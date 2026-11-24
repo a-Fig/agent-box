@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"text/tabwriter"
 	"time"
 
@@ -48,6 +51,13 @@ type App struct {
 	Notify  func(jobNotice) // optional destination for job and launch notices
 	Now     func() time.Time
 	Rand    func() string // short random suffix for names and job IDs
+	// PausePoll is how often attach checks whether the box was frozen; zero
+	// is pausePoll.
+	PausePoll time.Duration
+	// PollTimeout bounds each of those checks (zero is pollTimeout), and
+	// ProbeTimeout bounds each probe after a job's result is known (zero is
+	// probeTimeout), so a freeze there can't hold the result back.
+	PollTimeout, ProbeTimeout time.Duration
 	// JoinConfig says where box join registers and installs; tests replace it.
 	JoinConfig func(out io.Writer) (joinConfig, error)
 }
@@ -816,7 +826,8 @@ func (a *App) removeQuietly(ctx context.Context, box string) {
 // cleanup deletes a throwaway box once no job is running in it. ours says
 // the caller created it; otherwise the box's throwaway mark decides.
 func (a *App) cleanup(ctx context.Context, box string, ours bool) {
-	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := a.probeCtx(ctx)
+	defer cancel()
 	if !ours {
 		v, err := a.incusOK(ctx, "config", "get", a.target(box), throwawayKey)
 		if err != nil || strings.TrimSpace(v) != "true" {
@@ -922,7 +933,10 @@ while :; do
     tail -c +$((off + 1)) %[1]s.log | head -c $((size - off))
     off=$size
   fi
-  [ $fin = 1 ] && exit 0
+  if [ $fin = 1 ]; then
+    printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
+    exit 0
+  fi
   if ! alive "$pid" %[2]s; then
     [ -f %[1]s.exit ] && continue
     echo "box: job %[2]s died without an exit code" >&2
@@ -930,23 +944,176 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job)
+`, f, job, shq(exitMarker))
+}
+
+// pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
+// how long one look may take, and probeTimeout how long a probe after the
+// job's result is known may take.
+const (
+	pausePoll    = 5 * time.Second
+	pollTimeout  = 3 * time.Second
+	probeTimeout = 10 * time.Second
+)
+
+// exitMarker starts the line followScript prints on stderr when the job has
+// ended, followed by its exit code. attach reads it from that exec, so it
+// needs no second exec that a freeze could cut off.
+const exitMarker = "\x01box-exit "
+
+// lockedWriter writes to w under mu.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// exitFilter passes writes through except lines that start with exitMarker,
+// which it keeps.
+type exitFilter struct {
+	w    io.Writer
+	mu   sync.Mutex
+	buf  []byte
+	code string
+	seen bool
+}
+
+func (e *exitFilter) Write(p []byte) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.buf = append(e.buf, p...)
+	for {
+		i := bytes.IndexByte(e.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		line := e.buf[:i+1]
+		if rest, ok := bytes.CutPrefix(line, []byte(exitMarker)); ok {
+			e.code, e.seen = strings.TrimSpace(string(rest)), true
+		} else if _, err := e.w.Write(line); err != nil {
+			return len(p), err
+		}
+		e.buf = e.buf[i+1:]
+	}
+}
+
+// flush writes a trailing partial line.
+func (e *exitFilter) flush() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.buf) > 0 {
+		e.w.Write(e.buf)
+		e.buf = nil
+	}
+}
+
+func (e *exitFilter) exit() (string, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.code, e.seen
+}
+
+// pausedMidRun says what is true of a job whose box was frozen: it resumes
+// only if the PC's owner switches back before the tray stops the box.
+func pausedMidRun(job string) string {
+	return fmt.Sprintf("box: job %s is paused (the PC's owner is using it). It resumes if they switch back within %d minutes; after that the box is stopped and the job lost. Reattach later with: box job %s, or run it locally", job, int(mode.FrozenStop.Minutes()), job)
+}
+
+// pausedGPU is the same for a GPU box, which the tray normally stops, not freezes.
+func pausedGPU(job string) string {
+	return fmt.Sprintf("box: job %s is paused (the PC's owner is using the GPU box). The tray may still stop it, which loses the job. Reattach later with: box job %s, or rerun later or on CPU", job, job)
+}
+
+// watchPause polls until ctx ends. When a fresh look finds the box Frozen it
+// records that (and whether it is a GPU box) and calls stop. A frozen box
+// freezes the follow process too, so nothing else would notice. My PC mode
+// alone proves nothing: the tray writes it before it freezes, and a freeze
+// can fail. A look that errors or stalls past PollTimeout waits for the next
+// tick.
+func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFunc, hit, gpu *atomic.Bool) {
+	every := a.PausePoll
+	if every <= 0 {
+		every = pausePoll
+	}
+	limit := a.PollTimeout
+	if limit <= 0 {
+		limit = pollTimeout
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		look, cancel := context.WithTimeout(ctx, limit)
+		insts, err := a.list(look)
+		cancel()
+		if err != nil {
+			continue
+		}
+		if in := find(insts, box); in != nil && in.Status == "Frozen" {
+			gpu.Store(mode.IsGPU(in.Config))
+			hit.Store(true)
+			stop()
+			return
+		}
+	}
 }
 
 // attach streams a job's log until the job exits and returns its exit code.
+// If the box is frozen meanwhile it returns statePaused promptly. The
+// follow itself reports the job's exit code, and a code it reported wins
+// over any cancellation after it.
 func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state string, code int, err error) {
 	box, _, _ := strings.Cut(job, ".")
-	f := workRoot + "/.box/" + job
 	follow := ctx
 	if wait > 0 {
 		var cancel context.CancelFunc
 		follow, cancel = context.WithTimeout(ctx, wait)
 		defer cancel()
 	}
-	res, err := a.incus(follow, Cmd{
+	run, stop := context.WithCancel(follow)
+	defer stop()
+	var hit, gpu atomic.Bool
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		a.watchPause(run, box, stop, &hit, &gpu)
+	}()
+	// Out and Err may be one buffer, and exec now copies each from its own
+	// pipe, so serialize the writes.
+	var wmu sync.Mutex
+	ef := &exitFilter{w: &lockedWriter{&wmu, a.Err}}
+	res, err := a.incus(run, Cmd{
 		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
-		Stdout: a.Out, Stderr: a.Err,
+		Stdout: &lockedWriter{&wmu, a.Out}, Stderr: ef,
 	})
+	stop()
+	<-watched
+	ef.flush()
+	if text, ok := ef.exit(); ok {
+		code, cerr := strconv.Atoi(text)
+		if cerr != nil {
+			return "", 1, fmt.Errorf("job %s: bad exit code %q", job, text)
+		}
+		a.markIdle(ctx, box)
+		return stateDone, code, nil
+	}
+	if hit.Load() && ctx.Err() == nil {
+		if gpu.Load() {
+			fmt.Fprintln(a.Err, pausedGPU(job))
+		} else {
+			fmt.Fprintln(a.Err, pausedMidRun(job))
+		}
+		return statePaused, exitPaused, nil
+	}
 	if follow.Err() != nil {
 		fmt.Fprintf(a.Err, "box: job %s is still running; reattach with: box job %s\n", job, job)
 		return stateDetached, exitDetached, nil
@@ -964,33 +1131,39 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	}
 	switch res.Code {
 	case 0:
+		return "", 1, fmt.Errorf("job %s ended without an exit code", job)
 	case 3:
 		return "", 1, fmt.Errorf("no job %s", job)
 	case 4:
 		return "", 1, fmt.Errorf("job %s died without an exit code", job)
 	default:
 		if _, paused := a.check(ctx, box); paused != "" {
-			fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+			if strings.HasSuffix(paused, " is paused") {
+				fmt.Fprintln(a.Err, pausedMidRun(job))
+			} else {
+				fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+			}
 			return statePaused, exitPaused, nil
 		}
 		return "", 1, fmt.Errorf("lost job %s (reattach with: box job %s)", job, job)
 	}
-	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "cat", f+".exit")
-	if err != nil {
-		return "", 1, fmt.Errorf("job %s ended without an exit code: %v", job, err)
+}
+
+// probeCtx bounds the probes that follow a known result: a freeze there
+// must not hold the result back. It outlives ctx's cancellation.
+func (a *App) probeCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := a.ProbeTimeout
+	if d <= 0 {
+		d = probeTimeout
 	}
-	code, err = strconv.Atoi(strings.TrimSpace(out))
-	if err != nil {
-		return "", 1, fmt.Errorf("job %s: bad exit code %q", job, out)
-	}
-	a.markIdle(ctx, box)
-	return stateDone, code, nil
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
 }
 
 // markIdle shortens the box's expiry to idleTTL once a job has ended, unless
 // another job is still running there (it would lose its jobTTL window).
 func (a *App) markIdle(ctx context.Context, box string) {
-	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := a.probeCtx(ctx)
+	defer cancel()
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil || len(strings.Fields(out)) > 0 {
 		return

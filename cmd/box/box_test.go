@@ -190,6 +190,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 					return Result{Code: 1}, nil
 				}
 				io.WriteString(c.Stdout, f.log)
+				if f.exit != "" {
+					io.WriteString(c.Stderr, exitMarker+strings.TrimSpace(f.exit)+"\n")
+				}
 			case isScript(c, "# running jobs"):
 				return Result{Stdout: f.running}, nil
 			case isScript(c, "# jobs"):
@@ -373,7 +376,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file config exec config exec exec exec config exec" {
+	if got := f.callList(); got != "list project start file config exec config exec exec config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -391,7 +394,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file config exec config exec exec exec config exec exec delete" {
+	if got := f.callList(); got != "list project launch file config exec config exec exec config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
