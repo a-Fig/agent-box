@@ -145,7 +145,8 @@ func (a *App) New(ctx context.Context, name string, ttl time.Duration) (string, 
 	if !validBox.MatchString(name) {
 		return "", fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
 	}
-	args := []string{"launch", a.Image, a.target(name)}
+	// Unqualified, the image would be looked up on the local (laptop) remote.
+	args := []string{"launch", a.target(a.Image), a.target(name)}
 	if ttl > 0 {
 		args = append(args, "-c", "user.expires="+a.Now().Add(ttl).UTC().Format(time.RFC3339))
 	}
