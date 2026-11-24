@@ -36,9 +36,10 @@ const usage = `usage:
   box mcp                                   serve MCP on stdio
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
 
-Sizes (CPUs in Shared/Full mode, RAM, disk): %s.
---size picks one for a box box launches; the default is medium. A reused box
-of another size isn't resized: the run gets a throwaway box instead.
+Sizes (CPUs in Shared/Full mode, RAM, disk):
+  %s.
+--size sets the size of a box that box new or box run launches (default
+medium). A reused box of another size isn't resized: the run gets a throwaway.
 
 box run exits with the command's exit code, 124 when --timeout fired, or 75
 when the PC or box is paused or has no room. A relative remote path in box
