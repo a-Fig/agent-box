@@ -110,6 +110,7 @@ func (n *noIncus) List(context.Context) ([]mode.Instance, error) {
 func (n *noIncus) Pause(context.Context, string) error  { n.calls++; return nil }
 func (n *noIncus) Resume(context.Context, string) error { n.calls++; return nil }
 func (n *noIncus) Stop(context.Context, string) error   { n.calls++; return nil }
+func (n *noIncus) Delete(context.Context, string) error { n.calls++; return nil }
 func (n *noIncus) SetInstanceConfig(context.Context, string, string, string) error {
 	n.calls++
 	return nil

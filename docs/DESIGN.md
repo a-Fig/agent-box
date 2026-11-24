@@ -74,3 +74,12 @@ Wake-on-LAN via homeserver (`wakeonlan`), automatic sleep, GPU (`/dev/dxg` passt
 
 ## References
 code-on-incus (local only; profile and egress ideas), pixels (remote Incus backend, checkpoints, egress allowlists), Containarium and Coder (heavier control planes; not adopted). Incus docs: projects (limits are allocation caps; `restricted.*` keys), instance options (`limits.cpu` and `limits.memory` update live).
+
+## Boxes are compute, not storage
+
+Boxes are throwaway compute. Push work to git before a box goes.
+
+- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
+- **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
+- **Disk caps.** Root disk `size: 30GiB` per box (profile). Project `limits.disk=150GiB` over all boxes, volumes and images. Volume `cache` is `size=50GiB`.
+- **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle and uv rebuild it).

@@ -48,3 +48,12 @@ Files: `default-profile.yaml` (the default project's `default` profile, which pr
 - **Kernel.** Incus 7.x needs Linux 6.12+. `install-pc.ps1` runs `wsl --update`; `setup-distro.sh` fails if `uname -r` is older (then `wsl --shutdown` and re-run). Changing `.wslconfig` applies after `wsl --shutdown`, which stops every WSL distro.
 - **Two client identities.** Agents (restricted cert) and the tray (admin) must be different certs, so give the tray its own `INCUS_CONF` directory.
 - **VMs.** `setup-distro.sh` reports whether `/dev/kvm` exists. If not, `nestedVirtualization=true` under `[wsl2]` in `.wslconfig` is the usual fix on Windows 11.
+
+## Boxes are compute, not storage
+
+Boxes are throwaway. Nothing on one is kept: push work to git before the box goes.
+
+- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
+- **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
+- **Disk caps.** Root disk `size: 30GiB` per box (`default-profile.yaml`). Project `limits.disk=150GiB` over all boxes, volumes and images (`AGENTS_DISK_CAP`). Volume `cache` is `size=50GiB`. `restricted=true` has no key that blocks creating a custom volume; `limits.disk` is what bounds one. These quotas need the pool to enforce them: on the `dir` pool that means filesystem project quotas on the distro's ext4. If `setup-distro.sh` fails at the `cache` volume `size`, or a box won't start with the 30GiB root, switch the pool to btrfs (see `incus-preseed.yaml`).
+- **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle and uv rebuild it).
