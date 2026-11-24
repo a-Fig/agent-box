@@ -179,7 +179,11 @@ func (m *Manager) reclaimFrozen(now time.Time, in Instance, prev, state string) 
 		r.gen++
 		r.jobs[in.Name] = &reclaimJob{pid: pid, gen: r.gen}
 	}
-	if j := r.jobs[in.Name]; !j.done && j.cancel == nil && !now.Before(j.next) && !m.releasing.Load() {
+	// Not before this instance's swap.max is known to be set: Incus writes 0
+	// when it starts a box, so the first freeze after a start (or a tray
+	// start) would reclaim nothing and get the short limit. Swap is set at
+	// the end of the tick, so this waits one tick at most.
+	if j := r.jobs[in.Name]; !j.done && j.cancel == nil && !now.Before(j.next) && !m.releasing.Load() && m.swapSet[in.Name] == pid {
 		r.start(m.workCtx, m.Reclaim, in.Name, j)
 	}
 }
@@ -189,12 +193,14 @@ func (m *Manager) reclaimFrozen(now time.Time, in Instance, prev, state string) 
 // tick, after the instance actions; it writes only values that differ. A
 // box with no limits.memory (own or from a profile) is reported and left
 // alone: it has no limit to swap up to.
-func (m *Manager) ensureSwap(ctx context.Context, ins []Instance) (errs []error) {
+func (m *Manager) ensureSwap(ctx context.Context, ins []Instance, ended map[string]string) (errs []error) {
+	set := map[string]int64{}
+	defer func() { m.swapSet = set }()
 	var boxes []SwapBox
 	for _, in := range ins {
 		pid := pidOf(in)
-		if pid <= 0 {
-			continue
+		if st := ended[in.Name]; pid <= 0 || (st != "running" && st != "frozen") {
+			continue // stopped (or gone) this tick: no cgroup to write
 		}
 		b, ok := memoryLimit(in)
 		if !ok {
@@ -210,6 +216,8 @@ func (m *Manager) ensureSwap(ctx context.Context, ins []Instance) (errs []error)
 	for _, b := range boxes { // in order, so the error text is stable
 		if err := res[b.Name]; err != nil {
 			errs = append(errs, err)
+		} else {
+			set[b.Name] = b.Pid
 		}
 	}
 	return errs

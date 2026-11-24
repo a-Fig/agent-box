@@ -67,6 +67,8 @@ type Manager struct {
 	reasonRead  bool   // pubReason was read from the project once
 	frozenSince map[string]frozenAt
 	rc          reclaims
+	swapSet     map[string]int64  // box -> init PID whose memory.swap.max was confirmed last tick
+	ended       map[string]string // box -> state it ended the last applyInstances in
 	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
 
@@ -174,7 +176,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 			}
 		}
 		if m.Reclaim != nil && ctx.Err() == nil {
-			errs = append(errs, m.ensureSwap(ctx, ins)...)
+			errs = append(errs, m.ensureSwap(ctx, ins, m.ended)...)
 		}
 	}
 	st.Err = errors.Join(errs...)
@@ -304,6 +306,7 @@ func AllocatedMemory(ins []Instance) int64 {
 // applyInstances brings each instance in line with eff. why is what a GPU
 // box stopped in My PC is told (StoppedKey).
 func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, why string, ins []Instance, errs []error) (running int, _ []error) {
+	m.ended = map[string]string{}
 	seen := map[string]bool{}
 	for _, in := range ins {
 		seen[in.Name] = true
@@ -333,6 +336,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 		if state == "running" {
 			running++
 		}
+		m.ended[in.Name] = state
 	}
 	for name := range m.frozenSince {
 		if !seen[name] {
