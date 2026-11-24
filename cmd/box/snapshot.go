@@ -59,8 +59,8 @@ func boxName(s string) string {
 // snapshot commits the worktree as it is, untracked files included and
 // ignored files excluded, without touching the user's index, and writes a
 // bundle of that commit to a temporary file. The commit is reachable in the
-// bundle as refs/agent-box/<job>. The caller removes the bundle.
-func snapshot(ctx context.Context, r Runner, top, job string) (bundle string, err error) {
+// bundle as refs/agent-box/<id>. The caller removes the bundle.
+func snapshot(ctx context.Context, r Runner, top, id string) (bundle string, err error) {
 	tmp, err := os.MkdirTemp("", "box-")
 	if err != nil {
 		return "", err
@@ -72,18 +72,20 @@ func snapshot(ctx context.Context, r Runner, top, job string) (bundle string, er
 		}
 	}()
 
-	// Start from a copy of the real index so git can reuse its stat cache.
+	// Start from HEAD's tree, not a copy of the real index: a copy would keep
+	// assume-unchanged and skip-worktree flags, and add -A would then skip
+	// changed files. The price is rehashing the worktree (no stat cache).
 	index := filepath.Join(tmp, "index")
-	if p, err := git(ctx, r, top, nil, "rev-parse", "--git-path", "index"); err == nil {
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(top, p)
-		}
-		copyFile(p, index) // a missing index (fresh repo) is fine
-	}
+	head, _ := git(ctx, r, top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}")
 	env := []string{
 		"GIT_INDEX_FILE=" + index,
 		"GIT_AUTHOR_NAME=box", "GIT_AUTHOR_EMAIL=box@agent-box",
 		"GIT_COMMITTER_NAME=box", "GIT_COMMITTER_EMAIL=box@agent-box",
+	}
+	if head != "" {
+		if _, err := git(ctx, r, top, env, "read-tree", "--no-sparse-checkout", head); err != nil {
+			return "", err
+		}
 	}
 	if _, err := git(ctx, r, top, env, "add", "-A"); err != nil {
 		return "", err
@@ -92,8 +94,10 @@ func snapshot(ctx context.Context, r Runner, top, job string) (bundle string, er
 	if err != nil {
 		return "", err
 	}
-	args := []string{"commit-tree", tree, "-m", "box snapshot " + job}
-	if head, err := git(ctx, r, top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}"); err == nil && head != "" {
+	args := []string{"commit-tree", tree, "-m", "box snapshot " + id}
+	// A shallow clone lacks the history below its cut, so a bundle of it
+	// can't be fetched elsewhere: snapshot it without history.
+	if shallow, _ := git(ctx, r, top, nil, "rev-parse", "--is-shallow-repository"); head != "" && shallow != "true" {
 		args = append(args, "-p", head)
 	}
 	commit, err := git(ctx, r, top, env, args...)
@@ -102,12 +106,12 @@ func snapshot(ctx context.Context, r Runner, top, job string) (bundle string, er
 	}
 
 	// git bundle needs a ref; keep it only as long as the bundle takes.
-	ref := "refs/agent-box/" + job
+	ref := "refs/agent-box/" + id
 	if _, err := git(ctx, r, top, nil, "update-ref", ref, commit); err != nil {
 		return "", err
 	}
 	defer git(context.WithoutCancel(ctx), r, top, nil, "update-ref", "-d", ref)
-	bundle = filepath.Join(tmp, job+".bundle")
+	bundle = filepath.Join(tmp, id+".bundle")
 	if _, err := git(ctx, r, top, nil, "bundle", "create", "-q", bundle, ref); err != nil {
 		return "", err
 	}

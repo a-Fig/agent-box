@@ -41,7 +41,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		fmt.Fprintln(a.Err, "box:", err)
 		return 1
 	}
-	code := func(c int, err error) int {
+	code := func(r JobResult, err error) int {
+		c := r.Code
 		if err != nil {
 			fmt.Fprintln(a.Err, "box:", err)
 			if c == 0 {
