@@ -1,0 +1,377 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+)
+
+// Job states as box jobs reports them.
+const (
+	jobRunning  = "running"
+	jobDone     = "done"
+	jobDied     = "died"     // the wrapper is gone and left no exit code
+	jobStarting = "starting" // the log exists but the wrapper hasn't published its PID yet
+)
+
+// JobInfo is one job in a box, from its files in /work/.box.
+type JobInfo struct {
+	Job      string    `json:"job"`
+	Box      string    `json:"box"`
+	State    string    `json:"state"`
+	Code     *int      `json:"exitCode,omitempty"` // when done
+	Started  time.Time `json:"started"`
+	LogBytes int64     `json:"logBytes"`
+}
+
+// jobStateFn defines jobstate JOB, run in /work/.box: it prints the job's
+// state and exit code ("-" unless done). A log with no PID file for over a
+// minute means the start failed.
+const jobStateFn = `jobstate() {
+  if [ -f "$1.exit" ]; then echo "done $(cat "$1.exit")"
+  elif alive "$(cat "$1.pid" 2>/dev/null)" "$1"; then echo "running -"
+  elif [ -f "$1.pid" ] || [ -n "$(find "$1.log" -mmin +1 2>/dev/null)" ]; then echo "died -"
+  else echo "starting -"
+  fi
+}
+`
+
+// jobsScript prints "JOB STATE CODE LOGBYTES" for every job in a box.
+func jobsScript() string {
+	return "# jobs\n" + aliveFn + jobStateFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
+for l in *.log; do
+  [ -e "$l" ] || continue
+  j=${l%%.log}
+  echo "$j $(jobstate "$j") $(( $(wc -c < "$l") ))"
+done
+exit 0
+`, workRoot)
+}
+
+// pageScript prints "STATE CODE LOGBYTES", then limit bytes of the job's
+// log from offset. It exits 3 for an unknown job.
+func pageScript(job string, offset, limit int64) string {
+	return "# page\n" + aliveFn + jobStateFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
+test -f %[2]s.log || exit 3
+echo "$(jobstate %[2]s) $(( $(wc -c < %[2]s.log) ))"
+tail -c +%[3]d %[2]s.log | head -c %[4]d
+`, workRoot, job, offset+1, limit)
+}
+
+// cancelScript stops a job's whole session (the wrapper leads one, from
+// setsid): TERM, then KILL after 5 seconds. It writes 130 to the job's
+// .exit if the wrapper didn't, so followers stop. It prints "cancelled" or
+// "finished", then the exit code, and exits 3 for an unknown job.
+func cancelScript(job string) string {
+	return "# cancel\n" + aliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
+j=%s
+test -f "$j.log" || exit 3
+if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+pid=$(cat "$j.pid" 2>/dev/null)
+if alive "$pid" "$j"; then
+  if [ "$(ps -o sid= -p "$pid" | tr -d ' ')" = "$pid" ]; then
+    pkill -TERM -s "$pid"
+    for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
+    pkill -KILL -s "$pid"
+  else
+    kill -TERM "$pid"
+  fi
+  sleep 0.2
+fi
+[ -f "$j.exit" ] || { echo %d > "$j.exit.tmp" && mv "$j.exit.tmp" "$j.exit"; }
+echo "cancelled $(cat "$j.exit")"
+`, workRoot, job, exitDetached)
+}
+
+// jobStart reads the start time from a job ID (box.YYYYMMDD-HHMMSS-xxxx, UTC).
+func jobStart(job string) time.Time {
+	_, id, _ := strings.Cut(job, ".")
+	if len(id) < 15 {
+		return time.Time{}
+	}
+	t, _ := time.Parse("20060102-150405", id[:15])
+	return t
+}
+
+func parseJobs(box, out string) []JobInfo {
+	var jobs []JobInfo
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) != 4 || !validJob.MatchString(f[0]) {
+			continue
+		}
+		j := JobInfo{Job: f[0], Box: box, State: f[1], Started: jobStart(f[0])}
+		if c, err := strconv.Atoi(f[2]); err == nil {
+			j.Code = &c
+		}
+		j.LogBytes, _ = strconv.ParseInt(f[3], 10, 64)
+		jobs = append(jobs, j)
+	}
+	return jobs
+}
+
+func (a *App) boxJobs(ctx context.Context, box string) ([]JobInfo, error) {
+	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", jobsScript())
+	if err != nil {
+		return nil, err
+	}
+	return parseJobs(box, out), nil
+}
+
+// Jobs lists the jobs in one box, or in every running box when box is "",
+// newest first. Boxes that aren't running are skipped with a warning.
+func (a *App) Jobs(ctx context.Context, box string) ([]JobInfo, error) {
+	if box != "" && !validBox.MatchString(box) {
+		return nil, fmt.Errorf("bad box name %q", box)
+	}
+	insts, err := a.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if box != "" {
+		inst := find(insts, box)
+		if inst == nil {
+			return nil, fmt.Errorf("no box %s", box)
+		}
+		insts = []instance{*inst}
+	}
+	var jobs []JobInfo
+	for _, in := range insts {
+		if in.Status != "Running" {
+			a.warn(fmt.Sprintf("box: %s is %s; its jobs aren't listed", in.Name, in.Status))
+			continue
+		}
+		js, err := a.boxJobs(ctx, in.Name)
+		if err != nil {
+			a.warn(fmt.Sprintf("box: listing jobs in %s: %v", in.Name, err))
+			continue
+		}
+		jobs = append(jobs, js...)
+	}
+	sort.SliceStable(jobs, func(i, j int) bool {
+		_, x, _ := strings.Cut(jobs[i].Job, ".")
+		_, y, _ := strings.Cut(jobs[j].Job, ".")
+		return x > y
+	})
+	return jobs, nil
+}
+
+func (j JobInfo) stateText() string {
+	if j.Code != nil {
+		return fmt.Sprintf("%s (exit %d)", j.State, *j.Code)
+	}
+	return j.State
+}
+
+func printJobs(a *App, jobs []JobInfo) error {
+	if len(jobs) == 0 {
+		fmt.Fprintln(a.Out, "no jobs")
+		return nil
+	}
+	w := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "JOB\tSTATE\tSTARTED\tLOG")
+	for _, j := range jobs {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%dB\n", j.Job, j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
+	}
+	return w.Flush()
+}
+
+// Page is a piece of a job's log.
+type Page struct {
+	JobInfo
+	Offset     int64  `json:"offset"`
+	NextOffset int64  `json:"nextOffset"`
+	More       bool   `json:"more"` // the log goes on past this page, or the job is still writing it
+	Text       string `json:"-"`
+}
+
+const (
+	defaultPage = 32 << 10
+	maxPage     = 1 << 20
+)
+
+// LogPage reads limit bytes of a job's log from offset, without waiting.
+func (a *App) LogPage(ctx context.Context, job string, offset, limit int64) (Page, error) {
+	if !validJob.MatchString(job) {
+		return Page{}, fmt.Errorf("bad job id %q", job)
+	}
+	if offset < 0 || limit < 0 {
+		return Page{}, errors.New("offset and limit can't be negative")
+	}
+	if limit == 0 {
+		limit = defaultPage
+	}
+	limit = min(limit, maxPage)
+	box, _, _ := strings.Cut(job, ".")
+	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", pageScript(job, offset, limit)}})
+	if err != nil {
+		return Page{}, err
+	}
+	if res.Code == 3 {
+		return Page{}, fmt.Errorf("no job %s", job)
+	}
+	if res.Code != 0 {
+		return Page{}, fmt.Errorf("reading job %s: %s", job, strings.TrimSpace(res.Stderr))
+	}
+	head, text, _ := strings.Cut(res.Stdout, "\n")
+	jobs := parseJobs(box, job+" "+head)
+	if len(jobs) != 1 {
+		return Page{}, fmt.Errorf("reading job %s: bad state %q", job, head)
+	}
+	p := Page{JobInfo: jobs[0], Offset: offset, Text: text}
+	p.NextOffset = offset + int64(len(text))
+	p.LogBytes = max(p.LogBytes, p.NextOffset) // the log grew while it was read
+	p.More = p.NextOffset < p.LogBytes || p.State == jobRunning || p.State == jobStarting
+	return p, nil
+}
+
+// pageHead is the one-line summary of a log page.
+func (p Page) pageHead() string {
+	s := fmt.Sprintf("job %s on box %s: %s, log bytes %d-%d of %d", p.Job, p.Box, p.stateText(), p.Offset, p.NextOffset, p.LogBytes)
+	if p.More {
+		s += fmt.Sprintf("; next offset %d", p.NextOffset)
+	}
+	return s
+}
+
+// Cancel stops a running job. It reports the job's exit code: 130 when box
+// stopped it, or the code it had already finished with.
+func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int, err error) {
+	if !validJob.MatchString(job) {
+		return false, 0, fmt.Errorf("bad job id %q", job)
+	}
+	box, _, _ := strings.Cut(job, ".")
+	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", cancelScript(job)}})
+	if err != nil {
+		return false, 0, err
+	}
+	switch res.Code {
+	case 0:
+	case 3:
+		return false, 0, fmt.Errorf("no job %s", job)
+	default:
+		return false, 0, fmt.Errorf("cancel %s: %s", job, strings.TrimSpace(res.Stderr))
+	}
+	f := strings.Fields(res.Stdout)
+	if len(f) != 2 {
+		return false, 0, fmt.Errorf("cancel %s: unexpected output %q", job, res.Stdout)
+	}
+	code, err = strconv.Atoi(f[1])
+	if err != nil {
+		return false, 0, fmt.Errorf("cancel %s: bad exit code %q", job, f[1])
+	}
+	if f[0] == "cancelled" {
+		a.markIdle(ctx, box)
+	}
+	return f[0] == "cancelled", code, nil
+}
+
+// checkoutScript prints the checkout a relative path in box pull starts
+// from: the job's /work/<repo>, or the only checkout in the box.
+func checkoutScript(job string) string {
+	s := "# checkout\nr=\n"
+	if job != "" {
+		s += fmt.Sprintf("r=$(cat %s/.box/%s.repo 2>/dev/null)\n", workRoot, job)
+	}
+	return s + fmt.Sprintf(`if [ -z "$r" ]; then
+  set --
+  for d in %[1]s/*/; do [ -d "$d" ] && set -- "$@" "$(basename "$d")"; done
+  [ $# = 1 ] || { echo "box: $# checkouts in %[1]s; give an absolute path" >&2; exit 3; }
+  r=$1
+fi
+echo %[1]s/"$r"
+`, workRoot)
+}
+
+// Pull copies a file or directory from a box into the local directory
+// local, as local/<base name>. target is a job ID or a box name. A relative
+// remote path starts at the job's checkout (or the box's only checkout).
+// Nothing is written outside local: the copy lands in a staging directory
+// inside it, symlinks and special files are dropped, and an existing
+// local/<base name> is never replaced.
+func (a *App) Pull(ctx context.Context, target, remote, local string) (string, error) {
+	box, job := target, ""
+	if validJob.MatchString(target) {
+		box, _, _ = strings.Cut(target, ".")
+		job = target
+	} else if !validBox.MatchString(target) {
+		return "", fmt.Errorf("bad job id or box name %q", target)
+	}
+	if remote == "" || strings.ContainsAny(remote, "\x00\n") {
+		return "", errors.New("give a remote path")
+	}
+	if local == "" {
+		return "", errors.New("give a local directory")
+	}
+	if !path.IsAbs(remote) {
+		base, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", checkoutScript(job))
+		if err != nil {
+			return "", err
+		}
+		remote = path.Join(strings.TrimSpace(base), remote)
+	}
+	remote = path.Clean(remote)
+	name := path.Base(remote)
+	if name == "/" || name == "." || name == ".." {
+		return "", fmt.Errorf("can't pull %s", remote)
+	}
+
+	local, err := filepath.Abs(local)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		return "", err
+	}
+	dest := filepath.Join(local, name)
+	if _, err := os.Lstat(dest); err == nil {
+		return "", fmt.Errorf("%s already exists; remove it or pull into another directory", dest)
+	}
+	staging, err := os.MkdirTemp(local, ".box-pull-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(staging)
+	if _, err := a.incusOK(ctx, "file", "pull", "-r", a.target(box)+remote, staging); err != nil {
+		return "", err
+	}
+	entries, err := os.ReadDir(staging)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) != 1 {
+		return "", fmt.Errorf("pull of %s left %d entries, want 1", remote, len(entries))
+	}
+	got := filepath.Join(staging, entries[0].Name())
+	var dropped []string
+	err = filepath.WalkDir(got, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() || d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(staging, p)
+		dropped = append(dropped, filepath.ToSlash(rel))
+		return os.Remove(p)
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(dropped) > 0 {
+		a.warn("box: warning: dropped links and special files: " + strings.Join(dropped, " "))
+	}
+	if err := os.Rename(got, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
+}

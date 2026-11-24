@@ -37,6 +37,13 @@ type fakePC struct {
 	startErr  bool            // the connection drops while starting the job
 	calls     []string
 	pushed    int
+	project   map[string]string // project config other than the mode
+	memory    string            // the default profile's limits.memory
+	jobs      map[string]string // canned "# jobs" output by box
+	script    string            // canned output of the page, cancel and checkout scripts
+	scriptRC  int
+	pull      func(src, dst string) // file pull -r src dst
+	pulls     []string
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -69,7 +76,12 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		b, _ := json.Marshal(f.insts)
 		return Result{Stdout: string(b)}, nil
 	case "project":
+		if key := args[len(args)-1]; key != "user.agent-box.mode" {
+			return Result{Stdout: f.project[key] + "\n"}, nil
+		}
 		return Result{Stdout: f.mode + "\n"}, nil
+	case "profile":
+		return Result{Stdout: f.memory + "\n"}, nil
 	case "launch":
 		name := strings.TrimPrefix(args[2], "pc:")
 		if f.race[name] {
@@ -115,6 +127,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			}
 		}
 	case "file":
+		if args[1] == "pull" {
+			f.pulls = append(f.pulls, args[3])
+			if f.pull != nil {
+				f.pull(args[3], args[4])
+			}
+			return Result{}, nil
+		}
 		f.pushed++
 		if _, err := os.Stat(args[3]); err != nil {
 			f.t.Errorf("pushed bundle missing: %v", err)
@@ -139,6 +158,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 				io.WriteString(c.Stdout, f.log)
 			case isScript(c, "# running jobs"):
 				return Result{Stdout: f.running}, nil
+			case isScript(c, "# jobs"):
+				return Result{Stdout: f.jobs[strings.TrimPrefix(args[1], "pc:")]}, nil
+			case isScript(c, "# page"), isScript(c, "# cancel"), isScript(c, "# checkout"):
+				return Result{Stdout: f.script, Code: f.scriptRC}, nil
 			case argv[0] == "cat":
 				return Result{Stdout: f.exit}, nil
 			case f.startErr:

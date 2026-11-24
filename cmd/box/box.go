@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -45,6 +46,8 @@ type App struct {
 	Notify  func(jobNotice) // optional destination for job and launch notices
 	Now     func() time.Time
 	Rand    func() string // short random suffix for names and job IDs
+	// JoinConfig says where box join registers and installs; tests replace it.
+	JoinConfig func(out io.Writer) (joinConfig, error)
 }
 
 func newApp() *App {
@@ -57,6 +60,8 @@ func newApp() *App {
 		Err:     os.Stderr,
 		Now:     time.Now,
 		Rand:    randHex,
+
+		JoinConfig: defaultJoinConfig,
 	}
 }
 
@@ -250,7 +255,34 @@ type RunOpts struct {
 	Box  string   // box to use; "" is the repo's own box
 	New  bool     // use a throwaway box, deleted afterwards
 	TTL  time.Duration
-	Wait time.Duration // stop following after this long; 0 waits for the end
+	Wait time.Duration     // stop following after this long; 0 waits for the end
+	Env  map[string]string // passed to the command; no secrets (see checkEnv)
+	// Timeout makes the box kill the command after this long (exit 124).
+	Timeout time.Duration
+}
+
+// exitTimeout is the exit code of a command the box killed at its timeout,
+// as coreutils timeout reports it.
+const exitTimeout = 124
+
+var (
+	validEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	secretName   = regexp.MustCompile(`TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL`)
+)
+
+// checkEnv refuses variable names that aren't names or that look like
+// secrets: boxes are shared, and the values show up in the box's process
+// list.
+func checkEnv(env map[string]string) error {
+	for k := range env {
+		if !validEnvName.MatchString(k) {
+			return fmt.Errorf("bad env name %q", k)
+		}
+		if secretName.MatchString(strings.ToUpper(k)) {
+			return fmt.Errorf("env %s looks like a secret; boxes are shared, so box won't pass it. Use a non-secret value or run locally", k)
+		}
+	}
+	return nil
 }
 
 // What following a job ended with.
@@ -275,6 +307,12 @@ type JobResult struct {
 func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if len(o.Cmd) == 0 {
 		return JobResult{Code: 2}, errors.New("no command given")
+	}
+	if err := checkEnv(o.Env); err != nil {
+		return JobResult{Code: 2}, err
+	}
+	if o.Timeout < 0 {
+		return JobResult{Code: 2}, errors.New("timeout must be positive")
 	}
 	rp, err := openRepo(ctx, a.R, o.Dir)
 	if err != nil {
@@ -351,7 +389,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		return r, err
 	}
 	started = true
-	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, o.Cmd)); err != nil {
+	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
 		if o.New {
 			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
 		}
@@ -619,13 +657,35 @@ func (a *App) markIdle(ctx context.Context, box string) {
 	}
 }
 
-// startScript checks the bundle out in /work/<repo> and starts cmd detached,
-// logging to /work/.box/<job>.log and writing its exit code to <job>.exit.
+// payload is the shell code a job runs in its checkout: the exports, then the
+// command, under coreutils timeout when there is one.
+func payload(o RunOpts) string {
+	keys := make([]string, 0, len(o.Env))
+	for k := range o.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "export %s=%s\n", k, shq(o.Env[k]))
+	}
+	cmd := shellCommand(o.Cmd)
+	if o.Timeout > 0 {
+		secs := int64((o.Timeout + time.Second - 1) / time.Second)
+		cmd = fmt.Sprintf("timeout -k 10s %ds bash -c %s", secs, shq(cmd))
+	}
+	b.WriteString(cmd)
+	return b.String()
+}
+
+// startScript checks the bundle out in /work/<repo> and starts the payload
+// detached, logging to /work/.box/<job>.log and writing its exit code to
+// <job>.exit. <job>.repo names the checkout, for box pull.
 // ref names the snapshot in the bundle (refs/agent-box/<ref>). Jobs on the
 // same repo in the same box take turns (flock), since they share the
 // checkout. The payload runs without the lock's FD, so a background child it
 // leaves behind can't keep holding the lock.
-func startScript(job, ref, repo string, cmd []string) string {
+func startScript(job, ref, repo, payload string) string {
 	w := workRoot
 	f := w + "/.box/" + job
 	inner := fmt.Sprintf(`exec 9>%[1]s/.box/%[3]s.lock
@@ -643,11 +703,11 @@ else
 fi
 rm -f %[2]s.bundle
 echo $code > %[2]s.exit.tmp && mv %[2]s.exit.tmp %[2]s.exit
-`, w, f, repo, ref, shellCommand(cmd))
+`, w, f, repo, ref, payload)
 	// The log is created before the job starts, so a follow that begins at
 	// once never sees "no job".
-	return fmt.Sprintf("mkdir -p %[1]s/.box && : > %[3]s.log && { setsid nohup bash -lc %[2]s >> %[3]s.log 2>&1 < /dev/null & }\necho $! > %[3]s.pid",
-		w, shq(inner), f)
+	return fmt.Sprintf("mkdir -p %[1]s/.box && : > %[3]s.log && echo %[4]s > %[3]s.repo && { setsid nohup bash -lc %[2]s >> %[3]s.log 2>&1 < /dev/null & }\necho $! > %[3]s.pid",
+		w, shq(inner), f, shq(repo))
 }
 
 // shellCommand runs a single argument as a shell string ("go test ./... && x")

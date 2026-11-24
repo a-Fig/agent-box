@@ -64,7 +64,7 @@ func TestMCP(t *testing.T) {
 	for _, tl := range got[2].Result.Tools {
 		names = append(names, tl.Name)
 	}
-	if strings.Join(names, ",") != "box_new,box_run,box_job,box_rm,box_ls" {
+	if strings.Join(names, ",") != "box_status,box_new,box_run,box_job,box_jobs,box_cancel,box_pull,box_rm,box_ls" {
 		t.Errorf("tools = %v", names)
 	}
 	if txt := got[3].Result.Content[0].Text; !strings.Contains(txt, "agent-box") || !strings.Contains(txt, "2026-11-24T00:00:00Z") {
