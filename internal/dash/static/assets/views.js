@@ -64,11 +64,13 @@ function elapsed(j) {
   return dur((Date.parse(j.endedAt) - Date.parse(j.startedAt)) / 1000);
 }
 
-// A job's box is the box of that name made before the job started: names get reused, and a newer
-// box of the same name holds none of this job's log.
+// A job's box is the box of that name made no later than 10 minutes after the job started
+// (dash.JobBoxGrace: box run --new starts the job's clock before it launches the box). Names get
+// reused, and a later box of that name holds none of this job's log.
+const JOB_BOX_GRACE_MS = 10 * 60 * 1000;
 function jobBox(j) {
   const b = boxOf(j.machine, j.box);
-  return b && Date.parse(b.createdAt) <= Date.parse(j.startedAt) ? b : null;
+  return b && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + JOB_BOX_GRACE_MS ? b : null;
 }
 
 function jobMeta(j) {

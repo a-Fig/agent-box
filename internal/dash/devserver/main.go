@@ -101,6 +101,7 @@ func (s *server) routes() http.Handler {
 	api("POST /api/boxes/{name}/delete", s.control(s.handleDelete))
 	api("POST /api/boxes/{name}/extend", s.control(s.handleExtend))
 	api("POST /api/refusals", s.control(s.handleRefusal))
+	api("POST /api/jobs/ended", s.control(s.handleJobEnded))
 	api("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, dash.CodeNotFound, "no such endpoint")
 	})
@@ -149,7 +150,7 @@ func (s *server) control(fn func(r *http.Request, body []byte) (int, any, error)
 			writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "couldn't read the body")
 			return
 		}
-		if s.fail && !strings.HasSuffix(r.URL.Path, "/refusals") {
+		if s.fail && r.URL.Path != "/api/refusals" && r.URL.Path != "/api/jobs/ended" {
 			writeErr(w, http.StatusBadGateway, dash.CodeIncus, "Incus didn't answer: Post \"http://unix.socket/1.0/instances\": context deadline exceeded")
 			return
 		}

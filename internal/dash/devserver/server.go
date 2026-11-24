@@ -231,11 +231,11 @@ func (s *server) findBox(name string) int {
 	return slices.IndexFunc(s.sc.State.Boxes, func(b dash.Box) bool { return b.Name == name })
 }
 
-// jobBox is the box j ran on, or -1: the box of that name made before j started. Names get
-// reused, and a newer box of the same name holds none of j's log.
+// jobBox is the box j ran on, or -1: the box of that name made no later than dash.JobBoxGrace
+// after j started. Names get reused, and a newer box of the same name holds none of j's log.
 func (s *server) jobBox(j *dash.Job) int {
 	i := s.findBox(j.Box)
-	if i < 0 || s.sc.State.Boxes[i].CreatedAt.After(j.StartedAt) {
+	if i < 0 || s.sc.State.Boxes[i].CreatedAt.After(j.StartedAt.Add(dash.JobBoxGrace)) {
 		return -1
 	}
 	return i
@@ -424,6 +424,39 @@ func (s *server) handleExtend(r *http.Request, body []byte) (int, any, error) {
 	bx.ExpiresAt = &t
 	s.publish(dash.EventBox, *bx)
 	return http.StatusOK, *bx, nil
+}
+
+// handleJobEnded is box's report that a run ended, sent before it deletes a throwaway. Only a
+// job running now is ended by it. The devserver's tails are made up, so it masks nothing; boxd
+// masks this tail as it masks every tail.
+func (s *server) handleJobEnded(r *http.Request, body []byte) (int, any, error) {
+	var b dash.JobEndedBody
+	if err := decode(body, &b); err != nil {
+		return 0, nil, err
+	}
+	if b.Box == "" || b.ID == "" || b.EndedAt.IsZero() {
+		return 0, nil, fail(http.StatusBadRequest, dash.CodeBadRequest, "box, id and endedAt are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.sc.State.Jobs {
+		j := &s.sc.State.Jobs[i]
+		if j.Box == b.Box && j.ID == b.ID && (j.State == dash.JobRunning || j.State == dash.JobPaused) {
+			if b.Tail != "" {
+				s.logs[j.Key] = b.Tail
+			}
+			s.end(j, b.Exit)
+			ended := b.EndedAt.UTC()
+			j.EndedAt = &ended
+			if b.Tail != "" {
+				j.Tail = fixture.Tail(b.Tail)
+			}
+			s.done[slices.IndexFunc(s.done, func(d dash.Job) bool { return d.Key == j.Key })] = *j
+			s.publish(dash.EventJob, *j)
+			return http.StatusNoContent, nil, nil
+		}
+	}
+	return 0, nil, fail(http.StatusNotFound, dash.CodeNotFound, "no running job %s on %s", b.ID, b.Box)
 }
 
 func (s *server) handleRefusal(r *http.Request, body []byte) (int, any, error) {

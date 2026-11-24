@@ -155,6 +155,12 @@ type Job struct {
 // TailBytes is how much of a job's log its Tail keeps.
 const TailBytes = 2 << 10
 
+// JobBoxGrace is how much later than a job's start its box may have been made. box run --new
+// makes the job's ID, and its start, before it launches the box, so a throwaway's createdAt is a
+// few seconds after its job's startedAt. A job's box is the box of its name made no later than
+// startedAt + JobBoxGrace; a box of that name made later is a reuse of the name.
+const JobBoxGrace = 10 * time.Minute
+
 // JobKey makes a job's key from its box, ID and start.
 func JobKey(box, id string, started time.Time) string {
 	return box + "/" + id + "/" + started.UTC().Format(time.RFC3339)
@@ -288,6 +294,18 @@ type RefusalBody struct {
 	GPU    bool   `json:"gpu"`
 	Repo   string `json:"repo"`
 	Agent  string `json:"agent"`
+}
+
+// JobEndedBody is POST /api/jobs/ended, sent by box as a best effort (2s timeout) once it has
+// read a run's exit and before it deletes a throwaway box, so boxd records the job as ended
+// rather than lost when its box vanishes between polls. boxd takes it only for a job it knows is
+// running (404 otherwise), masks the tail as it masks every tail, and answers 204.
+type JobEndedBody struct {
+	Box     string    `json:"box"`
+	ID      string    `json:"id"`
+	Exit    int       `json:"exit"`
+	EndedAt time.Time `json:"endedAt"`
+	Tail    string    `json:"tail"`
 }
 
 // ModeBody is POST /api/mode. The reply is the Machine, with ModeRequested

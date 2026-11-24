@@ -270,7 +270,14 @@ func TestJobAndReusedBox(t *testing.T) {
 	if code, _, _ := call(t, ts, "GET", "/api/jobs/x%2F1%2F2026-01-01T00:00:00Z", "", false); code != 404 {
 		t.Errorf("GET no job: %d", code)
 	}
-	s.sc.State.Boxes = append(s.sc.State.Boxes, dash.Box{Name: old.Box, Machine: "pc", Size: "small", State: dash.BoxRunning, CreatedAt: old.StartedAt.Add(time.Minute)})
+	// Made seconds after the job started, as box run --new does: still the job's box.
+	s.sc.State.Boxes = append(s.sc.State.Boxes, dash.Box{Name: old.Box, Machine: "pc", Size: "small", State: dash.BoxRunning, CreatedAt: old.StartedAt.Add(5 * time.Second)})
+	s.logs[old.Key] = "this job's\n"
+	if code, _, _ := call(t, ts, "GET", "/api/jobs/"+key(old)+"/log", "", false); code != 200 {
+		t.Errorf("log on a box made 5s after the job: %d", code)
+	}
+	// Made past the grace: a reuse of the name.
+	s.sc.State.Boxes[len(s.sc.State.Boxes)-1].CreatedAt = old.StartedAt.Add(dash.JobBoxGrace + time.Second)
 	s.logs[old.Key] = "not this job's\n"
 	if code, e, _ := call(t, ts, "GET", "/api/jobs/"+key(old)+"/log", "", false); code != 404 || e.Code != dash.CodeNotFound {
 		t.Errorf("log on a reused box name: %d %q", code, e.Code)
@@ -297,5 +304,34 @@ func TestSearchFolding(t *testing.T) {
 	// Per field: a query can't match across the reason and the command.
 	if matchesText("suite go", "Full suite", "go test") {
 		t.Error("matched across fields")
+	}
+}
+
+// box reports a run's end before deleting its throwaway, so the job ends rather than goes lost.
+func TestJobEnded(t *testing.T) {
+	s, ts := start(t, "busy")
+	var run dash.Job
+	for _, j := range s.sc.State.Jobs {
+		if j.State == dash.JobRunning {
+			run = j
+			break
+		}
+	}
+	body := func(id string) string {
+		b, _ := json.Marshal(dash.JobEndedBody{Box: run.Box, ID: id, Exit: 1, EndedAt: t0, Tail: "FAIL\n"})
+		return string(b)
+	}
+	if code, e, _ := call(t, ts, "POST", "/api/jobs/ended", body("nope"), true); code != 404 || e.Code != dash.CodeNotFound {
+		t.Errorf("unknown job: %d %q", code, e.Code)
+	}
+	if code, _, _ := call(t, ts, "POST", "/api/jobs/ended", body(run.ID), true); code != 204 {
+		t.Fatalf("ended: %d", code)
+	}
+	j, _ := s.findJob(run.Key)
+	if j.State != dash.JobDone || j.Exit == nil || *j.Exit != 1 || !j.EndedAt.Equal(t0) || j.Tail != "FAIL\n" {
+		t.Errorf("after ended: %+v", *j)
+	}
+	if code, _, _ := call(t, ts, "POST", "/api/jobs/ended", body(run.ID), true); code != 404 {
+		t.Errorf("a second report for an ended job: %d", code)
 	}
 }

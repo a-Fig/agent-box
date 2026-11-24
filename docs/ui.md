@@ -165,6 +165,15 @@ A run turned away with exit 75 never reaches a box, so `box` also sends `POST /a
 (`{why, reason, size, gpu, repo, agent}`: `why` is the refusal's cause, `reason` the agent's), as a best effort with a 2s timeout, ignoring errors. Without
 it the history couldn't show what yields and full caps cost.
 
+### Jobs that end with their box
+
+`box` deletes a throwaway box as soon as it has read the run's exit, which can be inside `boxd`'s
+3s poll: `boxd` would then see the box vanish with no `.exit` read and record the job as `lost`. So
+after reading the exit and before deleting the box, `box` sends `POST /api/jobs/ended`
+(`{box, id, exit, endedAt, tail}`, `dash.JobEndedBody`), as a best effort with a 2s timeout,
+ignoring errors, like refusals. `boxd` takes it only for a job it knows is running (404
+otherwise), masks the tail as it masks every tail, records the end, and answers 204.
+
 ### History
 
 `boxd` writes JSON lines to `/var/lib/agent-box/history/`, in two kinds of files:
@@ -228,9 +237,11 @@ JSON over HTTPS, on the same origin as the page.
   - 502 when Incus failed.
   - The codes are constants in `internal/dash` (`CodeYielding` and the rest).
 - **In a path**, a job's key is one segment, escaped (`encodeURIComponent`), since it holds `/`.
-- **A job's box** is the box of its name made before the job started (`createdAt <= startedAt`).
-  Names are reused, so a newer box of the same name is not the job's: its log is gone, and the
-  page shows the kept `tail`.
+- **A job's box** is the box of its name made no later than 10 minutes after the job started
+  (`createdAt <= startedAt + 10m`, `dash.JobBoxGrace`): `box run --new` makes the job's ID and
+  start before it launches the box, so a throwaway's `createdAt` is a few seconds after its job's
+  `startedAt`. A box of the name made later is a reuse of the name, not the job's: its log is gone,
+  and the page shows the kept `tail`.
 - **A box control names its box** by name and `createdAt`, for the same reason: delete and extend
   send `{createdAt}` (the box the page saw), `boxd` compares it with the box's own under the same
   lock as the change, and answers 409 `code: "gone"` when the name now belongs to another box. The
@@ -263,6 +274,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
+| `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
 
 ### Shapes
 
