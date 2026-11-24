@@ -1130,8 +1130,9 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		if cerr != nil {
 			return "", 1, fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
+		ended := a.Now()
 		a.markIdle(ctx, box)
-		a.reportEnded(ctx, job, code, tail.String())
+		a.reportEnded(ctx, job, code, ended, tail.String())
 		return stateDone, code, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

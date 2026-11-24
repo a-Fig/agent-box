@@ -361,16 +361,30 @@ func TestRunReportsItsEnd(t *testing.T) {
 		r.Job != e.Box+"."+e.ID || e.EndedAt.IsZero() {
 		t.Errorf("ended = %s (job %s)", p.raw[0], r.Job)
 	}
+
+	// A throwaway is reported before it is deleted.
+	f = &fakePC{t: t, exit: "0", remotes: testRemotes}
+	a, out = testApp(f)
+	p = posted{}
+	a.Post = p.post
+	if r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Reason: testReason, New: true}); err != nil || r.Code != 0 {
+		t.Fatalf("Run --new = %+v, %v\n%s", r, err, out)
+	}
+	calls := f.callList()
+	if len(p.urls) != 1 || !strings.Contains(calls, "delete") || strings.Index(calls, "remote") > strings.LastIndex(calls, "delete") {
+		t.Errorf("posted %q; calls %s", p.urls, calls)
+	}
 }
 
 func TestTailWriterKeepsTheEnd(t *testing.T) {
 	var sink bytes.Buffer
 	tw := &tailWriter{w: &sink}
 	tw.Write([]byte(strings.Repeat("x", 3000)))
-	tw.Write([]byte("é" + strings.Repeat("y", dash.TailBytes-3) + "z"))
+	// The last TailBytes start inside the é, and hold a stray invalid byte.
+	tw.Write([]byte("é" + strings.Repeat("y", dash.TailBytes-3) + "\xff" + "z"))
 	got := tw.String()
-	if sink.Len() != 3000+dash.TailBytes || !strings.HasSuffix(got, "z") || len(got) > dash.TailBytes || !utf8.ValidString(got) {
-		t.Fatalf("tail %d bytes, valid %v", len(got), utf8.ValidString(got))
+	if sink.Len() != 3000+dash.TailBytes+1 || got != strings.Repeat("y", dash.TailBytes-3)+"z" {
+		t.Fatalf("tail %d bytes, valid %v: %q...", len(got), utf8.ValidString(got), got[:min(len(got), 10)])
 	}
 }
 

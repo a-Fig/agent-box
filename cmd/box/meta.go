@@ -281,19 +281,19 @@ func (t *tailWriter) Write(p []byte) (int, error) {
 	return t.w.Write(p)
 }
 
-// String is the kept tail from a whole character's start.
+// String is the kept tail from a whole character's start, without invalid bytes.
 func (t *tailWriter) String() string {
 	b := t.buf
 	for len(b) > 0 && !utf8.RuneStart(b[0]) {
 		b = b[1:]
 	}
-	return strings.ToValidUTF8(string(b), "�")
+	return strings.ToValidUTF8(string(b), "") // dropped, not replaced, so it stays within TailBytes
 }
 
 // reportEnded tells boxd how a job ended, as a best effort. A throwaway box
 // goes right after its exit code is read, usually before boxd's next look,
 // so without this its job would be recorded as lost. Errors are dropped.
-func (a *App) reportEnded(ctx context.Context, job string, code int, tail string) {
+func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.Time, tail string) {
 	if a.Post == nil {
 		return
 	}
@@ -304,7 +304,7 @@ func (a *App) reportEnded(ctx context.Context, job string, code int, tail string
 		return
 	}
 	box, id, _ := strings.Cut(job, ".")
-	b, err := json.Marshal(dash.JobEndedBody{Box: box, ID: id, Exit: code, EndedAt: a.Now().UTC().Truncate(time.Second), Tail: tail})
+	b, err := json.Marshal(dash.JobEndedBody{Box: box, ID: id, Exit: code, EndedAt: ended.UTC().Truncate(time.Second), Tail: tail})
 	if err != nil {
 		return
 	}
