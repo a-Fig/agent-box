@@ -961,6 +961,18 @@ const (
 // needs no second exec that a freeze could cut off.
 const exitMarker = "\x01box-exit "
 
+// lockedWriter writes to w under mu.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
 // exitFilter passes writes through except lines that start with exitMarker,
 // which it keeps.
 type exitFilter struct {
@@ -1075,10 +1087,13 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		defer close(watched)
 		a.watchPause(run, box, stop, &hit, &gpu)
 	}()
-	ef := &exitFilter{w: a.Err}
+	// Out and Err may be one buffer, and exec now copies each from its own
+	// pipe, so serialize the writes.
+	var wmu sync.Mutex
+	ef := &exitFilter{w: &lockedWriter{&wmu, a.Err}}
 	res, err := a.incus(run, Cmd{
 		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
-		Stdout: a.Out, Stderr: ef,
+		Stdout: &lockedWriter{&wmu, a.Out}, Stderr: ef,
 	})
 	stop()
 	<-watched
