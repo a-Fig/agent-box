@@ -2,13 +2,11 @@ package mode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -17,14 +15,17 @@ import (
 // Every box may swap up to its own memory limit (EnsureSwap, every tick), so
 // reclaiming a frozen box is a single memory.reclaim write: nothing is opened
 // for it and nothing needs putting back, so a reclaim that is cancelled,
-// killed or raced can't leave a box in a state that needs repair.
+// killed or raced can't leave a box in a state that needs repair. Reclaim is
+// best effort: nothing acts on how much a box still holds afterwards, and
+// only FrozenStop stops a frozen CPU box.
 type Reclaimer interface {
-	// EnsureSwap sets memory.swap.max on each box's cgroup where it differs.
-	EnsureSwap(ctx context.Context, boxes []SwapBox) error
+	// EnsureSwap sets memory.swap.max on each box's cgroup where it differs
+	// and returns an error for each box it couldn't (nil entries are fine).
+	EnsureSwap(ctx context.Context, boxes []SwapBox) map[string]error
 	// Reclaim writes memory.reclaim on frozen box name (init process pid)
-	// and returns what it still holds in RAM. ran is false when the reclaim
-	// never got to the write: the box wasn't frozen, its cgroup wasn't the
-	// expected one, or wsl.exe failed or timed out.
+	// and returns what it still holds in RAM. ran is false when the write
+	// never happened: the box wasn't frozen, its cgroup wasn't the expected
+	// one, or wsl.exe failed or timed out.
 	Reclaim(ctx context.Context, name string, pid int64) (left int64, ran bool, err error)
 }
 
@@ -35,22 +36,20 @@ type SwapBox struct {
 	Bytes int64
 }
 
+// Reclaimed is one reclaim that ran: what the box still holds afterwards,
+// for the log and the dashboard. Nothing acts on it.
+type Reclaimed struct {
+	Name string
+	Left int64
+}
+
 const (
 	// ReclaimTimeout bounds one reclaim attempt inside the distro.
 	ReclaimTimeout = 60 * time.Second
-	// ReclaimLeft is how much RAM a box may still hold after a reclaim that
-	// worked; measured leftovers were about 11MB.
-	ReclaimLeft = 256 << 20
-	// ReclaimRetry is the wait before the next attempt, times the attempts so
-	// far, up to ReclaimRetryMax.
+	// ReclaimRetry is the wait before retrying a reclaim whose write never
+	// happened, times the failures so far, up to ReclaimRetryMax.
 	ReclaimRetry    = 15 * time.Second
 	ReclaimRetryMax = time.Minute
-	// ReclaimTries is how many reclaims may run and still leave more than
-	// ReclaimLeft before the box is stopped early, because a game needs the
-	// RAM more than the box needs its job. Attempts that never ran (WSL,
-	// PID or timeout failures) don't count: they retry, and FrozenStop still
-	// stops the box after 15 minutes.
-	ReclaimTries = 2
 )
 
 // reclaimJob is the reclaim state of one frozen box, for one identity (name
@@ -59,12 +58,10 @@ const (
 type reclaimJob struct {
 	pid    int64
 	gen    int
-	short  int // reclaims that ran and left more than ReclaimLeft
-	failed int // attempts that never ran
+	failed int // attempts whose write never happened
 	next   time.Time
 	cancel context.CancelFunc // set while an attempt runs
-	done   bool
-	stop   bool
+	done   bool               // the write happened; no more attempts this freeze
 }
 
 type reclaimResult struct {
@@ -77,12 +74,11 @@ type reclaimResult struct {
 
 // reclaims runs reclaim attempts in the background, so a slow or stuck one
 // never holds up the tick that pauses the next box, stops long-frozen ones,
-// or reaps. Only Tick (and Release, under the tick lock) touches jobs;
+// or reaps. Only Tick (and BeginRelease, under the tick lock) touches jobs;
 // attempts report through results.
 type reclaims struct {
-	jobs      map[string]*reclaimJob
-	gen       int
-	releasing atomic.Bool // Release memory is under way: start no wsl.exe worker
+	jobs map[string]*reclaimJob
+	gen  int
 
 	mu      sync.Mutex
 	results []reclaimResult
@@ -110,12 +106,11 @@ func (r *reclaims) forgetAll() {
 	}
 }
 
-// wait blocks until every attempt has reported; tests use it. The tray
-// never waits: there is nothing to clean up after a worker.
+// wait blocks until every attempt has reported.
 func (r *reclaims) wait() { r.wg.Wait() }
 
 // harvest applies the attempts that ended since the last tick.
-func (r *reclaims) harvest(now time.Time) (errs []error) {
+func (r *reclaims) harvest(now time.Time) (done []Reclaimed, errs []error) {
 	r.mu.Lock()
 	res := r.results
 	r.results = nil
@@ -126,30 +121,19 @@ func (r *reclaims) harvest(now time.Time) (errs []error) {
 			continue // the box was thawed, stopped, recreated or frozen again meanwhile
 		}
 		j.cancel = nil
-		switch {
-		case x.ran && x.left <= ReclaimLeft:
+		if x.ran {
 			j.done = true
+			done = append(done, Reclaimed{x.name, x.left})
 			continue
-		case x.ran:
-			j.short++
-			err := fmt.Errorf("reclaim %s: still holds %s in RAM", x.name, FormatBytes(x.left))
-			if j.short >= ReclaimTries {
-				j.stop = true
-				err = fmt.Errorf("%w after %d reclaims; stopping it", err, j.short)
-			} else {
-				j.next = now.Add(ReclaimRetry * time.Duration(j.short))
-			}
-			errs = append(errs, err)
-		default:
-			j.failed++
-			j.next = now.Add(min(ReclaimRetry*time.Duration(j.failed), ReclaimRetryMax))
-			if x.err == nil {
-				x.err = fmt.Errorf("reclaim %s did not run", x.name)
-			}
-			errs = append(errs, x.err)
 		}
+		j.failed++
+		j.next = now.Add(min(ReclaimRetry*time.Duration(j.failed), ReclaimRetryMax))
+		if x.err == nil {
+			x.err = fmt.Errorf("reclaim %s did not run", x.name)
+		}
+		errs = append(errs, x.err)
 	}
-	return errs
+	return done, errs
 }
 
 // start runs one attempt in the background. ctx is the tray's, not the
@@ -162,29 +146,12 @@ func (r *reclaims) start(ctx context.Context, rc Reclaimer, name string, j *recl
 		defer r.wg.Done()
 		defer cancel()
 		res := reclaimResult{name: name, gen: gen}
-		if r.releasing.Load() || actx.Err() != nil {
-			res.err = fmt.Errorf("reclaim %s: cancelled", name)
-		} else {
-			res.left, res.ran, res.err = rc.Reclaim(actx, name, pid)
-		}
+		res.left, res.ran, res.err = rc.Reclaim(actx, name, pid)
 		r.mu.Lock()
 		r.results = append(r.results, res)
 		r.mu.Unlock()
 	}(j.gen, j.pid)
 }
-
-// BeginRelease is called before the tray's "Release memory" runs `wsl
-// --terminate`: queued and running reclaims are dropped (their wsl.exe
-// calls cancelled) and no new one starts until EndRelease.
-func (m *Manager) BeginRelease() {
-	m.rc.releasing.Store(true)
-	m.tickMu.Lock()
-	defer m.tickMu.Unlock()
-	m.rc.forgetAll()
-}
-
-// EndRelease lets reclaims start again.
-func (m *Manager) EndRelease() { m.rc.releasing.Store(false) }
 
 func pidOf(in Instance) int64 {
 	if in.State == nil {
@@ -193,76 +160,65 @@ func pidOf(in Instance) int64 {
 	return in.State.Pid
 }
 
-// reclaimFrozen is the reclaim step for a CPU box in My PC, after freeze.
-// prev is its state before freeze ran. It returns the state the box ends in.
-func (m *Manager) reclaimFrozen(ctx context.Context, now time.Time, in Instance, prev, state string) (string, error) {
+// reclaimFrozen is the reclaim step for a CPU box in My PC, after freeze:
+// one write per freeze, retried with backoff only if it never happened.
+// prev is the box's state before freeze ran.
+func (m *Manager) reclaimFrozen(now time.Time, in Instance, prev, state string) {
 	r := &m.rc
 	pid := pidOf(in)
 	if state != "frozen" || pid <= 0 {
 		r.forget(in.Name)
-		return state, nil
+		return
 	}
 	if j := r.jobs[in.Name]; prev != "frozen" || j == nil || j.pid != pid { // a new freeze or a new box
 		r.forget(in.Name)
 		r.gen++
 		r.jobs[in.Name] = &reclaimJob{pid: pid, gen: r.gen}
 	}
-	j := r.jobs[in.Name]
-	switch {
-	case j.stop:
-		return m.stopUnreclaimed(ctx, in, pid, state)
-	case !j.done && j.cancel == nil && !now.Before(j.next) && !r.releasing.Load():
-		r.start(ctx, m.Reclaim, in.Name, j)
+	if j := r.jobs[in.Name]; !j.done && j.cancel == nil && !now.Before(j.next) && !m.releasing.Load() {
+		r.start(m.workCtx, m.Reclaim, in.Name, j)
 	}
-	return state, nil
-}
-
-// stopUnreclaimed stops a box that reclaims couldn't empty, after checking
-// again that the PC still yields (the mode may have changed during the tick)
-// and that the box is still the same frozen instance.
-func (m *Manager) stopUnreclaimed(ctx context.Context, in Instance, pid int64, state string) (string, error) {
-	if m.Chosen() != MyPC && !m.yielding {
-		return state, nil
-	}
-	ins, err := m.Incus.List(ctx)
-	if err != nil {
-		return state, err
-	}
-	for _, now := range ins {
-		if now.Name == in.Name && strings.EqualFold(now.Status, "frozen") && pidOf(now) == pid {
-			if err := m.Incus.Stop(ctx, in.Name); err != nil {
-				return state, err
-			}
-			m.rc.forget(in.Name)
-			delete(m.frozenSince, in.Name)
-			return "stopped", nil
-		}
-	}
-	m.rc.forget(in.Name) // gone, resumed or recreated: nothing to stop
-	return state, nil
 }
 
 // ensureSwap asks for every live box's memory.swap.max to be its memory
 // limit. Incus writes 0 there whenever it starts a box, so this runs every
-// tick; it writes only values that differ.
-func (m *Manager) ensureSwap(ctx context.Context, ins []Instance) error {
+// tick, after the instance actions; it writes only values that differ. A
+// box with no limits.memory (own or from a profile) is reported and left
+// alone: it has no limit to swap up to.
+func (m *Manager) ensureSwap(ctx context.Context, ins []Instance) (errs []error) {
 	var boxes []SwapBox
 	for _, in := range ins {
-		if pid := pidOf(in); pid > 0 {
-			boxes = append(boxes, SwapBox{Name: in.Name, Pid: pid, Bytes: swapFor(in)})
+		pid := pidOf(in)
+		if pid <= 0 {
+			continue
 		}
+		b, ok := memoryLimit(in)
+		if !ok {
+			errs = append(errs, fmt.Errorf("%s has no limits.memory: not letting it swap", in.Name))
+			continue
+		}
+		boxes = append(boxes, SwapBox{Name: in.Name, Pid: pid, Bytes: b &^ 4095}) // page-aligned, as the kernel stores it
 	}
 	if len(boxes) == 0 {
-		return nil
+		return errs
 	}
-	return m.Reclaim.EnsureSwap(ctx, boxes)
+	res := m.Reclaim.EnsureSwap(ctx, boxes)
+	for _, b := range boxes { // in order, so the error text is stable
+		if err := res[b.Name]; err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
-// swapFor is a box's memory.swap.max: its own memory limit, so it can swap
-// all of its RAM out when frozen. Page-aligned, as the kernel stores it.
-func swapFor(in Instance) int64 {
-	n := AllocatedMemory([]Instance{in})
-	return n &^ 4095
+// memoryLimit is the box's limits.memory, from its expanded config (profiles
+// included) or its own; false if neither has a size.
+func memoryLimit(in Instance) (int64, bool) {
+	v, ok := in.ExpandedConfig[MemoryCapKey]
+	if !ok {
+		v = in.Config[MemoryCapKey]
+	}
+	return ParseBytes(v)
 }
 
 // prune drops state for instances that are gone.
@@ -299,11 +255,12 @@ const reclaimScript = `P=$2; ` + cgroupOf +
 	`n=$(cat $c/memory.current); echo $n > $c/memory.reclaim 2>/dev/null; echo left $(cat $c/memory.current)`
 
 // ensureSwapScript ($@ name PID bytes, repeated) sets memory.swap.max where
-// it differs and exits 1, naming them, if any box's cgroup was wrong.
-const ensureSwapScript = `r=0; while [ $# -ge 3 ]; do N=$1; P=$2; B=$3; shift 3; ` + cgroupOf +
-	`if [ x$t != xlxc.payload.` + Project + `_$N ]; then echo $N: cgroup $t >&2; r=1; continue; fi; ` +
-	`c=/sys/fs/cgroup/$t; [ x$(cat $c/memory.swap.max) = x$B ] && continue; ` +
-	`echo $B > $c/memory.swap.max || { echo $N: write failed >&2; r=1; }; done; exit $r`
+// it differs and prints one line per box: "ok <name>" or "err <name> <why>".
+// It always exits 0, so one box gone mid-batch doesn't hide the others.
+const ensureSwapScript = `while [ $# -ge 3 ]; do N=$1; P=$2; B=$3; shift 3; ` + cgroupOf +
+	`if [ x$t != xlxc.payload.` + Project + `_$N ]; then echo err $N cgroup $t; continue; fi; ` +
+	`c=/sys/fs/cgroup/$t; if [ x$(cat $c/memory.swap.max 2>/dev/null) = x$B ]; then echo ok $N; continue; fi; ` +
+	`if echo $B > $c/memory.swap.max; then echo ok $N; else echo err $N write failed; fi; done; exit 0`
 
 var instanceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 
@@ -322,21 +279,46 @@ func (c CgroupReclaim) Reclaim(ctx context.Context, name string, pid int64) (int
 	}
 	left, perr := strconv.ParseInt(f[len(f)-1], 10, 64)
 	if perr != nil {
-		return 0, false, fmt.Errorf("reclaim %s: memory.current %q: %w", name, f[len(f)-1], perr)
+		return 0, true, fmt.Errorf("reclaim %s: memory.current %q: %w", name, f[len(f)-1], perr)
 	}
 	return left, true, nil
 }
 
-func (c CgroupReclaim) EnsureSwap(ctx context.Context, boxes []SwapBox) error {
+func (c CgroupReclaim) EnsureSwap(ctx context.Context, boxes []SwapBox) map[string]error {
+	res := map[string]error{}
 	args := []string{"sh", "-c", ensureSwapScript, "sh"}
+	var sent []SwapBox
 	for _, b := range boxes {
 		if !instanceName.MatchString(b.Name) || b.Pid <= 0 || b.Bytes < 0 {
-			return fmt.Errorf("swap: bad instance %q (pid %d)", b.Name, b.Pid)
+			res[b.Name] = fmt.Errorf("swap: bad instance %q (pid %d)", b.Name, b.Pid)
+			continue
 		}
+		sent = append(sent, b)
 		args = append(args, b.Name, strconv.FormatInt(b.Pid, 10), strconv.FormatInt(b.Bytes, 10))
 	}
-	if _, err := c.Run(ctx, args...); err != nil {
-		return errors.Join(errors.New("set memory.swap.max"), err)
+	if len(sent) == 0 {
+		return res
 	}
-	return nil
+	out, err := c.Run(ctx, args...)
+	got := map[string]string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && (f[0] == "ok" || f[0] == "err") {
+			got[f[1]] = strings.Join(f[2:], " ")
+			if f[0] == "ok" {
+				got[f[1]] = "ok"
+			}
+		}
+	}
+	for _, b := range sent {
+		switch why, ok := got[b.Name]; {
+		case ok && why == "ok":
+		case ok:
+			res[b.Name] = fmt.Errorf("swap %s: %s", b.Name, why)
+		case err != nil:
+			res[b.Name] = fmt.Errorf("swap %s: %w", b.Name, err)
+		default:
+			res[b.Name] = fmt.Errorf("swap %s: no result", b.Name)
+		}
+	}
+	return res
 }

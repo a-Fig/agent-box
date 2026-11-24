@@ -69,8 +69,12 @@ func main() {
 		},
 		release: func() {
 			go func() {
-				// No reclaim may start a wsl.exe while the distro goes down.
-				mgr.BeginRelease()
+				// One release at a time; while it runs, no tick, reclaim or
+				// swap call starts a wsl.exe that would bring the distro back.
+				if !mgr.BeginRelease() {
+					lg.Printf("release memory: already running")
+					return
+				}
 				defer mgr.EndRelease()
 				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
 				defer cancel()

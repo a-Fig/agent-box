@@ -135,6 +135,7 @@ $wantCfg = [ordered]@{
     'experimental' = [ordered]@{ 'autoMemoryReclaim' = 'gradual'; 'sparseVhd' = 'true' }
 }
 $cfgPath = Join-Path $env:USERPROFILE '.wslconfig'
+# >>> wslconfig merge (provision/test-wslconfig.ps1 runs this block on test files)
 # Read the bytes and decode them strictly ourselves: PowerShell 5.1's Get-Content assumes the ANSI
 # code page without a BOM. Only UTF-8 (with or without a BOM) and UTF-16 with a BOM are rewritten,
 # in the encoding they came in; each line keeps its own terminator (CRLF, LF or none at the end).
@@ -144,13 +145,14 @@ $enc = New-Object Text.UTF8Encoding($false, $true)
 if (Test-Path -LiteralPath $cfgPath) {
     $bytes = [IO.File]::ReadAllBytes($cfgPath)
     $skip = 0
+    $refuse = "$cfgPath is not valid UTF-8 or UTF-16, so it is left alone. Save it as UTF-8 (Notepad: Save As, Encoding UTF-8) and re-run, or set these by hand: [wsl2] memory=${MemoryGB}GB, swap=${SwapGB}GB, vmIdleTimeout=-1; [experimental] autoMemoryReclaim=gradual, sparseVhd=true."
+    # UTF-32 first: its little-endian BOM starts with UTF-16's.
+    if ($bytes.Length -ge 4 -and (($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) -or ($bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF))) { throw $refuse }
     if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { $enc = New-Object Text.UTF8Encoding($true, $true); $skip = 3 }
     elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) { $enc = New-Object Text.UnicodeEncoding($false, $true, $true); $skip = 2 }
     elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) { $enc = New-Object Text.UnicodeEncoding($true, $true, $true); $skip = 2 }
     try { $text = $enc.GetString($bytes, $skip, $bytes.Length - $skip) }
-    catch {
-        throw "$cfgPath is not valid UTF-8 or UTF-16, so it is left alone. Save it as UTF-8 (Notepad: Save As, Encoding UTF-8) and re-run, or set these by hand: [wsl2] memory=${MemoryGB}GB, swap=${SwapGB}GB, vmIdleTimeout=-1; [experimental] autoMemoryReclaim=gradual, sparseVhd=true."
-    }
+    catch { throw $refuse }
     $pos = 0
     while ($pos -lt $text.Length) {
         $nl = $text.IndexOfAny([char[]]"`r`n", $pos)
@@ -206,6 +208,7 @@ if ($cfgChanged) {
 } else {
     Note 'already up to date'
 }
+# <<< wslconfig merge
 
 # --- 3. Import the distro --------------------------------------------------
 Step "WSL distro '$Distro'"
