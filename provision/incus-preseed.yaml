@@ -2,9 +2,10 @@
 #   incus admin init --preseed < incus-preseed.yaml
 # only when Incus has no storage pool yet (a fresh install).
 #
-# Storage: a plain `dir` pool on the distro's ext4 (inside the VHDX). It needs no loop file
-# and works everywhere. Switch driver to btrfs (and add `config: {size: 60GiB}`) if you
-# want fast snapshots/copies; the pool is then a sparse loop file in /var/lib/incus/disks.
+# Storage: btrfs in a sparse loop file (/var/lib/incus/disks/default.img) inside the VHDX.
+# Not `dir`: WSL's ext4 has no project quotas, so a dir pool can't enforce the per-box and
+# cache sizes. btrfs enforces them and makes new boxes instant copies of the image. WSL's kernel
+# has btrfs as a module; setup-distro.sh loads it (and at every boot via modules-load.d).
 config:
   core.https_address: "[::]:8443"
 
@@ -18,7 +19,9 @@ networks:
 
 storage_pools:
   - name: default
-    driver: dir
+    driver: btrfs
+    config:
+      size: 200GiB
 
 profiles:
   - name: default

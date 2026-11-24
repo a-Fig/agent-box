@@ -65,9 +65,9 @@ case "$state" in
   *) die "systemd is '$state'. Is systemd=true in /etc/wsl.conf and has the distro been restarted (wsl --terminate agents)?" ;;
 esac
 
-step "Installing prerequisites (curl, gnupg, ca-certificates)"
+step "Installing prerequisites (curl, gnupg, ca-certificates, btrfs-progs)"
 apt-get update -qq
-apt-get install -y -qq curl gnupg ca-certificates
+apt-get install -y -qq curl gnupg ca-certificates btrfs-progs
 
 # ---------------------------------------------------------------- Incus
 step "Adding the Zabbly Incus stable repository"
@@ -95,12 +95,17 @@ apt-get install -y -qq incus incus-ui-canonical
 systemctl enable --now incus.service incus.socket >/dev/null 2>&1 || systemctl enable --now incus
 incus version
 
+step "Loading btrfs (the storage pool needs it)"
+modprobe btrfs
+echo btrfs > /etc/modules-load.d/agent-box-btrfs.conf
+note "btrfs loaded, and loaded at every boot"
+
 step "Initialising Incus (preseed)"
 if incus storage show default >/dev/null 2>&1; then
   note "storage pool 'default' exists: already initialised, skipping preseed"
 else
   incus admin init --preseed < "$HERE/incus-preseed.yaml"
-  note "applied incus-preseed.yaml (dir pool, incusbr0 NAT bridge, HTTPS on :8443)"
+  note "applied incus-preseed.yaml (btrfs pool, incusbr0 NAT bridge, HTTPS on :8443)"
 fi
 addr=$(incus config get core.https_address)
 [ -n "$addr" ] || { incus config set core.https_address "[::]:8443"; addr="[::]:8443"; }
@@ -177,9 +182,8 @@ else
   incus storage volume create default cache --project "$PROJECT" size="$CACHE_SIZE"
   note "created, $CACHE_SIZE"
 fi
-# Idempotent: an existing volume gets the quota too. (A dir pool needs filesystem project quotas
-# for any size; if this fails the pool cannot enforce the caps, see provision/README.md.)
-incus storage volume set default cache size "$CACHE_SIZE" --project "$PROJECT"
+# Idempotent: an existing volume gets the quota too.
+incus storage volume set default cache size="$CACHE_SIZE" --project "$PROJECT"
 note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
 
 step "Default profile of the '$PROJECT' project"
