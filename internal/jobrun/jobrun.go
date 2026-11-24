@@ -107,3 +107,42 @@ func ShellCommand(args []string) string {
 
 // Shq quotes s for the shell.
 func Shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// CancelScript stops a job's whole session (the wrapper leads one, from
+// setsid): TERM, then KILL after 5 seconds. It writes code (box uses 130) to the job's
+// .exit if the wrapper didn't, so followers stop. It prints "cancelled" or
+// "finished", then the exit code, and exits 3 for an unknown job.
+//
+// With mark, it leaves a .cancelled file before the kill: box's watchers read
+// it to stay quiet about a job the agent itself cancelled. A cancel from the
+// page doesn't mark, so the agent hears that its job ended.
+func CancelScript(root, job string, code int, mark bool) string {
+	marked := "false"
+	if mark {
+		marked = "true"
+	}
+	return "# cancel\n" + AliveFn + JobPIDFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
+j=%s
+test -f "$j.log" || exit 3
+pid=$(jobpid "$j")
+if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+case "$pid" in ''|*[!0-9]*) echo "job $j has no wrapper PID" >&2; exit 4 ;; esac
+if ! alive "$pid" "$j" || [ "$(ps -o sid= -p "$pid" | tr -d ' ')" != "$pid" ]; then
+  if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+  echo "cannot identify the session for job $j" >&2
+  exit 4
+fi
+# Watchers read this to stay quiet about a job the agent cancelled; it is
+# there before the exit file can be.
+if %s; then : > "$j.cancelled"; fi
+if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
+for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
+if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
+if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+verdict=finished
+if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then verdict=cancelled; fi
+rm -f "$j.cancel.$$"
+test -f "$j.exit" || exit 4
+echo "$verdict $(cat "$j.exit")"
+`, root, job, marked, code)
+}

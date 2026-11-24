@@ -63,6 +63,15 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 	for _, a := range args {
 		skip[a] = true
 	}
+	if strings.HasPrefix(script, "# cancel") {
+		for i, j := range f.jobs[box] {
+			if strings.Contains(script, "\nj="+j.name+"\n") {
+				f.jobs[box][i].state, f.jobs[box][i].exit = "done", "130"
+				return []byte("cancelled 130\n"), nil
+			}
+		}
+		return nil, &ExitError{Code: 3}
+	}
 	if strings.HasPrefix(script, "# boxd scan") {
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
