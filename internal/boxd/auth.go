@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/dash/static"
 )
 
 // Config is /etc/agent-box/boxd.json, written by provision/setup-distro.sh.
@@ -21,6 +24,10 @@ type Config struct {
 	Listen string `json:"listen"`
 	// HistoryDir holds the JSON-lines history.
 	HistoryDir string `json:"historyDir"`
+	// MachineID and MachineName are this PC on the page: "pc" and "PC"
+	// unless set.
+	MachineID   string `json:"machineId"`
+	MachineName string `json:"machineName"`
 }
 
 // DefaultListen is the port docs/ui.md picked, so nothing else on the
@@ -43,6 +50,12 @@ func LoadConfig(path string) (Config, error) {
 	if c.HistoryDir == "" {
 		c.HistoryDir = "/var/lib/agent-box/history"
 	}
+	if c.MachineID == "" {
+		c.MachineID = "pc"
+	}
+	if c.MachineName == "" {
+		c.MachineName = "PC"
+	}
 	return c, nil
 }
 
@@ -53,7 +66,7 @@ const LoginHeader = "Tailscale-User-Login"
 
 // Owners lets a request through only when it came over loopback (from
 // `tailscale serve`) with a login on the owner list. Everything else gets 403
-// with {error, code}.
+// with code forbidden.
 func Owners(owners []string, next http.Handler) http.Handler {
 	allowed := map[string]bool{}
 	for _, o := range owners {
@@ -63,12 +76,12 @@ func Owners(owners []string, next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !fromLoopback(r.RemoteAddr) {
-			writeError(w, http.StatusForbidden, "not-loopback", "boxd answers only through tailscale serve")
+			writeError(w, http.StatusForbidden, dash.CodeForbidden, "boxd answers only through tailscale serve")
 			return
 		}
 		login := strings.ToLower(strings.TrimSpace(r.Header.Get(LoginHeader)))
 		if login == "" || !allowed[login] {
-			writeError(w, http.StatusForbidden, "not-owner", "this tailnet login may not use the dashboard")
+			writeError(w, http.StatusForbidden, dash.CodeForbidden, "this tailnet login may not use the dashboard")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -84,24 +97,22 @@ func fromLoopback(remote string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// apiError is the error body every endpoint returns.
-type apiError struct {
-	Error string `json:"error"`
-	Code  string `json:"code"`
+func writeError(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, dash.ErrorBody{Error: msg, Code: code})
 }
 
-func writeError(w http.ResponseWriter, status int, code, msg string) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(apiError{Error: msg, Code: code})
+	json.NewEncoder(w).Encode(v)
 }
 
-// SecurityHeaders sets the page's strict CSP (agents' text is shown, never
-// run) and keeps the page out of other sites' frames.
+// SecurityHeaders sets the page's strict CSP on every answer, the API's too
+// (agents' text is shown, never run), and keeps the page out of frames.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+		h.Set("Content-Security-Policy", static.CSP)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)

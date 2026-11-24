@@ -210,7 +210,9 @@ How the files are written and read:
 - After a restart, `boxd` reconciles jobs it recorded as started but never as ended. It checks the
   box: a job whose box is gone is recorded as `lost`.
 - JSON lines keep to the standard library. SQLite would need cgo or a large pure-Go port.
-- The history API reads the last 7 days into memory at start; older days are read on demand.
+- `boxd` reads every events file into memory at start and keeps them there. A busy day is a few
+  hundred lines, so 180 days is a few MB. Samples are read per request; a finished day's hourly
+  means are cached (built 2026-11-24).
 
 **Secrets in the history.** Commands and log tails can hold secrets, and the history keeps them
 longer than the boxes do. Before writing, `boxd` masks anything that looks like a token in both:
@@ -229,10 +231,16 @@ storage.
   library has no WebSocket client. `boxd` polls `GET /1.0/instances?project=agents&recursion=2`
   every 3s, which is a single call for ten boxes at most, and diffs the result to make its own
   events.
-- **Job files are read with `exec`, bounded.** The command is
-  `tail -c +<offset> <job>.log | head -c 65536`, with a 3s timeout. A frozen box can't run it, so
-  its log is shown as paused; it isn't an error.
-- `.meta` and `.exit` are read the same way, once per job.
+- **Job files are read with `exec`, bounded.** Exec over REST needs a WebSocket too, so `boxd`
+  runs the `incus` command for it, with a 3s timeout. Each poll runs one scan in each running box:
+  every job's state, exit code and log size, plus the `.meta` and the last 2KiB of the log for
+  jobs not yet recorded as ended. A log page is `tail -c +<offset> <job>.log | head -c 65536`. A
+  frozen box can't run either, so its jobs are paused and its log is shown as paused, not an
+  error. The unit points `INCUS_CONF` at boxd's state directory, since `ProtectHome` hides
+  `/root`.
+- **A throwaway outlives its job by about a second,** less than a poll. So `box` reports each run's
+  end (`POST /api/jobs/ended`), and boxd records the job from that; a job whose box went without a
+  report is `lost`.
 - **Its access.** `boxd` uses the PC's own Incus admin access, not one of the agents' restricted
   certs, and it only ever touches project `agents`.
 
