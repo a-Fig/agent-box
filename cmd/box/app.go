@@ -162,6 +162,10 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	}
 	select {
 	case err := <-exited:
+		if err == nil { // closed by the person, quickly
+			fmt.Fprintln(a.Out, "The window opened and was closed.")
+			return 0
+		}
 		return fail(fmt.Errorf("the window closed as it opened (%v): %s", err, lastLine(logPath, start)))
 	case <-time.After(appStartWait):
 	}
@@ -169,7 +173,7 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	return 0
 }
 
-// appLogMax is the size at which the window's log starts over, keeping one old copy.
+// appLogMax is the size at which the window's log starts over, keeping a copy of what it held.
 const appLogMax = 1 << 20
 
 // appLog is the window's log, in the user's cache directory.
@@ -184,7 +188,11 @@ func appLog() (string, error) {
 	}
 	path := filepath.Join(dir, "app.log")
 	if fi, err := os.Stat(path); err == nil && fi.Size() > appLogMax {
-		os.Rename(path, path+".old")
+		// Copied and emptied rather than renamed: Windows refuses to rename a file that a window
+		// still open has open, and that window appends at the end, wherever it now is.
+		if b, err := os.ReadFile(path); err == nil && os.WriteFile(path+".old", b, 0o600) == nil {
+			os.Truncate(path, 0)
+		}
 	}
 	return path, nil
 }

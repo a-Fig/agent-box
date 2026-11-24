@@ -37,8 +37,19 @@ func TestProbe(t *testing.T) {
 func TestOfflinePage(t *testing.T) {
 	var answers atomic.Bool
 	var ups atomic.Int32
-	srv := httptest.NewServer(offlineHandler(func(context.Context) bool { return answers.Load() }, func() { ups.Add(1) }))
+	srv := httptest.NewUnstartedServer(nil)
+	srv.Config.Handler = offlineHandler(srv.Listener.Addr().String(), func(context.Context) bool { return answers.Load() }, func() { ups.Add(1) })
+	srv.Start()
 	defer srv.Close()
+
+	// Another name for the same address is another site's page: refused.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/state", nil)
+	req.Host = "rebound.example.test"
+	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode != http.StatusForbidden {
+		t.Fatalf("other host: %v %v", res, err)
+	} else {
+		res.Body.Close()
+	}
 
 	get := func(path string) (*http.Response, string) {
 		t.Helper()
@@ -72,7 +83,7 @@ func TestOfflinePage(t *testing.T) {
 	answers.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/state", nil)
+	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/state", nil)
 	if res, err := http.DefaultClient.Do(req); err == nil {
 		res.Body.Close()
 		t.Fatalf("answered %d rather than holding", res.StatusCode)
@@ -98,4 +109,82 @@ func TestOutside(t *testing.T) {
 			t.Errorf("outside(%q) = %v, want %v", link, got, want)
 		}
 	}
+}
+
+// keeperAt is a keeper with a clock the test moves, recording where it sends the window.
+func keeperAt(t *testing.T) (*keeper, *time.Time, *[]string) {
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	var went []string
+	k := &keeper{dash: "https://pc.example.test/", offline: "http://127.0.0.1:5555/", now: func() time.Time { return now }}
+	k.navigate = func(u string) { went = append(went, u) }
+	k.seen = now
+	return k, &now, &went
+}
+
+func TestKeeper(t *testing.T) {
+	const dash, offline, dashO, offO = "https://pc.example.test/", "http://127.0.0.1:5555/", "https://pc.example.test", "http://127.0.0.1:5555"
+
+	t.Run("a trip on its way isn't started again", func(t *testing.T) {
+		k, now, went := keeperAt(t)
+		k.up()
+		*now = now.Add(5 * time.Second)
+		k.up()
+		if len(*went) != 1 || (*went)[0] != dash {
+			t.Fatalf("went %q", *went)
+		}
+		k.here(dashO, true)
+		*now = now.Add(10 * time.Second)
+		k.tick()
+		if len(*went) != 1 {
+			t.Fatalf("went %q after arriving", *went)
+		}
+	})
+
+	t.Run("a trip that doesn't arrive goes back", func(t *testing.T) {
+		k, now, went := keeperAt(t)
+		k.up()
+		*now = now.Add(10 * time.Second)
+		k.here(offO, true) // the offline page still answering while the dashboard loads
+		k.tick()
+		*now = now.Add(11 * time.Second)
+		k.tick()
+		if len(*went) != 2 || (*went)[1] != offline {
+			t.Fatalf("went %q", *went)
+		}
+		k.up() // and the offline page can send it again
+		if len(*went) != 3 || (*went)[2] != dash {
+			t.Fatalf("went %q", *went)
+		}
+	})
+
+	t.Run("a document that stops answering goes back", func(t *testing.T) {
+		k, now, went := keeperAt(t)
+		k.up()
+		k.here(dashO, true)
+		for range 2 {
+			*now = now.Add(pingEvery)
+			k.tick()
+		}
+		if len(*went) != 1 {
+			t.Fatalf("went %q within %v", *went, answerWithin)
+		}
+		*now = now.Add(pingEvery)
+		k.tick()
+		if len(*went) != 2 || (*went)[1] != offline {
+			t.Fatalf("went %q", *went)
+		}
+	})
+
+	t.Run("an error or another site goes back", func(t *testing.T) {
+		for _, tc := range []struct {
+			origin string
+			ok     bool
+		}{{dashO, false}, {"https://elsewhere.example.test", true}, {offO, false}} {
+			k, _, went := keeperAt(t)
+			k.here(tc.origin, tc.ok)
+			if len(*went) != 1 || (*went)[0] != offline {
+				t.Errorf("%s %v: went %q", tc.origin, tc.ok, *went)
+			}
+		}
+	})
 }
