@@ -335,8 +335,10 @@ fi
 rm -f %[2]s.bundle
 echo $code > %[2]s.exit.tmp && mv %[2]s.exit.tmp %[2]s.exit
 `, w, f, repo, job, shellCommand(cmd))
-	return fmt.Sprintf("mkdir -p %s/.box && setsid nohup bash -lc %s > %s.log 2>&1 < /dev/null &\necho $! > %s.pid",
-		w, shq(inner), f, f)
+	// The log is created before the job starts, so a follow that begins at
+	// once never sees "no job".
+	return fmt.Sprintf("mkdir -p %[1]s/.box && : > %[3]s.log && { setsid nohup bash -lc %[2]s >> %[3]s.log 2>&1 < /dev/null & }\necho $! > %[3]s.pid",
+		w, shq(inner), f)
 }
 
 // shellCommand runs a single argument as a shell string ("go test ./... && x")
