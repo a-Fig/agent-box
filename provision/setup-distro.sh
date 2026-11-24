@@ -259,7 +259,7 @@ step "HTTPS certificate (Let's Encrypt through Tailscale, renewed weekly)"
 install -m 0755 "$HERE/https-cert.sh" /usr/local/sbin/agent-box-https-cert
 install -m 0644 "$HERE/systemd/agent-box-https-cert.service" "$HERE/systemd/agent-box-https-cert.timer" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable agent-box-https-cert.timer >/dev/null 2>&1
+systemctl enable --now agent-box-https-cert.timer >/dev/null 2>&1
 if /usr/local/sbin/agent-box-https-cert; then
   note "Incus serves a trusted certificate; renewed weekly"
 else
