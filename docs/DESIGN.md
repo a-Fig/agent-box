@@ -18,7 +18,7 @@ On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq
 | Boxes, API, auth | **Incus** from the Zabbly repo (Ubuntu's 6.0.0 has nested AppArmor issues), HTTPS API on `:8443` |
 | Network reach | Tailscale **inside** the distro as node `agent-box`; WSL stays on NAT networking |
 | Isolation for agents | Incus project `agents` (`restricted=true`, its own profiles) + **restricted client certs** (`incus config trust add --restricted --projects agents`); see Isolation below |
-| Dashboard | Incus web UI (`incus-ui-canonical`) at `https://agent-box:8443` |
+| Dashboard | Incus web UI (`incus-ui-canonical`) at `https://agent-box.<tailnet>.ts.net:8443`, with a Let's Encrypt certificate from Tailscale (`provision/https-cert.sh`, renewed weekly) |
 | Client on the laptop | Windows `incus` client (`winget install LinuxContainers.Incus`), `incus remote add pc` |
 | Image | `images:ubuntu/24.04/cloud` + cloud-init in the `agents` profile (git, build-essential, Go, Node LTS, uv, JDK 17, gh), published once as `agent-base` |
 | Caches | Custom storage volume `cache` mounted at `/cache` (Go, npm, Gradle, uv caches) |

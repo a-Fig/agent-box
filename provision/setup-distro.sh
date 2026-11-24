@@ -255,6 +255,17 @@ systemctl daemon-reload
 systemctl enable --now agent-box-reaper.timer >/dev/null 2>&1
 note "agent-box-reaper.timer enabled"
 
+step "HTTPS certificate (Let's Encrypt through Tailscale, renewed weekly)"
+install -m 0755 "$HERE/https-cert.sh" /usr/local/sbin/agent-box-https-cert
+install -m 0644 "$HERE/systemd/agent-box-https-cert.service" "$HERE/systemd/agent-box-https-cert.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable agent-box-https-cert.timer >/dev/null 2>&1
+if /usr/local/sbin/agent-box-https-cert; then
+  note "Incus serves a trusted certificate; renewed weekly"
+else
+  note "no certificate yet (Tailscale not joined, or HTTPS certificates off in the tailnet's DNS settings); the timer retries weekly"
+fi
+
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then
   note "/dev/kvm present: Incus VMs (incus launch --vm) are possible."
@@ -270,7 +281,7 @@ cat <<'EOF'
   # Laptop, for agents (restricted to the agents project):
   incus config trust add laptop-agents --restricted --projects agents
   #   prints a token; on the laptop:
-  #   incus remote add pc https://agent-box:8443 --token <token>
+  #   incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token <token>
   #   incus project switch agents   # or pass --project agents
 
   # Tray on the PC (admin). It must use a DIFFERENT client cert than agents:
@@ -278,7 +289,7 @@ cat <<'EOF'
   #   on the PC, with its own config dir (e.g. INCUS_CONF=%LOCALAPPDATA%\agent-box\incus):
   #   incus remote add pc https://localhost:8443 --token <token>
 
-  # Web UI: https://agent-box:8443 (import a client cert into the browser; see the Incus UI docs)
+  # Web UI: https://agent-box.<tailnet>.ts.net:8443 (import a client cert into the browser; see the Incus UI docs)
   # List / revoke:  incus config trust list ;  incus config trust remove <fingerprint>
 
 EOF

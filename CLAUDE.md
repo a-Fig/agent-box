@@ -19,7 +19,8 @@ this file loads into every session, so it stays short and points into `docs/` fo
   where boxes run. The laptop is where agents and their worktrees live.
 - **agents (distro), agents (project).** The WSL2 distro on the PC is `agents`; it joins the
   tailnet as `agent-box` (100.88.172.93). The Incus project the boxes live in is also `agents`.
-- **pc (remote).** The laptop's Incus remote for the PC, with a restricted cert.
+- **pc (remote).** The laptop's Incus remote for the PC, `https://agent-box.tail051d13.ts.net:8443`,
+  with a restricted cert. Incus there serves a Let's Encrypt cert for that name (renewed weekly).
 - **box.** One Incus container in project `agents`: throwaway compute, never storage. Also the CLI.
 - **mode, yield.** The tray's choice: My PC (boxes frozen), Shared (2 CPUs a box), Full (4).
   Yield is My PC forced while a game runs. The tray writes `user.agent-box.mode` and

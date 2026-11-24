@@ -66,7 +66,7 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Securit
     throw 'Run this from an elevated (Administrator) PowerShell.'
 }
 $ProvisionDir = $PSScriptRoot
-foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf', 'reaper.sh', 'systemd/agent-box-reaper.service', 'systemd/agent-box-reaper.timer') {
+foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf', 'reaper.sh', 'systemd/agent-box-reaper.service', 'systemd/agent-box-reaper.timer', 'https-cert.sh', 'systemd/agent-box-https-cert.service', 'systemd/agent-box-https-cert.timer') {
     if (-not (Test-Path (Join-Path $ProvisionDir $f))) { throw "Missing $f next to install-pc.ps1." }
 }
 if ($BoxtrayPath -and -not (Test-Path -LiteralPath $BoxtrayPath)) { throw "BoxtrayPath not found: $BoxtrayPath" }
@@ -212,7 +212,7 @@ Step "Copying provision files to $StageDir in the distro"
 Invoke-InDistro @('sh', '-c', "rm -rf $StageDir && mkdir -p $StageDir") | Out-Null
 $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path $tarExe)) { throw 'tar.exe not found (needs Windows 10 1803+).' }
-$cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-distro.sh incus-preseed.yaml default-profile.yaml wsl.conf reaper.sh systemd | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
+$cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-distro.sh incus-preseed.yaml default-profile.yaml wsl.conf reaper.sh https-cert.sh systemd | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
 & cmd.exe /c $cmd
 if ($LASTEXITCODE -ne 0) { throw 'Copying provision files into the distro failed.' }
 Invoke-InDistro @('sh', '-c', "sed -i 's/\r$//' $StageDir/*.sh $StageDir/*.yaml $StageDir/wsl.conf && chmod +x $StageDir/setup-distro.sh") | Out-Null
