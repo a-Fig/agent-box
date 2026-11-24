@@ -19,7 +19,8 @@ this file loads into every session, so it stays short and points into `docs/` fo
   where boxes run. The laptop is where agents and their worktrees live.
 - **agents (distro), agents (project).** The WSL2 distro on the PC is `agents`; it joins the
   tailnet as `agent-box` (100.88.172.93). The Incus project the boxes live in is also `agents`.
-- **pc (remote).** The laptop's Incus remote for the PC, with a restricted cert.
+- **pc (remote).** The laptop's Incus remote for the PC, `https://agent-box.tail051d13.ts.net:8443`,
+  with a restricted cert. Incus there serves a Let's Encrypt cert for that name (renewed weekly).
 - **box.** One Incus container in project `agents`: throwaway compute, never storage. Also the CLI.
 - **size.** small, medium (default) or large, in `user.box.size`; the table is
   `internal/mode/size.go`, explained in `docs/DESIGN.md`.
@@ -37,6 +38,8 @@ this file loads into every session, so it stays short and points into `docs/` fo
   the tray (`%APPDATA%\agent-box\boxtray.json`, then restart it), not the key.
 - Over SSH, `$env:USERDOMAIN` on the PC is `WORKGROUP`; use the Windows identity's name.
 - WSL's ext4 has no project quotas, so the storage pool is btrfs: only it enforces disk sizes.
+- systemd in WSL counts as a container, so units with `ConditionVirtualization=!container` (such
+  as `incus-lxcfs`) are skipped unless a drop-in clears the condition.
 - On the laptop, run Go only through `.scratch/golock.sh` (one Go run at a time) and never with
   `-race`: the laptop starves. CI runs `-race`.
 

@@ -10,26 +10,44 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
 	"golang.org/x/sys/windows"
 )
 
+// lg is the log at %LOCALAPPDATA%\agent-box\boxtray.log. A nil *fileLog is a
+// no-op, so it is safe to use before main sets it.
+var lg *fileLog
+
 func main() {
 	runtime.LockOSThread() // the tray window must be created and pumped on one thread
+
+	lg = openLog(logPath(), maxLogBytes)
+	lg.Printf("boxtray starting (pid %d)", os.Getpid())
+	defer func() {
+		if r := recover(); r != nil {
+			lg.Printf("exit: panic: %v\n%s", r, debug.Stack())
+			os.Exit(2)
+		}
+	}()
 
 	// One tray per login session.
 	name, _ := windows.UTF16PtrFromString(`Local\agent-box-boxtray`)
 	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
+		lg.Printf("exit: another boxtray is already running in this session")
 		return
 	}
 
+	// A missing config folder costs only the saved mode, never the tray.
 	cfg, err := configPath()
 	if err != nil {
-		os.Exit(1)
+		lg.Printf("no config path (%v): the chosen mode will not be saved", err)
+		cfg = ""
 	}
 	mgr := mode.New(mode.CLI{Run: wslIncus}, loadMode(cfg))
+	lg.Printf("mode at start: %s", mgr.Chosen())
 	wake := make(chan struct{}, 1)
 	poke := func() {
 		select {
@@ -41,7 +59,11 @@ func main() {
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
 			mgr.SetChosen(m)
-			saveMode(cfg, m)
+			if cfg != "" {
+				if err := saveMode(cfg, m); err != nil {
+					lg.Printf("could not save the mode: %v", err)
+				}
+			}
 			poke()
 		},
 		release: func() {
@@ -51,12 +73,44 @@ func main() {
 			}()
 		},
 	})
+	sl := &statusLog{logf: lg.Printf}
+	report := func(st mode.Status) {
+		sl.observe(st)
+		if t != nil {
+			t.setStatus(st)
+		}
+	}
 	if err != nil {
-		os.Exit(1)
+		// No window means no icon and no menu, but enforcing modes and
+		// yielding to games matters more, so keep going.
+		t = nil
+		lg.Printf("tray window failed (%v): running the mode loop without an icon", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go run(ctx, mgr, &winSensors{}, 5*time.Second, wake, t.setStatus)
+	defer cancel()
+	go supervise(ctx, func() { run(ctx, mgr, &winSensors{}, 5*time.Second, wake, report) })
+	lg.Printf("mode and yield loop started")
+
+	if t == nil {
+		select {} // nothing to pump; only a kill ends this
+	}
 	t.loop()
-	cancel()
+	lg.Printf("exit: message loop ended")
+}
+
+// supervise reruns f if it panics, so a bug in one tick can't leave the tray
+// up with nothing enforcing the modes.
+func supervise(ctx context.Context, f func()) {
+	for ctx.Err() == nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					lg.Printf("mode loop panicked, restarting in 5s: %v\n%s", r, debug.Stack())
+					time.Sleep(5 * time.Second)
+				}
+			}()
+			f()
+		}()
+	}
 }

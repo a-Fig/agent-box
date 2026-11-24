@@ -1,0 +1,8 @@
+[Unit]
+Description=agent-box: renew the Tailscale HTTPS certificate for Incus
+After=tailscaled.service incus.service
+Wants=tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/agent-box-https-cert

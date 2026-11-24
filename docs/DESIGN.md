@@ -18,7 +18,7 @@ On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq
 | Boxes, API, auth | **Incus** from the Zabbly repo (Ubuntu's 6.0.0 has nested AppArmor issues), HTTPS API on `:8443` |
 | Network reach | Tailscale **inside** the distro as node `agent-box`; WSL stays on NAT networking |
 | Isolation for agents | Incus project `agents` (`restricted=true`, its own profiles) + **restricted client certs** (`incus config trust add --restricted --projects agents`); see Isolation below |
-| Dashboard | Incus web UI (`incus-ui-canonical`) at `https://agent-box:8443` |
+| Dashboard | Incus web UI (`incus-ui-canonical`) at `https://agent-box.<tailnet>.ts.net:8443`, with a Let's Encrypt certificate from Tailscale (`provision/https-cert.sh`, renewed weekly) |
 | Client on the laptop | Windows `incus` client (`winget install LinuxContainers.Incus`), `incus remote add pc` |
 | Image | `images:ubuntu/24.04/cloud` + cloud-init in the `agents` profile (git, build-essential, Go, Node LTS, uv, JDK 17, gh), published once as `agent-base` |
 | Caches | Custom storage volume `cache` mounted at `/cache` (Go, npm, Gradle, uv caches) |
@@ -109,6 +109,7 @@ By default it reuses one box per repo, which keeps caches and `node_modules` war
 - **Gaming yield:** Steam `RunningAppID` != 0, or `SHQueryUserNotificationState` full-screen/busy, behaves like My PC until the game ends.
 - It uses an admin client cert, which agents don't have. The mode is stored in the `agents` project config as `user.agent-box.mode`, so `box` can read it. A mode check in `box` is advisory: an agent can ignore it. The tray's per-tick enforcement is what makes games win.
 - The tray also holds a Windows power request while any instance is running, so the PC doesn't sleep in the middle of a job.
+- **Logon and logging.** On 2026-11-23 the tray exited with code 1 at logon and nothing recorded why, so no game yield ran. Now it logs to `%LOCALAPPDATA%gent-boxoxtray.log` (start, every exit path, mode changes, yields; capped at 1 MB by dropping the older half). If adding the notification icon fails, the tray retries every 2 s for 2 min while the mode loop keeps running, and it adds the icon again on `TaskbarCreated` (Explorer restart). The `agent-box-tray` task restarts it up to 5 times, a minute apart, if it exits with an error.
 
 ### 3. Provisioning (`provision/`)
 `bootstrap-ssh.ps1`, `install-pc.ps1` (WSL, distro import, `wsl --update`, `.wslconfig` with 16 GB / `autoMemoryReclaim=gradual` / `vmIdleTimeout=-1`, the scheduled task, the tray at logon), `setup-distro.sh` (kernel check, Incus + UI, preseed, project/profile/volume, Tailscale, certs, image).
