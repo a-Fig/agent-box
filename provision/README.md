@@ -18,7 +18,7 @@ Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here to
 3. **`setup-distro.sh`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-distro.sh [--build-base]`.
 4. Add client certs (commands are printed at the end of `setup-distro.sh`), then `incus remote add pc https://agent-box:8443 --token ...` on the laptop.
 
-Files: `agents-profile.yaml` (project profile + cloud-init), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
+Files: `default-profile.yaml` (the default project's `default` profile, which project `agents` uses: limits, nesting, cache volume, cloud-init), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
 ## What changes on the PC, and how to undo it
 
@@ -37,13 +37,14 @@ Files: `agents-profile.yaml` (project profile + cloud-init), `incus-preseed.yaml
 | | Scheduled Task `agent-box-tray` (only with `-BoxtrayPath`) | `Unregister-ScheduledTask agent-box-tray -Confirm:$false` |
 | | `%TEMP%\agent-box-dl` (rootfs download) | delete it |
 | `setup-distro.sh` | Zabbly apt repo + key, `incus`, `incus-ui-canonical`, Tailscale (all inside the distro) | `apt remove` them; `rm /etc/apt/sources.list.d/zabbly-incus-stable.sources` |
-| | Incus: storage pool `default`, bridge `incusbr0`, HTTPS `:8443`, project `agents` (caps, profile, `cache` volume), image `agent-base` | `incus project delete agents` after removing its instances and volume; or just `wsl --unregister agents` |
+| | Incus: storage pool `default`, bridge `incusbr0`, HTTPS `:8443`, project `agents` (restricted, caps, `cache` volume), the default project's `default` profile, image `agent-base` | `incus project delete agents` after removing its instances and volume; or just `wsl --unregister agents` |
 | | Tailscale node `agent-box` | `tailscale logout` in the distro and remove the node in the admin console |
 
 ## Details
 
 - **Secrets.** The Tailscale auth key travels only through the environment (`WSLENV`) and `tailscale up --authkey`. It's never written to disk by these scripts. Client-cert tokens are printed by Incus and expire.
-- **Re-running** `install-pc.ps1` skips what exists: features, distro, `.wslconfig` keys, `/etc/wsl.conf`, tasks (re-registered with `-Force`). `setup-distro.sh` skips the preseed when the `default` pool exists and re-applies project caps and the profile every time.
-- **Memory limits.** Per-box `limits.memory=4GiB`, project cap default `12GiB` (`AGENTS_MEM_CAP`), VM ceiling `16GB`. Changing `.wslconfig` applies after `wsl --shutdown`, which stops every WSL distro.
+- **Re-running** `install-pc.ps1` skips what exists: features, distro, `.wslconfig` keys, `/etc/wsl.conf`, tasks (re-registered with `-Force`). `setup-distro.sh` skips the preseed when the `default` pool exists and re-applies project caps, the `restricted.*` keys and the profile every time. `features.profiles` and `features.images` can't change after a project exists: if `agents` has the wrong ones, the script stops and prints how to recreate the project.
+- **Modes and limits.** Project caps are fixed at setup (`limits.instances=3` via `AGENTS_MAX_BOXES`, `limits.cpu=12` via `AGENTS_CPU_CAP`, `limits.memory=12GiB` via `AGENTS_MEM_CAP`): 3 boxes x 4 CPUs x 4GiB. The tray never changes them (Incus won't lower them below existing instances); it sets each box's `limits.cpu` (2 Shared, 4 Full) and re-enforces it every tick. A mode check in `box` is advisory; the tray's per-tick enforcement is what makes games win. Per-box `limits.memory=4GiB`, VM ceiling `16GB`.
+- **Kernel.** Incus 7.x needs Linux 6.12+. `install-pc.ps1` runs `wsl --update`; `setup-distro.sh` fails if `uname -r` is older (then `wsl --shutdown` and re-run). Changing `.wslconfig` applies after `wsl --shutdown`, which stops every WSL distro.
 - **Two client identities.** Agents (restricted cert) and the tray (admin) must be different certs, so give the tray its own `INCUS_CONF` directory.
 - **VMs.** `setup-distro.sh` reports whether `/dev/kvm` exists. If not, `nestedVirtualization=true` under `[wsl2]` in `.wslconfig` is the usual fix on Windows 11.

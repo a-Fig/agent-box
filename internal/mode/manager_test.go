@@ -17,10 +17,11 @@ type fake struct {
 	calls   []string
 	failOn  string // a call prefix that returns an error
 	project map[string]string
+	config  map[string]map[string]string // instance -> its own config
 }
 
 func newFake(kv ...string) *fake {
-	f := &fake{state: map[string]string{}, project: map[string]string{}}
+	f := &fake{state: map[string]string{}, project: map[string]string{}, config: map[string]map[string]string{}}
 	for i := 0; i < len(kv); i += 2 {
 		f.add(kv[i], kv[i+1])
 	}
@@ -46,7 +47,11 @@ func (f *fake) List(context.Context) ([]Instance, error) {
 	}
 	var out []Instance
 	for _, n := range f.order {
-		out = append(out, Instance{Name: n, Status: f.state[n]})
+		cfg := map[string]string{}
+		for k, v := range f.config[n] {
+			cfg[k] = v
+		}
+		out = append(out, Instance{Name: n, Status: f.state[n], Config: cfg})
 	}
 	return out, nil
 }
@@ -72,10 +77,25 @@ func (f *fake) Stop(_ context.Context, n string) error {
 	return nil
 }
 func (f *fake) SetInstanceConfig(_ context.Context, n, k, v string) error {
-	return f.rec("set %s %s=%s", n, k, v)
+	if err := f.rec("set %s %s=%s", n, k, v); err != nil {
+		return err
+	}
+	f.setCfg(n, k, v)
+	return nil
+}
+
+func (f *fake) setCfg(n, k, v string) {
+	if f.config[n] == nil {
+		f.config[n] = map[string]string{}
+	}
+	f.config[n][k] = v
 }
 func (f *fake) UnsetInstanceConfig(_ context.Context, n, k string) error {
-	return f.rec("unset %s %s", n, k)
+	if err := f.rec("unset %s %s", n, k); err != nil {
+		return err
+	}
+	delete(f.config[n], k)
+	return nil
 }
 func (f *fake) SetProjectConfig(_ context.Context, k, v string) error {
 	if err := f.rec("project %s=%s", k, v); err != nil {
@@ -123,15 +143,15 @@ func TestMyPCPausesBoxesStartedLater(t *testing.T) {
 	equal(t, f.take(), []string{"pause late"})
 }
 
-func TestSharedConfiguresResumesAndIsIdempotent(t *testing.T) {
+func TestSharedCapsCPUResumesAndIsIdempotent(t *testing.T) {
 	f := newFake("a", "Frozen", "b", "Running")
 	m := New(f, Shared)
 
 	st := tick(m, 0, false)
 	equal(t, f.take(), []string{
-		"project user.agent-box.mode=shared", "project limits.instances=2",
-		"set a limits.cpu.allowance=50%", "set a limits.cpu.priority=0", "resume a",
-		"set b limits.cpu.allowance=50%", "set b limits.cpu.priority=0",
+		"project user.agent-box.mode=shared",
+		"set a limits.cpu=2", "set a limits.cpu.priority=0", "resume a",
+		"set b limits.cpu=2", "set b limits.cpu.priority=0",
 	})
 	if st.Running != 2 {
 		t.Fatalf("running = %d", st.Running)
@@ -141,20 +161,103 @@ func TestSharedConfiguresResumesAndIsIdempotent(t *testing.T) {
 
 	f.add("new", "Running")
 	tick(m, 10*time.Second, false)
-	equal(t, f.take(), []string{"set new limits.cpu.allowance=50%", "set new limits.cpu.priority=0"})
+	equal(t, f.take(), []string{"set new limits.cpu=2", "set new limits.cpu.priority=0"})
 }
 
-func TestFullUnsetsAllowance(t *testing.T) {
+func TestNeverWritesProjectLimitsOrMemory(t *testing.T) {
+	f := newFake("a", "Running")
+	for _, c := range []Mode{Shared, Full, MyPC, Full} {
+		m := New(f, c)
+		tick(m, 0, false)
+		tick(m, time.Hour, false)
+	}
+	for _, c := range f.take() {
+		if strings.HasPrefix(c, "project ") && !strings.HasPrefix(c, "project user.agent-box.mode=") {
+			t.Errorf("wrote a project limit: %s", c)
+		}
+		if strings.Contains(c, "limits.memory") || strings.Contains(c, "limits.instances") {
+			t.Errorf("touched %s", c)
+		}
+	}
+}
+
+func TestFullRaisesCPUAndRemovesLegacyAllowance(t *testing.T) {
 	f := newFake("a", "Frozen")
+	f.config["a"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0", "limits.cpu.allowance": "50%"}
 	m := New(f, Shared)
 	tick(m, 0, false)
-	f.take()
+	equal(t, f.take(), []string{
+		"project user.agent-box.mode=shared",
+		"unset a limits.cpu.allowance", "resume a",
+	})
 	m.SetChosen(Full)
 	tick(m, time.Second, false)
 	equal(t, f.take(), []string{
-		"project user.agent-box.mode=full", "project limits.instances=3",
-		"unset a limits.cpu.allowance", "set a limits.cpu.priority=10",
+		"project user.agent-box.mode=full",
+		"set a limits.cpu=4", "set a limits.cpu.priority=10",
 	})
+	tick(m, 2*time.Second, false)
+	equal(t, f.take(), nil)
+}
+
+func TestOnlyDifferingKeysAreSet(t *testing.T) {
+	f := newFake("a", "Running", "b", "Running")
+	f.config["a"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "10"} // already right for Full
+	f.config["b"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "0"}
+	m := New(f, Full)
+	tick(m, 0, false)
+	equal(t, f.take(), []string{"project user.agent-box.mode=full", "set b limits.cpu.priority=10"})
+}
+
+func TestReenforcesLimitsAnAgentChanged(t *testing.T) {
+	f := newFake("a", "Running")
+	m := New(f, Shared)
+	tick(m, 0, false)
+	f.take()
+
+	f.config["a"]["limits.cpu"] = "12"            // agent raised its CPUs
+	f.config["a"]["limits.cpu.allowance"] = "90%" // and added an allowance
+	delete(f.config["a"], "limits.cpu.priority")  // and dropped the priority
+	tick(m, time.Second, false)
+	equal(t, f.take(), []string{"set a limits.cpu=2", "set a limits.cpu.priority=0", "unset a limits.cpu.allowance"})
+	tick(m, 2*time.Second, false)
+	equal(t, f.take(), nil)
+}
+
+func TestMyPCRepausesAnInstanceAnAgentResumed(t *testing.T) {
+	f := newFake("a", "Running")
+	m := New(f, MyPC)
+	tick(m, 0, false)
+	f.take()
+	f.state["a"] = "Running" // agent resumed it
+	tick(m, time.Second, false)
+	equal(t, f.take(), []string{"pause a"})
+}
+
+func TestMyPCLeavesInstanceConfigAlone(t *testing.T) {
+	f := newFake("a", "Running")
+	f.config["a"] = map[string]string{"limits.cpu": "12", "limits.cpu.allowance": "50%"}
+	m := New(f, MyPC)
+	tick(m, 0, false)
+	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "pause a"})
+}
+
+func TestFrozenInstanceStaysFrozenIfLimitsFail(t *testing.T) {
+	f := newFake("a", "Frozen")
+	f.failOn = "set a limits.cpu=2"
+	m := New(f, Shared)
+	st := tick(m, 0, false)
+	if st.Err == nil || st.Running != 0 {
+		t.Fatalf("status %+v", st)
+	}
+	for _, c := range f.take() {
+		if strings.HasPrefix(c, "resume") {
+			t.Fatalf("resumed without limits: %s", c)
+		}
+	}
+	f.failOn = ""
+	tick(m, time.Second, false)
+	equal(t, f.take(), []string{"set a limits.cpu=2", "resume a"})
 }
 
 func TestStoppedInstancesStayStopped(t *testing.T) {
@@ -191,8 +294,7 @@ func TestGamingYieldAndDebounce(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 	equal(t, f.take(), []string{
-		"project user.agent-box.mode=full", "project limits.instances=3",
-		"unset a limits.cpu.allowance", "set a limits.cpu.priority=10", "resume a",
+		"project user.agent-box.mode=full", "resume a", // limits were never lost: nothing to reset
 	})
 }
 
@@ -210,7 +312,7 @@ func TestYieldWinsOverModeChangeWhileGaming(t *testing.T) {
 
 func TestFailuresAreReportedAndRetried(t *testing.T) {
 	f := newFake("a", "Running")
-	f.failOn = "project limits.instances"
+	f.failOn = "project user.agent-box.mode"
 	m := New(f, Shared)
 
 	st := tick(m, 0, false)
@@ -226,7 +328,7 @@ func TestFailuresAreReportedAndRetried(t *testing.T) {
 	if st.Err != nil {
 		t.Fatal(st.Err)
 	}
-	equal(t, f.take(), []string{"project user.agent-box.mode=shared", "project limits.instances=2"})
+	equal(t, f.take(), []string{"project user.agent-box.mode=shared"})
 }
 
 func TestListFailureKeepsLastRunningCount(t *testing.T) {
@@ -266,29 +368,29 @@ func TestCLIArgs(t *testing.T) {
 	run := func(_ context.Context, args ...string) ([]byte, error) {
 		got = append(got, args)
 		if args[0] == "list" {
-			return []byte(`[{"name":"a","status":"Running","type":"container"},{"name":"b","status":"Frozen"}]`), nil
+			return []byte(`[{"name":"a","status":"Running","type":"container"},{"name":"b","status":"Frozen","config":{"limits.cpu":"2"}}]`), nil
 		}
 		return nil, nil
 	}
 	c, ctx := CLI{Run: run}, context.Background()
 	ins, err := c.List(ctx)
-	if err != nil || len(ins) != 2 || ins[1] != (Instance{Name: "b", Status: "Frozen"}) {
+	if err != nil || len(ins) != 2 || ins[1].Name != "b" || ins[1].Status != "Frozen" || ins[1].Config["limits.cpu"] != "2" || len(ins[0].Config) != 0 {
 		t.Fatalf("list = %v, %v", ins, err)
 	}
 	c.Pause(ctx, "a")
 	c.Resume(ctx, "a")
 	c.Stop(ctx, "a")
-	c.SetInstanceConfig(ctx, "a", "limits.cpu.allowance", "50%")
+	c.SetInstanceConfig(ctx, "a", "limits.cpu", "2")
 	c.UnsetInstanceConfig(ctx, "a", "limits.cpu.allowance")
-	c.SetProjectConfig(ctx, "limits.instances", "2")
+	c.SetProjectConfig(ctx, ProjectModeKey, "full")
 	want := [][]string{
 		{"list", "--project", "agents", "--format", "json"},
 		{"pause", "a", "--project", "agents"},
 		{"start", "a", "--project", "agents"},
 		{"stop", "a", "--force", "--project", "agents"},
-		{"config", "set", "a", "limits.cpu.allowance=50%", "--project", "agents"},
+		{"config", "set", "a", "limits.cpu=2", "--project", "agents"},
 		{"config", "unset", "a", "limits.cpu.allowance", "--project", "agents"},
-		{"project", "set", "agents", "limits.instances=2"},
+		{"project", "set", "agents", "user.agent-box.mode=full"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)

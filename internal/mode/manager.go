@@ -40,9 +40,8 @@ type Manager struct {
 	yielding    bool
 	clearSince  time.Time
 	reason      string
-	applied     Mode            // effective mode the fields below belong to
-	projectDone bool            // project keys set for applied
-	configured  map[string]Mode // instance -> mode its limits were set for
+	applied     Mode // effective mode the fields below belong to
+	projectDone bool // mode label set for applied
 	frozenSince map[string]time.Time
 	last        Status
 }
@@ -75,7 +74,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	}
 	if st.Effective != m.applied {
 		m.applied, m.projectDone = st.Effective, false
-		m.configured, m.frozenSince = map[string]Mode{}, map[string]time.Time{}
+		m.frozenSince = map[string]time.Time{}
 	}
 
 	var errs []error
@@ -114,14 +113,9 @@ func (m *Manager) updateYield(now time.Time, gaming bool, reason string) {
 	}
 }
 
+// applyProject records the mode for `box`. It never touches project limits.
 func (m *Manager) applyProject(ctx context.Context, eff Mode) error {
-	if err := m.Incus.SetProjectConfig(ctx, ProjectModeKey, string(eff)); err != nil {
-		return err
-	}
-	if eff == MyPC {
-		return nil // My PC leaves the instance cap alone
-	}
-	return m.Incus.SetProjectConfig(ctx, "limits.instances", eff.limits().maxInstances)
+	return m.Incus.SetProjectConfig(ctx, ProjectModeKey, string(eff))
 }
 
 func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, ins []Instance, errs []error) (running int, _ []error) {
@@ -133,7 +127,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, i
 		if eff == MyPC {
 			state, err = m.freeze(ctx, now, in.Name, state)
 		} else {
-			state, err = m.thaw(ctx, eff, in.Name, state)
+			state, err = m.thaw(ctx, eff, in, state)
 		}
 		if err != nil {
 			errs = append(errs, err)
@@ -176,27 +170,34 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name, state string)
 	return state, nil
 }
 
-// thaw is the Shared/Full step for one instance. Limits go on before the
-// resume so a thawed box is never briefly uncapped.
-func (m *Manager) thaw(ctx context.Context, eff Mode, name, state string) (string, error) {
-	if m.configured[name] != eff {
-		lim := eff.limits()
-		var err error
-		if lim.allowance == "" {
-			err = m.Incus.UnsetInstanceConfig(ctx, name, "limits.cpu.allowance")
-		} else {
-			err = m.Incus.SetInstanceConfig(ctx, name, "limits.cpu.allowance", lim.allowance)
+// thaw is the Shared/Full step for one instance. Every tick it compares the
+// instance's own config with what the mode wants and fixes only the keys that
+// differ, so a limit an agent changed is put back, and nothing is called when
+// nothing changed. Limits go on before the resume so a thawed box is never
+// briefly uncapped.
+func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string) (string, error) {
+	lim := eff.limits()
+	want := [...][2]string{{"limits.cpu", lim.cpu}, {"limits.cpu.priority", lim.priority}}
+	var errs []error
+	for _, kv := range want {
+		if cur, ok := in.Config[kv[0]]; !ok || cur != kv[1] {
+			if err := m.Incus.SetInstanceConfig(ctx, in.Name, kv[0], kv[1]); err != nil {
+				errs = append(errs, err)
+			}
 		}
-		if err == nil {
-			err = m.Incus.SetInstanceConfig(ctx, name, "limits.cpu.priority", lim.priority)
+	}
+	for _, k := range legacyKeys {
+		if _, ok := in.Config[k]; ok {
+			if err := m.Incus.UnsetInstanceConfig(ctx, in.Name, k); err != nil {
+				errs = append(errs, err)
+			}
 		}
-		if err != nil {
-			return state, err
-		}
-		m.configured[name] = eff
+	}
+	if err := errors.Join(errs...); err != nil {
+		return state, err // stay frozen until the limits are right
 	}
 	if state == "frozen" {
-		if err := m.Incus.Resume(ctx, name); err != nil {
+		if err := m.Incus.Resume(ctx, in.Name); err != nil {
 			return state, err
 		}
 		return "running", nil

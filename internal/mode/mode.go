@@ -9,8 +9,8 @@ type Mode string
 
 const (
 	MyPC   Mode = "mypc"   // every instance paused; long-frozen ones stopped
-	Shared Mode = "shared" // half the CPU, normal priority, at most 2 instances
-	Full   Mode = "full"   // all the CPU, higher priority, at most 3 instances (12GiB cap / 4GiB each)
+	Shared Mode = "shared" // each instance may use 2 CPUs, normal priority
+	Full   Mode = "full"   // each instance may use 4 CPUs, higher priority
 )
 
 // All lists the modes in menu order.
@@ -42,16 +42,22 @@ func (m Mode) Label() string {
 	return string(m)
 }
 
-// limits are the Incus settings a running mode (Shared, Full) applies.
+// limits are the per-instance Incus settings a running mode (Shared, Full)
+// enforces. limits.cpu=N is a real cap (N CPUs), unlike limits.cpu.allowance,
+// which is only a weight between Linux processes and does nothing against
+// Windows. Memory stays as the profile set it. Project limits are fixed at
+// provisioning, because Incus refuses to lower them below what is in use.
 type limits struct {
-	allowance    string // limits.cpu.allowance; "" means unset
-	priority     string // limits.cpu.priority
-	maxInstances string // project limits.instances
+	cpu      string // limits.cpu
+	priority string // limits.cpu.priority
 }
+
+// legacyKeys are instance keys earlier versions set; they are removed if found.
+var legacyKeys = []string{"limits.cpu.allowance"}
 
 func (m Mode) limits() limits {
 	if m == Full {
-		return limits{allowance: "", priority: "10", maxInstances: "3"}
+		return limits{cpu: "4", priority: "10"}
 	}
-	return limits{allowance: "50%", priority: "0", maxInstances: "2"}
+	return limits{cpu: "2", priority: "0"}
 }

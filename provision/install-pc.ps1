@@ -66,7 +66,7 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Securit
     throw 'Run this from an elevated (Administrator) PowerShell.'
 }
 $ProvisionDir = $PSScriptRoot
-foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'agents-profile.yaml', 'wsl.conf') {
+foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf') {
     if (-not (Test-Path (Join-Path $ProvisionDir $f))) { throw "Missing $f next to install-pc.ps1." }
 }
 if ($BoxtrayPath -and -not (Test-Path -LiteralPath $BoxtrayPath)) { throw "BoxtrayPath not found: $BoxtrayPath" }
@@ -113,6 +113,10 @@ if ($needWsl -or $needVmp) {
 }
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { throw 'wsl.exe not found.' }
 Invoke-Wsl @('--set-default-version', '2') -AllowFail | Out-Null
+# Incus 7.x needs Linux 6.12+; current WSL ships 6.18. A VM that is already running keeps its old kernel until wsl --shutdown.
+Step 'Updating WSL (wsl --update)'
+Invoke-Wsl @('--update') -AllowFail | Out-Null
+Note 'done (setup-distro.sh checks that the kernel is 6.12 or newer)'
 
 # --- 2. .wslconfig (merge) -------------------------------------------------
 Step 'Merging %USERPROFILE%\.wslconfig'
@@ -206,7 +210,7 @@ Step "Copying provision files to $StageDir in the distro"
 Invoke-InDistro @('sh', '-c', "rm -rf $StageDir && mkdir -p $StageDir") | Out-Null
 $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path $tarExe)) { throw 'tar.exe not found (needs Windows 10 1803+).' }
-$cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-distro.sh incus-preseed.yaml agents-profile.yaml wsl.conf | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
+$cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-distro.sh incus-preseed.yaml default-profile.yaml wsl.conf | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
 & cmd.exe /c $cmd
 if ($LASTEXITCODE -ne 0) { throw 'Copying provision files into the distro failed.' }
 Invoke-InDistro @('sh', '-c', "sed -i 's/\r$//' $StageDir/*.sh $StageDir/*.yaml $StageDir/wsl.conf && chmod +x $StageDir/setup-distro.sh") | Out-Null

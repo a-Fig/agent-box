@@ -1,7 +1,10 @@
-# Default profile of the Incus project `agents`. Applied by setup-distro.sh with
-#   incus profile edit default --project agents < agents-profile.yaml
+# `default` profile of the Incus DEFAULT project. The `agents` project is created with
+# features.profiles=false, so its boxes use this profile, and only the admin can edit it.
+# Applied by setup-distro.sh with
+#   incus profile edit default --project default < default-profile.yaml
 #
-# limits.cpu / limits.memory MUST be set per box: the project caps count them.
+# limits.cpu / limits.memory MUST be set per box: the project caps count them. The tray's
+# modes override limits.cpu per instance (2 in Shared, 4 in Full); memory stays at 4GiB.
 # The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes).
 #
 # cloud-init: the first boot of a box runs /usr/local/sbin/agent-box-provision.sh. Every step
@@ -88,4 +91,4 @@ devices:
     type: disk
     pool: default
     source: cache
-    path: /cache
+    path: /cache  # the volume is project-scoped, so this resolves to agents' `cache` volume

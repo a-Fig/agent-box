@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # setup-distro.sh - run as root INSIDE the `agents` WSL distro (install-pc.ps1 does this).
-# Installs Incus (Zabbly stable) + web UI, applies the preseed, creates the `agents` project,
-# its default profile and `cache` volume, installs Tailscale, optionally builds `agent-base`.
+# Installs Incus (Zabbly stable) + web UI, applies the preseed, creates the restricted `agents`
+# project (it uses the DEFAULT project's profiles, which only the admin can edit), the default
+# profile and the `cache` volume, installs Tailscale, optionally builds `agent-base`.
+# Needs Linux 6.12+ (Incus 7.x); install-pc.ps1 runs `wsl --update` for that.
 # Safe to re-run: each step checks before it changes anything.
 #
 # Environment:
@@ -9,7 +11,7 @@
 #                     Without it Tailscale is installed but not joined.
 #   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 12)
 #   AGENTS_MEM_CAP    project cap on the sum of limits.memory  (default 12GiB)
-#   AGENTS_MAX_BOXES  project limits.instances                 (default 2)
+#   AGENTS_MAX_BOXES  project limits.instances                 (default 3)
 # Flags:
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
@@ -20,7 +22,7 @@ ZABBLY_FPR="4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
 PROJECT=agents
 CPU_CAP=${AGENTS_CPU_CAP:-12}
 MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
-MAX_BOXES=${AGENTS_MAX_BOXES:-2}
+MAX_BOXES=${AGENTS_MAX_BOXES:-3}
 BUILD_BASE=0
 REBUILD=0
 
@@ -43,7 +45,12 @@ trap 'rc=$?; [ $rc -ne 0 ] && printf "ERROR: setup-distro.sh failed (exit %s) ne
 # shellcheck disable=SC1091
 . /etc/os-release
 [ "${ID:-}" = ubuntu ] || die "expected Ubuntu, found ${ID:-unknown}"
-for f in incus-preseed.yaml agents-profile.yaml; do
+kernel=$(uname -r)
+kmajor=${kernel%%.*}; krest=${kernel#*.}; kminor=${krest%%[^0-9]*}
+if [ "$kmajor" -lt 6 ] || { [ "$kmajor" -eq 6 ] && [ "${kminor:-0}" -lt 12 ]; }; then
+  die "WSL kernel is $kernel; Incus 7.x needs Linux 6.12 or newer. On Windows run 'wsl --update' (install-pc.ps1 does), then 'wsl --shutdown', then run this again."
+fi
+for f in incus-preseed.yaml default-profile.yaml; do
   [ -r "$HERE/$f" ] || die "missing $HERE/$f"
 done
 
@@ -99,23 +106,56 @@ note "HTTPS API address: $addr"
 
 # ---------------------------------------------------------------- project
 step "Project '$PROJECT'"
+# features.profiles=false: the project uses the default project's profiles, which restricted
+# client certs cannot edit. features.images=false: images are shared with the default project.
+# Neither can change after creation, so an existing project is only checked.
 if incus project show "$PROJECT" >/dev/null 2>&1; then
   note "project exists; features.* cannot change after creation, only checking"
-  for kv in features.images=false features.profiles=true; do
+  bad=0
+  for kv in features.images=false features.profiles=false; do
     k=${kv%%=*}; v=${kv#*=}
     cur=$(incus project get "$PROJECT" "$k")
-    [ "$cur" = "$v" ] || note "WARNING: $k is '$cur', expected '$v' (recreate the project if this matters)"
+    if [ "$cur" != "$v" ]; then
+      printf 'ERROR: project %s has %s=%s, expected %s.\n' "$PROJECT" "$k" "${cur:-<unset>}" "$v" >&2
+      bad=1
+    fi
   done
+  if [ "$bad" -eq 1 ]; then
+    cat >&2 <<EOF
+
+Incus cannot change features.* on an existing project, so it has to be recreated. This deletes
+every box in it and the shared cache volume (push anything you need from /work first):
+  incus list --project $PROJECT -c n --format csv | xargs -r -n1 incus delete --force --project $PROJECT
+  incus storage volume delete default cache --project $PROJECT
+  incus project delete $PROJECT
+Then run setup-distro.sh again.
+EOF
+    exit 1
+  fi
 else
   incus project create "$PROJECT" \
-    -c features.images=false -c features.profiles=true \
+    -c features.images=false -c features.profiles=false \
     -c user.agent-box.mode=shared
-  note "created (images shared with the default project, own profiles)"
+  note "created (images and profiles shared with the default project)"
 fi
+# Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
+# below what existing instances use). Defaults: 3 boxes x 4 CPUs x 4GiB, the Full mode size.
 incus project set "$PROJECT" limits.instances "$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu "$CPU_CAP"
 incus project set "$PROJECT" limits.memory "$MEM_CAP"
 note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP (allocation caps, not usage caps)"
+# Restricted project. Keys per https://linuxcontainers.org/incus/docs/main/reference/projects/
+#   restricted=true                                turns the restricted.* keys on
+#   restricted.containers.privilege=unprivileged   blocks security.privileged=true (the default)
+#   restricted.containers.nesting=allow            boxes need security.nesting=true (default: block)
+#   restricted.devices.disk=managed                only pool-backed disks: root and /cache (default)
+#   restricted.devices.nic=managed                 only NICs on a managed network: incusbr0 (default)
+incus project set "$PROJECT" restricted=true \
+  restricted.containers.privilege=unprivileged \
+  restricted.containers.nesting=allow \
+  restricted.devices.disk=managed \
+  restricted.devices.nic=managed
+note "restricted: unprivileged containers, nesting allowed, managed disks and NICs only"
 
 step "Volume 'cache' (shared /cache for Go, npm, Gradle, uv)"
 if incus storage volume show default cache --project "$PROJECT" >/dev/null 2>&1; then
@@ -125,9 +165,11 @@ else
   note "created"
 fi
 
-step "Default profile of project '$PROJECT'"
-incus profile edit default --project "$PROJECT" < "$HERE/agents-profile.yaml"
-note "applied agents-profile.yaml (limits.cpu=2, limits.memory=4GiB, nesting, /cache, cloud-init)"
+step "Default profile (default project; the '$PROJECT' project uses it)"
+# Only the admin can edit this profile; agents' restricted certs cannot. It replaces the whole
+# `default` profile, which the preseed made, so any other boxes in the default project share it.
+incus profile edit default --project default < "$HERE/default-profile.yaml"
+note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, nesting, /cache, cloud-init)"
 
 # ---------------------------------------------------------------- Tailscale
 step "Tailscale"
