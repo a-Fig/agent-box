@@ -18,7 +18,7 @@ func TestMCP(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"box_ls","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"box_rm","arguments":{"name":"old-box"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"box_new","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"box_run","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":6,"method":"nope"}`,
 		`not json`,
@@ -64,14 +64,13 @@ func TestMCP(t *testing.T) {
 	for _, tl := range got[2].Result.Tools {
 		names = append(names, tl.Name)
 	}
-	if strings.Join(names, ",") != "box_status,box_new,box_run,box_job,box_jobs,box_cancel,box_pull,box_rm,box_ls" {
+	if strings.Join(names, ",") != "box_status,box_run,box_job,box_cancel,box_pull" {
 		t.Errorf("tools = %v", names)
 	}
-	if txt := got[3].Result.Content[0].Text; !strings.Contains(txt, "agent-box") || !strings.Contains(txt, "2026-11-24T00:00:00Z") {
-		t.Errorf("box_ls = %q", txt)
-	}
-	if r := got[4].Result; r.IsError || r.Content[0].Text != "removed old-box" {
-		t.Errorf("box_rm = %+v", r)
+	for _, id := range []int{3, 4} { // CLI only now
+		if r := got[id].Result; !r.IsError || !strings.Contains(r.Content[0].Text, "unknown tool") {
+			t.Errorf("removed tool %d = %+v", id, r)
+		}
 	}
 	if !got[5].Result.IsError {
 		t.Error("box_run without arguments didn't fail")

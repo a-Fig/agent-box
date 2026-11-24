@@ -213,7 +213,7 @@ func TestMCPSize(t *testing.T) {
 		} `json:"properties"`
 	}
 	for _, tl := range tools {
-		if tl.Name != "box_new" && tl.Name != "box_run" {
+		if tl.Name != "box_run" {
 			continue
 		}
 		b, _ := json.Marshal(tl.InputSchema)
@@ -224,8 +224,7 @@ func TestMCPSize(t *testing.T) {
 	}
 	f := &fakePC{t: t}
 	a, _ := testApp(f)
-	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_new","arguments":{"name":"s","size":"small"}}`), nil)
-	if res["isError"] != false || len(f.launches) != 1 || !strings.Contains(strings.Join(f.launches[0], " "), "limits.memory=2GiB") {
-		t.Errorf("box_new = %v, launches %q", res, f.launches)
+	if code := run(context.Background(), a, []string{"new", "s", "--size", "small"}, nil); code != 0 || len(f.launches) != 1 || !strings.Contains(strings.Join(f.launches[0], " "), "limits.memory=2GiB") {
+		t.Errorf("box new = %d, launches %q", code, f.launches)
 	}
 }

@@ -144,7 +144,7 @@ The same set everywhere, since everywhere is the same page.
 `box run` records who asked, in `/work/.box/<job>.meta` (JSON) next to `.log` and `.exit`:
 - the reason: one or two sentences from the agent on why this run needs a box. Tyler asked for it
   (2026-11-24). `box run --reason` and `box_run`'s `reason` are required, from 10 to 300
-  characters, and `box_new` takes one too (stored as `user.box.reason`). The page shows it as the
+  characters, and `box new` takes one too (stored as `user.box.reason`). The page shows it as the
   job's headline;
 - the command, and its `kind` (see Use cases below);
 - the repo (remote URL without credentials), branch and commit;

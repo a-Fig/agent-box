@@ -70,10 +70,20 @@ type App struct {
 	Post func(ctx context.Context, url string, body []byte) error
 	// Browse opens an address in the person's browser; tests replace it.
 	Browse func(url string) error
+	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
+	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
+	// per-job files. Any of them nil or empty means no push.
+	Push     Pusher
+	Spawn    func(stateDir, job string) error
+	StateDir string
+	// InlineWait is how long box_run follows a job (zero is inlineWait);
+	// WatchPoll replaces the watcher's waits, for tests.
+	InlineWait time.Duration
+	WatchPoll  time.Duration
 }
 
 func newApp() *App {
-	return &App{
+	a := &App{
 		R:       execRunner{},
 		Remote:  env("BOX_REMOTE", "pc"),
 		Project: env("BOX_PROJECT", "agents"),
@@ -86,7 +96,13 @@ func newApp() *App {
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
 		Browse:     browse,
+		Spawn:      spawnWatcher,
+		StateDir:   defaultStateDir(),
 	}
+	if p := findT3(os.Getenv); p != "" {
+		a.Push = t3CLI{path: p}
+	}
+	return a
 }
 
 func (a *App) warn(message string) {
@@ -593,6 +609,12 @@ const (
 	statePaused   = "paused"   // the PC or the box is paused or out of reach
 )
 
+// States the MCP tools report instead of detached and a paused refusal.
+const (
+	stateRunning = "running"
+	stateRefused = "refused"
+)
+
 // JobResult is what Run and Job report. Code is the job's own exit code when
 // State is done; otherwise it is exitDetached, exitPaused, or 1 or 2 with an
 // error.
@@ -601,6 +623,9 @@ type JobResult struct {
 	Box   string `json:"box,omitempty"`
 	State string `json:"state,omitempty"`
 	Code  int    `json:"exitCode"`
+	// Push is set on a box_run that returned a running job: whether its
+	// result will arrive as a turn in the agent's T3 thread.
+	Push *bool `json:"push,omitempty"`
 }
 
 // Run syncs the worktree to a box, runs the command there and follows its

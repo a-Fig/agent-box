@@ -34,7 +34,9 @@ const usage = `usage:
                                             launch a box with a positive TTL
   box rm <name>                             delete a box
   box ls                                    list boxes
-  box mcp                                   serve MCP on stdio
+  box mcp                                   serve MCP on stdio: box_status, box_run, box_job, box_cancel, box_pull
+  box watch [--state dir] <id>              follow a job and push its result into this session's T3 thread
+                                            (box_run starts it detached; not for people)
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
@@ -271,6 +273,17 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return runUI(ctx, a, fs, args[1:])
 	case "app":
 		return runApp(ctx, a, fs, args[1:])
+	case "watch":
+		state := fs.String("state", a.StateDir, "directory of per-job push state")
+		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() != 1 {
+			fmt.Fprint(a.Err, usageText())
+			return 2
+		}
+		a.StateDir = *state
+		if err := a.Watch(ctx, fs.Arg(0)); err != nil {
+			return fail(err)
+		}
+		return 0
 	case "-h", "--help", "help":
 		fmt.Fprint(a.Out, usageText())
 		return 0
