@@ -179,7 +179,7 @@ func TestMCPRunNoticesDeliveredBeforeCancel(t *testing.T) {
 	defer request.Close()
 	defer output.Close()
 	go func() { response.CloseWithError(serveMCP(ctx, a, input, response)) }()
-	if _, err := io.WriteString(request, `{"jsonrpc":"2.0","id":"run","method":"tools/call","params":{"name":"box_run","arguments":{"dir":`+string(repoJSON)+`,"command":"true","new":true}}}`+"\n"); err != nil {
+	if _, err := io.WriteString(request, `{"jsonrpc":"2.0","id":"run","method":"tools/call","params":{"name":"box_run","arguments":{"dir":`+string(repoJSON)+`,"command":"true","new":true,"reason":"Run the tests in a box for this change."}}}`+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	dec := json.NewDecoder(output)
@@ -217,7 +217,7 @@ func TestMCPSubmoduleWarningSurvivesLongLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(repoJSON) + `,"command":"true"}}}`
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(repoJSON) + `,"command":"true","reason":"Run the tests in a box for this change."}}}`
 	var out bytes.Buffer
 	if err := serveMCP(context.Background(), a, strings.NewReader(in), &out); err != nil {
 		t.Fatal(err)

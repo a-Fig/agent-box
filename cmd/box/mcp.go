@@ -64,14 +64,16 @@ var tools = []tool{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
 	{"box_new", "Launch a Linux box on the PC. Returns its name.", obj(map[string]any{
-		"name": str("Box name (lowercase letters, digits, hyphens). Omit for a random one."),
-		"ttl":  str(`How long the box is meant to live, like "2h". Default 2h.`),
-		"size": sizeArg,
-		"gpu":  gpuArg,
+		"name":   str("Box name (lowercase letters, digits, hyphens). Omit for a random one."),
+		"ttl":    str(`How long the box is meant to live, like "2h". Default 2h.`),
+		"size":   sizeArg,
+		"gpu":    gpuArg,
+		"reason": str("Optional: why you need this box, as for box_run."),
 	}), nil},
 	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
+		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
 		"box":     str("Reusable box to use. Default: the repo's own box."),
 		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, deleted after the run."},
 		"size":    sizeArg,
@@ -80,7 +82,7 @@ var tools = []tool{
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
-	}, "dir", "command"), jobOutput},
+	}, "dir", "command", "reason"), jobOutput},
 	{"box_job", "Wait for a job started by box_run and return its exit code (first line) and output tail. A throwaway box from box_run new is deleted once its job has ended. With offset or limit it doesn't wait: it returns that piece of the log, the job's state and nextOffset, so a long log can be read in pieces. " + pausedHint, obj(map[string]any{
 		"id":     str("Job ID printed by box_run."),
 		"wait":   str(`Stop waiting after this long. Default 10m.`),
@@ -153,6 +155,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 	var callsMu sync.Mutex
 	calls := map[string]context.CancelCauseFunc{} // by request id
 	var suppressInfo atomic.Bool
+	var client clientInfo // from initialize; read and written only in this loop
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -182,9 +185,11 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 		switch req.Method {
 		case "initialize":
 			var p struct {
-				ProtocolVersion string `json:"protocolVersion"`
+				ProtocolVersion string     `json:"protocolVersion"`
+				ClientInfo      clientInfo `json:"clientInfo"`
 			}
 			json.Unmarshal(req.Params, &p)
+			client = p.ClientInfo
 			if p.ProtocolVersion == "" {
 				p.ProtocolVersion = "2025-06-18"
 			}
@@ -218,10 +223,15 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			callsMu.Lock()
 			calls[key] = cancel
 			callsMu.Unlock()
+			ca := *a // with the client, for the job's .meta
+			ca.Client = client
+			if ca.Client.Name == "" {
+				ca.Client.Name = "mcp"
+			}
 			wg.Add(1)
 			go func(req rpcMsg) {
 				defer wg.Done()
-				res := callTool(callCtx, a, req.Params, func(note jobNotice) {
+				res := callTool(callCtx, &ca, req.Params, func(note jobNotice) {
 					if suppressInfo.Load() || callCtx.Err() != nil {
 						return
 					}
@@ -268,6 +278,7 @@ type toolArgs struct {
 	From    string            `json:"from"`
 	Remote  string            `json:"remotePath"`
 	Local   string            `json:"localDir"`
+	Reason  string            `json:"reason"`
 }
 
 // pageResult reports a box_job log page: the summary line, then the bytes.
@@ -331,6 +342,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 	var p struct {
 		Name      string   `json:"name"`
 		Arguments toolArgs `json:"arguments"`
+		// T3 names the thread here for Codex, whose MCP servers get a bare
+		// environment (see App.session).
+		Meta struct {
+			ThreadID string `json:"threadId"`
+		} `json:"_meta"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return textResult("bad arguments: "+err.Error(), true)
@@ -345,6 +361,9 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 	out := &tailBuffer{max: 32 << 10}
 	a := *base
 	a.Out, a.Err = out, out
+	if p.Meta.ThreadID != "" {
+		a.Thread = p.Meta.ThreadID
+	}
 	a.Notify = notify
 	var warnings []string
 	a.Warn = func(message string) { warnings = append(warnings, message) }
@@ -412,7 +431,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		name, err := a.New(ctx, args.Name, ttl, args.Size)
+		reason, err := checkReason(args.Reason, false, "reason")
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
+		name, err := a.New(ctx, args.Name, ttl, args.Size, reason)
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
@@ -425,11 +448,15 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if args.Dir == "" || args.Command == "" {
 			return textResult("dir and command are required", true)
 		}
+		reason, err := checkReason(args.Reason, true, "reason")
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
 		timeout, err := dur(args.Timeout, 0)
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, Box: args.Box, New: args.New, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout})
+		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, Box: args.Box, New: args.New, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason})
 		return jobResult(r, err, out.String(), warnings)
 	case "box_job":
 		if args.Offset != nil || args.Limit != nil {

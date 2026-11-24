@@ -79,7 +79,7 @@ func sizeFlag(t *testing.T, args []string) string {
 func TestGPUFlagsDontMixWithOtherSizes(t *testing.T) {
 	for _, args := range [][]string{
 		{"new", "--gpu", "--size", "large"},
-		{"run", "--gpu", "--size", "small", "--", "true"},
+		{"run", "--gpu", "--size", "small", "--reason", "Train the model on the GPU box.", "--", "true"},
 	} {
 		f := &fakePC{t: t}
 		a, out := testApp(f)
@@ -144,7 +144,7 @@ func TestGPUInUseExits75(t *testing.T) {
 	f = busy(t)
 	a, _ = testApp(f)
 	dir := newRepo(t)
-	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_run","arguments":{"dir":`+jsonString(dir)+`,"command":"true","gpu":true}}`), nil)
+	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_run","arguments":{"dir":`+jsonString(dir)+`,"command":"true","gpu":true,"reason":"Run the tests in a box for this change."}}`), nil)
 	if sc := res["structuredContent"].(struct {
 		JobResult
 		Warnings []string `json:"warnings,omitempty"`

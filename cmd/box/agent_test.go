@@ -550,7 +550,7 @@ func TestMCPAgentTools(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_status","arguments":{"dir":` + string(dir) + `}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"box_jobs","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"box_job","arguments":{"id":"my-repo.20261123-120000-0001","offset":0}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(dir) + `,"command":"true","env":{"GH_TOKEN":"x"}}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(dir) + `,"command":"true","reason":"Run the tests in a box for this change.","env":{"GH_TOKEN":"x"}}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"box_pull","arguments":{"from":"my-repo","remotePath":"x","localDir":"relative"}}}`,
 	}, "\n")
 	var out bytes.Buffer
