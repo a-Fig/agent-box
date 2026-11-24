@@ -231,7 +231,7 @@ incus --project agents project get pc:agents restricted.devices.disk.paths  # /u
 # The CUDA driver API through ctypes: init, a context, a 1 GiB alloc and a copy round trip.
 # A here-string without double quotes, because PowerShell 5.1 mangles nested ones.
 $check = @'
-/usr/lib/wsl/lib/nvidia-smi && python3 - <<PY
+nvidia-smi && python3 - <<PY
 import ctypes
 c = ctypes.CDLL('libcuda.so.1')
 assert c.cuInit(0) == 0
@@ -258,7 +258,7 @@ is gone afterwards (`box ls`). Then check one-at-a-time and the stop for games:
 
 ```powershell
 Push-Location -LiteralPath $repo
-& $box run --gpu -- '/usr/lib/wsl/lib/nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
+& $box run --gpu -- 'nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
 & $box status                           # gpu: in use: job <id>
 & $box run --gpu -- true                # exit 75: the GPU box is in use (job <id>); run on CPU or wait
 if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a second GPU box' }

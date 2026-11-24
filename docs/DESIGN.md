@@ -58,10 +58,10 @@ The table lives in `internal/mode/size.go`; `box`, the tray and `box help` read 
 The PC's RTX 3070 (8GB of VRAM) is a size, `gpu`, so agents ask for it with `box run --gpu` (or `--size gpu`; MCP `gpu: true`). WSL2 exposes the GPU as `/dev/dxg` plus two host folders, and these three devices made `nvidia-smi` and the CUDA driver API work in an unprivileged box built from `agent-base` (proven by hand on 2026-11-24):
 
 - `dxg`: `unix-char`, `path=/dev/dxg`, `mode=0666`
-- `wsllib`: `disk`, `/usr/lib/wsl/lib` read-only (libcuda, libnvidia-ml, and `nvidia-smi`, which is not on `PATH`)
+- `wsllib`: `disk`, `/usr/lib/wsl/lib` read-only (libcuda, libnvidia-ml and `nvidia-smi`)
 - `wsldrivers`: `disk`, `/usr/lib/wsl/drivers` read-only (Windows' driver store; without it nvidia-smi can't reach the driver)
 
-plus `environment.LD_LIBRARY_PATH=/usr/lib/wsl/lib`. `box` adds them at launch (the devices as YAML on `incus launch`'s stdin, since `-d` only overrides devices a profile has). The tables are `GPUDevices` and `GPUEnv` in `internal/mode/size.go`.
+plus `environment.LD_LIBRARY_PATH=/usr/lib/wsl/lib` and an `environment.PATH` that ends in that folder, so `nvidia-smi` runs by name. `box` adds them at launch (the devices as YAML on `incus launch`'s stdin, since `-d` only overrides devices a profile has). The tables are `GPUDevices` and `GPUEnv` in `internal/mode/size.go`.
 
 - **Throwaway only.** A GPU run always gets a throwaway box, never the repo's reused box, so an idle box doesn't hold the GPU. `box new --gpu` makes a named one for whoever asks; `box run --gpu --box <it>` uses it.
 - **One at a time.** Before launching, `box` looks for another instance with `user.box.size=gpu` that is running or frozen. If one exists it exits 75 with `the GPU box is in use (job X); run on CPU or wait`. Throwaway GPU boxes that are stopped or run no job are deleted on the way, since they would hold 8GiB of the 12GiB memory cap. Two launches racing past that check are caught right after launch: a run that finds another GPU box deletes its own and exits 75, so both may back off, but the GPU never has two boxes.

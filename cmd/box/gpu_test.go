@@ -37,7 +37,8 @@ func TestGPURunLaunchesThrowawayWithDevices(t *testing.T) {
 			}
 			got := strings.Join(f.launches[0], " ")
 			for _, want := range []string{"-c user.box.size=gpu", "-c limits.cpu=4", "-c limits.memory=8GiB", "-d root,size=40GiB",
-				"-c " + throwawayKey + "=true", "-c environment.LD_LIBRARY_PATH=/usr/lib/wsl/lib"} {
+				"-c " + throwawayKey + "=true", "-c environment.LD_LIBRARY_PATH=/usr/lib/wsl/lib",
+				"-c environment.PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/wsl/lib"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("launch %s\nlacks %s", got, want)
 				}

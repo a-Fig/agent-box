@@ -46,8 +46,12 @@ var GPUDevices = map[string]map[string]string{
 }
 
 // GPUEnv is the instance config a GPU box gets beside GPUDevices, so CUDA
-// programs find WSL's libcuda.
-var GPUEnv = map[string]string{"environment.LD_LIBRARY_PATH": "/usr/lib/wsl/lib"}
+// programs find WSL's libcuda and nvidia-smi is on PATH. The PATH is incus
+// exec's default plus the WSL folder; a login shell still adds Go to it.
+var GPUEnv = map[string]string{
+	"environment.LD_LIBRARY_PATH": "/usr/lib/wsl/lib",
+	"environment.PATH":            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/wsl/lib",
+}
 
 // StoppedKey is the instance key the tray sets on a GPU box just before it
 // stops it, saying why ("mypc", or the yield reason like "gaming: steam:570"),
