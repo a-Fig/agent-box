@@ -109,25 +109,6 @@ var errQueueFull = errors.New("the queue's snapshots would pass 2GiB")
 // check validates a request: what reaches a shell in the box is names and
 // quoted values only.
 func check(r *dash.QueueRequest) error {
-	base := r.Box
-	if r.New && len(base) > 50 {
-		base = strings.TrimRight(base[:50], "-")
-		r.Box = base
-	}
-	switch {
-	case !validBoxName.MatchString(r.Box):
-		return fmt.Errorf("bad box name %q", r.Box)
-	case !validCheckout.MatchString(r.Checkout):
-		return fmt.Errorf("bad checkout %q", r.Checkout)
-	case !validRef.MatchString(r.Ref):
-		return fmt.Errorf("bad ref %q", r.Ref)
-	case len(r.Command) == 0 || r.Command[0] == "":
-		return errors.New("no command")
-	case r.Timeout < 0:
-		return errors.New("timeout can't be negative")
-	case len(r.Meta) > 16<<10:
-		return errors.New("meta is over 16KiB")
-	}
 	if r.Size != "" {
 		sz, ok := mode.LookupSize(r.Size)
 		if !ok {
@@ -138,13 +119,33 @@ func check(r *dash.QueueRequest) error {
 	if r.GPU {
 		r.Size, r.New = mode.GPUSize, true // a GPU run always gets a throwaway, as box run does
 	}
+	if r.New && len(r.Box) > 50 { // room for the random suffix
+		r.Box = strings.TrimRight(r.Box[:50], "-")
+	}
+	if m := strings.TrimSpace(string(r.Meta)); m == "" || m == "null" {
+		r.Meta = json.RawMessage("{}")
+	}
+	var obj map[string]any
+	switch {
+	case !validBoxName.MatchString(r.Box):
+		return fmt.Errorf("bad box name %q", r.Box)
+	case !validCheckout.MatchString(r.Checkout):
+		return fmt.Errorf("bad checkout %q", r.Checkout)
+	case !validRef.MatchString(r.Ref):
+		return fmt.Errorf("bad ref %q", r.Ref)
+	case len(r.Command) == 0 || r.Command[0] == "":
+		return errors.New("no command")
+	case r.Timeout < 0 || r.Timeout > 7*24*3600:
+		return errors.New("timeout is 0 to 7 days")
+	case len(r.Meta) > 15<<10: // boxd adds to it, and the scan reads 16KiB
+		return errors.New("meta is over 15KiB")
+	case json.Unmarshal(r.Meta, &obj) != nil || obj == nil:
+		return errors.New("meta must be a JSON object")
+	}
 	for k, v := range r.Env {
 		if !validEnvName.MatchString(k) || secretEnvName.MatchString(strings.ToUpper(k)) || strings.ContainsRune(v, 0) {
 			return fmt.Errorf("env %s isn't allowed", k)
 		}
-	}
-	if len(r.Meta) > 0 && !json.Valid(r.Meta) {
-		return errors.New("meta isn't JSON")
 	}
 	return nil
 }

@@ -297,3 +297,36 @@ func TestQueueRefusalsAndLimits(t *testing.T) {
 		t.Fatal("kept past 24 hours")
 	}
 }
+
+// From the review of 820d791: a request with no meta, and Incus refusing
+// a launch at the instance cap, which must leave the job waiting.
+func TestQueueNoMetaAndInstanceCap(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
+	r.f.set(func() {
+		r.f.cliErr = func(args []string) error {
+			if args[0] == "launch" {
+				return errors.New(`incus launch: Error: Failed instance creation: Reached maximum number of instances in project "agents"`)
+			}
+			return nil
+		}
+	})
+	req := small("w", "s")
+	req.Meta = nil
+	code, rep, eb := r.enqueue(req, "B")
+	if code != 201 {
+		t.Fatalf("no meta: %d %+v", code, eb)
+	}
+	r.poll()
+	if q := r.w.Queued(); len(q) != 1 || q[0].Box+"."+q[0].ID != rep.Job {
+		t.Fatalf("a launch refused at the cap dropped the job: %+v", q)
+	}
+	r.f.set(func() { r.f.cliErr = nil })
+	r.c.add(noRoomBackoff + time.Second)
+	r.poll()
+	if q := r.w.Queued(); len(q) != 0 {
+		t.Fatalf("not started after the backoff: %+v", q)
+	}
+	if j, ok := r.w.QueuedView(rep.Job); !ok || j.State != dash.JobRunning {
+		t.Fatalf("GET /api/queue/{job} right after the start: %+v %v", j, ok)
+	}
+}

@@ -433,7 +433,7 @@ func reusableBox(in *instance, requestedSize string) error {
 // projectLimitRefusal matches Incus's refusals for project limits, like
 // `Reached maximum aggregate value "12GiB" for "limits.memory" in project
 // "agents"` or `Reached maximum number of instances in project "agents"`.
-var projectLimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
+var projectLimitRefusal = jobrun.LimitRefusal
 
 // reclaimable says whether in is a throwaway GPU box the tray stopped for a
 // game or My PC. It is kept for GPUStoppedTTL so box job can say why its job

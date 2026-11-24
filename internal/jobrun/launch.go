@@ -2,12 +2,17 @@ package jobrun
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
 )
+
+// LimitRefusal matches Incus refusing a launch over a project cap
+// (limits.memory and the like, or limits.instances).
+var LimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
 
 // Instance keys a box is launched with (cmd/box reads them too).
 const (

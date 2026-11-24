@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
@@ -27,10 +26,6 @@ const (
 	jobTTL    = 24 * time.Hour // while a job runs, as box run sets it
 	startTime = 10 * time.Minute
 )
-
-// projectLimitRefusal is Incus refusing a launch over a project cap
-// (cmd/box matches the same text).
-var projectLimitRefusal = regexp.MustCompile(`(?i)reached maximum aggregate value|exceeds (the )?(project|maximum)|project .*limit`)
 
 var errNoRoom = errors.New("no room")
 
@@ -85,11 +80,18 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 	return ""
 }
 
-// schedule runs at the end of each poll, with w.mu held.
+// noRoomBackoff is how long a job waits after Incus refused its launch for
+// room that boxd's own count said was there.
+const noRoomBackoff = 30 * time.Second
+
+// schedule runs at the end of each poll, with w.mu held. now is when the
+// poll began: a start that finished after it ran on room this poll's data
+// doesn't show yet, so nothing starts until the next poll.
 func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	if w.Queue == nil {
 		return
 	}
+	stale := w.startDone.After(now)
 	byName := map[string]Instance{}
 	for _, in := range ins {
 		byName[in.Name] = in
@@ -115,7 +117,7 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 			w.qview[it.Job] = j
 			w.emit(dash.Event{Name: dash.EventJob, Data: j})
 		}
-		if j.Why == "" && w.starting == "" &&
+		if j.Why == "" && w.starting == "" && !stale && !now.Before(w.noRoom[it.Job]) &&
 			(pick == nil || running[j.Agent.Session] < running[pick.view.Agent.Session]) {
 			pick = it
 		}
@@ -134,7 +136,8 @@ func (w *Watcher) QueuedView(job string) (dash.Job, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if _, ok := w.Queue.get(job); !ok {
-		return dash.Job{}, false
+		j, ok := w.started[job]
+		return j, ok
 	}
 	j, ok := w.qview[job]
 	if !ok {
@@ -173,6 +176,9 @@ func (w *Watcher) Enqueued(it *queued) dash.QueueReply {
 	defer w.mu.Unlock()
 	w.init()
 	w.record(record{Type: recQueueAdd, At: it.QueuedAt, Job: &it.view})
+	if _, ok := w.Queue.get(it.Job); !ok { // a poll started it already
+		return dash.QueueReply{Job: it.Job, Key: it.view.Key, Position: 0}
+	}
 	byName := map[string]Instance{}
 	for _, in := range w.lastIns {
 		byName[in.Name] = in
@@ -245,17 +251,25 @@ func (w *Watcher) startQueued(it *queued, reuse bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.starting = ""
+	w.startDone = w.Now().UTC()
 	w.Queue.setStarting(it, false)
 	switch {
 	case errors.Is(err, errNoRoom):
 		w.logf("boxd: queue: %s: no room yet: %v", it.Job, err) // it waits on
+		w.noRoom[it.Job] = w.startDone.Add(noRoomBackoff)
+	case err != nil && (w.machine.Yielding || w.machine.Mode == dash.ModeMyPC):
+		// A game or My PC froze the box mid-start: wait for it to end.
+		w.logf("boxd: queue: %s: paused mid-start: %v", it.Job, err)
 	case err != nil:
 		w.dropQueued(it, w.Now().UTC(), err.Error())
 	default:
 		w.Queue.Remove(it.Job)
 		delete(w.qview, it.Job)
+		delete(w.noRoom, it.Job)
 		j := it.view
 		j.State, j.StartedAt, j.Why = dash.JobRunning, started, ""
+		j.Key = dash.JobKey(j.Box, j.ID, started)
+		w.started[it.Job] = j // GET /api/queue/{job} until a scan sees it
 		w.record(record{Type: recQueueStart, At: started, Job: &j, Seconds: started.Sub(it.QueuedAt).Seconds()})
 		// The job's key changes from its queued time to its start; the next
 		// scan announces it running.
@@ -271,7 +285,7 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time
 		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New)
 		args := append([]string{"launch", w.image(), box}, flags...)
 		if _, err := w.Incus.CLI(ctx, devices, args...); err != nil {
-			if projectLimitRefusal.MatchString(err.Error()) {
+			if jobrun.LimitRefusal.MatchString(err.Error()) {
 				return fmt.Errorf("%w: %v", errNoRoom, err)
 			}
 			return fmt.Errorf("launch %s: %w", box, err)
@@ -289,7 +303,9 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time
 		return fmt.Errorf("push the snapshot: %w", err)
 	}
 	m := map[string]any{}
-	json.Unmarshal(it.Meta, &m)
+	if json.Unmarshal(it.Meta, &m) != nil || m == nil {
+		m = map[string]any{} // check accepts objects only; a file from before may hold null
+	}
 	m["v"], m["queuedAt"], m["startedAt"] = 1, it.QueuedAt.Format(time.RFC3339), now.Format(time.RFC3339)
 	b, _ := json.Marshal(m)
 	tmp := filepath.Join(w.Queue.dir, it.Job+".meta.tmp")
@@ -305,6 +321,13 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time
 	}
 	payload := jobrun.Payload(it.Env, it.Command, time.Duration(it.Timeout)*time.Second)
 	if _, err := w.Incus.CLI(ctx, "", "exec", box, "--", "bash", "-lc", jobrun.StartScript(workRoot, it.Job, it.Ref, it.Checkout, payload)); err != nil {
+		// The job may have started and only the wait for its PID or the
+		// stream failed, as box run allows for: then it runs, and is ours.
+		check, cancel := context.WithTimeout(context.WithoutCancel(ctx), execTimeout)
+		defer cancel()
+		if _, perr := w.Incus.Exec(check, box, "test -e "+remote+".pid -o -e "+remote+".exit"); perr == nil {
+			return nil
+		}
 		return fmt.Errorf("start: %w", err)
 	}
 	return nil
@@ -320,12 +343,11 @@ func (w *Watcher) image() string {
 // reapQueuedThrowaway deletes a throwaway box that boxd launched for a queued
 // job once that job has ended and nothing else runs there: no box run is
 // following it to clean up. With w.mu held.
+//
+// A repo box it reused or launched gets box new's idle expiry back instead,
+// as box run's markIdle does once a job ends.
 func (w *Watcher) reapQueuedThrowaway(j *dash.Job) {
 	if j.QueuedAt == nil {
-		return
-	}
-	b, ok := w.boxes[j.Box]
-	if !ok || !b.Throwaway {
 		return
 	}
 	for _, o := range w.live {
@@ -333,12 +355,27 @@ func (w *Watcher) reapQueuedThrowaway(j *dash.Job) {
 			return
 		}
 	}
-	box := j.Box
+	box, started := j.Box, j.StartedAt
 	go func() {
+		// Read the box now: the poll's own list may predate it.
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		if _, err := w.Incus.CLI(ctx, "", "delete", box, "--force"); err != nil {
-			w.logf("boxd: queue: deleting %s: %v", box, err)
+		ins, err := w.Incus.Instances(ctx)
+		if err != nil {
+			return
+		}
+		for _, in := range ins {
+			if in.Name != box || !holds(in.CreatedAt, started) {
+				continue
+			}
+			if in.Config[keyThrowaway] == "true" {
+				_, err = w.Incus.CLI(ctx, "", "delete", box, "--force")
+			} else {
+				_, err = w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+w.Now().UTC().Add(idleTTL).Format(time.RFC3339))
+			}
+			if err != nil {
+				w.logf("boxd: queue: after %s's job: %v", box, err)
+			}
 		}
 	}()
 }

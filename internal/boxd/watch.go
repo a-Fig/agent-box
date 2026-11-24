@@ -45,22 +45,25 @@ type Watcher struct {
 	Queue *Queue
 	Image string // the image a queued job's new box is launched from: agent-base
 
-	mu       sync.Mutex
-	polled   bool
-	machine  dash.Machine
-	boxes    map[string]dash.Box
-	known    map[string]boxRec // box id -> what was recorded as created
-	live     map[string]*dash.Job
-	repoOf   map[string]string    // box -> the repo of its latest job
-	died     map[string]time.Time // job key -> when a scan first saw it died
-	qview    map[string]dash.Job  // queued job -> as last announced
-	starting string               // the queued job being started, one at a time
-	lastIns  []Instance
-	cpu      map[string]cpuMark
-	lastMode *modeRec
-	lastReq  string
-	sampled  time.Time
-	subs     map[chan dash.Event]struct{}
+	mu        sync.Mutex
+	polled    bool
+	machine   dash.Machine
+	boxes     map[string]dash.Box
+	known     map[string]boxRec // box id -> what was recorded as created
+	live      map[string]*dash.Job
+	repoOf    map[string]string    // box -> the repo of its latest job
+	died      map[string]time.Time // job key -> when a scan first saw it died
+	qview     map[string]dash.Job  // queued job -> as last announced
+	starting  string               // the queued job being started, one at a time
+	startDone time.Time            // when the last start finished
+	noRoom    map[string]time.Time // queued job -> not before, after Incus refused its launch
+	started   map[string]dash.Job  // queued jobs started, until a scan sees them
+	lastIns   []Instance
+	cpu       map[string]cpuMark
+	lastMode  *modeRec
+	lastReq   string
+	sampled   time.Time
+	subs      map[chan dash.Event]struct{}
 }
 
 type cpuMark struct {
@@ -75,6 +78,7 @@ func (w *Watcher) init() {
 	w.boxes, w.known, w.live = map[string]dash.Box{}, map[string]boxRec{}, map[string]*dash.Job{}
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
 	w.died, w.qview = map[string]time.Time{}, map[string]dash.Job{}
+	w.noRoom, w.started = map[string]time.Time{}, map[string]dash.Job{}
 	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
@@ -301,6 +305,7 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 				}
 				j = w.newJob(key, id, box, started, in, s.Meta)
 				w.live[key] = j
+				delete(w.started, s.Job)
 				w.record(record{Type: recJobStart, At: started, Job: j})
 			} else if s.Meta != nil && j.Command == "" && j.Reason == "" {
 				fillMeta(j, s.Meta)
