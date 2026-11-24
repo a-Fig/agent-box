@@ -16,7 +16,7 @@ Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here to
    ```
    If Windows features had to be enabled, it asks for a reboot; run it again afterwards.
 3. **`setup-distro.sh`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-distro.sh [--build-base]`.
-4. Add client certs (commands are printed at the end of `setup-distro.sh`), then `incus remote add pc https://agent-box:8443 --token ...` on the laptop.
+4. Add client certs (commands are printed at the end of `setup-distro.sh`), then `incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token ...` on the laptop. Use the tailnet name, not an IP: Incus serves a Let's Encrypt certificate for that name (`https-cert.sh`, needs HTTPS certificates enabled in the tailnet's DNS settings), so the client trusts it without pinning and renewals need no client change.
 
 Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume, cloud-init), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
