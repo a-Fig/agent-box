@@ -130,6 +130,9 @@ The same set everywhere, since everywhere is the same page.
 ### Agent identity
 
 `box run` records who asked, in `/work/.box/<job>.meta` (JSON) next to `.log` and `.exit`:
+- the reason: one or two sentences from the agent on why this run needs a box. Tyler asked for it
+  (2026-11-24). `box run --reason` and `box_run`'s `reason` are required, from 10 to 300
+  characters, and `box_new` takes one too. The page shows it as the job's headline;
 - the command, and its `kind` (see Use cases below);
 - the repo (remote URL without credentials), branch and commit;
 - the laptop's hostname and the worktree path;
@@ -162,7 +165,7 @@ A command that matches none is `other`.
 ### Refusals
 
 A run turned away with exit 75 never reaches a box, so `box` also sends `POST /api/refusals`
-(`{reason, size, gpu, repo, agent}`), as a best effort with a 2s timeout, ignoring errors. Without
+(`{why, reason, size, gpu, repo, agent}`: `why` is the refusal's cause, `reason` the agent's), as a best effort with a 2s timeout, ignoring errors. Without
 it the history couldn't show what yields and full caps cost.
 
 ### History
@@ -256,7 +259,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
   memLimit, cpus, cpuPct}`
 - **`Job`:** `{key, id, box, machine, state: running|done|paused|lost, exit, startedAt, endedAt,
-  command, kind, repo, branch, commit, agent: {client, session, host, worktree}, size, gpu, tail}`
+  reason, command, kind, repo, branch, commit, agent: {client, session, host, worktree}, size, gpu, tail}`
 
 ### The contract and the devserver
 
