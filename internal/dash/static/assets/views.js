@@ -5,7 +5,7 @@
 import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, timeEl } from "./dom.js";
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, empty, section, modeLabel, jobBox };
+export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold };
 
 const MODES = [
   ["full", "Full"],
@@ -117,12 +117,27 @@ function control(key, props, ...kids) {
   return h("button", { ...props, "data-key": key, disabled: props.disabled || busy.has(key) }, ...kids);
 }
 
-function confirmDialog({ title, body, action, danger = true, run }) {
-  const prev = document.activeElement;
+// The open confirm, if any. valid says whether what it acts on is still the thing it was opened
+// for; after each redraw checkDialog closes it if not, so a click can't land on a replacement.
+let dialog = null;
+
+function checkDialog() {
+  if (dialog && !dialog.valid()) {
+    const { close, goneText } = dialog;
+    close();
+    toast(goneText);
+  }
+}
+
+function confirmDialog({ title, body, action, danger = true, run, valid = () => true, goneText = "That changed while the dialog was open." }) {
+  // The opener is found again by its data-key on close: a redraw may have replaced it.
+  const opener = document.activeElement?.closest?.("[data-key]")?.dataset.key;
   const close = () => {
     scrim.remove();
     document.removeEventListener("keydown", onKey);
-    prev?.focus?.();
+    dialog = null;
+    const back = opener && document.querySelector(`[data-key="${CSS.escape(opener)}"]`);
+    (back || document.querySelector(".content"))?.focus?.({ preventScroll: true });
   };
   const onKey = (e) => {
     if (e.key === "Escape") close();
@@ -133,9 +148,18 @@ function confirmDialog({ title, body, action, danger = true, run }) {
     { class: "scrim", onclick: (e) => e.target === scrim && close() },
     h("div", { class: "dialog", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "dlg-t" }, h("h2", { id: "dlg-t" }, title), h("p", null, body), h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-sm btn-ghost", onclick: close }, "Keep it"), go)),
   );
+  dialog?.close();
   document.addEventListener("keydown", onKey);
   document.body.append(scrim);
+  dialog = { close, valid, goneText };
   go.focus();
+}
+
+// A box is one generation of a name: the box of that name made at createdAt. Controls send it,
+// and boxd refuses with 409 "gone" when the box of that name now is another.
+function sameBox(b) {
+  const now = boxOf(b.machine, b.name);
+  return !!now && now.createdAt === b.createdAt;
 }
 
 function setMode(m, mode) {
@@ -150,6 +174,8 @@ function setMode(m, mode) {
 
 function cancelJob(j) {
   confirmDialog({
+    valid: () => ["running", "paused"].includes(S.jobs.get(j.key)?.state),
+    goneText: "The job ended before it was cancelled.",
     title: "Cancel this job?",
     body: "Its command on " + j.box + " is killed and the job ends with exit 130. The agent that started it sees it cancelled.",
     action: "Cancel job",
@@ -160,15 +186,17 @@ function cancelJob(j) {
 function deleteBox(b) {
   const running = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"));
   confirmDialog({
+    valid: () => sameBox(b),
+    goneText: "Box " + b.name + " went away or was replaced, so nothing was deleted.",
     title: "Delete " + b.name + "?",
     body: (running.length ? plural(running.length, "running job") + " on it will be lost. " : "") + "Boxes are compute, not storage: anything on it that wasn't pushed is gone.",
     action: "Delete box",
-    run: () => act("del-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete"), () => S.boxes.delete(b.machine + "/" + b.name)),
+    run: () => act("del-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete", { createdAt: b.createdAt }), () => S.boxes.delete(b.machine + "/" + b.name)),
   });
 }
 
 function extendBox(b, hours) {
-  act("ext-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/extend", { hours }), (box) => box?.name && S.boxes.set(box.machine + "/" + box.name, box));
+  act("ext-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/extend", { hours, createdAt: b.createdAt }), (box) => box?.name && S.boxes.set(box.machine + "/" + box.name, box));
 }
 
 // Overview: what is happening on the PC right now.
@@ -339,9 +367,18 @@ const boxes = {
 const F = { q: "", repo: "", agent: "", kind: "", machine: "", result: "" };
 const list = { jobs: [], more: false, loading: false, error: "", seq: 0 };
 
+// Search folds case as the server does (Go's strings.ToLower): each code point by Unicode's
+// simple lower-case mapping. Lower-casing one code point at a time gives that, except for
+// U+0130 (İ), whose full mapping is two code points; its simple mapping is i.
+function fold(s) {
+  let out = "";
+  for (const ch of s || "") out += ch === "\u0130" ? "i" : ch.toLowerCase();
+  return out;
+}
+
 function matches(j) {
-  const q = F.q.trim().toLowerCase();
-  if (q && ![j.reason, j.command, j.branch].some((v) => (v || "").toLowerCase().includes(q))) return false;
+  const q = fold(F.q.trim());
+  if (q && ![j.reason, j.command, j.branch].some((v) => fold(v).includes(q))) return false;
   if (F.repo && shortRepo(j.repo) !== F.repo) return false;
   if (F.agent && j.agent?.session !== F.agent) return false;
   if (F.kind && j.kind !== F.kind) return false;
@@ -461,10 +498,12 @@ function clearFilters() {
 // A job: its reason, what ran, who asked, and its log. The log tails with offset while the box
 // exists; after, the kept tail is all there is.
 
-const tailer = { key: "", pre: null, offset: 0, timer: 0, status: "", gone: false, seq: 0 };
+const tailer = { key: "", pre: null, offset: 0, timer: 0, status: "", gone: false, seq: 0, abort: null };
 
 function stopTail() {
   clearTimeout(tailer.timer);
+  tailer.abort?.abort();
+  tailer.abort = null;
   tailer.seq++;
   tailer.key = "";
 }
@@ -474,7 +513,8 @@ async function pull(j, seq) {
   const cur = S.jobs.get(j.key) || j;
   let next = 0;
   try {
-    const c = await api("/api/jobs/" + encodeURIComponent(j.key) + "/log?offset=" + tailer.offset);
+    tailer.abort = new AbortController();
+    const c = await api("/api/jobs/" + encodeURIComponent(j.key) + "/log?offset=" + tailer.offset, { signal: tailer.abort.signal });
     if (seq !== tailer.seq) return;
     const pre = tailer.pre;
     const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
@@ -507,12 +547,14 @@ async function pull(j, seq) {
   if (next) tailer.timer = setTimeout(() => pull(j, seq), next);
 }
 
+// Jobs the detail page has seen, by key, and its lookups of jobs it hadn't.
+const seen = new Map();
+const lookups = new Map();
+
 const jobDetail = {
   mount(el, key) {
     stopTail();
     this.key = key;
-    this.fetched = null;
-    this.missing = false;
     this.head = h("div", { class: "section" });
     this.logHead = h("div", { class: "log-head" });
     tailer.pre = h("pre", { class: "log log-tall", tabindex: "0", "aria-label": "Log" });
@@ -524,26 +566,37 @@ const jobDetail = {
   },
   update(el) {
     // The stream's copy is the newest; a job the stream let go (job-gone, or older than the state's
-    // last 50) keeps the last copy seen, and one never seen is asked for.
-    const j = S.jobs.get(this.key) || list.jobs.find((x) => x.key === this.key) || (this.last?.key === this.key ? this.last : null);
-    if (j) this.last = j;
+    // last 50) keeps the last copy seen, by key, and one never seen is asked for.
+    const key = this.key;
+    const j = S.jobs.get(key) || list.jobs.find((x) => x.key === key) || seen.get(key);
+    if (j) seen.set(key, j);
     if (!j) {
       stopTail();
-      if (this.fetched !== this.key) {
-        this.fetched = this.key;
-        this.missing = false;
-        api("/api/jobs/" + encodeURIComponent(this.key))
-          .then((job) => (this.last = job))
-          .catch(() => (this.missing = true))
+      const look = lookups.get(key);
+      if (!look || look.state === "retry") {
+        const mine = { state: "loading" };
+        lookups.set(key, mine);
+        api("/api/jobs/" + encodeURIComponent(key))
+          .then((job) => {
+            // Only this request's answer counts, and it is filed under its own key, so a late
+            // answer for another job can't overwrite the one on screen.
+            if (lookups.get(key) !== mine) return;
+            seen.set(key, job);
+            lookups.delete(key);
+          })
+          .catch((e) => {
+            if (lookups.get(key) !== mine) return;
+            mine.state = e.status === 404 ? "missing" : "error";
+            mine.error = e.message;
+          })
           .finally(changed);
       }
-      el.replaceChildren(
-        h(
-          "div",
-          { class: "page" },
-          this.missing ? empty("search", "Job not found", "boxd has no job with this key. Its history keeps jobs for 180 days.", h("a", { class: "btn btn-sm btn-outline", href: "#jobs" }, "Back to Jobs")) : empty("retry", "Loading the job…", null),
-        ),
-      );
+      const now = lookups.get(key);
+      let body = empty("retry", "Loading the job…", null);
+      if (now?.state === "missing") body = empty("search", "Job not found", "boxd has no job with this key. Its history keeps jobs for 180 days.", h("a", { class: "btn btn-sm btn-outline", href: "#jobs" }, "Back to Jobs"));
+      if (now?.state === "error")
+        body = empty("alert", "Couldn't load the job", now.error, h("button", { class: "btn btn-sm btn-outline", onclick: () => ((now.state = "retry"), changed()) }, "Try again"));
+      el.replaceChildren(h("div", { class: "page" }, body));
       return;
     }
     if (!this.body.isConnected) el.replaceChildren(this.body);
@@ -555,6 +608,14 @@ const jobDetail = {
       tailer.status = "";
       tailer.pre.textContent = tailer.gone ? j.tail || "" : "";
       if (!tailer.gone) pull(j, tailer.seq);
+    }
+    // The box can go, or its name be taken by a new box, while the page is open: from then on the
+    // kept tail is all there is.
+    if (!tailer.gone && !jobBox(j)) {
+      stopTail();
+      tailer.key = j.key;
+      tailer.gone = true;
+      tailer.status = "";
     }
     if (tailer.gone && tailer.pre.textContent !== (j.tail || "")) tailer.pre.textContent = j.tail || "";
     const live = j.state === "running" || j.state === "paused";

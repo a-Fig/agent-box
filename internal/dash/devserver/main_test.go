@@ -77,6 +77,7 @@ func TestPageAndState(t *testing.T) {
 func TestControls(t *testing.T) {
 	s, ts := start(t, "yielding")
 	paused := s.sc.State.Jobs[0]
+	lanternMade := s.sc.State.Boxes[s.findBox("lantern")].CreatedAt.Format(time.RFC3339)
 	if paused.State != dash.JobPaused {
 		t.Fatalf("first job is %s", paused.State)
 	}
@@ -92,9 +93,12 @@ func TestControls(t *testing.T) {
 		{"cancel while yielding", "POST", "/api/jobs/" + key(paused) + "/cancel", `{}`, true, 409, dash.CodeYielding},
 		{"cancel a finished job", "POST", "/api/jobs/" + key(s.done[0]) + "/cancel", `{}`, true, 409, dash.CodeNotRunning},
 		{"cancel nothing", "POST", "/api/jobs/x%2Fy%2Fz/cancel", `{}`, true, 404, dash.CodeNotFound},
-		{"extend by 2h", "POST", "/api/boxes/lantern/extend", `{"hours":2}`, true, 400, dash.CodeBadRequest},
-		{"extend by 4h", "POST", "/api/boxes/lantern/extend", `{"hours":4}`, true, 200, ""},
-		{"delete nothing", "POST", "/api/boxes/nope/delete", `{}`, true, 404, dash.CodeNotFound},
+		{"extend by 2h", "POST", "/api/boxes/lantern/extend", `{"hours":2,"createdAt":"` + lanternMade + `"}`, true, 400, dash.CodeBadRequest},
+		{"extend with no createdAt", "POST", "/api/boxes/lantern/extend", `{"hours":4}`, true, 400, dash.CodeBadRequest},
+		{"extend a replaced box", "POST", "/api/boxes/lantern/extend", `{"hours":4,"createdAt":"2026-01-01T00:00:00Z"}`, true, 409, dash.CodeGone},
+		{"extend by 4h", "POST", "/api/boxes/lantern/extend", `{"hours":4,"createdAt":"` + lanternMade + `"}`, true, 200, ""},
+		{"delete nothing", "POST", "/api/boxes/nope/delete", `{"createdAt":"` + lanternMade + `"}`, true, 404, dash.CodeNotFound},
+		{"delete a replaced box", "POST", "/api/boxes/lantern/delete", `{"createdAt":"2026-01-01T00:00:00Z"}`, true, 409, dash.CodeGone},
 		{"log of a frozen box", "GET", "/api/jobs/" + key(paused) + "/log?offset=0", "", false, 200, ""},
 		{"bad refusal", "POST", "/api/refusals", `{"why":"bored"}`, true, 400, dash.CodeBadRequest},
 		{"refusal", "POST", "/api/refusals", `{"why":"yielding","reason":"Full suite before the PR.","size":"medium"}`, true, 204, ""},
@@ -122,7 +126,8 @@ func TestControls(t *testing.T) {
 
 func TestDeleteLosesItsJobs(t *testing.T) {
 	s, ts := start(t, "busy")
-	if status, _, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{}`, true); status != 204 {
+	made := s.sc.State.Boxes[s.findBox("lantern")].CreatedAt.Format(time.RFC3339)
+	if status, _, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`"}`, true); status != 204 {
 		t.Fatalf("delete: %d", status)
 	}
 	if s.findBox("lantern") >= 0 {
@@ -269,5 +274,28 @@ func TestJobAndReusedBox(t *testing.T) {
 	s.logs[old.Key] = "not this job's\n"
 	if code, e, _ := call(t, ts, "GET", "/api/jobs/"+key(old)+"/log", "", false); code != 404 || e.Code != dash.CodeNotFound {
 		t.Errorf("log on a reused box name: %d %q", code, e.Code)
+	}
+}
+
+// The search folds case one way, the way the page does: strings.ToLower, field by field.
+func TestSearchFolding(t *testing.T) {
+	cases := []struct {
+		q, field string
+		want     bool
+	}{
+		{"RACE", "Full -race suite", true},
+		{"istanbul", "Deploy to İstanbul", true}, // U+0130's simple lower case is i
+		{"İST", "istanbul", true},
+		{"straße", "STRASSE", false}, // no full case folding
+		{"suite\nmain", "suite", false},
+	}
+	for _, c := range cases {
+		if got := matchesText(c.q, c.field); got != c.want {
+			t.Errorf("matchesText(%q, %q) = %v, want %v", c.q, c.field, got, c.want)
+		}
+	}
+	// Per field: a query can't match across the reason and the command.
+	if matchesText("suite go", "Full suite", "go test") {
+		t.Error("matched across fields")
 	}
 }

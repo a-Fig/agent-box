@@ -296,9 +296,20 @@ type ModeBody struct {
 	Mode string `json:"mode"`
 }
 
+// BoxBody names which box a control is for: the box of the path's name made at CreatedAt.
+// Names are reused, so a page that saw an older box of the name must not act on a newer one;
+// boxd compares CreatedAt with the box's own and answers 409 CodeGone when they differ.
+type BoxBody struct {
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// DeleteBody is POST /api/boxes/{name}/delete; the reply is 204.
+type DeleteBody = BoxBody
+
 // ExtendBody is POST /api/boxes/{name}/extend; the reply is the Box.
 type ExtendBody struct {
-	Hours int `json:"hours"`
+	Hours     int       `json:"hours"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // ExtendHours are the extensions the page offers and boxd accepts.
@@ -322,6 +333,7 @@ const (
 	CodeYielding   = "yielding"    // 409: the box is frozen for a game
 	CodeFrozen     = "frozen"      // 409: the box is frozen for My PC
 	CodeNotRunning = "not-running" // 409: the job has already ended
+	CodeGone       = "gone"        // 409: the box of that name is another one now
 	CodeIncus      = "incus"       // 502: Incus failed
 )
 

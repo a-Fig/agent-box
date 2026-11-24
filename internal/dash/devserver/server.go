@@ -188,7 +188,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "result must be one of "+strings.Join(dash.Results, ", "))
 		return
 	}
-	text := strings.ToLower(q.Get("q"))
+	text := q.Get("q")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	page := dash.JobsPage{Jobs: []dash.Job{}}
@@ -201,7 +201,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 			q.Get("machine") != "" && q.Get("machine") != j.Machine,
 			q.Get("result") != "" && q.Get("result") != j.Result(),
 			before != nil && newest(*before, j) >= 0,
-			text != "" && !strings.Contains(strings.ToLower(j.Reason+"\n"+j.Command+"\n"+j.Branch), text):
+			text != "" && !matchesText(text, j.Reason, j.Command, j.Branch):
 			continue
 		}
 		if len(page.Jobs) == limit {
@@ -357,12 +357,44 @@ func (s *server) handleCancel(r *http.Request, body []byte) (int, any, error) {
 	return http.StatusOK, *j, nil
 }
 
+// matchesText is the jobs search: q in any one field, case folded by strings.ToLower (Unicode's
+// simple lower-case mapping, code point by code point). The page folds the same way.
+func matchesText(q string, fields ...string) bool {
+	q = strings.ToLower(q)
+	for _, f := range fields {
+		if strings.Contains(strings.ToLower(f), q) {
+			return true
+		}
+	}
+	return false
+}
+
+// thisBox finds the box a control names: the path's name, made at createdAt. A box of that name
+// made at another time is a replacement, which the control was never meant for.
+func (s *server) thisBox(name string, createdAt time.Time) (int, error) {
+	if createdAt.IsZero() {
+		return -1, fail(http.StatusBadRequest, dash.CodeBadRequest, "box controls need the box's createdAt")
+	}
+	i := s.findBox(name)
+	switch {
+	case i < 0:
+		return -1, fail(http.StatusNotFound, dash.CodeNotFound, "no box %s", name)
+	case !s.sc.State.Boxes[i].CreatedAt.Equal(createdAt):
+		return -1, fail(http.StatusConflict, dash.CodeGone, "box %s was replaced by a newer box of the same name; nothing was done", name)
+	}
+	return i, nil
+}
+
 func (s *server) handleDelete(r *http.Request, body []byte) (int, any, error) {
 	name := r.PathValue("name")
+	var b dash.DeleteBody
+	if err := decode(body, &b); err != nil {
+		return 0, nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.findBox(name) < 0 {
-		return 0, nil, fail(http.StatusNotFound, dash.CodeNotFound, "no box %s", name)
+	if _, err := s.thisBox(name, b.CreatedAt); err != nil {
+		return 0, nil, err
 	}
 	s.removeBox(name)
 	return http.StatusNoContent, nil, nil
@@ -379,9 +411,9 @@ func (s *server) handleExtend(r *http.Request, body []byte) (int, any, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	i := s.findBox(name)
-	if i < 0 {
-		return 0, nil, fail(http.StatusNotFound, dash.CodeNotFound, "no box %s", name)
+	i, err := s.thisBox(name, b.CreatedAt)
+	if err != nil {
+		return 0, nil, err
 	}
 	bx := &s.sc.State.Boxes[i]
 	from := s.now().UTC().Truncate(time.Second)

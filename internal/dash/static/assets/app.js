@@ -5,7 +5,7 @@
 
 import { h, icon, tickTimes } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
-import { overview, boxes, jobs, jobDetail, modeLabel } from "./views.js";
+import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog } from "./views.js";
 import { history } from "./history.js";
 
 const root = document.getElementById("root");
@@ -155,20 +155,21 @@ function render() {
 
 // A redraw replaces the elements under the pointer, so one between a press and its release would
 // drop the click: while a pointer is down, the redraw waits for it to come up.
+// A release can go missing (the pointer leaves the window, a dialog takes it), so the hold also
+// clears when the window loses focus or a pointer event says no button is down.
 let pressed = false;
 let owed = false;
+function release() {
+  if (!pressed) return;
+  pressed = false;
+  // After the click this release makes has run.
+  if (owed) setTimeout(render, 0);
+  owed = false;
+}
 document.addEventListener("pointerdown", () => (pressed = true), true);
-for (const ev of ["pointerup", "pointercancel"])
-  document.addEventListener(
-    ev,
-    () => {
-      pressed = false;
-      // After the click this release makes has run.
-      if (owed) setTimeout(render, 0);
-      owed = false;
-    },
-    true,
-  );
+for (const ev of ["pointerup", "pointercancel"]) document.addEventListener(ev, release, true);
+for (const ev of ["pointermove", "pointerover", "pointerenter"]) document.addEventListener(ev, (e) => e.buttons === 0 && release(), true);
+window.addEventListener("blur", release);
 
 // What a redraw would lose, by data-key: the focus, and where each scrolled element was (a log
 // tail scrolled up stays there; one at the bottom follows new lines).
@@ -205,7 +206,7 @@ function draw() {
   const r = route();
   const v = r.key ? jobDetail : VIEWS[r.name].view;
   if (!shell) {
-    const content = h("main", { class: "content", id: "content" });
+    const content = h("main", { class: "content", id: "content", tabindex: "-1" });
     const title = h("h1", null);
     const top = h("header", { class: "topbar" }, h("button", { class: "icon-btn menu-toggle", "aria-label": "Open navigation", onclick: () => setDrawer(true) }, icon("menu")), title);
     const el = h("div", { class: "app" }, h("span"), h("div", { class: "main" }, top, content));
@@ -230,6 +231,7 @@ function draw() {
   finish(shell.content);
   finish(shell.el.firstChild);
   restore(kept);
+  checkDialog();
   toastEl();
 }
 

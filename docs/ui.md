@@ -223,13 +223,18 @@ JSON over HTTPS, on the same origin as the page.
   - 404 for something that's gone;
   - 409 for a request that can't be applied now: cancelling a job whose box is frozen
     (`code: "yielding"` during a game, `"frozen"` in My PC, since a frozen box can't run the kill),
-    or one that has already ended (`"not-running"`);
+    or one that has already ended (`"not-running"`); and a box control for a box whose name a
+    newer box now has (`"gone"`, see below);
   - 502 when Incus failed.
   - The codes are constants in `internal/dash` (`CodeYielding` and the rest).
 - **In a path**, a job's key is one segment, escaped (`encodeURIComponent`), since it holds `/`.
 - **A job's box** is the box of its name made before the job started (`createdAt <= startedAt`).
   Names are reused, so a newer box of the same name is not the job's: its log is gone, and the
   page shows the kept `tail`.
+- **A box control names its box** by name and `createdAt`, for the same reason: delete and extend
+  send `{createdAt}` (the box the page saw), `boxd` compares it with the box's own under the same
+  lock as the change, and answers 409 `code: "gone"` when the name now belongs to another box. The
+  page also closes a confirm whose box went or was replaced while it was open.
 
 ### Live updates
 
@@ -249,14 +254,14 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 |---|---|
 | `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
-| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a case-blind substring of the reason, command or branch, `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
+| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode, reason}]`: the effective mode, a yield being `mypc` with the tray's reason (`gaming: steam:570`). |
 | `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. During a game it waits, as the handshake says; it is not refused. |
 | `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
-| `POST /api/boxes/{name}/delete` | 204. Its running jobs become `lost`. |
-| `POST /api/boxes/{name}/extend` | `{hours}`, one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
+| `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
+| `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 
 ### Shapes
