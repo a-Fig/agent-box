@@ -30,11 +30,9 @@ func createMutex(name string) (windows.Handle, error) {
 	if err != nil {
 		return 0, err
 	}
-	h, err := windows.CreateMutex(nil, false, n)
-	if err != nil && h != 0 {
-		windows.CloseHandle(h) // ALREADY_EXISTS still returns a handle
-	}
-	return h, err
+	// With ERROR_ALREADY_EXISTS the handle is still valid and still counts as a
+	// holder, so the caller keeps it for the life of the process.
+	return windows.CreateMutex(nil, false, n)
 }
 
 // trayRunning reports whether an interactive tray holds trayActiveMutex. An

@@ -343,6 +343,8 @@ if ($BoxtrayPath) {
     # password; WSL needs only the user's token). It runs Full and stands
     # aside whenever the interactive tray runs.
     Step "Scheduled Task '$EnforcerTask' (boxtray --headless at startup)"
+    # A running instance would keep the old binary (and blocks replacing the exe).
+    Stop-ScheduledTask -TaskName $EnforcerTask -ErrorAction SilentlyContinue
     $eAction = New-ScheduledTaskAction -Execute $full -Argument '--headless' -WorkingDirectory (Split-Path $full)
     $ePrinc = New-ScheduledTaskPrincipal -UserId $me -LogonType S4U -RunLevel Limited
     $eSett = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `

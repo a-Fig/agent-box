@@ -51,12 +51,11 @@ func main() {
 	// The interactive tray is the enforcer while it runs; the headless one
 	// sees this and stands aside. Taken first so the gap at logon is short.
 	// Held until the process ends, which is also what frees it at logoff.
-	switch _, err := holdTrayActive(); {
-	case err == nil:
-	case errors.Is(err, windows.ERROR_ALREADY_EXISTS), errors.Is(err, windows.ERROR_ACCESS_DENIED):
-		lg.Printf("exit: another interactive boxtray holds %s (%v)", trayActiveMutex, err)
-		return
-	default:
+	// ALREADY_EXISTS is not a reason to exit: the headless enforcer opens this
+	// name for an instant every tick, so a tray that starts in that instant
+	// sees it, and exiting (code 0, no restart) would leave Full enforced all
+	// session. One tray per session is the Local\ mutex above.
+	if _, err := holdTrayActive(); err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		// Not fatal: without it the headless enforcer would run beside us.
 		lg.Printf("could not create %s (%v): the headless enforcer will not see this tray", trayActiveMutex, err)
 	}
