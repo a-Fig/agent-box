@@ -16,6 +16,9 @@
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
 set -euo pipefail
+# incus create/edit commands read YAML from stdin when it isn't a terminal; over SSH or a pipe
+# they would hang waiting for it. Nothing here needs stdin.
+exec </dev/null
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ZABBLY_FPR="4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
