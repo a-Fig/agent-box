@@ -1,0 +1,91 @@
+# Default profile of the Incus project `agents`. Applied by setup-distro.sh with
+#   incus profile edit default --project agents < agents-profile.yaml
+#
+# limits.cpu / limits.memory MUST be set per box: the project caps count them.
+# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes).
+#
+# cloud-init: the first boot of a box runs /usr/local/sbin/agent-box-provision.sh. Every step
+# in it is guarded, so boxes launched from the published `agent-base` image (which re-run
+# cloud-init because their instance-id differs) finish in seconds.
+config:
+  limits.cpu: "2"
+  limits.memory: 4GiB
+  security.nesting: "true"
+  cloud-init.user-data: |
+    #cloud-config
+    write_files:
+      - path: /etc/profile.d/agent-box.sh
+        permissions: "0644"
+        content: |
+          # Managed by agent-box cloud-init. Caches live on the shared /cache volume.
+          export PATH="$PATH:/usr/local/go/bin"
+          export GOCACHE=/cache/go-build
+          export GOMODCACHE=/cache/go-mod
+          export npm_config_cache=/cache/npm
+          export GRADLE_USER_HOME=/cache/gradle
+          export UV_CACHE_DIR=/cache/uv
+      - path: /usr/local/sbin/agent-box-provision.sh
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          # Idempotent toolchain install. Bump GO_VERSION here to update Go.
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          GO_VERSION=1.27.3
+          arch=$(dpkg --print-architecture)
+
+          mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle /cache/uv /work
+          chmod -R a+rwX /cache || true
+
+          apt_pkgs="git build-essential curl ca-certificates unzip jq openjdk-17-jdk-headless"
+          # shellcheck disable=SC2086
+          if ! dpkg -s $apt_pkgs >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq $apt_pkgs
+          fi
+
+          if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go${GO_VERSION} "; then
+            tmp=$(mktemp -d)
+            curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${arch}.tar.gz" -o "$tmp/go.tgz"
+            want=$(curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${arch}.tar.gz.sha256")
+            echo "${want}  $tmp/go.tgz" | sha256sum -c -
+            rm -rf /usr/local/go
+            tar -C /usr/local -xzf "$tmp/go.tgz"
+            rm -rf "$tmp"
+          fi
+
+          if ! command -v node >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+            apt-get install -y -qq nodejs
+          fi
+
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+          fi
+
+          if ! command -v gh >/dev/null 2>&1; then
+            install -d -m 0755 /etc/apt/keyrings
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg
+            echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+              > /etc/apt/sources.list.d/github-cli.list
+            apt-get update -qq
+            apt-get install -y -qq gh
+          fi
+    runcmd:
+      - [bash, -c, "/usr/local/sbin/agent-box-provision.sh >> /var/log/agent-box-provision.log 2>&1"]
+
+description: agent-box default profile for the `agents` project
+devices:
+  root:
+    type: disk
+    path: /
+    pool: default
+  eth0:
+    type: nic
+    name: eth0
+    network: incusbr0
+  cache:
+    type: disk
+    pool: default
+    source: cache
+    path: /cache

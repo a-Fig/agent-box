@@ -1,0 +1,34 @@
+# Incus preseed for the `agents` WSL distro. Applied by setup-distro.sh with
+#   incus admin init --preseed < incus-preseed.yaml
+# only when Incus has no storage pool yet (a fresh install).
+#
+# Storage: a plain `dir` pool on the distro's ext4 (inside the VHDX). It needs no loop file
+# and works everywhere. Switch driver to btrfs (and add `config: {size: 60GiB}`) if you
+# want fast snapshots/copies; the pool is then a sparse loop file in /var/lib/incus/disks.
+config:
+  core.https_address: "[::]:8443"
+
+networks:
+  - name: incusbr0
+    type: bridge
+    config:
+      ipv4.address: auto
+      ipv4.nat: "true"
+      ipv6.address: none
+
+storage_pools:
+  - name: default
+    driver: dir
+
+profiles:
+  - name: default
+    description: Default profile of the default project (not used by agents)
+    devices:
+      root:
+        type: disk
+        path: /
+        pool: default
+      eth0:
+        type: nic
+        name: eth0
+        network: incusbr0
