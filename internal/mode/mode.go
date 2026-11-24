@@ -47,10 +47,6 @@ func (m Mode) Label() string {
 	return string(m)
 }
 
-// ProjectReasonKey is the project key the tray sets to why it is yielding
-// (a game, say) and clears when it stops.
-const ProjectReasonKey = "user.agent-box.reason"
-
 // BoxCPUs is how many CPUs each box may use in this mode: 0 when boxes are
 // paused (My PC) or the mode is unknown.
 func (m Mode) BoxCPUs() int {
