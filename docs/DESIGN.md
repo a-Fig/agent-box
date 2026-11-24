@@ -34,16 +34,24 @@ A restricted cert can still resume an instance and edit its own `limits.cpu`. So
 
 ## Glue we write
 
-### 1. `box` (Go, one binary, laptop): sync-and-run + a small MCP server
-It shells out to the `incus` CLI, using the `pc` remote and the `agents` project.
+### 1. `box` (Go, one binary, laptop): CLI + stdio MCP server, shaped like Murmur
+It shells out to the `incus` CLI, using the `pc` remote and the `agents` project. Each command is also an MCP tool with the same behaviour.
 
 ```
-box new [name] [--ttl 8h]        # incus launch agent-base pc:<name> --project agents, with a user.expires label
-box run [--box name|--new] -- <cmd...>
-box rm <name>
-box ls
-box mcp                          # stdio MCP with only: box_new, box_run, box_job, box_rm, box_ls
+box status                       # box_status: advice line, reachability, mode + yield reason, free slots, CPUs/RAM per box, this repo's box and running jobs
+box run [--box name|--new] [--env K=V] [--timeout d] -- <cmd...>   # box_run
+box job <id> [--offset N --limit N]   # box_job: follow a job, or page through its log
+box jobs [--box name]            # box_jobs: jobs from /work/.box (*.pid, *.exit, *.log), newest first
+box cancel <id>                  # box_cancel: kill the job's session (setsid), write .exit 130
+box pull <id|box> <path> <dir>   # box_pull: incus file pull -r into a staging dir inside <dir>
+box new [name] [--ttl 8h]        # box_new: incus launch agent-base pc:<name> --project agents, with a user.expires label
+box rm <name>                    # box_rm
+box ls                           # box_ls
+box mcp                          # serve the tools on stdio
+box join [--leave]               # register box mcp with claude/codex (user scope) and install skills/box/SKILL.md
 ```
+
+`box status` reads `user.agent-box.mode` and `user.agent-box.reason` (set by the tray while it yields to a game) from the project, `limits.instances` from the project and `limits.memory` from the `default` profile, and counts slots as `limits.instances` minus existing boxes. `box join` uses the agents' own CLIs and never edits their config files. Env names that look like secrets are refused, since boxes are shared.
 
 `box run`:
 1. Snapshots the worktree as a git commit without touching the user's index: a temporary `GIT_INDEX_FILE`, add everything not ignored, then `write-tree` and `commit-tree`. It sends a `git bundle` with `incus file push` and checks the commit out in `/work/<repo>`.

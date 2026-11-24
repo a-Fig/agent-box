@@ -4,6 +4,8 @@
 // fakes and builds everywhere.
 package mode
 
+import "strconv"
+
 // Mode is how much of the PC agents get.
 type Mode string
 
@@ -43,6 +45,21 @@ func (m Mode) Label() string {
 		return "Full"
 	}
 	return string(m)
+}
+
+// ProjectReasonKey is the project key the tray sets to why it is yielding
+// (a game, say) and clears when it stops.
+const ProjectReasonKey = "user.agent-box.reason"
+
+// BoxCPUs is how many CPUs each box may use in this mode: 0 when boxes are
+// paused (My PC) or the mode is unknown.
+func (m Mode) BoxCPUs() int {
+	switch m {
+	case Shared, Full:
+		n, _ := strconv.Atoi(m.limits().cpu)
+		return n
+	}
+	return 0
 }
 
 // limits are the per-instance Incus settings a running mode (Shared, Full)
