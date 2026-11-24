@@ -186,6 +186,8 @@ if ($installed -contains $Distro) {
     $tar = Join-Path $dl 'ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz'
     $ProgressPreference = 'SilentlyContinue'
     $sums = (Invoke-WebRequest -UseBasicParsing -Uri $RootfsSums).Content
+    # PowerShell 5.1 returns bytes when the server doesn't say the file is text.
+    if ($sums -is [byte[]]) { $sums = [Text.Encoding]::ASCII.GetString($sums) }
     $wantHash = $null
     foreach ($l in ($sums -split "`n")) { if ($l -match '^([0-9a-fA-F]{64})\s+\*?(\S+)') { if ($Matches[2] -eq 'ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz') { $wantHash = $Matches[1] } } }
     if (-not $wantHash) { throw "Could not find the rootfs checksum in $RootfsSums" }
@@ -245,7 +247,8 @@ Note "systemd: $state"
 
 # --- 6. Keep-alive scheduled task -----------------------------------------
 Step "Scheduled Task '$KeepAliveTask' (keeps the distro alive)"
-$me = "$env:USERDOMAIN\$env:USERNAME"
+# Not $env:USERDOMAIN: over SSH it reads WORKGROUP, which Task Scheduler can't resolve.
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $wslExe = Join-Path $env:SystemRoot 'System32\wsl.exe'
 $action = New-ScheduledTaskAction -Execute $wslExe -Argument "-d $Distro --exec sleep infinity"
 $trigs = @((New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -AtLogOn -User $me))

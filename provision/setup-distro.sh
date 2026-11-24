@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # setup-distro.sh - run as root INSIDE the `agents` WSL distro (install-pc.ps1 does this).
 # Installs Incus (Zabbly stable) + web UI, applies the preseed, creates the restricted `agents`
-# project (it uses the DEFAULT project's profiles, which only the admin can edit), the default
-# profile and the `cache` volume, installs Tailscale, optionally builds `agent-base`.
+# project with its own default profile, that profile and the `cache` volume, installs Tailscale, optionally builds `agent-base`.
 # Needs Linux 6.12+ (Incus 7.x); install-pc.ps1 runs `wsl --update` for that.
 # Safe to re-run: each step checks before it changes anything.
 #
@@ -106,13 +105,16 @@ note "HTTPS API address: $addr"
 
 # ---------------------------------------------------------------- project
 step "Project '$PROJECT'"
-# features.profiles=false: the project uses the default project's profiles, which restricted
-# client certs cannot edit. features.images=false: images are shared with the default project.
+# features.profiles=true: the project has its own profiles. Incus refuses restricted=true on a
+# project without them ("Projects without their own profiles cannot be restricted"). Agents' certs
+# can edit these profiles, but restricted=true still validates what goes in them, the project caps
+# bound the totals, and the tray resets each box's own CPU limits every tick.
+# features.images=false: images are shared with the default project.
 # Neither can change after creation, so an existing project is only checked.
 if incus project show "$PROJECT" >/dev/null 2>&1; then
   note "project exists; features.* cannot change after creation, only checking"
   bad=0
-  for kv in features.images=false features.profiles=false; do
+  for kv in features.images=false features.profiles=true; do
     k=${kv%%=*}; v=${kv#*=}
     cur=$(incus project get "$PROJECT" "$k")
     if [ "$cur" != "$v" ]; then
@@ -134,15 +136,15 @@ EOF
   fi
 else
   incus project create "$PROJECT" \
-    -c features.images=false -c features.profiles=false \
+    -c features.images=false -c features.profiles=true \
     -c user.agent-box.mode=shared
-  note "created (images and profiles shared with the default project)"
+  note "created (own profiles; images shared with the default project)"
 fi
 # Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
 # below what existing instances use). Defaults: 3 boxes x 4 CPUs x 4GiB, the Full mode size.
-incus project set "$PROJECT" limits.instances "$MAX_BOXES"
-incus project set "$PROJECT" limits.cpu "$CPU_CAP"
-incus project set "$PROJECT" limits.memory "$MEM_CAP"
+incus project set "$PROJECT" limits.instances="$MAX_BOXES"
+incus project set "$PROJECT" limits.cpu="$CPU_CAP"
+incus project set "$PROJECT" limits.memory="$MEM_CAP"
 note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP (allocation caps, not usage caps)"
 # Restricted project. Keys per https://linuxcontainers.org/incus/docs/main/reference/projects/
 #   restricted=true                                turns the restricted.* keys on
@@ -165,10 +167,8 @@ else
   note "created"
 fi
 
-step "Default profile (default project; the '$PROJECT' project uses it)"
-# Only the admin can edit this profile; agents' restricted certs cannot. It replaces the whole
-# `default` profile, which the preseed made, so any other boxes in the default project share it.
-incus profile edit default --project default < "$HERE/default-profile.yaml"
+step "Default profile of the '$PROJECT' project"
+incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
 note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, nesting, /cache, cloud-init)"
 
 # ---------------------------------------------------------------- Tailscale
