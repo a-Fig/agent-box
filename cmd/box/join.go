@@ -20,6 +20,7 @@ type joinConfig struct {
 	LookPath        func(string) (string, error)
 	Home            string // the user's home directory
 	ClaudeConfigDir string // $CLAUDE_CONFIG_DIR, if set
+	CodexHome       string // $CODEX_HOME, if set
 	Exe             string // absolute path of this box binary
 	Out             io.Writer
 }
@@ -42,7 +43,7 @@ func defaultJoinConfig(out io.Writer) (joinConfig, error) {
 	}
 	return joinConfig{
 		R: execRunner{}, LookPath: exec.LookPath,
-		Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+		Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"), CodexHome: os.Getenv("CODEX_HOME"),
 		Exe: exe, Out: out,
 	}, nil
 }
@@ -60,8 +61,7 @@ func agentCLIs(exe string) []agentCLI {
 	}
 }
 
-// skillPaths are where the box skill goes: ~/.claude/skills, and the
-// CLAUDE_CONFIG_DIR one when that is set somewhere else.
+// skillPaths returns the user skill locations for Claude Code and Codex.
 func (c joinConfig) skillPaths() []string {
 	paths := []string{filepath.Join(c.Home, ".claude", "skills", "box", "SKILL.md")}
 	if c.ClaudeConfigDir != "" {
@@ -70,7 +70,11 @@ func (c joinConfig) skillPaths() []string {
 			paths = append(paths, p)
 		}
 	}
-	return paths
+	codexHome := c.CodexHome
+	if codexHome == "" {
+		codexHome = filepath.Join(c.Home, ".codex")
+	}
+	return append(paths, filepath.Join(codexHome, "skills", "box", "SKILL.md"))
 }
 
 // join registers box mcp as a user-scope MCP server named box with each
@@ -111,12 +115,20 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 		fmt.Fprintf(c.Out, "%s: registered MCP server box (user scope): %s mcp\n", a.name, c.Exe)
 	}
 	for _, p := range c.skillPaths() {
+		existing, err := os.ReadFile(p)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+			continue
+		}
+		if err == nil && string(existing) != skills.Box {
+			errs = append(errs, fmt.Errorf("existing skill at %s differs from the embedded box skill", p))
+			continue
+		}
 		if leave {
-			err := os.Remove(p)
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			if err != nil {
+			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, err)
 				continue
 			}
@@ -124,11 +136,22 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			fmt.Fprintf(c.Out, "skill: removed %s\n", p)
 			continue
 		}
+		if err == nil {
+			fmt.Fprintf(c.Out, "skill: already installed %s\n", p)
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if err := os.WriteFile(p, []byte(skills.Box), 0o644); err != nil {
+		file, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_, writeErr := io.WriteString(file, skills.Box)
+		if err := errors.Join(writeErr, file.Close()); err != nil {
+			os.Remove(p)
 			errs = append(errs, err)
 			continue
 		}

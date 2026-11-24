@@ -274,12 +274,15 @@ var (
 // secrets: boxes are shared, and the values show up in the box's process
 // list.
 func checkEnv(env map[string]string) error {
-	for k := range env {
+	for k, value := range env {
 		if !validEnvName.MatchString(k) {
 			return fmt.Errorf("bad env name %q", k)
 		}
 		if secretName.MatchString(strings.ToUpper(k)) {
 			return fmt.Errorf("env %s looks like a secret; boxes are shared, so box won't pass it. Use a non-secret value or run locally", k)
+		}
+		if strings.ContainsRune(value, 0) {
+			return fmt.Errorf("env %s contains NUL", k)
 		}
 	}
 	return nil
@@ -307,6 +310,12 @@ type JobResult struct {
 func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if len(o.Cmd) == 0 {
 		return JobResult{Code: 2}, errors.New("no command given")
+	}
+	if o.New && o.Box != "" {
+		return JobResult{Code: 2}, errors.New("--box and --new don't mix")
+	}
+	if o.Wait < 0 {
+		return JobResult{Code: 2}, errors.New("wait can't be negative")
 	}
 	if err := checkEnv(o.Env); err != nil {
 		return JobResult{Code: 2}, err
@@ -526,6 +535,9 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 	if !validJob.MatchString(job) {
 		return JobResult{Code: 2}, fmt.Errorf("bad job id %q", job)
 	}
+	if wait < 0 {
+		return JobResult{Code: 2}, errors.New("wait can't be negative")
+	}
 	box, _, _ := strings.Cut(job, ".")
 	r := JobResult{Job: job, Box: box}
 	var err error
@@ -539,6 +551,18 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 // aliveFn defines alive PID JOB: whether PID is still JOB's wrapper and not
 // a later process that got the same PID after a restart.
 const aliveFn = `alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && { [ ! -r /proc/"$1"/cmdline ] || grep -aqF "$2" /proc/"$1"/cmdline; }; }
+`
+
+// jobpid waits for the detached wrapper to publish its actual PID.
+const jobPIDFn = `jobpid() {
+  local pid deadline=$((SECONDS + 15))
+  pid=$(cat "$1.pid" 2>/dev/null)
+  while [ -z "$pid" ] && [ ! -f "$1.exit" ] && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 0.1
+    pid=$(cat "$1.pid" 2>/dev/null)
+  done
+  printf '%s' "$pid"
+}
 `
 
 // runningScript prints the jobs still running in a box.
@@ -559,13 +583,8 @@ exit 0
 // writing its exit code.
 func followScript(job string) string {
 	f := workRoot + "/.box/" + job
-	return "# follow\n" + aliveFn + fmt.Sprintf(`test -f %[1]s.log || { echo "box: no job %[2]s" >&2; exit 3; }
-pid=$(cat %[1]s.pid 2>/dev/null)
-deadline=$((SECONDS + 15))
-while [ -z "$pid" ] && [ ! -f %[1]s.exit ] && [ "$SECONDS" -lt "$deadline" ]; do
-  sleep 0.1
-  pid=$(cat %[1]s.pid 2>/dev/null)
-done
+	return "# follow\n" + aliveFn + jobPIDFn + fmt.Sprintf(`test -f %[1]s.log || { echo "box: no job %[2]s" >&2; exit 3; }
+pid=$(jobpid %[1]s)
 off=0
 while :; do
   fin=0; [ -f %[1]s.exit ] && fin=1
@@ -667,12 +686,19 @@ func payload(o RunOpts) string {
 	sort.Strings(keys)
 	var b strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "export %s=%s\n", k, shq(o.Env[k]))
+		fmt.Fprintf(&b, "export %s=%s || exit 2\n", k, shq(o.Env[k]))
 	}
 	cmd := shellCommand(o.Cmd)
 	if o.Timeout > 0 {
-		secs := int64((o.Timeout + time.Second - 1) / time.Second)
-		cmd = fmt.Sprintf("timeout -k 10s %ds bash -c %s", secs, shq(cmd))
+		secs := strconv.FormatFloat(o.Timeout.Seconds(), 'f', -1, 64)
+		// A hard timeout can kill the timeout process itself. Read its private
+		// diagnostic to distinguish that from a payload that simply exits 137.
+		cmd = fmt.Sprintf(`exec 3>&1 4>&2
+diagnostic=$(/usr/bin/timeout --verbose -k 10s %ss /bin/bash -c %s 2>&1 1>&3) 2>/dev/null
+status=$?
+if [[ $status = 137 && $diagnostic == *" KILL "* ]]; then exit 124; fi
+if [[ $status != 0 && $status != 124 && -n $diagnostic ]]; then echo "$diagnostic" >&2; fi
+exit "$status"`, secs, shq("exec 2>&4 3>&- 4>&-\n"+cmd))
 	}
 	b.WriteString(cmd)
 	return b.String()
@@ -688,8 +714,9 @@ func payload(o RunOpts) string {
 func startScript(job, ref, repo, payload string) string {
 	w := workRoot
 	f := w + "/.box/" + job
-	inner := fmt.Sprintf(`exec 9>%[1]s/.box/%[3]s.lock
-flock 9
+	inner := fmt.Sprintf(`echo "$$" > %[2]s.pid.tmp && mv %[2]s.pid.tmp %[2]s.pid || exit 1
+exec 9>%[1]s/.box/%[3]s.lock
+flock 9 || exit 1
 if git init -q %[1]s/%[3]s && cd %[1]s/%[3]s &&
    git fetch -q %[2]s.bundle refs/agent-box/%[4]s &&
    git checkout -q --force --detach FETCH_HEAD && git clean -fdq; then
@@ -702,11 +729,12 @@ else
   code=1
 fi
 rm -f %[2]s.bundle
-echo $code > %[2]s.exit.tmp && mv %[2]s.exit.tmp %[2]s.exit
+echo $code > %[2]s.exit.tmp && ln %[2]s.exit.tmp %[2]s.exit 2>/dev/null
+rm -f %[2]s.exit.tmp
 `, w, f, repo, ref, payload)
 	// The log is created before the job starts, so a follow that begins at
 	// once never sees "no job".
-	return fmt.Sprintf("mkdir -p %[1]s/.box && : > %[3]s.log && echo %[4]s > %[3]s.repo && { setsid nohup bash -lc %[2]s >> %[3]s.log 2>&1 < /dev/null & }\necho $! > %[3]s.pid",
+	return jobPIDFn + fmt.Sprintf("mkdir -p %[1]s/.box && : > %[3]s.log && echo %[4]s > %[3]s.repo && { setsid nohup bash -lc %[2]s >> %[3]s.log 2>&1 < /dev/null & } && [ -n \"$(jobpid %[3]s)\" ]",
 		w, shq(inner), f, shq(repo))
 }
 
