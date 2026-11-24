@@ -45,8 +45,9 @@ type Manager struct {
 	yielding    bool
 	clearSince  time.Time
 	reason      string
-	applied     Mode // effective mode the fields below belong to
-	projectDone bool // mode label set for applied
+	applied     Mode   // effective mode the fields below belong to
+	projectDone bool   // mode label set for applied
+	pubReason   string // user.agent-box.reason last written ("" = never or cleared)
 	frozenSince map[string]time.Time
 	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
@@ -89,6 +90,15 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 			errs = append(errs, err)
 		} else {
 			m.projectDone = true
+		}
+	}
+	// Why the PC is yielding, for `box status`. Written only on change, so the
+	// common case (never yielding) costs no calls.
+	if want := yieldReason(m.yielding, m.reason); want != m.pubReason {
+		if err := m.Incus.SetProjectConfig(ctx, ProjectReasonKey, want); err != nil {
+			errs = append(errs, err)
+		} else {
+			m.pubReason = want
 		}
 	}
 	ins, err := m.Incus.List(ctx)
@@ -166,6 +176,17 @@ func (m *Manager) updateYield(now time.Time, gaming bool, reason string) {
 			m.yielding, m.reason, m.clearSince = false, "", time.Time{}
 		}
 	}
+}
+
+// yieldReason is the value of ProjectReasonKey: empty unless yielding.
+func yieldReason(yielding bool, reason string) string {
+	if !yielding {
+		return ""
+	}
+	if reason == "" {
+		return "gaming"
+	}
+	return "gaming: " + reason
 }
 
 // applyProject records the mode for `box`. It never touches project limits.

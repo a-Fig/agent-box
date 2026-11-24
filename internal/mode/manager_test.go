@@ -292,7 +292,7 @@ func TestGamingYieldAndDebounce(t *testing.T) {
 	f.take()
 
 	st := tick(m, 5*time.Second, true) // game starts: freeze at once
-	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "pause a"})
+	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "project user.agent-box.reason=gaming: steam:570", "pause a"})
 	if !st.Yielding || st.Effective != MyPC || st.Chosen != Full || st.Reason != "steam:570" {
 		t.Fatalf("status %+v", st)
 	}
@@ -308,7 +308,7 @@ func TestGamingYieldAndDebounce(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 	equal(t, f.take(), []string{
-		"project user.agent-box.mode=full", "resume a", // limits were never lost: nothing to reset
+		"project user.agent-box.mode=full", "project user.agent-box.reason=", "resume a", // limits were never lost: nothing to reset
 	})
 }
 

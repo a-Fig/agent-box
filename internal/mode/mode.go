@@ -19,6 +19,9 @@ var All = []Mode{MyPC, Shared, Full}
 // ProjectModeKey is the Incus project key `box` reads to learn the mode.
 const ProjectModeKey = "user.agent-box.mode"
 
+// ProjectReasonKey says why the tray is yielding (e.g. "gaming: steam:570"); empty otherwise.
+const ProjectReasonKey = "user.agent-box.reason"
+
 // Parse turns a stored string into a Mode.
 func Parse(s string) (Mode, bool) {
 	for _, m := range All {
