@@ -403,7 +403,7 @@ func TestAttachReportsBoxFrozenMidRun(t *testing.T) {
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("took %v, want a prompt return", d)
 	}
-	want := "box: job " + pauseTestJob + " is paused (the PC's owner is using it). It resumes if they switch back within 15 minutes; after that the box is stopped and the job lost. Reattach later with: box job " + pauseTestJob + ", or run it locally"
+	want := "box: job " + pauseTestJob + " is paused (the PC's owner is using it). It resumes if they switch back within 15 minutes (4 hours once its memory is moved to swap); after that the box is stopped and the job lost. Reattach later with: box job " + pauseTestJob + ", or run it locally"
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("output lacks %q:\n%s", want, out)
 	}

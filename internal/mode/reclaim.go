@@ -16,8 +16,8 @@ import (
 // reclaiming a frozen box is a single memory.reclaim write: nothing is opened
 // for it and nothing needs putting back, so a reclaim that is cancelled,
 // killed or raced can't leave a box in a state that needs repair. Reclaim is
-// best effort: nothing acts on how much a box still holds afterwards, and
-// only FrozenStop stops a frozen CPU box.
+// best effort and never stops a box itself; what it leaves only picks the
+// frozen limit (FrozenStop, or FrozenSwappedStop when ReclaimLeft or less).
 type Reclaimer interface {
 	// EnsureSwap sets memory.swap.max on each box's cgroup where it differs
 	// and returns an error for each box it couldn't (nil entries are fine).
@@ -37,13 +37,16 @@ type SwapBox struct {
 }
 
 // Reclaimed is one reclaim that ran: what the box still holds afterwards,
-// for the log and the dashboard. Nothing acts on it.
+// for the log and the dashboard. Only frozenLimit reads it.
 type Reclaimed struct {
 	Name string
 	Left int64
 }
 
 const (
+	// ReclaimLeft is the most a box may still hold after a reclaim for its
+	// freeze to get FrozenSwappedStop; measured leftovers were about 10MB.
+	ReclaimLeft = 256 << 20
 	// ReclaimTimeout bounds one reclaim attempt inside the distro.
 	ReclaimTimeout = 60 * time.Second
 	// ReclaimRetry is the wait before retrying a reclaim whose write never
@@ -62,6 +65,7 @@ type reclaimJob struct {
 	next   time.Time
 	cancel context.CancelFunc // set while an attempt runs
 	done   bool               // the write happened; no more attempts this freeze
+	left   int64              // what the box held after it (set when done)
 }
 
 type reclaimResult struct {
@@ -122,7 +126,7 @@ func (r *reclaims) harvest(now time.Time) (done []Reclaimed, errs []error) {
 		}
 		j.cancel = nil
 		if x.ran {
-			j.done = true
+			j.done, j.left = true, x.left
 			done = append(done, Reclaimed{x.name, x.left})
 			continue
 		}
@@ -175,7 +179,11 @@ func (m *Manager) reclaimFrozen(now time.Time, in Instance, prev, state string) 
 		r.gen++
 		r.jobs[in.Name] = &reclaimJob{pid: pid, gen: r.gen}
 	}
-	if j := r.jobs[in.Name]; !j.done && j.cancel == nil && !now.Before(j.next) && !m.releasing.Load() {
+	// Not before this instance's swap.max is known to be set: Incus writes 0
+	// when it starts a box, so the first freeze after a start (or a tray
+	// start) would reclaim nothing and get the short limit. Swap is set at
+	// the end of the tick, so this waits one tick at most.
+	if j := r.jobs[in.Name]; !j.done && j.cancel == nil && !now.Before(j.next) && !m.releasing.Load() && m.swapSet[in.Name] == pid {
 		r.start(m.workCtx, m.Reclaim, in.Name, j)
 	}
 }
@@ -185,12 +193,14 @@ func (m *Manager) reclaimFrozen(now time.Time, in Instance, prev, state string) 
 // tick, after the instance actions; it writes only values that differ. A
 // box with no limits.memory (own or from a profile) is reported and left
 // alone: it has no limit to swap up to.
-func (m *Manager) ensureSwap(ctx context.Context, ins []Instance) (errs []error) {
+func (m *Manager) ensureSwap(ctx context.Context, ins []Instance, ended map[string]string) (errs []error) {
+	set := map[string]int64{}
+	defer func() { m.swapSet = set }()
 	var boxes []SwapBox
 	for _, in := range ins {
 		pid := pidOf(in)
-		if pid <= 0 {
-			continue
+		if st := ended[in.Name]; pid <= 0 || (st != "running" && st != "frozen") {
+			continue // stopped (or gone) this tick: no cgroup to write
 		}
 		b, ok := memoryLimit(in)
 		if !ok {
@@ -206,6 +216,8 @@ func (m *Manager) ensureSwap(ctx context.Context, ins []Instance) (errs []error)
 	for _, b := range boxes { // in order, so the error text is stable
 		if err := res[b.Name]; err != nil {
 			errs = append(errs, err)
+		} else {
+			set[b.Name] = b.Pid
 		}
 	}
 	return errs

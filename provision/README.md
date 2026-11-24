@@ -39,6 +39,7 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 | `setup-distro.sh` | Zabbly apt repo + key, `incus`, `incus-ui-canonical`, Tailscale (all inside the distro) | `apt remove` them; `rm /etc/apt/sources.list.d/zabbly-incus-stable.sources` |
 | | Incus: storage pool `default`, bridge `incusbr0`, HTTPS `:8443`, project `agents` (restricted, caps, `cache` volume), its `default` profile, image `agent-base` | `incus project delete agents` after removing its instances and volume; or just `wsl --unregister agents` |
 | | Tailscale node `agent-box` | `tailscale logout` in the distro and remove the node in the admin console |
+| | With `-BoxdPath`: `boxd` in `/opt/agent-box/bin`, `agent-box-boxd.service`, `/etc/agent-box/boxd.json` (owners: this node's tailnet login), and `tailscale serve` on 443 to `127.0.0.1:7766` | `tailscale serve --https=443 off`, `systemctl disable --now agent-box-boxd`, delete those files |
 
 ## Details
 

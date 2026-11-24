@@ -61,6 +61,17 @@ memory released from the tray) and retry every 10s, rather than leaving a browse
 - **Agents' text is shown, never run.** Commands, branches and log tails are written by agents.
   The page sets them with `textContent` only, never as HTML, under a strict Content-Security-Policy
   (`default-src 'self'`, no inline script).
+- **The spike (step 0) on the PC, 2026-11-24.** `boxd` behind `tailscale serve` answered the
+  laptop with its owner's login. A `Tailscale-User-Login` header the laptop sent itself was
+  replaced by the real one. A request to `127.0.0.1:7766` with no header got 403 `not-owner`. From
+  inside a box, `127.0.0.1:7766`, the bridge gateway's `:7766`, and the node's tailnet address on
+  80 and 443 all failed to connect, although the box resolves the `ts.net` name (public DNS
+  answers with the tailnet address): `tailscaled` binds its serve listener to `tailscale0`. A
+  request from a tagged device wasn't tried (none could run one); `boxd` lets in only listed
+  logins, so a tagged device's missing header, or its `tagged-devices` pseudo-login, is refused
+  either way (`internal/boxd` tests). Chrome on the laptop (through the Claude in Chrome
+  extension) couldn't open the page or Incus's own UI on 8443, while `curl` reached both, so that
+  is a browser network setting to look at in step 5, not `boxd`.
 - **Boxes can't reach `boxd`.** A test from inside a box checks that neither the distro's
   `127.0.0.1:7766` nor the serve address answers: boxes are on `incusbr0` with no route to the
   host's loopback, and they aren't on the tailnet.

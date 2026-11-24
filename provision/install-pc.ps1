@@ -11,6 +11,9 @@
   Where the distro's VHDX lives. Default: <drive with the most free space>\agent-box\wsl\agents.
 .PARAMETER BoxtrayPath
   Path to boxtray.exe. If given, a per-user Scheduled Task starts it at logon.
+.PARAMETER BoxdPath
+  Path to the Linux boxd binary (GOOS=linux go build ./cmd/boxd). If given, setup-distro.sh installs it as
+  agent-box-boxd.service and puts it on the tailnet with tailscale serve (docs/ui.md).
 .PARAMETER TailscaleAuthKey
   Auth key for `tailscale up`. Falls back to $env:TS_AUTHKEY. Passed to the distro via WSLENV; never written to disk.
 .PARAMETER BuildBase
@@ -26,6 +29,7 @@ param(
     [switch]$AcceptVmp,
     [string]$InstallDir,
     [string]$BoxtrayPath,
+    [string]$BoxdPath,
     [string]$TailscaleAuthKey,
     [switch]$BuildBase,
     [int]$MemoryGB = 0,
@@ -70,10 +74,11 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Securit
     throw 'Run this from an elevated (Administrator) PowerShell.'
 }
 $ProvisionDir = $PSScriptRoot
-foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf', 'reaper.sh', 'systemd/agent-box-reaper.service', 'systemd/agent-box-reaper.timer', 'https-cert.sh', 'systemd/agent-box-https-cert.service', 'systemd/agent-box-https-cert.timer') {
+foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf', 'reaper.sh', 'systemd/agent-box-reaper.service', 'systemd/agent-box-reaper.timer', 'https-cert.sh', 'systemd/agent-box-https-cert.service', 'systemd/agent-box-https-cert.timer', 'systemd/agent-box-boxd.service') {
     if (-not (Test-Path (Join-Path $ProvisionDir $f))) { throw "Missing $f next to install-pc.ps1." }
 }
 if ($BoxtrayPath -and -not (Test-Path -LiteralPath $BoxtrayPath)) { throw "BoxtrayPath not found: $BoxtrayPath" }
+if ($BoxdPath -and -not (Test-Path -LiteralPath $BoxdPath)) { throw "BoxdPath not found: $BoxdPath" }
 if (-not $TailscaleAuthKey) { $TailscaleAuthKey = $env:TS_AUTHKEY }
 
 # --- 1. Windows features ---------------------------------------------------
@@ -264,6 +269,14 @@ if (-not (Test-Path $tarExe)) { throw 'tar.exe not found (needs Windows 10 1803+
 $cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-distro.sh incus-preseed.yaml default-profile.yaml wsl.conf reaper.sh https-cert.sh systemd | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
 & cmd.exe /c $cmd
 if ($LASTEXITCODE -ne 0) { throw 'Copying provision files into the distro failed.' }
+if ($BoxdPath) {
+    $bd = (Resolve-Path -LiteralPath $BoxdPath).Path
+    $cmd = "`"$tarExe`" -cf - -C `"$(Split-Path $bd)`" `"$(Split-Path -Leaf $bd)`" | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
+    & cmd.exe /c $cmd
+    if ($LASTEXITCODE -ne 0) { throw 'Copying boxd into the distro failed.' }
+    if ((Split-Path -Leaf $bd) -ne 'boxd') { Invoke-InDistro @('mv', "$StageDir/$(Split-Path -Leaf $bd)", "$StageDir/boxd") | Out-Null }
+    Note 'boxd copied'
+}
 Invoke-InDistro @('sh', '-c', "sed -i 's/\r$//' $StageDir/*.sh $StageDir/*.yaml $StageDir/wsl.conf && chmod +x $StageDir/setup-distro.sh") | Out-Null
 Note 'copied'
 
