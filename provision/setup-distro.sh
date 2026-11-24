@@ -15,7 +15,7 @@
 # Flags:
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
-set -euo pipefail
+set -Eeuo pipefail
 # incus create/edit commands read YAML from stdin when it isn't a terminal; over SSH or a pipe
 # they would hang waiting for it. Nothing here needs stdin.
 exec </dev/null
@@ -43,7 +43,8 @@ done
 step() { printf '\n==> %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-trap 'rc=$?; [ $rc -ne 0 ] && printf "ERROR: setup-distro.sh failed (exit %s) near line %s\n" "$rc" "$LINENO" >&2' EXIT
+# ERR, not EXIT: only an ERR trap sees the failing line in $LINENO.
+trap 'printf "ERROR: setup-distro.sh failed (exit %s) at line %s\n" "$?" "$LINENO" >&2' ERR
 
 [ "$(id -u)" -eq 0 ] || die "run as root (wsl -d agents -u root ...)"
 [ -r /etc/os-release ] || die "no /etc/os-release"

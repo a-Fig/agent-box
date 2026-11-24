@@ -1,0 +1,68 @@
+# Every pull request and every push to dev or main runs the checks each change must pass, so
+# verification doesn't wait on the laptop, which can run only one Go test at a time and never -race.
+# Linux runs the race detector; Windows runs the tests natively, builds the tray and parses the
+# provisioning PowerShell.
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run in progress.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l cmd internal)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
+      - run: go vet ./...
+      - run: GOOS=windows go vet ./...
+      - run: go test -race -count=1 ./...
+      - name: provisioning scripts
+        run: |
+          bash -n provision/setup-distro.sh
+          shellcheck -S warning provision/setup-distro.sh
+          python3 -c 'import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]' provision/*.yaml
+
+  # gofmt runs on Linux only: a Windows checkout of LF files can confuse it.
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+      - run: go build -ldflags -H=windowsgui -o boxtray.exe ./cmd/boxtray
+      - name: parse PowerShell
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem provision/*.ps1) {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
+            foreach ($e in $errs) { Write-Host "$($f.Name): $($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
