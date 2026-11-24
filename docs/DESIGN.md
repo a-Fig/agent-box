@@ -17,18 +17,18 @@ On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq
 | Linux host on Windows | WSL2 distro `agents` (Ubuntu 24.04, systemd on, automount + interop off, VHDX on the biggest drive, `sparseVhd`) |
 | Boxes, API, auth | **Incus** from the Zabbly repo (Ubuntu's 6.0.0 has nested AppArmor issues), HTTPS API on `:8443` |
 | Network reach | Tailscale **inside** the distro as node `agent-box`; WSL stays on NAT networking |
-| Isolation for agents | Incus project `agents` (`restricted=true`, `features.profiles=false`) + **restricted client certs** (`incus config trust add --restricted --projects agents`); see Isolation below |
+| Isolation for agents | Incus project `agents` (`restricted=true`, its own profiles) + **restricted client certs** (`incus config trust add --restricted --projects agents`); see Isolation below |
 | Dashboard | Incus web UI (`incus-ui-canonical`) at `https://agent-box:8443` |
 | Client on the laptop | Windows `incus` client (`winget install LinuxContainers.Incus`), `incus remote add pc` |
 | Image | `images:ubuntu/24.04/cloud` + cloud-init in the `agents` profile (git, build-essential, Go, Node LTS, uv, JDK 17, gh), published once as `agent-base` |
 | Caches | Custom storage volume `cache` mounted at `/cache` (Go, npm, Gradle, uv caches) |
 | Keeping WSL up | Scheduled Task at boot: `wsl -d agents --exec sleep infinity` |
 
-The default project's `default` profile (which `agents` uses; see Isolation) sets `limits.cpu=2`/`limits.memory=4GiB` per box, `security.nesting=true`, the cache volume and cloud-init. The Linux kernel must be 6.12+ for Incus 7.x (`install-pc.ps1` runs `wsl --update`; `setup-distro.sh` checks).
+The `agents` project's `default` profile sets `limits.cpu=2`/`limits.memory=4GiB` per box, `security.nesting=true`, the cache volume and cloud-init. The Linux kernel must be 6.12+ for Incus 7.x (`install-pc.ps1` runs `wsl --update`; `setup-distro.sh` checks).
 
 ## Isolation
 
-Project `agents` is created with `features.profiles=false`, so its boxes use the default project's profiles, and only the admin can edit those. `features.images=false` shares images. Neither can change after creation, so `setup-distro.sh` only checks an existing project and says how to recreate it if they are wrong. The project is `restricted=true` with `restricted.containers.privilege=unprivileged`, `restricted.containers.nesting=allow`, `restricted.devices.disk=managed` (the `cache` volume and root) and `restricted.devices.nic=managed` (`incusbr0`). Project caps are fixed at setup: `limits.instances=3`, `limits.cpu=12`, `limits.memory=12GiB` (3 boxes x 4 CPUs x 4GiB, the Full size). They are allocation caps, not usage caps, and the tray never changes them, because Incus refuses to lower them below what existing instances (stopped ones too) already use.
+Project `agents` has its own profiles (`features.profiles=true`): Incus refuses `restricted=true` on a project without them. Agents' certs can edit those profiles, but `restricted=true` still validates what goes in them, the project caps bound the totals, and the tray resets each box's own CPU limits every tick. `features.images=false` shares images. Neither can change after creation, so `setup-distro.sh` only checks an existing project and says how to recreate it if they are wrong. The project is `restricted=true` with `restricted.containers.privilege=unprivileged`, `restricted.containers.nesting=allow`, `restricted.devices.disk=managed` (the `cache` volume and root) and `restricted.devices.nic=managed` (`incusbr0`). Project caps are fixed at setup: `limits.instances=3`, `limits.cpu=12`, `limits.memory=12GiB` (3 boxes x 4 CPUs x 4GiB, the Full size). They are allocation caps, not usage caps, and the tray never changes them, because Incus refuses to lower them below what existing instances (stopped ones too) already use.
 
 A restricted cert can still resume an instance and edit its own `limits.cpu`. So the modes are enforced by the tray's admin cert on every tick, not by permissions (see the tray below).
 
@@ -74,3 +74,12 @@ Wake-on-LAN via homeserver (`wakeonlan`), automatic sleep, GPU (`/dev/dxg` passt
 
 ## References
 code-on-incus (local only; profile and egress ideas), pixels (remote Incus backend, checkpoints, egress allowlists), Containarium and Coder (heavier control planes; not adopted). Incus docs: projects (limits are allocation caps; `restricted.*` keys), instance options (`limits.cpu` and `limits.memory` update live).
+
+## Boxes are compute, not storage
+
+Boxes are throwaway compute. Push work to git before a box goes.
+
+- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
+- **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
+- **Disk caps.** Root disk `size: 30GiB` per box (profile). Project `limits.disk=150GiB` over all boxes, volumes and images. Volume `cache` is `size=50GiB`.
+- **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle and uv rebuild it).

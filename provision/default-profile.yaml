@@ -5,7 +5,9 @@
 #
 # limits.cpu / limits.memory MUST be set per box: the project caps count them. The tray's
 # modes override limits.cpu per instance (2 in Shared, 4 in Full); memory stays at 4GiB.
-# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes).
+# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes, 50GiB).
+# The root disk is capped at 30GiB (`size`). Boxes are deleted by the tray's reaper after
+# user.expires; only /cache outlives a box, and it may be wiped at any time.
 #
 # cloud-init: the first boot of a box runs /usr/local/sbin/agent-box-provision.sh. Every step
 # in it is guarded, so boxes launched from the published `agent-base` image (which re-run
@@ -83,6 +85,7 @@ devices:
     type: disk
     path: /
     pool: default
+    size: 30GiB  # root disk quota per box; boxes are compute, not storage (see docs/DESIGN.md)
   eth0:
     type: nic
     name: eth0

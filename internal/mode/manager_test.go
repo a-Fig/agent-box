@@ -76,6 +76,20 @@ func (f *fake) Stop(_ context.Context, n string) error {
 	f.state[n] = "Stopped"
 	return nil
 }
+func (f *fake) Delete(_ context.Context, n string) error {
+	if err := f.rec("delete %s", n); err != nil {
+		return err
+	}
+	delete(f.state, n)
+	delete(f.config, n)
+	for i, o := range f.order {
+		if o == n {
+			f.order = append(f.order[:i:i], f.order[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
 func (f *fake) SetInstanceConfig(_ context.Context, n, k, v string) error {
 	if err := f.rec("set %s %s=%s", n, k, v); err != nil {
 		return err
@@ -380,6 +394,7 @@ func TestCLIArgs(t *testing.T) {
 	c.Pause(ctx, "a")
 	c.Resume(ctx, "a")
 	c.Stop(ctx, "a")
+	c.Delete(ctx, "a")
 	c.SetInstanceConfig(ctx, "a", "limits.cpu", "2")
 	c.UnsetInstanceConfig(ctx, "a", "limits.cpu.allowance")
 	c.SetProjectConfig(ctx, ProjectModeKey, "full")
@@ -388,11 +403,110 @@ func TestCLIArgs(t *testing.T) {
 		{"pause", "a", "--project", "agents"},
 		{"start", "a", "--project", "agents"},
 		{"stop", "a", "--force", "--project", "agents"},
+		{"delete", "a", "--force", "--project", "agents"},
 		{"config", "set", "a", "limits.cpu=2", "--project", "agents"},
 		{"config", "unset", "a", "limits.cpu.allowance", "--project", "agents"},
 		{"project", "set", "agents", "user.agent-box.mode=full"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+func expiry(f *fake, name string, at time.Time) { f.setCfg(name, ExpiresKey, at.Format(time.RFC3339)) }
+
+func TestReaperDeletesOnlyExpiredInEveryMode(t *testing.T) {
+	for _, md := range []Mode{MyPC, Shared, Full} {
+		f := newFake("old", "Running", "fresh", "Running", "none", "Running", "gone", "Stopped")
+		expiry(f, "old", t0.Add(-time.Second))
+		expiry(f, "fresh", t0.Add(time.Hour))
+		expiry(f, "gone", t0.Add(-24*time.Hour))
+		m := New(f, md)
+		st := tick(m, 0, false)
+		if st.Err != nil {
+			t.Fatalf("%s: err %v", md, st.Err)
+		}
+		var dels []string
+		for _, c := range f.calls {
+			if strings.HasPrefix(c, "delete ") {
+				dels = append(dels, c)
+			}
+		}
+		equal(t, dels, []string{"delete old", "delete gone"})
+		for _, c := range f.calls {
+			if strings.HasSuffix(c, " old") && !strings.HasPrefix(c, "delete") {
+				t.Fatalf("%s: touched the deleted instance after deleting it: %q", md, f.calls)
+			}
+		}
+	}
+}
+
+func TestReaperKeepsInstanceExpiringExactlyNow(t *testing.T) {
+	f := newFake("a", "Running")
+	expiry(f, "a", t0)
+	tick(New(f, Shared), 0, false)
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "delete") {
+			t.Fatalf("deleted at the exact expiry time: %q", f.calls)
+		}
+	}
+}
+
+func TestReaperReportsBadValueOnceAndSkips(t *testing.T) {
+	f := newFake("a", "Running")
+	f.setCfg("a", ExpiresKey, "tomorrow")
+	m := New(f, Shared)
+	st := tick(m, 0, false)
+	if st.Err == nil || !strings.Contains(st.Err.Error(), "tomorrow") {
+		t.Fatalf("first tick should report the bad value: %v", st.Err)
+	}
+	if st.Running != 1 {
+		t.Fatalf("running = %d", st.Running)
+	}
+	if st = tick(m, time.Minute, false); st.Err != nil {
+		t.Fatalf("second tick repeated the report: %v", st.Err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "delete") {
+			t.Fatalf("deleted an instance with a bad value: %q", f.calls)
+		}
+	}
+	// A different bad value is news; so is the same one on a new instance.
+	f.setCfg("a", ExpiresKey, "next week")
+	if st = tick(m, 2*time.Minute, false); st.Err == nil {
+		t.Fatal("changed bad value should be reported")
+	}
+	// Once the instance is gone and a new one has the same bad value, report again.
+	delete(f.config, "a")
+	tick(m, 3*time.Minute, false)
+	f.setCfg("a", ExpiresKey, "next week")
+	if st = tick(m, 4*time.Minute, false); st.Err == nil {
+		t.Fatal("bad value still reported once per instance lifetime")
+	}
+}
+
+func TestReaperRetriesFailedDelete(t *testing.T) {
+	f := newFake("a", "Running")
+	expiry(f, "a", t0.Add(-time.Minute))
+	m := New(f, Full)
+	f.failOn = "delete"
+	st := tick(m, 0, false)
+	if st.Err == nil || !strings.Contains(st.Err.Error(), "boom") {
+		t.Fatalf("delete failure not reported: %v", st.Err)
+	}
+	if st.Running != 1 {
+		t.Fatalf("an instance that could not be deleted still runs: %d", st.Running)
+	}
+	f.failOn = ""
+	f.take()
+	st = tick(m, 10*time.Second, false)
+	if st.Err != nil {
+		t.Fatalf("retry: %v", st.Err)
+	}
+	if got := f.take(); !reflect.DeepEqual(got, []string{"delete a"}) {
+		t.Fatalf("retry calls %q", got)
+	}
+	if st.Running != 0 {
+		t.Fatalf("running after reap = %d", st.Running)
 	}
 }

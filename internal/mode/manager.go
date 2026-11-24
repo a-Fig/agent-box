@@ -3,10 +3,15 @@ package mode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 )
+
+// ExpiresKey is the instance config key `box` sets to an RFC3339 UTC time after
+// which the instance is deleted.
+const ExpiresKey = "user.expires"
 
 const (
 	// FrozenStop is how long an instance may stay frozen in My PC before it is
@@ -43,6 +48,7 @@ type Manager struct {
 	applied     Mode // effective mode the fields below belong to
 	projectDone bool // mode label set for applied
 	frozenSince map[string]time.Time
+	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
 }
 
@@ -90,11 +96,60 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		errs = append(errs, err)
 		st.Running = m.last.Running
 	} else {
+		ins, errs = m.reap(ctx, now, ins, errs)
 		st.Running, errs = m.applyInstances(ctx, now, st.Effective, ins, errs)
 	}
 	st.Err = errors.Join(errs...)
 	m.last = st
 	return st
+}
+
+// reap deletes every instance whose user.expires is in the past and returns
+// the rest. It runs in every mode, My PC included, because deleting frees RAM
+// and disk. An instance with no user.expires is left alone; one with a value
+// that isn't RFC3339 is left alone and reported once. A failed delete is
+// reported and retried next tick, since the instance is still listed.
+func (m *Manager) reap(ctx context.Context, now time.Time, ins []Instance, errs []error) ([]Instance, []error) {
+	if m.badExpires == nil {
+		m.badExpires = map[string]string{}
+	}
+	live := make(map[string]bool, len(ins))
+	keep := ins[:0:0]
+	for _, in := range ins {
+		live[in.Name] = true
+		val, ok := in.Config[ExpiresKey]
+		if !ok {
+			delete(m.badExpires, in.Name)
+			keep = append(keep, in)
+			continue
+		}
+		exp, err := time.Parse(time.RFC3339, val)
+		if err != nil {
+			if m.badExpires[in.Name] != val {
+				m.badExpires[in.Name] = val
+				errs = append(errs, fmt.Errorf("%s: ignoring unparseable %s %q: %w", in.Name, ExpiresKey, val, err))
+			}
+			keep = append(keep, in)
+			continue
+		}
+		delete(m.badExpires, in.Name)
+		if !exp.Before(now) {
+			keep = append(keep, in)
+			continue
+		}
+		if err := m.Incus.Delete(ctx, in.Name); err != nil {
+			errs = append(errs, err)
+			keep = append(keep, in) // still there; counted and retried next tick
+			continue
+		}
+		delete(m.frozenSince, in.Name)
+	}
+	for name := range m.badExpires {
+		if !live[name] {
+			delete(m.badExpires, name)
+		}
+	}
+	return keep, errs
 }
 
 // updateYield starts yielding at once but stops only after YieldDebounce of

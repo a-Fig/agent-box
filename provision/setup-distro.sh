@@ -11,6 +11,7 @@
 #   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 12)
 #   AGENTS_MEM_CAP    project cap on the sum of limits.memory  (default 12GiB)
 #   AGENTS_MAX_BOXES  project limits.instances                 (default 3)
+#   AGENTS_DISK_CAP   project limits.disk, all boxes + volumes (default 150GiB)
 # Flags:
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
@@ -22,6 +23,8 @@ PROJECT=agents
 CPU_CAP=${AGENTS_CPU_CAP:-12}
 MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
 MAX_BOXES=${AGENTS_MAX_BOXES:-3}
+DISK_CAP=${AGENTS_DISK_CAP:-150GiB}
+CACHE_SIZE=50GiB
 BUILD_BASE=0
 REBUILD=0
 
@@ -145,13 +148,21 @@ fi
 incus project set "$PROJECT" limits.instances="$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu="$CPU_CAP"
 incus project set "$PROJECT" limits.memory="$MEM_CAP"
-note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP (allocation caps, not usage caps)"
+# limits.disk: "maximum value of the aggregate disk space used by all instance volumes, custom
+# volumes, and images of the project" (project config reference, key limits.disk).
+incus project set "$PROJECT" limits.disk="$DISK_CAP"
+note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP disk=$DISK_CAP (allocation caps, not usage caps)"
 # Restricted project. Keys per https://linuxcontainers.org/incus/docs/main/reference/projects/
 #   restricted=true                                turns the restricted.* keys on
 #   restricted.containers.privilege=unprivileged   blocks security.privileged=true (the default)
 #   restricted.containers.nesting=allow            boxes need security.nesting=true (default: block)
 #   restricted.devices.disk=managed                only pool-backed disks: root and /cache (default)
 #   restricted.devices.nic=managed                 only NICs on a managed network: incusbr0 (default)
+# No restricted.* key stops a restricted client cert from creating a custom storage volume: the
+# reference has none for volumes (restricted.devices.disk only limits which disk DEVICES an
+# instance may have; `managed` still lets it attach any pool volume). So the real limit is
+# limits.disk above, which counts custom volumes too. Agents should not store data in a volume,
+# and the reaper only deletes instances, so volumes agents create are bounded, not removed.
 incus project set "$PROJECT" restricted=true \
   restricted.containers.privilege=unprivileged \
   restricted.containers.nesting=allow \
@@ -163,13 +174,17 @@ step "Volume 'cache' (shared /cache for Go, npm, Gradle, uv)"
 if incus storage volume show default cache --project "$PROJECT" >/dev/null 2>&1; then
   note "exists"
 else
-  incus storage volume create default cache --project "$PROJECT"
-  note "created"
+  incus storage volume create default cache --project "$PROJECT" size="$CACHE_SIZE"
+  note "created, $CACHE_SIZE"
 fi
+# Idempotent: an existing volume gets the quota too. (A dir pool needs filesystem project quotas
+# for any size; if this fails the pool cannot enforce the caps, see provision/README.md.)
+incus storage volume set default cache size "$CACHE_SIZE" --project "$PROJECT"
+note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
 
 step "Default profile of the '$PROJECT' project"
 incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
-note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, nesting, /cache, cloud-init)"
+note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, 30GiB root, nesting, /cache, cloud-init)"
 
 # ---------------------------------------------------------------- Tailscale
 step "Tailscale"
