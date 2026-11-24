@@ -316,7 +316,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file config exec exec exec config" {
+	if got := f.callList(); got != "list project start file config exec config exec exec exec config" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -334,7 +334,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file config exec exec exec config exec delete" {
+	if got := f.callList(); got != "list project launch file config exec config exec exec exec config exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -534,5 +534,16 @@ func TestRunEndToEnd(t *testing.T) {
 	r, err = a.Job(ctx, "my-repo.20261123-120000-00ff", 5*time.Second)
 	if err == nil || !strings.Contains(err.Error(), "died") {
 		t.Fatalf("lost job = %+v, %v\n%s", r, err, out)
+	}
+}
+
+func TestRunKeepsJobExpiryWhileAnotherJobRuns(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running"}}, log: "ok\n", exit: "0\n", running: "my-repo.20261123-110000-beef\n"}
+	a, out := testApp(f)
+	if _, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}}); err != nil {
+		t.Fatalf("Run: %v\n%s", err, out)
+	}
+	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
+		t.Errorf("expiry = %q, want the 24h job expiry kept", got)
 	}
 }

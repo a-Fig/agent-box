@@ -357,6 +357,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 		return r, err
 	}
+	// Again now that the job runs: another job finishing in between may have
+	// shortened the expiry before this one was visible to its running check.
+	if err := a.setExpiry(context.WithoutCancel(ctx), box, jobTTL); err != nil {
+		a.warn(fmt.Sprintf("box: warning: setting job expiry on %s: %v", box, err))
+	}
 
 	r.State, r.Code, err = a.attach(ctx, job, o.Wait)
 	switch {
@@ -584,10 +589,21 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	if err != nil {
 		return "", 1, fmt.Errorf("job %s: bad exit code %q", job, out)
 	}
-	if err := a.setExpiry(context.WithoutCancel(ctx), box, idleTTL); err != nil {
+	a.markIdle(ctx, box)
+	return stateDone, code, nil
+}
+
+// markIdle shortens the box's expiry to idleTTL once a job has ended, unless
+// another job is still running there (it would lose its jobTTL window).
+func (a *App) markIdle(ctx context.Context, box string) {
+	ctx = context.WithoutCancel(ctx)
+	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
+	if err != nil || len(strings.Fields(out)) > 0 {
+		return
+	}
+	if err := a.setExpiry(ctx, box, idleTTL); err != nil {
 		a.warn(fmt.Sprintf("box: warning: setting idle expiry on %s: %v", box, err))
 	}
-	return stateDone, code, nil
 }
 
 // startScript checks the bundle out in /work/<repo> and starts cmd detached,

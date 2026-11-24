@@ -188,7 +188,7 @@ func TestMCPRunNoticesDeliveredBeforeCancel(t *testing.T) {
 	if launch.Box != "my-repo-0002" || launch.Job != "" || start.Box != launch.Box || start.Job != "my-repo-0002.20261123-120000-0001" {
 		t.Fatalf("launch = %+v; start = %+v", launch, start)
 	}
-	for !strings.HasSuffix(f.callList(), "file config exec exec") {
+	for !strings.HasSuffix(f.callList(), "file config exec config exec") {
 		select {
 		case <-ctx.Done():
 			t.Fatalf("never followed job: %s", f.callList())
