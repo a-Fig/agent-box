@@ -49,7 +49,7 @@ By default it reuses one box per repo, which keeps caches and `node_modules` war
 ### 2. Tray app (Windows): mode switch + gaming yield
 - **My PC:** `incus pause` every running instance in `agents`. Boxes still frozen after 15 minutes are stopped to free RAM. A "Release memory" item runs `wsl --terminate agents`.
 - **Shared:** resume, and set `limits.cpu.allowance=50%` + `limits.cpu.priority=0` live on each instance; project `limits.instances=2`.
-- **Full:** resume, unset the allowance, `limits.cpu.priority=10`; project `limits.instances=6`.
+- **Full:** resume, unset the allowance, `limits.cpu.priority=10`; project `limits.instances=3` (the project caps of 12 CPUs / 12GiB at 2 CPUs / 4GiB per box allow 3).
 - **Gaming yield:** Steam `RunningAppID` != 0, or `SHQueryUserNotificationState` full-screen/busy, behaves like My PC until the game ends.
 - It uses an admin client cert, which agents don't have. The mode is stored in the `agents` project config as `user.agent-box.mode`, so `box` can read it.
 - The tray also holds a Windows power request while any instance is running, so the PC doesn't sleep in the middle of a job.

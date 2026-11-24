@@ -10,7 +10,7 @@ type Mode string
 const (
 	MyPC   Mode = "mypc"   // every instance paused; long-frozen ones stopped
 	Shared Mode = "shared" // half the CPU, normal priority, at most 2 instances
-	Full   Mode = "full"   // all the CPU, higher priority, at most 6 instances
+	Full   Mode = "full"   // all the CPU, higher priority, at most 3 instances (12GiB cap / 4GiB each)
 )
 
 // All lists the modes in menu order.
@@ -51,7 +51,7 @@ type limits struct {
 
 func (m Mode) limits() limits {
 	if m == Full {
-		return limits{allowance: "", priority: "10", maxInstances: "6"}
+		return limits{allowance: "", priority: "10", maxInstances: "3"}
 	}
 	return limits{allowance: "50%", priority: "0", maxInstances: "2"}
 }

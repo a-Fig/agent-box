@@ -152,7 +152,7 @@ func TestFullUnsetsAllowance(t *testing.T) {
 	m.SetChosen(Full)
 	tick(m, time.Second, false)
 	equal(t, f.take(), []string{
-		"project user.agent-box.mode=full", "project limits.instances=6",
+		"project user.agent-box.mode=full", "project limits.instances=3",
 		"unset a limits.cpu.allowance", "set a limits.cpu.priority=10",
 	})
 }
@@ -191,7 +191,7 @@ func TestGamingYieldAndDebounce(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 	equal(t, f.take(), []string{
-		"project user.agent-box.mode=full", "project limits.instances=6",
+		"project user.agent-box.mode=full", "project limits.instances=3",
 		"unset a limits.cpu.allowance", "set a limits.cpu.priority=10", "resume a",
 	})
 }
