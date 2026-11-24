@@ -144,6 +144,104 @@ func TestMCPCancelDetaches(t *testing.T) {
 	}
 }
 
+func readJobNotice(t *testing.T, dec *json.Decoder, event string) jobNotice {
+	t.Helper()
+	var msg struct {
+		Method string
+		Params struct {
+			Level string
+			Data  struct {
+				jobNotice
+				RequestID json.RawMessage `json:"requestId"`
+			}
+		}
+	}
+	if err := dec.Decode(&msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.Method != "notifications/message" || msg.Params.Level != "info" || msg.Params.Data.Event != event || len(msg.Params.Data.RequestID) == 0 {
+		t.Fatalf("expected %s notice, got %+v", event, msg)
+	}
+	return msg.Params.Data.jobNotice
+}
+
+func TestMCPRunNoticesDeliveredBeforeCancel(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	a, _ := testApp(f)
+	repoJSON, err := json.Marshal(newRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	input, request := io.Pipe()
+	output, response := io.Pipe()
+	defer request.Close()
+	defer output.Close()
+	go func() { response.CloseWithError(serveMCP(ctx, a, input, response)) }()
+	if _, err := io.WriteString(request, `{"jsonrpc":"2.0","id":"run","method":"tools/call","params":{"name":"box_run","arguments":{"dir":`+string(repoJSON)+`,"command":"true","new":true}}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(output)
+	launch := readJobNotice(t, dec, "launching_box")
+	start := readJobNotice(t, dec, "starting_job")
+	if launch.Box != "my-repo-0002" || launch.Job != "" || start.Box != launch.Box || start.Job != "my-repo-0002.20261123-120000-0001" {
+		t.Fatalf("launch = %+v; start = %+v", launch, start)
+	}
+	for !strings.HasSuffix(f.callList(), "file config exec exec") {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("never followed job: %s", f.callList())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if _, err := io.WriteString(request, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"run"}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	request.Close()
+	var next rpcMsg
+	if err := dec.Decode(&next); err != io.EOF {
+		t.Fatalf("expected no reply after cancellation, got %+v, %v", next, err)
+	}
+	if f.names() != launch.Box {
+		t.Error("cancellation deleted the box")
+	}
+}
+
+func TestMCPSubmoduleWarningSurvivesLongLog(t *testing.T) {
+	repo := newRepo(t)
+	gitT(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", newRepo(t), "dependency")
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running"}}, log: strings.Repeat("x", 40<<10), exit: "0"}
+	a, _ := testApp(f)
+	repoJSON, err := json.Marshal(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(repoJSON) + `,"command":"true"}}}`
+	var out bytes.Buffer
+	if err := serveMCP(context.Background(), a, strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(&out)
+	readJobNotice(t, dec, "starting_job")
+	var reply struct {
+		Result struct {
+			Content           []struct{ Text string }
+			StructuredContent struct{ Warnings []string }
+		}
+	}
+	if err := dec.Decode(&reply); err != nil {
+		t.Fatal(err)
+	}
+	const warning = "box: warning: submodules aren't synced and will be empty in the box: dependency"
+	if got := reply.Result.StructuredContent.Warnings; len(got) != 1 || got[0] != warning {
+		t.Errorf("warnings = %q", got)
+	}
+	if got := strings.SplitN(reply.Result.Content[0].Text, "\n", 4); len(got) < 3 || got[1] != warning || got[2] != "[earlier output cut]" {
+		t.Error("warning was not shown ahead of the truncated log")
+	}
+}
+
 func TestTailBuffer(t *testing.T) {
 	b := &tailBuffer{max: 4}
 	b.Write([]byte("abc"))

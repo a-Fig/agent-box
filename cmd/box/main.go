@@ -12,7 +12,7 @@ import (
 )
 
 const usage = `usage:
-  box new [name] [--ttl 8h]                 launch a box (--ttl 0: no expiry)
+  box new [name] [--ttl 2h]                 launch a box with a positive TTL
   box run [--box name | --new] -- <cmd...>  sync this worktree to a box and run cmd
   box job <id>                              reattach to a job
   box rm <name>                             delete a box
@@ -54,7 +54,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 
 	switch args[0] {
 	case "new":
-		ttl := fs.Duration("ttl", defaultTTL, "lifetime, stored as user.expires")
+		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires")
 		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 1 {
 			return 2
 		}
@@ -67,7 +67,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	case "run":
 		box := fs.String("box", "", "box to use (default: the repo's own box)")
 		isNew := fs.Bool("new", false, "use a throwaway box, deleted afterwards")
-		ttl := fs.Duration("ttl", defaultTTL, "lifetime of a --new box")
+		ttl := fs.Duration("ttl", idleTTL, "initial lifetime of a --new box before the job starts")
 		if fs.Parse(args[1:]) != nil {
 			return 2
 		}

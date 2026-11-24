@@ -24,6 +24,32 @@ func TestRunNewNeverAdoptsABox(t *testing.T) {
 	}
 }
 
+func TestRunRejectsReuseOfThrowawayBox(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{
+		Name: "temporary", Status: "Running", Config: map[string]string{throwawayKey: "true"},
+	}}}
+	a, _ := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Box: "temporary", Cmd: []string{"true"}})
+	if err == nil || !strings.Contains(err.Error(), "throwaway and cannot be reused") || r.Box != "temporary" {
+		t.Fatalf("Run = %+v, %v", r, err)
+	}
+	if calls := f.callList(); calls != "list project" {
+		t.Errorf("incus calls = %q, want only list and project", calls)
+	}
+}
+
+func TestInterruptedThrowawayLaunchReportsName(t *testing.T) {
+	f := &fakePC{t: t, launchErr: true}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), New: true, Cmd: []string{"true"}})
+	if err == nil || r.Box == "" || !strings.Contains(out.String(), "box: launching "+r.Box) {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if got := f.inst(r.Box).Config[throwawayKey]; got != "true" {
+		t.Errorf("box %s marker = %q", r.Box, got)
+	}
+}
+
 func TestRunNewKeepsBoxWhenPaused(t *testing.T) {
 	// Frozen while following: the job isn't known to be done, so the box stays.
 	f := &fakePC{t: t, freeze: true}
@@ -189,6 +215,7 @@ func TestSnapshotIgnoresIndexFlags(t *testing.T) {
 	gitT(t, dir, "add", "-A")
 	gitT(t, dir, "commit", "-qm", "two files")
 	gitT(t, dir, "update-index", "--assume-unchanged", "a.txt")
+	gitT(t, dir, "update-index", "--skip-worktree", "a.txt")
 	gitT(t, dir, "update-index", "--skip-worktree", "b.txt")
 	write(t, filepath.Join(dir, "a.txt"), "a2\n")
 	write(t, filepath.Join(dir, "b.txt"), "b2\n")
@@ -205,7 +232,46 @@ func TestSnapshotIgnoresIndexFlags(t *testing.T) {
 		}
 	}
 	// The user's own flags stay as they were.
-	if v := gitT(t, dir, "ls-files", "-v", "a.txt", "b.txt"); v != "h a.txt\nS b.txt" {
+	if v := gitT(t, dir, "ls-files", "-v", "a.txt", "b.txt"); v != "s a.txt\nS b.txt" {
 		t.Errorf("ls-files -v = %q", v)
+	}
+}
+
+func TestSnapshotIncludesForceAddedFile(t *testing.T) {
+	dir := newRepo(t)
+	write(t, filepath.Join(dir, "ignored.txt"), "staged\n")
+	gitT(t, dir, "add", "-f", "ignored.txt")
+	write(t, filepath.Join(dir, "ignored.txt"), "worktree\n")
+
+	bundle, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(bundle))
+	clone := fetchSnapshot(t, bundle, "id-1")
+	if got := gitT(t, clone, "show", "FETCH_HEAD:ignored.txt"); got != "worktree" {
+		t.Errorf("ignored.txt = %q, want worktree contents", got)
+	}
+	if got := gitT(t, dir, "show", ":ignored.txt"); got != "staged" {
+		t.Errorf("original index = %q, want staged contents", got)
+	}
+}
+
+func TestFollowWaitsForLauncherPID(t *testing.T) {
+	bash := gitBash(t)
+	old := workRoot
+	workRoot = filepath.ToSlash(t.TempDir())
+	defer func() { workRoot = old }()
+	if err := os.Mkdir(filepath.Join(workRoot, ".box"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	job := "sample.20261123-120000-0001"
+	file := workRoot + "/.box/" + job
+	write(t, file+".log", "started\n")
+	// Publish the files when the follower first waits to model the launch race.
+	publish := "sleep() { echo $$ > " + shq(file+".pid") + "; echo 0 > " + shq(file+".exit") + "; }\n"
+	res, err := (execRunner{}).Run(context.Background(), Cmd{Name: bash, Args: []string{"-c", publish + followScript(job)}})
+	if err != nil || res.Code != 0 || strings.TrimSpace(res.Stdout) != "started" {
+		t.Fatalf("follow = %+v, %v", res, err)
 	}
 }

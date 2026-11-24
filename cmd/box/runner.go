@@ -15,6 +15,7 @@ type Cmd struct {
 	Args   []string
 	Env    []string  // added to the inherited environment
 	Dir    string    // working directory; "" is the current one
+	Stdin  io.Reader // optional input for the command
 	Stdout io.Writer // when set, stdout streams here instead of into Result.Stdout
 	Stderr io.Writer // when set, stderr streams here instead of into Result.Stderr
 }
@@ -36,6 +37,7 @@ type execRunner struct{}
 func (execRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Dir = c.Dir
+	cmd.Stdin = c.Stdin
 	if len(c.Env) > 0 {
 		cmd.Env = append(os.Environ(), c.Env...)
 	}

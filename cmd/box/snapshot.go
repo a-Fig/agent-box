@@ -18,14 +18,20 @@ type repo struct {
 }
 
 func git(ctx context.Context, r Runner, dir string, env []string, args ...string) (string, error) {
-	res, err := r.Run(ctx, Cmd{Name: "git", Args: args, Dir: dir, Env: env})
+	out, err := runGit(ctx, r, Cmd{Args: args, Dir: dir, Env: env})
+	return strings.TrimSpace(out), err
+}
+
+func runGit(ctx context.Context, r Runner, cmd Cmd) (string, error) {
+	cmd.Name = "git"
+	res, err := r.Run(ctx, cmd)
 	if err != nil {
 		return "", err
 	}
 	if res.Code != 0 {
-		return "", fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(res.Stderr))
+		return "", fmt.Errorf("git %s: %s", cmd.Args[0], strings.TrimSpace(res.Stderr))
 	}
-	return strings.TrimSpace(res.Stdout), nil
+	return res.Stdout, nil
 }
 
 func openRepo(ctx context.Context, r Runner, dir string) (repo, error) {
@@ -72,18 +78,21 @@ func snapshot(ctx context.Context, r Runner, top, id string) (bundle string, err
 		}
 	}()
 
-	// Start from HEAD's tree, not a copy of the real index: a copy would keep
-	// assume-unchanged and skip-worktree flags, and add -A would then skip
-	// changed files. The price is rehashing the worktree (no stat cache).
+	// Copy the real index's entries so files tracked with git add -f stay
+	// tracked. Rebuilding the index drops its flags and stale stat cache.
 	index := filepath.Join(tmp, "index")
+	entries, err := runGit(ctx, r, Cmd{Args: []string{"ls-files", "--stage", "-z"}, Dir: top})
+	if err != nil {
+		return "", err
+	}
 	head, _ := git(ctx, r, top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}")
 	env := []string{
 		"GIT_INDEX_FILE=" + index,
 		"GIT_AUTHOR_NAME=box", "GIT_AUTHOR_EMAIL=box@agent-box",
 		"GIT_COMMITTER_NAME=box", "GIT_COMMITTER_EMAIL=box@agent-box",
 	}
-	if head != "" {
-		if _, err := git(ctx, r, top, env, "read-tree", "--no-sparse-checkout", head); err != nil {
+	if entries != "" {
+		if _, err := runGit(ctx, r, Cmd{Args: []string{"update-index", "-z", "--index-info"}, Dir: top, Env: env, Stdin: strings.NewReader(entries)}); err != nil {
 			return "", err
 		}
 	}
