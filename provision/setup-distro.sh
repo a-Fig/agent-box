@@ -104,6 +104,18 @@ modprobe btrfs
 echo btrfs > /etc/modules-load.d/agent-box-btrfs.conf
 note "btrfs loaded, and loaded at every boot"
 
+step "lxcfs (boxes see their own memory and CPUs in /proc)"
+# systemd in WSL counts as a container, and incus-lxcfs.service skips containers
+# (ConditionVirtualization=!container). Without lxcfs, a box's /proc/meminfo shows the whole VM,
+# so tools that size themselves from it (Gradle, JVMs, test runners) overshoot their cgroup limit.
+mkdir -p /etc/systemd/system/incus-lxcfs.service.d
+printf '[Unit]
+ConditionVirtualization=
+' > /etc/systemd/system/incus-lxcfs.service.d/wsl.conf
+systemctl daemon-reload
+systemctl enable --now incus-lxcfs >/dev/null 2>&1 || true
+note "incus-lxcfs: $(systemctl is-active incus-lxcfs || true)"
+
 step "Initialising Incus (preseed)"
 if incus storage show default >/dev/null 2>&1; then
   note "storage pool 'default' exists: already initialised, skipping preseed"

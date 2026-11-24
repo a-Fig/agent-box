@@ -36,6 +36,8 @@ this file loads into every session, so it stays short and points into `docs/` fo
   the tray (`%APPDATA%\agent-box\boxtray.json`, then restart it), not the key.
 - Over SSH, `$env:USERDOMAIN` on the PC is `WORKGROUP`; use the Windows identity's name.
 - WSL's ext4 has no project quotas, so the storage pool is btrfs: only it enforces disk sizes.
+- systemd in WSL counts as a container, so units with `ConditionVirtualization=!container` (such
+  as `incus-lxcfs`) are skipped unless a drop-in clears the condition.
 - On the laptop, run Go only through `.scratch/golock.sh` (one Go run at a time) and never with
   `-race`: the laptop starves. CI runs `-race`.
 
