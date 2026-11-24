@@ -135,9 +135,14 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 	instCap := int64(maxBoxes)
 	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
 	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
-	var cpus, mem, gpus int64
+	var cpus, mem, gpus, reclaimN, reclaimDisk int64
 	for _, in := range insts {
 		sz := mode.SizeOf(in.Config)
+		if reclaimable(in) { // the next launch deletes it first
+			d, _ := mode.ParseBytes(sz.Disk)
+			reclaimN, reclaimDisk = reclaimN+1, reclaimDisk+d
+			continue
+		}
 		if sz.GPU && in.Status != "Stopped" {
 			gpus++
 		}
@@ -156,6 +161,8 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 	resources := a.projectResources(ctx)
 	diskFree, diskKnown := resources["disk"].remaining()
 	containersFree, containersKnown := resources["containers"].remaining()
+	diskFree += reclaimDisk
+	containersFree += reclaimN
 
 	sizes := make([]SizeRoom, len(mode.Sizes))
 	limited := false
@@ -169,7 +176,7 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 		szMem, _ := mode.ParseBytes(sz.Memory)
 		szDisk, _ := mode.ParseBytes(sz.Disk)
 		if instCap >= 0 {
-			limit(instCap-int64(len(insts)), 1)
+			limit(instCap-int64(len(insts))+reclaimN, 1)
 		}
 		if containersKnown {
 			limit(containersFree, 1)

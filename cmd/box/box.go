@@ -359,7 +359,41 @@ func reusableBox(in *instance, requestedSize string) error {
 // "agents"` or `Reached maximum number of instances in project "agents"`.
 var projectLimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
 
+// reclaimable says whether in is a throwaway GPU box the tray stopped for a
+// game or My PC. It is kept for GPUStoppedTTL so box job can say why its job
+// died, but it still holds a GPU box's memory and disk against the project's
+// caps, so any launch that would not fit deletes it first.
+func reclaimable(in instance) bool {
+	return in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true"
+}
+
+// reclaim deletes every reclaimable box and says whether there was one.
+func (a *App) reclaim(ctx context.Context) bool {
+	insts, err := a.list(ctx)
+	if err != nil {
+		return false
+	}
+	any := false
+	for _, in := range insts {
+		if reclaimable(in) {
+			a.removeQuietly(ctx, in.Name)
+			any = true
+		}
+	}
+	return any
+}
+
+// launch creates box name. Refused for the project's caps, it deletes
+// reclaimable boxes and tries once more.
 func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
+	err := a.launchOnce(ctx, name, ttl, throwaway, sz)
+	if isNoRoom(err) && a.reclaim(ctx) {
+		err = a.launchOnce(ctx, name, ttl, throwaway, sz)
+	}
+	return err
+}
+
+func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
 	}

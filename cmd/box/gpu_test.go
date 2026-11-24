@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -275,5 +276,40 @@ func TestStatusGPU(t *testing.T) {
 				t.Errorf("room = %q", s.Room)
 			}
 		})
+	}
+}
+
+// A GPU box the tray stopped still holds its memory and disk against the
+// caps, so a CPU run that doesn't fit deletes it and tries once more.
+func TestNoRoomReclaimsStoppedGPUThrowaways(t *testing.T) {
+	stopped := instance{Name: "gpu-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "gaming: steam:570")}
+	f := &fakePC{t: t, mode: "shared", refuse: memoryRefusal, insts: []instance{stopped}}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true})
+	if err != nil || r.Code != exitPaused {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if f.names() != "" || len(f.launches) != 2 || !strings.Contains(out.String(), "box: removing gpu-1234") {
+		t.Errorf("boxes %q, %d launches\n%s", f.names(), len(f.launches), out)
+	}
+	// Nothing to reclaim (a box new --gpu box is the owner's): one launch.
+	f = &fakePC{t: t, mode: "shared", refuse: memoryRefusal, insts: []instance{{Name: "mine", Status: "Stopped", Config: gpuConfig()}}}
+	a, out = testApp(f)
+	if r, _ := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true}); r.Code != exitPaused || len(f.launches) != 1 || f.names() != "mine" {
+		t.Errorf("Run = %+v, %d launches, boxes %q\n%s", r, len(f.launches), f.names(), out)
+	}
+}
+
+func TestStatusDoesntCountStoppedGPUThrowaways(t *testing.T) {
+	f := &fakePC{t: t, mode: "shared", project: map[string]string{
+		"limits.instances": "2", "limits.cpu": "24", "limits.memory": "12GiB",
+		"info": fmt.Sprintf(`{"resources":{"disk":{"Limit":%d,"Usage":%d},"containers":{"Limit":2,"Usage":2}}}`, int64(150)<<30, int64(110)<<30),
+	}, insts: []instance{
+		{Name: "pi-vi", Status: "Running", Config: map[string]string{"limits.memory": "4GiB"}},
+		{Name: "gpu-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")},
+	}}
+	a, _ := testApp(f)
+	if s := a.Status(context.Background(), ""); s.Room != "1 large, or 1 medium, or 1 small" || s.GPU != "free" {
+		t.Errorf("room = %q, gpu = %q", s.Room, s.GPU)
 	}
 }
