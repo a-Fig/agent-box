@@ -36,6 +36,10 @@ const (
 	recModeRequest = "mode-request"
 	recControl     = "control"
 	recRefusal     = "refusal"
+	recQueueAdd    = "queue-add"    // a job was queued
+	recQueueStart  = "queue-start"  // boxd started it; seconds is the wait
+	recQueueCancel = "queue-cancel" // cancelled while it waited
+	recQueueDrop   = "queue-drop"   // it could never start, or waited too long
 )
 
 // record is one line of an events file.
@@ -99,6 +103,11 @@ type modeAt struct {
 	modeRec
 }
 
+type waitAt struct {
+	at      time.Time
+	seconds float64
+}
+
 type refusalAt struct {
 	at  time.Time
 	why string
@@ -115,6 +124,8 @@ type History struct {
 	boxes    map[string]*boxSpan
 	modes    []modeAt
 	refusals []refusalAt
+	queueAdd []time.Time
+	waits    []waitAt
 	memDays  map[string][]memAgg // done days' minute samples, by UTC hour
 }
 
@@ -161,6 +172,14 @@ func eachLine(path string, fn func([]byte)) {
 // apply folds a record into memory.
 func (h *History) apply(r record) {
 	switch r.Type {
+	case recQueueAdd:
+		h.queueAdd = append(h.queueAdd, r.At)
+		return
+	case recQueueStart:
+		h.waits = append(h.waits, waitAt{r.At, r.Seconds})
+		return
+	case recQueueCancel, recQueueDrop:
+		return
 	case recJobStart, recJobEnd:
 		if r.Job == nil {
 			return
@@ -519,6 +538,22 @@ func (h *History) Range(rng string, live Live) dash.History {
 			out.Buckets[i].Refusals.ByWhy[r.why]++
 		}
 	}
+	for _, t := range h.queueAdd {
+		if i := at(t); i >= 0 {
+			out.Buckets[i].Queued.Jobs++
+		}
+	}
+	waits := make([][]float64, n)
+	for _, wt := range h.waits {
+		if i := at(wt.at); i >= 0 {
+			waits[i] = append(waits[i], wt.seconds)
+		}
+	}
+	for i, ws := range waits {
+		if len(ws) > 0 {
+			out.Buckets[i].Queued.MedianWaitSeconds = median(ws)
+		}
+	}
 	out.Segments = segments(h.modes, start, now, live.Mode)
 	h.mu.Unlock()
 
@@ -652,4 +687,20 @@ func median(ds []float64) float64 {
 		return math.Round(ds[n/2])
 	}
 	return math.Round((ds[n/2-1] + ds[n/2]) / 2)
+}
+
+// JobByID finds the newest recorded job of a box name and ID.
+func (h *History) JobByID(box, id string) (dash.Job, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var best *dash.Job
+	for _, j := range h.jobs {
+		if j.Box == box && j.ID == id && (best == nil || j.StartedAt.After(best.StartedAt)) {
+			best = j
+		}
+	}
+	if best == nil {
+		return dash.Job{}, false
+	}
+	return *best, true
 }

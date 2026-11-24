@@ -103,6 +103,9 @@ type meta struct {
 	} `json:"agent"`
 	Size string `json:"size"`
 	GPU  bool   `json:"gpu"`
+	// Set by boxd for a job it started from the queue.
+	QueuedAt  string `json:"queuedAt"`
+	StartedAt string `json:"startedAt"`
 }
 
 func parseScan(out []byte, skipped map[string]bool) []scanned {
