@@ -267,7 +267,8 @@ if ($BoxtrayPath) {
     $tAction = New-ScheduledTaskAction -Execute $full -WorkingDirectory (Split-Path $full)
     $tTrig = New-ScheduledTaskTrigger -AtLogOn -User $me
     $tPrinc = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-    $tSett = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+    $tSett = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)   # restart if boxtray exits with an error
     Register-ScheduledTask -TaskName $TrayTask -Action $tAction -Trigger $tTrig -Principal $tPrinc -Settings $tSett -Force `
         -Description 'agent-box tray' | Out-Null
     Note "registered: $full"
