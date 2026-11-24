@@ -30,6 +30,9 @@ this file loads into every session, so it stays short and points into `docs/` fo
 
 ## Traps
 
+- **The repo is public** (since 2026-11-24, so GitHub Actions is free). Everything in commits,
+  PR bodies, issues and docs is world-readable: no secrets or tokens, no personal details, and
+  nothing about machines other people lend us (addresses, ports, accounts, owners).
 - **Never wipe, repartition or dual-boot the PC** (Tyler's rule). Everything runs on top of
   Windows; ask before anything that touches its disks or boot config.
 - `incus` create and edit commands read YAML from stdin when it isn't a terminal. Over SSH or in
