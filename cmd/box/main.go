@@ -46,7 +46,8 @@ uses a throwaway. The tray stops a GPU box when a game starts or in My PC.
 
 box run exits with the command's exit code, 124 when --timeout fired, or 75
 when the PC or box is paused, there is no room, or the GPU is taken or was
-stopped. A relative remote path in box pull starts at the job's checkout.
+stopped. A job paused mid-run resumes if the PC's owner switches back within
+15 minutes, else it is lost; box job reattaches. A relative remote path in box pull starts at the job's checkout.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
