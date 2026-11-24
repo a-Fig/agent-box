@@ -17,8 +17,9 @@ One server, one page, three ways in.
   `tailscale serve`, which gives it HTTPS and tells it who is asking. `boxd` itself listens on
   127.0.0.1 only.
 - **The page** is static files embedded in `boxd`: plain HTML, CSS and JS with no framework and no
-  build step, like Murmur's `internal/web/static`. It follows Murmur's look (Tyler, 2026-11-23),
-  light and dark.
+  build step, like Murmur's `internal/web/static`. It follows Murmur's look (Tyler, 2026-11-23):
+  its tokens and components, and its three themes, Dim by default (Tyler's choice) with Light and
+  Dark, switched in the sidebar and remembered in the browser's `localStorage`.
 - **Ways in:**
   - `box ui` (laptop) opens the page in the browser.
   - `box app` (laptop) opens it in a window of its own, through
@@ -175,6 +176,15 @@ A run turned away with exit 75 never reaches a box, so `box` also sends `POST /a
 (`{why, reason, size, gpu, repo, agent}`: `why` is the refusal's cause, `reason` the agent's), as a best effort with a 2s timeout, ignoring errors. Without
 it the history couldn't show what yields and full caps cost.
 
+### Jobs that end with their box
+
+`box` deletes a throwaway box as soon as it has read the run's exit, which can be inside `boxd`'s
+3s poll: `boxd` would then see the box vanish with no `.exit` read and record the job as `lost`. So
+after reading the exit and before deleting the box, `box` sends `POST /api/jobs/ended`
+(`{box, id, exit, endedAt, tail}`, `dash.JobEndedBody`), as a best effort with a 2s timeout,
+ignoring errors, like refusals. `boxd` takes it only for a job it knows is running (404
+otherwise), masks the tail as it masks every tail, records the end, and answers 204.
+
 ### History
 
 `boxd` writes JSON lines to `/var/lib/agent-box/history/`, in two kinds of files:
@@ -229,10 +239,24 @@ JSON over HTTPS, on the same origin as the page.
 - **A job's key** is `box/id/startedAt`, since box names and job IDs get reused.
 - **Errors** are `{error, code}`:
   - 400 for a bad request;
-  - 403 when the caller isn't an owner;
+  - 403 when the caller isn't an owner, or a `POST` lacks `X-Agent-Box: 1`;
   - 404 for something that's gone;
-  - 409 for a request that can't be applied now (for example `code: "yielding"`);
+  - 409 for a request that can't be applied now: cancelling a job whose box is frozen
+    (`code: "yielding"` during a game, `"frozen"` in My PC, since a frozen box can't run the kill),
+    or one that has already ended (`"not-running"`); and a box control for a box whose name a
+    newer box now has (`"gone"`, see below);
   - 502 when Incus failed.
+  - The codes are constants in `internal/dash` (`CodeYielding` and the rest).
+- **In a path**, a job's key is one segment, escaped (`encodeURIComponent`), since it holds `/`.
+- **A job's box** is the box of its name made no later than 10 minutes after the job started
+  (`createdAt <= startedAt + 10m`, `dash.JobBoxGrace`): `box run --new` makes the job's ID and
+  start before it launches the box, so a throwaway's `createdAt` is a few seconds after its job's
+  `startedAt`. A box of the name made later is a reuse of the name, not the job's: its log is gone,
+  and the page shows the kept `tail`.
+- **A box control names its box** by name and `createdAt`, for the same reason: delete and extend
+  send `{createdAt}` (the box the page saw), `boxd` compares it with the box's own under the same
+  lock as the change, and answers 409 `code: "gone"` when the name now belongs to another box. The
+  page also closes a confirm whose box went or was replaced while it was open.
 
 ### Live updates
 
@@ -240,7 +264,11 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - The first event is `state`, the full `/api/state`.
 - After that, each event carries one whole object, which replaces the old one: `machine`, `box`,
   `job`, `box-gone` and `job-gone`.
-- On reconnect the page starts over from `state`. There is no replay.
+- On reconnect the page starts over from `state`. There is no replay. If `/api/state` fails too, the
+  page shows "PC unreachable" and tries again every 10s.
+- A running job's `job` events carry its `tail`, so Overview's log tails are live without a call.
+- The one exception is an open log: the page asks `/log` again from its `offset` every 2s while the
+  job runs and the answer said `eof`, and every 5s while it says `paused`.
 
 ### Endpoints
 
@@ -248,14 +276,16 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 |---|---|
 | `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
-| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&before=&limit=` | finished jobs from history, newest first |
-| `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call |
-| `GET /api/history?range=day\|week` | `{buckets}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byReason}, medianSeconds: {byRepo}, memUsed, memCap}`. A day has hourly buckets, a week daily ones. The mode timeline is a separate `segments: [{start, end, mode, reason}]`. |
-| `POST /api/mode` | `{mode}` |
-| `POST /api/jobs/{key}/cancel` | |
-| `POST /api/boxes/{name}/delete` | |
-| `POST /api/boxes/{name}/extend` | `{hours}` |
+| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
+| `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
+| `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
+| `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode, reason}]`: the effective mode, a yield being `mypc` with the tray's reason (`gaming: steam:570`). |
+| `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. During a game it waits, as the handshake says; it is not refused. |
+| `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
+| `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
+| `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
+| `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
 
 ### Shapes
 
@@ -270,7 +300,9 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 ### The contract and the devserver
 
 - **The contract** is `internal/dash`: the Go types plus the `kind` table.
-- **Fixtures** are generated from those types in a golden test, one per scenario:
+- **Fixtures** are generated from those types in a golden test, one per scenario
+  (`internal/dash/fixture` builds them; `go test ./internal/dash -run Golden -update` writes
+  `internal/dash/testdata/<scenario>.json`, built at 2026-11-24T17:30:00Z):
   - empty;
   - busy (three boxes, two running jobs);
   - yielding to a game, with a mode request pending;
@@ -281,6 +313,12 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - **The devserver** is `internal/dash/devserver`, like Murmur's `internal/web/devserver`. It serves
   the page with a chosen fixture, replays SSE events on a timer, and fakes the controls. The page is
   built against it, so the page and `boxd` are built at the same time.
+  - `go run ./internal/dash/devserver -scenario busy` (on 127.0.0.1:7767). `-static
+    internal/dash/static` serves the page from disk so an edit shows on reload; `-still` stops the
+    replay; `-unreachable` starts with the API down, and `GET /dev/down` and `/dev/up` switch it;
+    `-fail` makes every control answer 502.
+  - The page is `internal/dash/static`, embedded; `static.Handler` serves it with its
+    Content-Security-Policy, which `boxd` reuses.
 
 ## Install and run
 
