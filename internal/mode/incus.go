@@ -10,6 +10,10 @@ import (
 type Instance struct {
 	Name   string `json:"name"`
 	Status string `json:"status"` // Running, Frozen, Stopped, ...
+	// Config is the instance's own config (not the profile's), as
+	// `incus list --format json` reports it. The Manager compares it with
+	// what the mode wants, so a key an agent changed is put back.
+	Config map[string]string `json:"config"`
 }
 
 // Incus is everything the Manager needs from Incus.
@@ -20,6 +24,8 @@ type Incus interface {
 	Stop(ctx context.Context, name string) error
 	SetInstanceConfig(ctx context.Context, name, key, value string) error
 	UnsetInstanceConfig(ctx context.Context, name, key string) error
+	// SetProjectConfig is used only for the mode label; the tray never changes
+	// project limits (Incus refuses to lower them below what is in use).
 	SetProjectConfig(ctx context.Context, key, value string) error
 }
 
