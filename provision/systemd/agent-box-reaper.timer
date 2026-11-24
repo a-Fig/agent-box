@@ -1,0 +1,9 @@
+[Unit]
+Description=agent-box: delete expired boxes every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

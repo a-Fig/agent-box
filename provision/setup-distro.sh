@@ -248,6 +248,13 @@ else
 fi
 
 # ---------------------------------------------------------------- VM capability
+step "Reaper (deletes expired boxes every minute, with or without the tray)"
+install -m 0755 "$HERE/reaper.sh" /usr/local/sbin/agent-box-reaper
+install -m 0644 "$HERE/systemd/agent-box-reaper.service" "$HERE/systemd/agent-box-reaper.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agent-box-reaper.timer >/dev/null 2>&1
+note "agent-box-reaper.timer enabled"
+
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then
   note "/dev/kvm present: Incus VMs (incus launch --vm) are possible."

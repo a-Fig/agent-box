@@ -1,0 +1,8 @@
+[Unit]
+Description=agent-box: delete expired boxes
+After=incus.service
+Requires=incus.socket
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/agent-box-reaper
