@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -144,5 +148,158 @@ func TestRunSkipsIncusWhileHostDownAndHoldsAwake(t *testing.T) {
 	defer s.mu.Unlock()
 	if len(s.awake) < 3 || !s.awake[1] || s.awake[len(s.awake)-1] {
 		t.Fatalf("awake = %v", s.awake)
+	}
+}
+
+func TestLogCapKeepsNewerHalfAtLineBoundary(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "boxtray.log")
+	l := openLog(p, 400)
+	for i := 0; i < 50; i++ {
+		l.Printf("line %02d", i)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > 400 {
+		t.Fatalf("log is %d bytes, cap 400", len(b))
+	}
+	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	if len(lines) < 3 || !strings.HasSuffix(lines[len(lines)-1], "line 49") {
+		t.Fatalf("newest line missing: %q", lines)
+	}
+	for _, ln := range lines {
+		if !strings.Contains(ln, " line ") || !strings.HasPrefix(ln, "20") {
+			t.Fatalf("partial or untimestamped line %q", ln)
+		}
+	}
+	if strings.HasSuffix(lines[0], "line 00") {
+		t.Fatal("older lines were not dropped")
+	}
+}
+
+func TestLogTrimsOversizedFileAtOpenAndNilIsSafe(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "boxtray.log")
+	big := strings.Repeat("old line\n", 100)
+	if err := os.WriteFile(p, []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	openLog(p, 300)
+	b, _ := os.ReadFile(p)
+	if len(b) > 150 || !strings.HasPrefix(string(b), "old line\n") {
+		t.Fatalf("got %d bytes starting %q", len(b), b[:min(len(b), 12)])
+	}
+	var nilLog *fileLog
+	nilLog.Printf("ignored")
+}
+
+// fakeClock advances only when told to.
+type fakeClock struct{ t time.Time }
+
+func (c *fakeClock) now() time.Time { return c.t }
+
+func newRetry(c *fakeClock, add func() error) (*iconRetry, *[]string) {
+	var lines []string
+	r := &iconRetry{add: add, now: c.now, limit: iconRetryLimit,
+		logf: func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }}
+	r.restart()
+	return r, &lines
+}
+
+func TestIconRetrySucceedsAfterFailures(t *testing.T) {
+	c := &fakeClock{t: time.Unix(0, 0)}
+	n := 0
+	r, _ := newRetry(c, func() error {
+		n++
+		if n < 4 {
+			return errors.New("no taskbar")
+		}
+		return nil
+	})
+	for r.try() {
+		c.t = c.t.Add(iconRetryEvery)
+	}
+	if !r.added || r.gaveUp || r.tries != 4 {
+		t.Fatalf("added=%v gaveUp=%v tries=%d", r.added, r.gaveUp, r.tries)
+	}
+	if r.try() || n != 4 {
+		t.Fatal("kept adding after success")
+	}
+}
+
+func TestIconRetryGivesUpAfterTwoMinutes(t *testing.T) {
+	c := &fakeClock{t: time.Unix(0, 0)}
+	r, lines := newRetry(c, func() error { return errors.New("no taskbar") })
+	for r.try() {
+		c.t = c.t.Add(iconRetryEvery)
+	}
+	if !r.gaveUp || r.added {
+		t.Fatalf("added=%v gaveUp=%v", r.added, r.gaveUp)
+	}
+	if got := c.t.Sub(time.Unix(0, 0)); got != iconRetryLimit {
+		t.Fatalf("gave up at %v, want %v", got, iconRetryLimit)
+	}
+	if r.tries != 61 { // t=0,2,...,120s
+		t.Fatalf("tries=%d", r.tries)
+	}
+	if last := (*lines)[len(*lines)-1]; !strings.Contains(last, "giving up") || !strings.Contains(last, "without it") {
+		t.Fatalf("last log line %q", last)
+	}
+}
+
+func TestIconRetryRestartAfterExplorerRestart(t *testing.T) {
+	c := &fakeClock{t: time.Unix(0, 0)}
+	fail := false
+	r, _ := newRetry(c, func() error {
+		if fail {
+			return errors.New("no taskbar")
+		}
+		return nil
+	})
+	r.try()
+	if !r.added {
+		t.Fatal("first add failed")
+	}
+	c.t = c.t.Add(time.Hour)
+	fail = true
+	r.restart() // TaskbarCreated
+	if r.added || !r.try() {
+		t.Fatal("restart should retry after a failure")
+	}
+	fail = false
+	c.t = c.t.Add(iconRetryEvery)
+	if r.try() || !r.added {
+		t.Fatal("should have added on the retry")
+	}
+}
+
+func TestStatusLogOnlyLogsChanges(t *testing.T) {
+	var lines []string
+	s := &statusLog{logf: func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }}
+	st := mode.Status{Chosen: mode.Shared, Effective: mode.Shared}
+	s.observe(st)
+	s.observe(st)
+	s.observe(st)
+	if len(lines) != 1 {
+		t.Fatalf("steady state logged %q", lines)
+	}
+	y := st
+	y.Yielding, y.Reason, y.Effective = true, "steam:570", mode.MyPC
+	s.observe(y)
+	s.observe(y)
+	s.observe(st)
+	c := st
+	c.Chosen = mode.Full
+	s.observe(c)
+	d := c
+	d.Down = true
+	d.Err = errors.New("boom")
+	s.observe(d)
+	s.observe(d)
+	joined := strings.Join(lines, "|")
+	for _, want := range []string{"yielding to a game (steam:570)", "game ended", "mode chosen: ", "not running", "tick error: boom"} {
+		if strings.Count(joined, want) != 1 {
+			t.Fatalf("want one %q in %q", want, joined)
+		}
 	}
 }

@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -25,6 +26,8 @@ func u32(name string) *windows.LazyProc { return user32.NewProc(name) }
 const (
 	wmNull       = 0x0000
 	wmDestroy    = 0x0002
+	wmEndSession = 0x0016
+	wmTimer      = 0x0113
 	wmLButtonUp  = 0x0202
 	wmRButtonUp  = 0x0205
 	wmTray       = 0x8001 // WM_APP+1: icon callback
@@ -45,6 +48,7 @@ const (
 	idRelease    = 10
 	idQuit       = 11
 	trayIconID   = 1
+	iconTimerID  = 1
 	className    = "AgentBoxTray"
 )
 
@@ -112,6 +116,7 @@ type tray struct {
 	act            trayActions
 	taskbarCreated uint32
 	icons          map[mode.Mode]uintptr
+	retry          *iconRetry
 
 	mu     sync.Mutex
 	status mode.Status
@@ -152,11 +157,43 @@ func newTray(chosen func() mode.Mode, act trayActions) (*tray, error) {
 	t.nid.uID = trayIconID
 	t.nid.uFlags = nifMessage | nifIcon | nifTip
 	t.nid.uCallbackMessage = wmTray
+	t.retry = &iconRetry{add: t.addIcon, now: time.Now, limit: iconRetryLimit, logf: lg.Printf}
+	// A failed first add is not fatal: at logon the taskbar may not be ready.
+	t.restartIcon()
+	return t, nil
+}
+
+// addIcon puts the icon in the notification area (UI thread only).
+func (t *tray) addIcon() error {
 	t.render()
 	if ok, _, err := shellNI.Call(nimAdd, uintptr(unsafe.Pointer(&t.nid))); ok == 0 {
-		return nil, errors.Join(errors.New("Shell_NotifyIcon add failed"), err)
+		return errors.Join(errors.New("Shell_NotifyIcon add failed"), err)
 	}
-	return t, nil
+	return nil
+}
+
+// restartIcon starts a fresh round of add attempts and arms the retry timer
+// if the first one failed. Runs on the UI thread, from newTray and when
+// Explorer announces a new taskbar.
+func (t *tray) restartIcon() {
+	t.retry.restart()
+	t.stepIcon()
+}
+
+func (t *tray) stepIcon() {
+	if t.retry.try() {
+		u32("SetTimer").Call(t.hwnd, iconTimerID, uintptr(iconRetryEvery/time.Millisecond), 0)
+	} else {
+		u32("KillTimer").Call(t.hwnd, iconTimerID)
+	}
+}
+
+// modifyIcon refreshes the icon and tooltip, if the icon is in at all.
+func (t *tray) modifyIcon() {
+	t.render()
+	if t.retry.added {
+		shellNI.Call(nimModify, uintptr(unsafe.Pointer(&t.nid)))
+	}
 }
 
 // loop pumps messages until Quit.
@@ -164,6 +201,9 @@ func (t *tray) loop() {
 	var m winMsg
 	for {
 		r, _, _ := u32("GetMessageW").Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
+		if int32(r) < 0 {
+			lg.Printf("GetMessageW failed; leaving the message loop")
+		}
 		if int32(r) <= 0 {
 			break
 		}
@@ -232,11 +272,12 @@ func (t *tray) showMenu() {
 	switch {
 	case id >= idModeBase && int(id) < idModeBase+len(mode.All):
 		t.act.pick(mode.All[id-idModeBase])
-		t.render()
-		shellNI.Call(nimModify, uintptr(unsafe.Pointer(&t.nid)))
+		t.modifyIcon()
 	case id == idRelease:
+		lg.Printf("Release memory chosen from the menu")
 		t.act.release()
 	case id == idQuit:
+		lg.Printf("Quit chosen from the menu")
 		u32("PostQuitMessage").Call(0)
 	}
 }
@@ -250,11 +291,17 @@ func wndProc(hwnd, m, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case t != nil && m == wmRefresh:
-		t.render()
-		shellNI.Call(nimModify, uintptr(unsafe.Pointer(&t.nid)))
+		t.modifyIcon()
+		return 0
+	case t != nil && m == wmTimer && wparam == iconTimerID:
+		t.stepIcon()
 		return 0
 	case t != nil && t.taskbarCreated != 0 && uint32(m) == t.taskbarCreated:
-		shellNI.Call(nimAdd, uintptr(unsafe.Pointer(&t.nid))) // Explorer restarted
+		lg.Printf("TaskbarCreated: Explorer (re)started, adding the icon again")
+		t.restartIcon()
+		return 0
+	case m == wmEndSession && wparam != 0:
+		lg.Printf("Windows session is ending")
 		return 0
 	case m == wmDestroy:
 		u32("PostQuitMessage").Call(0)
