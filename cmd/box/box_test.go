@@ -1,0 +1,572 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// fakePC stands in for the incus CLI. git commands run for real.
+// With bash set, "incus exec" runs the script locally in that bash, so the
+// shell scripts are tested end to end; otherwise exec answers from canned values.
+type fakePC struct {
+	t         *testing.T
+	mu        sync.Mutex
+	insts     []instance
+	mode      string
+	listErr   bool
+	bash      string
+	log       string          // canned follow output
+	exit      string          // canned exit file
+	running   string          // canned output of the running-jobs check
+	race      map[string]bool // names another run launches just before ours
+	block     bool            // follow waits until its context ends
+	pushHang  bool            // file push waits until its context ends
+	freeze    bool            // follow freezes the box and fails
+	launchErr bool            // the connection drops after creating an instance
+	startErr  bool            // the connection drops while starting the job
+	calls     []string
+	pushed    int
+	project   map[string]string // project config other than the mode
+	memory    string            // the default profile's limits.memory
+	jobs      map[string]string // canned "# jobs" output by box
+	script    string            // canned output of the page, cancel and checkout scripts
+	scriptRC  int
+	pull      func(src, dst string) // file pull -r src dst
+	pulls     []string
+}
+
+func isScript(c Cmd, marker string) bool {
+	return len(c.Args) > 0 && strings.HasPrefix(c.Args[len(c.Args)-1], marker)
+}
+
+func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
+	if c.Name == "git" {
+		return execRunner{}.Run(ctx, c)
+	}
+	if c.Name != "incus" || len(c.Args) < 3 || c.Args[0] != "--project" || c.Args[1] != "agents" {
+		f.t.Fatalf("unexpected command %s %q", c.Name, c.Args)
+	}
+	args := c.Args[2:]
+	f.mu.Lock()
+	f.calls = append(f.calls, args[0])
+	hang := (f.block && isScript(c, "# follow")) || (f.pushHang && args[0] == "file")
+	f.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return Result{}, ctx.Err()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch args[0] {
+	case "list":
+		if f.listErr {
+			return Result{Stderr: "Error: connection refused", Code: 1}, nil
+		}
+		b, _ := json.Marshal(f.insts)
+		return Result{Stdout: string(b)}, nil
+	case "project":
+		if key := args[len(args)-1]; key != "user.agent-box.mode" {
+			return Result{Stdout: f.project[key] + "\n"}, nil
+		}
+		return Result{Stdout: f.mode + "\n"}, nil
+	case "profile":
+		return Result{Stdout: f.memory + "\n"}, nil
+	case "launch":
+		name := strings.TrimPrefix(args[2], "pc:")
+		if f.race[name] {
+			f.insts = append(f.insts, instance{Name: name, Status: "Running"})
+		}
+		for _, in := range f.insts {
+			if in.Name == name {
+				return Result{Stderr: `Error: Failed creating instance record: Instance "` + name + `" already exists`, Code: 1}, nil
+			}
+		}
+		cfg := map[string]string{}
+		for i, a := range args {
+			if a == "-c" {
+				k, v, _ := strings.Cut(args[i+1], "=")
+				cfg[k] = v
+			}
+		}
+		f.insts = append(f.insts, instance{Name: name, Status: "Running", Config: cfg})
+		if f.launchErr {
+			return Result{}, errors.New("connection reset")
+		}
+	case "start":
+		f.inst(args[1]).Status = "Running"
+	case "config":
+		inst := f.inst(args[2])
+		if args[1] == "get" {
+			return Result{Stdout: inst.Config[args[3]] + "\n"}, nil
+		}
+		k, v, ok := strings.Cut(args[3], "=")
+		if args[1] != "set" || !ok {
+			f.t.Fatalf("unexpected incus config arguments: %q", args)
+		}
+		if inst.Config == nil {
+			inst.Config = make(map[string]string)
+		}
+		inst.Config[k] = v
+	case "delete":
+		name := strings.TrimPrefix(args[1], "pc:")
+		for i := range f.insts {
+			if f.insts[i].Name == name {
+				f.insts = append(f.insts[:i], f.insts[i+1:]...)
+				break
+			}
+		}
+	case "file":
+		if args[1] == "pull" {
+			f.pulls = append(f.pulls, args[3])
+			if f.pull != nil {
+				f.pull(args[3], args[4])
+			}
+			return Result{}, nil
+		}
+		f.pushed++
+		if _, err := os.Stat(args[3]); err != nil {
+			f.t.Errorf("pushed bundle missing: %v", err)
+		}
+		if f.bash != "" {
+			_, dst, _ := strings.Cut(args[4], ":")
+			dst = dst[strings.Index(dst, workRoot):]
+			os.MkdirAll(filepath.Dir(dst), 0o755)
+			if err := copyFile(args[3], dst); err != nil {
+				f.t.Fatal(err)
+			}
+		}
+	case "exec":
+		argv := args[3:] // after "exec pc:box --"
+		if f.bash == "" {
+			switch {
+			case isScript(c, "# follow"):
+				if f.freeze {
+					f.inst(args[1]).Status = "Frozen"
+					return Result{Code: 1}, nil
+				}
+				io.WriteString(c.Stdout, f.log)
+			case isScript(c, "# running jobs"):
+				return Result{Stdout: f.running}, nil
+			case isScript(c, "# jobs"):
+				return Result{Stdout: f.jobs[strings.TrimPrefix(args[1], "pc:")]}, nil
+			case isScript(c, "# page"), isScript(c, "# cancel"), isScript(c, "# checkout"):
+				return Result{Stdout: f.script, Code: f.scriptRC}, nil
+			case argv[0] == "cat":
+				return Result{Stdout: f.exit}, nil
+			case f.startErr:
+				return Result{}, errors.New("connection reset")
+			}
+			return Result{}, nil
+		}
+		if argv[0] == "bash" {
+			argv = argv[1:]
+		} else {
+			argv = []string{"-c", shellCommand(argv)}
+		}
+		cmd := Cmd{Name: f.bash, Args: argv, Stdout: c.Stdout, Stderr: c.Stderr, Env: c.Env}
+		f.mu.Unlock()
+		defer f.mu.Lock()
+		return execRunner{}.Run(ctx, cmd)
+	default:
+		f.t.Fatalf("unexpected incus %q", args)
+	}
+	return Result{}, nil
+}
+
+func (f *fakePC) callList() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.calls, " ")
+}
+
+func (f *fakePC) names() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n []string
+	for _, in := range f.insts {
+		n = append(n, in.Name)
+	}
+	return strings.Join(n, " ")
+}
+
+func (f *fakePC) inst(target string) *instance {
+	name := strings.TrimPrefix(target, "pc:")
+	for i := range f.insts {
+		if f.insts[i].Name == name {
+			return &f.insts[i]
+		}
+	}
+	f.t.Fatalf("no instance %s", name)
+	return nil
+}
+
+func testApp(f *fakePC) (*App, *bytes.Buffer) {
+	var out bytes.Buffer
+	n := 0
+	return &App{
+		R: f, Remote: "pc", Project: "agents", Image: "agent-base",
+		Out: &out, Err: &out,
+		Now:  func() time.Time { return time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC) },
+		Rand: func() string { n++; return fmt.Sprintf("%04x", n) },
+	}, &out
+}
+
+func gitT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func write(t *testing.T, path, s string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newRepo makes a repo with one commit, one change to a tracked file, one
+// untracked file and one ignored file.
+func newRepo(t *testing.T) string {
+	dir := filepath.Join(t.TempDir(), "My_Repo")
+	os.Mkdir(dir, 0o755)
+	gitT(t, dir, "init", "-q")
+	write(t, filepath.Join(dir, ".gitignore"), "ignored.txt\n")
+	write(t, filepath.Join(dir, "a.txt"), "one\n")
+	gitT(t, dir, "add", "-A")
+	gitT(t, dir, "commit", "-q", "-m", "init")
+	write(t, filepath.Join(dir, "a.txt"), "two\n")
+	write(t, filepath.Join(dir, "untracked.txt"), "new\n")
+	write(t, filepath.Join(dir, "ignored.txt"), "secret\n")
+	return dir
+}
+
+func TestBoxName(t *testing.T) {
+	for in, want := range map[string]string{
+		"agent-box":             "agent-box",
+		"My_Repo":               "my-repo",
+		"3d-stuff":              "box-3d-stuff",
+		"":                      "box",
+		strings.Repeat("a", 70): strings.Repeat("a", 50),
+	} {
+		if got := boxName(in); got != want {
+			t.Errorf("boxName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestOpenRepoUsesOriginName(t *testing.T) {
+	dir := newRepo(t)
+	rp, err := openRepo(context.Background(), execRunner{}, dir)
+	if err != nil || rp.Name != "my-repo" {
+		t.Fatalf("openRepo = %+v, %v", rp, err)
+	}
+	gitT(t, dir, "remote", "add", "origin", "git@github.com:a-Fig/agent-box.git")
+	if rp, _ := openRepo(context.Background(), execRunner{}, dir); rp.Name != "agent-box" {
+		t.Fatalf("name = %q, want agent-box", rp.Name)
+	}
+}
+
+func TestSnapshot(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+	head := gitT(t, dir, "rev-parse", "HEAD")
+	before := gitT(t, dir, "status", "--porcelain")
+
+	bundle, err := snapshot(ctx, execRunner{}, dir, "my-repo.20261123-120000-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(bundle))
+
+	if after := gitT(t, dir, "status", "--porcelain"); after != before {
+		t.Errorf("user's index changed:\n%s\nwant:\n%s", after, before)
+	}
+	if refs := gitT(t, dir, "for-each-ref", "refs/agent-box"); refs != "" {
+		t.Errorf("temporary ref left behind: %s", refs)
+	}
+
+	// Unpack the bundle elsewhere and look at the snapshot.
+	clone := t.TempDir()
+	gitT(t, clone, "init", "-q")
+	gitT(t, clone, "fetch", "-q", bundle, "refs/agent-box/my-repo.20261123-120000-0001")
+	if p := gitT(t, clone, "rev-parse", "FETCH_HEAD^"); p != head {
+		t.Errorf("parent = %s, want HEAD %s", p, head)
+	}
+	files := gitT(t, clone, "ls-tree", "--name-only", "FETCH_HEAD")
+	if files != ".gitignore\na.txt\nuntracked.txt" {
+		t.Errorf("snapshot files = %q", files)
+	}
+	if a := gitT(t, clone, "show", "FETCH_HEAD:a.txt"); a != "two" {
+		t.Errorf("a.txt = %q, want the uncommitted change", a)
+	}
+}
+
+func TestSnapshotWithoutCommits(t *testing.T) {
+	dir := t.TempDir()
+	gitT(t, dir, "init", "-q")
+	write(t, filepath.Join(dir, "x"), "x\n")
+	bundle, err := snapshot(context.Background(), execRunner{}, dir, "x.20261123-120000-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Dir(bundle))
+	if s := gitT(t, dir, "status", "--porcelain"); s != "?? x" {
+		t.Errorf("status = %q", s)
+	}
+}
+
+func TestRunReusesRepoBox(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Stopped"}}, log: "ok\n", exit: "3\n"}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"go", "test"}})
+	if err != nil || r.Code != 3 {
+		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
+	}
+	if got := f.callList(); got != "list project start file config exec config exec exec exec config exec" {
+		t.Errorf("incus calls = %s", got)
+	}
+	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
+		t.Errorf("idle expiry = %q", got)
+	}
+	if !strings.Contains(out.String(), "ok\n") || !strings.Contains(out.String(), "job my-repo.20261123-120000-0001") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+func TestRunNewBoxIsThrowaway(t *testing.T) {
+	f := &fakePC{t: t, exit: "0"}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true, TTL: 2 * time.Hour})
+	if err != nil || r.Code != 0 {
+		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
+	}
+	if got := f.callList(); got != "list project launch file config exec config exec exec exec config exec exec delete" {
+		t.Errorf("incus calls = %s", got)
+	}
+	if len(f.insts) != 0 {
+		t.Errorf("throwaway box left behind: %+v", f.insts)
+	}
+}
+
+func TestNewSetsExpiry(t *testing.T) {
+	f := &fakePC{t: t}
+	a, _ := testApp(f)
+	name, err := a.New(context.Background(), "", 8*time.Hour)
+	if err != nil || name != "box-0001" {
+		t.Fatalf("New = %q, %v", name, err)
+	}
+	if exp := f.insts[0].Config["user.expires"]; exp != "2026-11-23T20:00:00Z" {
+		t.Errorf("user.expires = %q", exp)
+	}
+	if _, err := a.New(context.Background(), "Bad;name", 0); err == nil {
+		t.Error("bad name accepted")
+	}
+	if code := run(context.Background(), a, []string{"new", "idle"}, nil); code != 0 {
+		t.Fatalf("box new returned %d", code)
+	}
+	if got := f.inst("idle").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
+		t.Errorf("default expiry = %q", got)
+	}
+}
+
+func TestDetachedRunAndReattachRefreshExpiry(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	a, out := testApp(f)
+	started := a.Now()
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Wait: 10 * time.Millisecond})
+	if err != nil || r.State != stateDetached {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if got := f.inst(r.Box).Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
+		t.Errorf("detached job expiry = %q", got)
+	}
+	a.Now = func() time.Time { return started.Add(3 * time.Hour) }
+	f.block, f.exit = false, "0"
+	finished, err := a.Job(context.Background(), r.Job, 0)
+	if err != nil || finished.State != stateDone {
+		t.Fatalf("Job = %+v, %v\n%s", finished, err, out)
+	}
+	if got := f.inst(r.Box).Config[expiresKey]; got != "2026-11-23T17:00:00Z" {
+		t.Errorf("reattached job idle expiry = %q", got)
+	}
+}
+
+func TestRunPaused(t *testing.T) {
+	for name, f := range map[string]*fakePC{
+		"frozen box":  {insts: []instance{{Name: "my-repo", Status: "Frozen"}}},
+		"my pc mode":  {mode: "mypc"},
+		"unreachable": {listErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f.t = t
+			a, out := testApp(f)
+			r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
+			if err != nil || r.Code != exitPaused {
+				t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
+			}
+			if f.pushed != 0 {
+				t.Error("pushed to a paused PC")
+			}
+		})
+	}
+}
+
+func TestJobRejectsBadID(t *testing.T) {
+	a, _ := testApp(&fakePC{t: t})
+	for _, id := range []string{"", "x", "box.1; rm -rf /", "../x.20261123-120000-01"} {
+		if _, err := a.Job(context.Background(), id, 0); err == nil {
+			t.Errorf("Job(%q) accepted", id)
+		}
+	}
+}
+
+func TestShellCommand(t *testing.T) {
+	if got := shellCommand([]string{"go test ./... && echo hi"}); got != "go test ./... && echo hi" {
+		t.Errorf("one arg = %q", got)
+	}
+	if got := shellCommand([]string{"echo", "it's", "a b"}); got != `'echo' 'it'\''s' 'a b'` {
+		t.Errorf("argv = %q", got)
+	}
+}
+
+// gitBash finds a bash that isn't WSL's launcher, and shims flock and setsid
+// where they're missing (Git for Windows). It skips the test if there's none.
+func gitBash(t *testing.T) string {
+	bash, err := exec.LookPath("bash")
+	if err != nil || strings.Contains(strings.ToLower(bash), `\system32\`) {
+		t.Skip("no usable bash")
+	}
+	shims := t.TempDir()
+	for name, body := range map[string]string{"flock": "exit 0", "setsid": `exec "$@"`} {
+		if _, err := exec.LookPath(name); err != nil {
+			write(t, filepath.Join(shims, name), "#!/bin/sh\n"+body+"\n")
+		}
+	}
+	t.Setenv("PATH", shims+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return bash
+}
+
+// TestRunEndToEnd runs the real start and follow scripts in a local bash.
+func TestRunEndToEnd(t *testing.T) {
+	bash := gitBash(t)
+	root := filepath.ToSlash(t.TempDir()) // C:/... works in Git Bash too
+	old := workRoot
+	workRoot = root
+	defer func() { workRoot = old }()
+
+	dir := newRepo(t)
+	f := &fakePC{t: t, bash: bash}
+	a, out := testApp(f)
+	ctx := context.Background()
+
+	r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"cat a.txt untracked.txt; test ! -e ignored.txt || exit 9; exit 7"}})
+	if err != nil || r.Code != 7 {
+		t.Fatalf("first run = %d, %v\n%s", r.Code, err, out)
+	}
+	lf := func() string { return strings.ReplaceAll(out.String(), "\r", "") } // Windows git checks out CRLF
+	if !strings.Contains(lf(), "two\nnew\n") {
+		t.Errorf("output = %q", out)
+	}
+
+	// Second run fetches into the existing checkout and drops stale files.
+	os.Remove(filepath.Join(dir, "untracked.txt"))
+	out.Reset()
+	r, err = a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"test", "!", "-e", "untracked.txt"}})
+	if err != nil || r.Code != 0 {
+		t.Fatalf("second run = %d, %v\n%s", r.Code, err, out)
+	}
+	if n := strings.Count(f.callList(), "launch"); n != 1 {
+		t.Errorf("launched %d times, want 1", n)
+	}
+
+	// Reattaching to a finished job replays its log and exit code.
+	out.Reset()
+	r, err = a.Job(ctx, "my-repo.20261123-120000-0001", 0)
+	if err != nil || r.Code != 7 || !strings.Contains(lf(), "two\nnew\n") {
+		t.Fatalf("job = %d, %v\n%s", r.Code, err, out)
+	}
+	if _, err := a.Job(ctx, "my-repo.20261123-120000-ffff", 0); err == nil {
+		t.Error("unknown job didn't fail")
+	}
+
+	// The payload doesn't inherit the checkout lock's FD 9, so a background
+	// child it leaves behind can't hold the lock.
+	out.Reset()
+	r, err = a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"{ : >&9; } 2>/dev/null && exit 9; exit 0"}})
+	if err != nil || r.Code != 0 {
+		t.Fatalf("fd 9 run = %d, %v\n%s", r.Code, err, out)
+	}
+
+	// A throwaway box goes once its job is done and nothing else runs there.
+	out.Reset()
+	r, err = a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"exit 0"}, New: true})
+	if err != nil || r.Code != 0 || r.State != stateDone {
+		t.Fatalf("--new run = %+v, %v\n%s", r, err, out)
+	}
+	if n := f.names(); n != "my-repo" {
+		t.Errorf("boxes = %q, want the throwaway one gone", n)
+	}
+
+	// Reattaching to a finished job doesn't wait on its PID, which may
+	// belong to another process by now.
+	job := "my-repo.20261123-120000-0001"
+	pidFile := filepath.Join(root, ".box", job+".pid")
+	prevPID, _ := os.ReadFile(pidFile)
+	other := exec.Command(bash, "-c", `echo $$ > "$1.tmp" && mv "$1.tmp" "$1"; sleep 20`, "-", filepath.ToSlash(pidFile))
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer other.Process.Kill()
+	for i := 0; ; i++ {
+		if b, _ := os.ReadFile(pidFile); len(b) > 0 && string(b) != string(prevPID) {
+			break
+		}
+		if i > 100 {
+			t.Fatal("pid file not replaced")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	out.Reset()
+	r, err = a.Job(ctx, job, 5*time.Second)
+	if err != nil || r.Code != 7 || r.State != stateDone {
+		t.Fatalf("job with a reused pid = %+v, %v\n%s", r, err, out)
+	}
+
+	// A job whose wrapper died without an exit code is reported, not followed forever.
+	lost := filepath.Join(root, ".box", "my-repo.20261123-120000-00ff")
+	write(t, lost+".log", "partial\n")
+	write(t, lost+".pid", "999999\n")
+	out.Reset()
+	r, err = a.Job(ctx, "my-repo.20261123-120000-00ff", 5*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "died") {
+		t.Fatalf("lost job = %+v, %v\n%s", r, err, out)
+	}
+}
+
+func TestRunKeepsJobExpiryWhileAnotherJobRuns(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running"}}, log: "ok\n", exit: "0\n", running: "my-repo.20261123-110000-beef\n"}
+	a, out := testApp(f)
+	if _, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}}); err != nil {
+		t.Fatalf("Run: %v\n%s", err, out)
+	}
+	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
+		t.Errorf("expiry = %q, want the 24h job expiry kept", got)
+	}
+}

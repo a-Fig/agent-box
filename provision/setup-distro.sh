@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# setup-distro.sh - run as root INSIDE the `agents` WSL distro (install-pc.ps1 does this).
+# Installs Incus (Zabbly stable) + web UI, applies the preseed, creates the restricted `agents`
+# project with its own default profile, that profile and the `cache` volume, installs Tailscale, optionally builds `agent-base`.
+# Needs Linux 6.12+ (Incus 7.x); install-pc.ps1 runs `wsl --update` for that.
+# Safe to re-run: each step checks before it changes anything.
+#
+# Environment:
+#   TS_AUTHKEY        Tailscale auth key. Read from the environment only; never written to disk or logs.
+#                     Without it Tailscale is installed but not joined.
+#   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 12)
+#   AGENTS_MEM_CAP    project cap on the sum of limits.memory  (default 12GiB)
+#   AGENTS_MAX_BOXES  project limits.instances                 (default 3)
+#   AGENTS_DISK_CAP   project limits.disk, all boxes + volumes (default 150GiB)
+# Flags:
+#   --build-base      build the `agent-base` image if it does not exist
+#   --rebuild-base    build it again even if it exists
+set -Eeuo pipefail
+# incus create/edit commands read YAML from stdin when it isn't a terminal; over SSH or a pipe
+# they would hang waiting for it. Nothing here needs stdin.
+exec </dev/null
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ZABBLY_FPR="4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
+PROJECT=agents
+CPU_CAP=${AGENTS_CPU_CAP:-12}
+MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
+MAX_BOXES=${AGENTS_MAX_BOXES:-3}
+DISK_CAP=${AGENTS_DISK_CAP:-150GiB}
+CACHE_SIZE=50GiB
+BUILD_BASE=0
+REBUILD=0
+
+for a in "$@"; do
+  case "$a" in
+    --build-base) BUILD_BASE=1 ;;
+    --rebuild-base) BUILD_BASE=1; REBUILD=1 ;;
+    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "unknown argument: $a" >&2; exit 2 ;;
+  esac
+done
+
+step() { printf '\n==> %s\n' "$*"; }
+note() { printf '    %s\n' "$*"; }
+die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+# ERR, not EXIT: only an ERR trap sees the failing line in $LINENO.
+trap 'printf "ERROR: setup-distro.sh failed (exit %s) at line %s\n" "$?" "$LINENO" >&2' ERR
+
+[ "$(id -u)" -eq 0 ] || die "run as root (wsl -d agents -u root ...)"
+[ -r /etc/os-release ] || die "no /etc/os-release"
+# shellcheck disable=SC1091
+. /etc/os-release
+[ "${ID:-}" = ubuntu ] || die "expected Ubuntu, found ${ID:-unknown}"
+kernel=$(uname -r)
+kmajor=${kernel%%.*}; krest=${kernel#*.}; kminor=${krest%%[^0-9]*}
+if [ "$kmajor" -lt 6 ] || { [ "$kmajor" -eq 6 ] && [ "${kminor:-0}" -lt 12 ]; }; then
+  die "WSL kernel is $kernel; Incus 7.x needs Linux 6.12 or newer. On Windows run 'wsl --update' (install-pc.ps1 does), then 'wsl --shutdown', then run this again."
+fi
+for f in incus-preseed.yaml default-profile.yaml; do
+  [ -r "$HERE/$f" ] || die "missing $HERE/$f"
+done
+
+export DEBIAN_FRONTEND=noninteractive
+
+step "Checking systemd"
+state=$(systemctl is-system-running 2>/dev/null || true)
+case "$state" in
+  running|degraded) note "systemd is $state" ;;
+  *) die "systemd is '$state'. Is systemd=true in /etc/wsl.conf and has the distro been restarted (wsl --terminate agents)?" ;;
+esac
+
+step "Installing prerequisites (curl, gnupg, ca-certificates, btrfs-progs)"
+apt-get update -qq
+apt-get install -y -qq curl gnupg ca-certificates btrfs-progs
+
+# ---------------------------------------------------------------- Incus
+step "Adding the Zabbly Incus stable repository"
+install -d -m 0755 /etc/apt/keyrings
+tmpkey=$(mktemp)
+curl -fsSL https://pkgs.zabbly.com/key.asc -o "$tmpkey"
+got=$(gpg --show-keys --with-colons "$tmpkey" | awk -F: '$1=="fpr"{print $10; exit}')
+[ "$got" = "$ZABBLY_FPR" ] || die "Zabbly key fingerprint mismatch: got '$got', expected '$ZABBLY_FPR'. Not trusting it."
+install -m 0644 "$tmpkey" /etc/apt/keyrings/zabbly.asc
+rm -f "$tmpkey"
+cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+Enabled: yes
+Types: deb
+URIs: https://pkgs.zabbly.com/incus/stable
+Suites: ${VERSION_CODENAME}
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/zabbly.asc
+EOF
+note "repo written, key fingerprint verified"
+
+step "Installing incus and incus-ui-canonical"
+apt-get update -qq
+apt-get install -y -qq incus incus-ui-canonical
+systemctl enable --now incus.service incus.socket >/dev/null 2>&1 || systemctl enable --now incus
+incus version
+
+step "Loading btrfs (the storage pool needs it)"
+modprobe btrfs
+echo btrfs > /etc/modules-load.d/agent-box-btrfs.conf
+note "btrfs loaded, and loaded at every boot"
+
+step "Initialising Incus (preseed)"
+if incus storage show default >/dev/null 2>&1; then
+  note "storage pool 'default' exists: already initialised, skipping preseed"
+else
+  incus admin init --preseed < "$HERE/incus-preseed.yaml"
+  note "applied incus-preseed.yaml (btrfs pool, incusbr0 NAT bridge, HTTPS on :8443)"
+fi
+addr=$(incus config get core.https_address)
+[ -n "$addr" ] || { incus config set core.https_address "[::]:8443"; addr="[::]:8443"; }
+note "HTTPS API address: $addr"
+
+# ---------------------------------------------------------------- project
+step "Project '$PROJECT'"
+# features.profiles=true: the project has its own profiles. Incus refuses restricted=true on a
+# project without them ("Projects without their own profiles cannot be restricted"). Agents' certs
+# can edit these profiles, but restricted=true still validates what goes in them, the project caps
+# bound the totals, and the tray resets each box's own CPU limits every tick.
+# features.images=false: images are shared with the default project.
+# Neither can change after creation, so an existing project is only checked.
+if incus project show "$PROJECT" >/dev/null 2>&1; then
+  note "project exists; features.* cannot change after creation, only checking"
+  bad=0
+  for kv in features.images=false features.profiles=true; do
+    k=${kv%%=*}; v=${kv#*=}
+    cur=$(incus project get "$PROJECT" "$k")
+    if [ "$cur" != "$v" ]; then
+      printf 'ERROR: project %s has %s=%s, expected %s.\n' "$PROJECT" "$k" "${cur:-<unset>}" "$v" >&2
+      bad=1
+    fi
+  done
+  if [ "$bad" -eq 1 ]; then
+    cat >&2 <<EOF
+
+Incus cannot change features.* on an existing project, so it has to be recreated. This deletes
+every box in it and the shared cache volume (push anything you need from /work first):
+  incus list --project $PROJECT -c n --format csv | xargs -r -n1 incus delete --force --project $PROJECT
+  incus storage volume delete default cache --project $PROJECT
+  incus project delete $PROJECT
+Then run setup-distro.sh again.
+EOF
+    exit 1
+  fi
+else
+  incus project create "$PROJECT" \
+    -c features.images=false -c features.profiles=true \
+    -c user.agent-box.mode=shared
+  note "created (own profiles; images shared with the default project)"
+fi
+# Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
+# below what existing instances use). Defaults: 3 boxes x 4 CPUs x 4GiB, the Full mode size.
+incus project set "$PROJECT" limits.instances="$MAX_BOXES"
+incus project set "$PROJECT" limits.cpu="$CPU_CAP"
+incus project set "$PROJECT" limits.memory="$MEM_CAP"
+# limits.disk: "maximum value of the aggregate disk space used by all instance volumes, custom
+# volumes, and images of the project" (project config reference, key limits.disk).
+incus project set "$PROJECT" limits.disk="$DISK_CAP"
+note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP disk=$DISK_CAP (allocation caps, not usage caps)"
+# Restricted project. Keys per https://linuxcontainers.org/incus/docs/main/reference/projects/
+#   restricted=true                                turns the restricted.* keys on
+#   restricted.containers.privilege=unprivileged   blocks security.privileged=true (the default)
+#   restricted.containers.nesting=allow            boxes need security.nesting=true (default: block)
+#   restricted.devices.disk=managed                only pool-backed disks: root and /cache (default)
+#   restricted.devices.nic=managed                 only NICs on a managed network: incusbr0 (default)
+# No restricted.* key stops a restricted client cert from creating a custom storage volume: the
+# reference has none for volumes (restricted.devices.disk only limits which disk DEVICES an
+# instance may have; `managed` still lets it attach any pool volume). So the real limit is
+# limits.disk above, which counts custom volumes too. Agents should not store data in a volume,
+# and the reaper only deletes instances, so volumes agents create are bounded, not removed.
+incus project set "$PROJECT" restricted=true \
+  restricted.containers.privilege=unprivileged \
+  restricted.containers.nesting=allow \
+  restricted.devices.disk=managed \
+  restricted.devices.nic=managed
+note "restricted: unprivileged containers, nesting allowed, managed disks and NICs only"
+
+step "Volume 'cache' (shared /cache for Go, npm, Gradle, uv)"
+if incus storage volume show default cache --project "$PROJECT" >/dev/null 2>&1; then
+  note "exists"
+else
+  incus storage volume create default cache --project "$PROJECT" size="$CACHE_SIZE"
+  note "created, $CACHE_SIZE"
+fi
+# Idempotent: an existing volume gets the quota too.
+incus storage volume set default cache size="$CACHE_SIZE" --project "$PROJECT"
+note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
+
+step "Default profile of the '$PROJECT' project"
+incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
+note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, 30GiB root, nesting, /cache, cloud-init)"
+
+# ---------------------------------------------------------------- Tailscale
+step "Tailscale"
+if ! command -v tailscale >/dev/null 2>&1; then
+  install -d -m 0755 /usr/share/keyrings
+  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg" \
+    -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailscale-keyring.list" \
+    -o /etc/apt/sources.list.d/tailscale.list
+  apt-get update -qq
+  apt-get install -y -qq tailscale
+  note "installed"
+else
+  note "already installed"
+fi
+systemctl enable --now tailscaled >/dev/null 2>&1
+
+ts_state=$(tailscale status --json 2>/dev/null | sed -n 's/.*"BackendState": *"\([^"]*\)".*/\1/p' | head -n1 || true)
+if [ "$ts_state" = Running ]; then
+  note "already joined the tailnet; leaving it alone"
+elif [ -n "${TS_AUTHKEY:-}" ]; then
+  note "joining the tailnet as 'agent-box' (auth key read from \$TS_AUTHKEY, not stored)"
+  # --accept-dns=false: keep WSL's resolv.conf; boxes use the incusbr0 resolver.
+  tailscale up --hostname agent-box --accept-dns=false --authkey "$TS_AUTHKEY"
+  unset TS_AUTHKEY
+else
+  note "TS_AUTHKEY not set: NOT joined. Later: sudo tailscale up --hostname agent-box --accept-dns=false"
+  note "(or re-run install-pc.ps1 / this script with TS_AUTHKEY set)"
+fi
+
+# ---------------------------------------------------------------- agent-base
+if [ "$BUILD_BASE" -eq 1 ]; then
+  step "Building image 'agent-base'"
+  if incus image alias list --format csv | cut -d, -f1 | grep -qx agent-base && [ "$REBUILD" -eq 0 ]; then
+    note "alias exists; pass --rebuild-base to build again"
+  else
+    builder=agent-base-build
+    incus delete --force "$builder" --project "$PROJECT" >/dev/null 2>&1 || true
+    incus launch images:ubuntu/24.04/cloud "$builder" --project "$PROJECT"
+    note "waiting for cloud-init (installs Go, Node, JDK, ...); this takes a few minutes"
+    until incus exec "$builder" --project "$PROJECT" -- true >/dev/null 2>&1; do sleep 2; done
+    incus exec "$builder" --project "$PROJECT" -- cloud-init status --wait --long \
+      || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
+    incus stop "$builder" --project "$PROJECT"
+    incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, gh"
+    incus delete "$builder" --project "$PROJECT"
+    note "published as 'agent-base' (images are shared via the default project)"
+  fi
+else
+  step "Image 'agent-base'"
+  note "not built (optional). Build with: setup-distro.sh --build-base"
+fi
+
+# ---------------------------------------------------------------- VM capability
+step "Virtual machines (/dev/kvm)"
+if [ -e /dev/kvm ]; then
+  note "/dev/kvm present: Incus VMs (incus launch --vm) are possible."
+else
+  note "/dev/kvm missing: only containers. VMs would need nested virtualization"
+  note "(.wslconfig [wsl2] nestedVirtualization=true on Windows 11, then wsl --shutdown)."
+fi
+
+# ---------------------------------------------------------------- trust
+step "Done. Add client certificates (run these here, once per client)"
+cat <<'EOF'
+
+  # Laptop, for agents (restricted to the agents project):
+  incus config trust add laptop-agents --restricted --projects agents
+  #   prints a token; on the laptop:
+  #   incus remote add pc https://agent-box:8443 --token <token>
+  #   incus project switch agents   # or pass --project agents
+
+  # Tray on the PC (admin). It must use a DIFFERENT client cert than agents:
+  incus config trust add boxtray
+  #   on the PC, with its own config dir (e.g. INCUS_CONF=%LOCALAPPDATA%\agent-box\incus):
+  #   incus remote add pc https://localhost:8443 --token <token>
+
+  # Web UI: https://agent-box:8443 (import a client cert into the browser; see the Incus UI docs)
+  # List / revoke:  incus config trust list ;  incus config trust remove <fingerprint>
+
+EOF
+trap - EXIT

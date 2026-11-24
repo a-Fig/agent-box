@@ -1,0 +1,37 @@
+# Incus preseed for the `agents` WSL distro. Applied by setup-distro.sh with
+#   incus admin init --preseed < incus-preseed.yaml
+# only when Incus has no storage pool yet (a fresh install).
+#
+# Storage: btrfs in a sparse loop file (/var/lib/incus/disks/default.img) inside the VHDX.
+# Not `dir`: WSL's ext4 has no project quotas, so a dir pool can't enforce the per-box and
+# cache sizes. btrfs enforces them and makes new boxes instant copies of the image. WSL's kernel
+# has btrfs as a module; setup-distro.sh loads it (and at every boot via modules-load.d).
+config:
+  core.https_address: "[::]:8443"
+
+networks:
+  - name: incusbr0
+    type: bridge
+    config:
+      ipv4.address: auto
+      ipv4.nat: "true"
+      ipv6.address: none
+
+storage_pools:
+  - name: default
+    driver: btrfs
+    config:
+      size: 200GiB
+
+profiles:
+  - name: default
+    description: Default profile of the default project (not used by agents)
+    devices:
+      root:
+        type: disk
+        path: /
+        pool: default
+      eth0:
+        type: nic
+        name: eth0
+        network: incusbr0

@@ -1,3 +1,7 @@
+@CLAUDE.md
+
+Agent notes live in [CLAUDE.md](CLAUDE.md); edit that file, not this one.
+
 <!-- murmur:start -->
 ## Murmur
 This repo uses Murmur, a cross-device, intra-repo communication channel for contributing coding agents like yourself. If you have not joined Murmur yet, you should.
