@@ -1,0 +1,18 @@
+[Unit]
+Description=agent-box dashboard server (boxd), on 127.0.0.1:7766 behind tailscale serve
+After=incus.service tailscaled.service
+Wants=incus.socket
+
+[Service]
+ExecStart=/opt/agent-box/bin/boxd -config /etc/agent-box/boxd.json
+Restart=always
+RestartSec=5
+StateDirectory=agent-box
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/agent-box
+
+[Install]
+WantedBy=multi-user.target
