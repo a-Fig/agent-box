@@ -121,6 +121,7 @@ func (n *noIncus) SetInstanceConfig(context.Context, string, string, string) err
 }
 func (n *noIncus) UnsetInstanceConfig(context.Context, string, string) error { n.calls++; return nil }
 func (n *noIncus) SetProjectConfig(context.Context, string, string) error    { n.calls++; return nil }
+func (n *noIncus) ProjectConfig(context.Context, string) (string, error)     { n.calls++; return "", nil }
 
 func TestRunSkipsIncusWhileHostDownAndHoldsAwake(t *testing.T) {
 	inc := &noIncus{}
@@ -296,8 +297,11 @@ func TestStatusLogOnlyLogsChanges(t *testing.T) {
 	d.Err = errors.New("boom")
 	s.observe(d)
 	s.observe(d)
+	r := d
+	r.Reclaimed = []mode.Reclaimed{{Name: "a", Left: 11 << 20}}
+	s.observe(r)
 	joined := strings.Join(lines, "|")
-	for _, want := range []string{"yielding to a game (steam:570)", "game ended", "mode chosen: ", "not running", "tick error: boom"} {
+	for _, want := range []string{"yielding to a game (steam:570)", "game ended", "mode chosen: ", "not running", "tick error: boom", "reclaimed a: 11MiB left in RAM"} {
 		if strings.Count(joined, want) != 1 {
 			t.Fatalf("want one %q in %q", want, joined)
 		}

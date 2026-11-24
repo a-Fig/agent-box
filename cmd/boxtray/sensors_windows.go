@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
+	"github.com/a-Fig/agent-box/internal/mode"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -31,10 +33,30 @@ func hidden(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
+// Every wsl.exe call has a deadline, so a hung WSL can't stall the mode
+// loop for good: the next tick tries again.
+const (
+	wslIncusTimeout     = 30 * time.Second
+	wslRootTimeout      = mode.ReclaimTimeout + 15*time.Second // the reclaim's own bound, plus start-up
+	wslListTimeout      = 10 * time.Second
+	wslTerminateTimeout = time.Minute
+)
+
 // wslIncus runs `incus <args>` inside the agents distro. Inside WSL the
 // default (root) user talks to Incus over the local socket, which is admin.
 func wslIncus(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, wslIncusTimeout)
+	defer cancel()
 	full := append([]string{"-d", distro, "--", "incus"}, args...)
+	return hidden(exec.CommandContext(ctx, "wsl.exe", full...)).Output()
+}
+
+// wslRoot runs a command as root inside the agents distro, without a shell
+// in between (--exec), for the cgroup writes Incus has no command for.
+func wslRoot(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, wslRootTimeout)
+	defer cancel()
+	full := append([]string{"-d", distro, "-u", "root", "--exec"}, args...)
 	return hidden(exec.CommandContext(ctx, "wsl.exe", full...)).Output()
 }
 
@@ -63,6 +85,8 @@ func (*winSensors) Gaming() (bool, string) {
 
 // HostUp asks wsl.exe which distros run. It never starts one.
 func (*winSensors) HostUp(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, wslListTimeout)
+	defer cancel()
 	out, err := hidden(exec.CommandContext(ctx, "wsl.exe", "-l", "--running", "-q")).Output()
 	return err == nil && distroListed(out, distro)
 }

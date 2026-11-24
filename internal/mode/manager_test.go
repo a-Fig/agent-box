@@ -18,10 +18,12 @@ type fake struct {
 	failOn  string // a call prefix that returns an error
 	project map[string]string
 	config  map[string]map[string]string // instance -> its own config
+	logCap  bool                         // log project limits.memory writes (only cap tests want them)
 }
 
 func newFake(kv ...string) *fake {
-	f := &fake{state: map[string]string{}, project: map[string]string{}, config: map[string]map[string]string{}}
+	// The project starts at the Shared/My PC budget, so only Full writes the cap.
+	f := &fake{state: map[string]string{}, project: map[string]string{MemoryCapKey: "12GiB"}, config: map[string]map[string]string{}}
 	for i := 0; i < len(kv); i += 2 {
 		f.add(kv[i], kv[i+1])
 	}
@@ -51,7 +53,11 @@ func (f *fake) List(context.Context) ([]Instance, error) {
 		for k, v := range f.config[n] {
 			cfg[k] = v
 		}
-		out = append(out, Instance{Name: n, Status: f.state[n], Config: cfg})
+		in := Instance{Name: n, Status: f.state[n], Config: cfg}
+		if f.state[n] != "Stopped" {
+			in.State = &InstanceState{Pid: int64(1000 + len(out))}
+		}
+		out = append(out, in)
 	}
 	return out, nil
 }
@@ -111,7 +117,17 @@ func (f *fake) UnsetInstanceConfig(_ context.Context, n, k string) error {
 	delete(f.config[n], k)
 	return nil
 }
+func (f *fake) ProjectConfig(_ context.Context, k string) (string, error) {
+	if f.failOn == "project get" {
+		return "", errors.New("boom")
+	}
+	return f.project[k], nil
+}
 func (f *fake) SetProjectConfig(_ context.Context, k, v string) error {
+	if k == MemoryCapKey && !f.logCap {
+		f.project[k] = v
+		return nil
+	}
 	if err := f.rec("project %s=%s", k, v); err != nil {
 		return err
 	}
@@ -178,20 +194,120 @@ func TestSharedCapsCPUResumesAndIsIdempotent(t *testing.T) {
 	equal(t, f.take(), []string{"set new limits.cpu=2", "set new limits.cpu.priority=0"})
 }
 
-func TestNeverWritesProjectLimitsOrMemory(t *testing.T) {
+func TestNeverWritesOtherProjectLimitsOrBoxMemory(t *testing.T) {
 	f := newFake("a", "Running")
+	f.logCap = true
 	for _, c := range []Mode{Shared, Full, MyPC, Full} {
 		m := New(f, c)
 		tick(m, 0, false)
 		tick(m, time.Hour, false)
 	}
 	for _, c := range f.take() {
-		if strings.HasPrefix(c, "project ") && !strings.HasPrefix(c, "project user.agent-box.mode=") {
+		if strings.HasPrefix(c, "project ") && !strings.HasPrefix(c, "project user.agent-box.mode=") &&
+			!strings.HasPrefix(c, "project limits.memory=") {
 			t.Errorf("wrote a project limit: %s", c)
 		}
-		if strings.Contains(c, "limits.memory") || strings.Contains(c, "limits.instances") {
+		if strings.HasPrefix(c, "set ") && strings.Contains(c, "limits.memory") || strings.Contains(c, "limits.instances") {
 			t.Errorf("touched %s", c)
 		}
+	}
+}
+
+// memSets is the project limits.memory writes among calls.
+func memSets(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if strings.HasPrefix(c, "project limits.memory=") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestMemoryCapFollowsModeAndOnlyChanges(t *testing.T) {
+	f := newFake("a", "Running")
+	f.logCap = true
+	m := New(f, Full)
+	tick(m, 0, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=24GiB"})
+	tick(m, 5*time.Second, false)
+	equal(t, memSets(f.take()), nil) // already right: no write
+	m.SetChosen(Shared)
+	tick(m, 10*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
+	m.SetChosen(Full)
+	tick(m, 15*time.Second, false)
+	f.take()
+	tick(m, 20*time.Second, true) // a game: My PC's budget
+	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
+
+	f.project[MemoryCapKey] = "12884901888" // the same value, written as bytes
+	tick(m, 25*time.Second, true)
+	equal(t, memSets(f.take()), nil)
+}
+
+func TestMemoryCapNeverBelowWhatBoxesHoldAndTightensAsTheyGo(t *testing.T) {
+	f := newFake("big", "Stopped", "mid", "Running", "small", "Running")
+	f.logCap = true
+	f.config["big"] = map[string]string{SizeKey: "large", MemoryCapKey: "8GiB"}
+	f.config["mid"] = map[string]string{} // no key: medium's 4GiB
+	f.config["small"] = map[string]string{SizeKey: "small", MemoryCapKey: "2GiB"}
+	f.project[MemoryCapKey] = "24GiB"
+	m := New(f, Full)
+	tick(m, 0, false)
+	equal(t, memSets(f.take()), nil)
+
+	f.add("more", "Running")
+	f.config["more"] = map[string]string{SizeKey: "large", MemoryCapKey: "8GiB"}
+	m.SetChosen(Shared) // 22GiB launched, more than Shared's 12GiB
+	tick(m, 5*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=22GiB"})
+
+	f.Delete(context.Background(), "big")
+	f.take()
+	tick(m, 10*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=14GiB"})
+	f.Delete(context.Background(), "more")
+	f.take()
+	tick(m, 15*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
+}
+
+func TestAllocatedMemoryPrefersExpandedConfig(t *testing.T) {
+	ins := []Instance{
+		{Name: "a", Config: map[string]string{}, ExpandedConfig: map[string]string{MemoryCapKey: "4GiB"}},
+		{Name: "b", Config: map[string]string{MemoryCapKey: "2GiB"}},
+		{Name: "c", Config: map[string]string{SizeKey: "large"}},
+		{Name: "d", Config: map[string]string{MemoryCapKey: "1GiB"}, ExpandedConfig: map[string]string{MemoryCapKey: "512MiB"}},
+	}
+	if got, want := AllocatedMemory(ins), int64(4<<30+2<<30+8<<30+512<<20); got != want {
+		t.Fatalf("allocated %d, want %d", got, want)
+	}
+	for n, s := range map[int64]string{24 << 30: "24GiB", 512 << 20: "512MiB", 1000: "1000", 0: "0"} {
+		if FormatBytes(n) != s {
+			t.Errorf("FormatBytes(%d) = %s", n, FormatBytes(n))
+		}
+	}
+}
+
+func TestStaleYieldReasonIsClearedOnStart(t *testing.T) {
+	f := newFake("a", "Running")
+	f.project[ProjectReasonKey] = "gaming: busy" // left by a tray killed mid-yield
+	m := New(f, Full)
+	tick(m, 0, false)
+	if got := only(f.take(), "project user.agent-box.reason"); len(got) != 1 || got[0] != "project user.agent-box.reason=" {
+		t.Fatalf("reason writes %q", got)
+	}
+	tick(m, time.Second, false)
+	equal(t, only(f.take(), "project user.agent-box.reason"), nil)
+}
+
+func TestMemoryCapReadFailureIsReported(t *testing.T) {
+	f := newFake("a", "Running")
+	f.failOn = "project get"
+	st := tick(New(f, Full), 0, false)
+	if st.Err == nil || memSets(f.take()) != nil {
+		t.Fatalf("err %v", st.Err)
 	}
 }
 
@@ -398,6 +514,7 @@ func TestCLIArgs(t *testing.T) {
 	c.SetInstanceConfig(ctx, "a", "limits.cpu", "2")
 	c.UnsetInstanceConfig(ctx, "a", "limits.cpu.allowance")
 	c.SetProjectConfig(ctx, ProjectModeKey, "full")
+	c.ProjectConfig(ctx, MemoryCapKey)
 	want := [][]string{
 		{"list", "--project", "agents", "--format", "json"},
 		{"pause", "a", "--project", "agents"},
@@ -407,6 +524,7 @@ func TestCLIArgs(t *testing.T) {
 		{"config", "set", "a", "limits.cpu=2", "--project", "agents"},
 		{"config", "unset", "a", "limits.cpu.allowance", "--project", "agents"},
 		{"project", "set", "agents", "user.agent-box.mode=full"},
+		{"project", "get", "agents", "limits.memory"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)

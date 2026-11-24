@@ -16,7 +16,10 @@
 .PARAMETER BuildBase
   Also build the `agent-base` image (takes several minutes).
 .PARAMETER MemoryGB
-  WSL VM memory ceiling written to .wslconfig. Default 16.
+  WSL VM memory ceiling written to .wslconfig. Default: installed RAM minus 6 GB for Windows (26 on the 32 GB PC).
+.PARAMETER SwapGB
+  WSL swap written to .wslconfig. Default 24, enough to hold every box's memory: the tray pushes frozen boxes
+  out to swap while a game runs, so the RAM goes back to Windows.
 #>
 [CmdletBinding()]
 param(
@@ -25,7 +28,8 @@ param(
     [string]$BoxtrayPath,
     [string]$TailscaleAuthKey,
     [switch]$BuildBase,
-    [int]$MemoryGB = 16
+    [int]$MemoryGB = 0,
+    [int]$SwapGB = 24
 )
 
 $ErrorActionPreference = 'Stop'
@@ -120,20 +124,60 @@ Note 'done (setup-distro.sh checks that the kernel is 6.12 or newer)'
 
 # --- 2. .wslconfig (merge) -------------------------------------------------
 Step 'Merging %USERPROFILE%\.wslconfig'
+if ($MemoryGB -le 0) {
+    # Installed modules, not TotalPhysicalMemory: that is a little under (hardware reserved) and would round to 25.
+    $ramGB = [int][math]::Floor((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
+    $MemoryGB = [math]::Max(4, $ramGB - 6)
+    Note "memory: $MemoryGB GB of $ramGB GB (6 GB left for Windows)"
+}
 $wantCfg = [ordered]@{
-    'wsl2'         = [ordered]@{ 'memory' = "${MemoryGB}GB"; 'vmIdleTimeout' = '-1' }
+    'wsl2'         = [ordered]@{ 'memory' = "${MemoryGB}GB"; 'swap' = "${SwapGB}GB"; 'vmIdleTimeout' = '-1' }
     'experimental' = [ordered]@{ 'autoMemoryReclaim' = 'gradual'; 'sparseVhd' = 'true' }
 }
 $cfgPath = Join-Path $env:USERPROFILE '.wslconfig'
+# >>> wslconfig merge (provision/test-wslconfig.ps1 runs this block on test files)
+# Read the bytes and decode them strictly ourselves: PowerShell 5.1's Get-Content assumes the ANSI
+# code page without a BOM. Only UTF-8 (with or without a BOM) and UTF-16 with a BOM are rewritten,
+# in the encoding they came in; each line keeps its own terminator (CRLF, LF or none at the end).
 $lines = New-Object System.Collections.Generic.List[string]
-if (Test-Path -LiteralPath $cfgPath) { foreach ($l in (Get-Content -LiteralPath $cfgPath)) { $lines.Add([string]$l) } }
-$original = ($lines -join "`n")
+$terms = New-Object System.Collections.Generic.List[string]
+$enc = New-Object Text.UTF8Encoding($false, $true)
+if (Test-Path -LiteralPath $cfgPath) {
+    $bytes = [IO.File]::ReadAllBytes($cfgPath)
+    $skip = 0
+    $refuse = "$cfgPath is not valid UTF-8 or UTF-16, so it is left alone. Save it as UTF-8 (Notepad: Save As, Encoding UTF-8) and re-run, or set these by hand: [wsl2] memory=${MemoryGB}GB, swap=${SwapGB}GB, vmIdleTimeout=-1; [experimental] autoMemoryReclaim=gradual, sparseVhd=true."
+    # UTF-32 first: its little-endian BOM starts with UTF-16's.
+    if ($bytes.Length -ge 4 -and (($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) -or ($bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF))) { throw $refuse }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { $enc = New-Object Text.UTF8Encoding($true, $true); $skip = 3 }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) { $enc = New-Object Text.UnicodeEncoding($false, $true, $true); $skip = 2 }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) { $enc = New-Object Text.UnicodeEncoding($true, $true, $true); $skip = 2 }
+    try { $text = $enc.GetString($bytes, $skip, $bytes.Length - $skip) }
+    catch { throw $refuse }
+    $pos = 0
+    while ($pos -lt $text.Length) {
+        $nl = $text.IndexOfAny([char[]]"`r`n", $pos)
+        if ($nl -lt 0) { $lines.Add($text.Substring($pos)); $terms.Add(''); break }
+        $t = "$($text[$nl])"
+        if ($text[$nl] -eq "`r" -and $nl + 1 -lt $text.Length -and $text[$nl + 1] -eq "`n") { $t = "`r`n" }
+        $lines.Add($text.Substring($pos, $nl - $pos)); $terms.Add($t)
+        $pos = $nl + $t.Length
+    }
+}
+$eol = "`r`n"   # for new lines: the file's first terminator, else CRLF
+foreach ($t in $terms) { if ($t) { $eol = $t; break } }
+function Add-CfgLine([int]$at, [string]$line) {
+    $term = $eol
+    if ($at -eq $lines.Count -and $at -gt 0 -and $terms[$at - 1] -eq '') { $terms[$at - 1] = $eol; $term = '' }   # keep "no final newline"
+    $lines.Insert($at, $line); $terms.Insert($at, $term)
+}
+function Join-Cfg { $sb = New-Object Text.StringBuilder; for ($i = 0; $i -lt $lines.Count; $i++) { [void]$sb.Append($lines[$i]).Append($terms[$i]) }; $sb.ToString() }
+$original = Join-Cfg
 foreach ($section in $wantCfg.Keys) {
     $start = -1
     for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].Trim() -ieq "[$section]") { $start = $i; break } }
     if ($start -lt 0) {
-        if ($lines.Count -gt 0 -and $lines[$lines.Count - 1].Trim() -ne '') { $lines.Add('') }
-        $lines.Add("[$section]")
+        if ($lines.Count -gt 0 -and $lines[$lines.Count - 1].Trim() -ne '') { Add-CfgLine $lines.Count '' }
+        Add-CfgLine $lines.Count "[$section]"
         $start = $lines.Count - 1
     }
     $end = $lines.Count
@@ -146,20 +190,25 @@ foreach ($section in $wantCfg.Keys) {
                 if ($Matches[1] -ieq $key) { $lines[$i] = "$key=$val"; $found = $true; break }
             }
         }
-        if (-not $found) { $lines.Insert($end, "$key=$val"); $end++ }
+        if (-not $found) {
+            $at = $end   # before the blank lines that end the section
+            while ($at -gt $start + 1 -and $lines[$at - 1].Trim() -eq '') { $at-- }
+            Add-CfgLine $at "$key=$val"; $end++
+        }
     }
 }
-$cfgChanged = ($lines -join "`n") -ne $original
+$cfgChanged = (Join-Cfg) -ne $original
 if ($cfgChanged) {
     if (Test-Path -LiteralPath $cfgPath) {
         $bak = "$cfgPath.agent-box.bak"
         if (-not (Test-Path -LiteralPath $bak)) { Copy-Item -LiteralPath $cfgPath -Destination $bak; Note "backup: $bak" }
     }
-    [IO.File]::WriteAllLines($cfgPath, $lines, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($cfgPath, (Join-Cfg), $enc)
     Note "updated $cfgPath (other settings kept)"
 } else {
     Note 'already up to date'
 }
+# <<< wslconfig merge
 
 # --- 3. Import the distro --------------------------------------------------
 Step "WSL distro '$Distro'"

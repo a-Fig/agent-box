@@ -47,6 +47,7 @@ func main() {
 		cfg = ""
 	}
 	mgr := mode.New(mode.CLI{Run: wslIncus}, loadMode(cfg))
+	mgr.Reclaim = mode.CgroupReclaim{Run: wslRoot}
 	lg.Printf("mode at start: %s", mgr.Chosen())
 	wake := make(chan struct{}, 1)
 	poke := func() {
@@ -68,7 +69,18 @@ func main() {
 		},
 		release: func() {
 			go func() {
-				hidden(exec.Command("wsl.exe", "--terminate", distro)).Run()
+				// One release at a time; while it runs, no tick, reclaim or
+				// swap call starts a wsl.exe that would bring the distro back.
+				if !mgr.BeginRelease() {
+					lg.Printf("release memory: already running")
+					return
+				}
+				defer mgr.EndRelease()
+				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
+				defer cancel()
+				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
+					lg.Printf("release memory: wsl --terminate: %v", err)
+				}
 				poke()
 			}()
 		},

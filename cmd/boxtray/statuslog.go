@@ -37,6 +37,9 @@ func (s *statusLog) observe(st mode.Status) {
 	} else if !st.Down && prev.Down {
 		s.logf("WSL distro is running again")
 	}
+	for _, r := range st.Reclaimed {
+		s.logf("reclaimed %s: %.0fMiB left in RAM", r.Name, float64(r.Left)/(1<<20))
+	}
 	if e := errText(st.Err); e != "" && e != errText(prev.Err) {
 		s.logf("tick error: %s", e)
 	} else if e == "" && errText(prev.Err) != "" {

@@ -49,8 +49,8 @@ func (m Mode) Label() string {
 // every box. The CPU count comes from the box's size (Size.CPUs):
 // limits.cpu=N is a real cap (N CPUs), unlike limits.cpu.allowance, which is
 // only a weight between Linux processes and does nothing against Windows.
-// Memory stays as the box was launched with. Project limits are fixed at
-// provisioning, because Incus refuses to lower them below what is in use.
+// Memory stays as the box was launched with; the project's memory cap
+// follows the mode (MemoryBudgets).
 func (m Mode) priority() string {
 	if m == Full {
 		return "10"
