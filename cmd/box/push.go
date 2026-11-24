@@ -168,17 +168,32 @@ func readJSON(path string, v any) error {
 }
 
 // claim creates <job><ext> exclusively and says whether this caller made it.
-func (a *App) claim(job, ext string) bool {
+func (a *App) claim(job, ext string) bool { return a.claimBy(job, ext, "") }
+
+// claimBy is claim with the owner's name inside the file, readable by the
+// callers that lose. The file is written whole under a temporary name and
+// hard-linked into place, so it is never seen empty and only one link wins.
+func (a *App) claimBy(job, ext, who string) bool {
 	if a.StateDir == "" {
 		return false
 	}
 	os.MkdirAll(a.StateDir, 0o755)
-	f, err := os.OpenFile(a.statePath(job, ext), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	tmp, err := os.CreateTemp(a.StateDir, ".claim-*")
 	if err != nil {
 		return false
 	}
-	f.Close()
-	return true
+	defer os.Remove(tmp.Name())
+	_, werr := tmp.WriteString(who)
+	if cerr := tmp.Close(); werr != nil || cerr != nil {
+		return false
+	}
+	return os.Link(tmp.Name(), a.statePath(job, ext)) == nil
+}
+
+// owner is who created <job><ext> with claimBy, or "".
+func (a *App) owner(job, ext string) string {
+	b, _ := os.ReadFile(a.statePath(job, ext))
+	return string(b)
 }
 
 func (a *App) exists(job, ext string) bool {
@@ -205,16 +220,22 @@ func (a *App) startWatch(info jobMeta, job string, gpu bool) bool {
 	return true
 }
 
-// noteDelivered says a result reached the agent directly (box_job, box_cancel
-// or an inline box_run), so the watcher must not push it again.
-func (a *App) noteDelivered(job string) {
-	if a.StateDir == "" {
-		return
+// deliverFirst is box_job's side of "whoever creates .notified first
+// delivers". It is called once box_job has a terminal result, before it
+// returns it, and says whether box_job should hand the result over. It must
+// not when the watcher got there first and pushed (or is pushing) it: the
+// agent has it as a turn. A job without a record isn't pushed, so box_job
+// always delivers it; a job box_cancel marked, or one box_job already
+// returned, is delivered again on request.
+func (a *App) deliverFirst(job string) bool {
+	if a.StateDir == "" || !a.exists(job, ".json") {
+		return true
 	}
-	a.claim(job, ".notified")
-	if a.exists(job, ".json") {
+	if a.claimBy(job, ".notified", "box_job") {
 		a.claim(job, ".surfaced")
+		return true
 	}
+	return a.owner(job, ".notified") != "watcher"
 }
 
 // safetyNet runs at the start of every box_* call. It restarts the watchers
@@ -458,7 +479,7 @@ func (a *App) Watch(ctx context.Context, job string) error {
 // finish records the end and pushes it unless someone delivered it already.
 func (a *App) finish(ctx context.Context, rec jobRecord, end jobEnd, took time.Duration, tail string) error {
 	writeJSON(a.statePath(rec.Job, ".ended"), end)
-	if !a.claim(rec.Job, ".notified") {
+	if !a.claimBy(rec.Job, ".notified", "watcher") {
 		return nil // box_job or box_cancel delivered it, or a second watcher did
 	}
 	msg := endedMessage(rec, end.Code, took, tail)

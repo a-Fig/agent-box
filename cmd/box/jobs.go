@@ -285,7 +285,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 	}
 	if f[0] == "cancelled" {
 		a.markIdle(ctx, box)
-		a.claim(job, ".notified") // the agent cancelled it: no push of its end
+		a.claimBy(job, ".notified", "cancel") // the agent cancelled it: no push of its end
 	}
 	return f[0] == "cancelled", code, nil
 }

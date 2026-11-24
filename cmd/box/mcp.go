@@ -108,11 +108,13 @@ func sizeEnum() []string {
 
 // jobOutput is the structuredContent of box_run and box_job (a JobResult).
 var jobOutput = obj(map[string]any{
-	"job":      str("Job ID, for box_job."),
-	"box":      str("Box the job runs in."),
-	"state":    str("done (exitCode is the command's), running, paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
-	"push":     map[string]any{"type": "boolean", "description": "box_run, state running: the result will arrive as a turn in your thread."},
-	"exitCode": map[string]any{"type": "integer"},
+	"job":    str("Job ID, for box_job."),
+	"box":    str("Box the job runs in."),
+	"state":  str("done (exitCode is the command's), running, paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
+	"push":   map[string]any{"type": "boolean", "description": "box_run, state running: the result will arrive as a turn in your thread."},
+	"pushed": map[string]any{"type": "boolean", "description": "box_job: the job's result was already pushed into your thread, so this reply leaves out the output tail."},
+	"exitCode": map[string]any{"type": []string{"integer", "null"},
+		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 	// Only for a log page (box_job with offset or limit).
 	"offset":     map[string]any{"type": "integer"},
@@ -270,12 +272,13 @@ type toolArgs struct {
 
 // pageResult reports a box_job log page: the summary line, then the bytes.
 func pageResult(p Page) map[string]any {
-	code := exitDetached
+	var code *int // a job that is still running has no exit code
 	switch {
 	case p.Code != nil:
-		code = *p.Code
+		code = p.Code
 	case p.State == jobDied:
-		code = 1
+		one := 1
+		code = &one
 	}
 	res := textResult(p.pageHead()+"\n"+p.Text, false)
 	structured := map[string]any{
@@ -304,7 +307,9 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		r.State = stateRunning
 	}
 	head := "exit code: " + strconv.Itoa(r.Code)
-	if r.State != "" {
+	if r.State == stateRunning {
+		head = "running" // no exit code yet
+	} else if r.State != "" {
 		head = r.State + ", " + head
 	}
 	if r.Push != nil {
@@ -323,10 +328,18 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		text += "\nerror: " + err.Error()
 	}
 	res := textResult(text, err != nil)
-	res["structuredContent"] = struct {
-		JobResult
+	out := struct {
+		Job      string   `json:"job,omitempty"`
+		Box      string   `json:"box,omitempty"`
+		State    string   `json:"state,omitempty"`
+		ExitCode *int     `json:"exitCode"` // null while the job is running
+		Push     *bool    `json:"push,omitempty"`
 		Warnings []string `json:"warnings,omitempty"`
-	}{r, warnings}
+	}{r.Job, r.Box, r.State, &r.Code, r.Push, warnings}
+	if r.State == stateRunning {
+		out.ExitCode = nil
+	}
+	res["structuredContent"] = out
 	return res
 }
 
@@ -477,8 +490,12 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			return textResult(err.Error(), true)
 		}
 		r, err := a.Job(ctx, args.ID, wait)
-		if err == nil && r.State == stateDone {
-			a.noteDelivered(args.ID) // the watcher must not push it again
+		if err == nil && r.State == stateDone && !a.deliverFirst(args.ID) {
+			// The watcher claimed the end first and pushed it into this
+			// thread as a turn: stay quiet instead of delivering it twice.
+			res := textResult(fmt.Sprintf("job %s on box %s: done, exit code: %d\nIts result was already sent to your thread as a turn starting \"box: job\". Read the log with box_job offset 0.", r.Job, r.Box, r.Code), false)
+			res["structuredContent"] = map[string]any{"job": r.Job, "box": r.Box, "state": r.State, "exitCode": r.Code, "pushed": true}
+			return res
 		}
 		return jobResult(r, err, out.String(), warnings)
 	}

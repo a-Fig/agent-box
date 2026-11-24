@@ -584,7 +584,7 @@ func TestMCPAgentTools(t *testing.T) {
 	if l := first(2); l != "1 job(s), 1 running" {
 		t.Errorf("box_job list first line = %q", l)
 	}
-	if r := got[3].Result; r.IsError || r.Structured["nextOffset"] != 6.0 || r.Structured["exitCode"] != 130.0 || !strings.HasSuffix(r.Content[0].Text, "\nhello\n") {
+	if r := got[3].Result; r.IsError || r.Structured["nextOffset"] != 6.0 || r.Structured["exitCode"] != nil || !strings.HasSuffix(r.Content[0].Text, "\nhello\n") {
 		t.Errorf("box_job page = %+v", r)
 	}
 	if r := got[4].Result; !r.IsError || !strings.Contains(r.Content[0].Text, "GH_TOKEN looks like a secret") {

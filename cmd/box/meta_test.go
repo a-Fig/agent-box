@@ -302,10 +302,12 @@ func TestRefusalPosted(t *testing.T) {
 			// From MCP; the GPU case asks for the GPU.
 			res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_run","arguments":{"dir":`+jsonString(dir)+
 				`,"command":"true","gpu":`+fmt.Sprint(c.why == refusedGPUBusy)+`,"reason":"`+testReason+`"}}`), nil)
-			if sc := res["structuredContent"].(struct {
-				JobResult
-				Warnings []string `json:"warnings,omitempty"`
-			}); sc.Code != exitPaused {
+			var sc struct {
+				State    string
+				ExitCode int
+			}
+			raw, _ := json.Marshal(res["structuredContent"])
+			if json.Unmarshal(raw, &sc); sc.ExitCode != exitPaused || sc.State != stateRefused {
 				t.Fatalf("box_run = %v\n%s", res, out)
 			}
 			switch {
