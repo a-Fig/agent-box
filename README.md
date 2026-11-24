@@ -33,7 +33,7 @@ box rm scratch
 
 Boxes are disposable compute. Idle boxes expire after two hours by default. Only package caches in `/cache` survive deletion. `box new --ttl` sets the initial lifetime. Starting a job refreshes the box's expiry to 24 hours. Reading the job's exit code with `box run` or `box job` resets it to two hours.
 
-Sizes are small (1 CPU in Shared, 2 in Full, 2GiB, 20GiB disk), medium (2/4, 4GiB, 30GiB, the default) and large (4/8, 8GiB, 40GiB); [docs/DESIGN.md](docs/DESIGN.md#box-sizes) has why. A box records its size in `user.box.size` and is never resized. `--size` picks the size of a box the run launches. If the repo's box exists in another size, the run uses a throwaway box of the requested size and says so. A launch Incus refuses for the project's limits exits 75.
+Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4, 4GiB, 30GiB, the default) and large (4/8, 8GiB, 40GiB). A box records its size in `user.box.size` and is never resized. `--size` picks the size of a box the run launches. If the repo's box exists in another size, the run uses a throwaway box of the requested size and says so. A launch Incus refuses for the project's limits exits 75. [Box sizes](docs/DESIGN.md#box-sizes)
 
 `--new` launches a fresh box marked `user.box.throwaway=true` and removes it when the exit code is collected. Use `--box` with a reusable box. If the initial box launch loses its connection, look for the printed box name in `box ls` and remove it with `box rm` if it was created.
 

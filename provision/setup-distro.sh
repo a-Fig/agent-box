@@ -27,7 +27,7 @@ CPU_CAP=${AGENTS_CPU_CAP:-24}
 MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
 MAX_BOXES=${AGENTS_MAX_BOXES:-6}
 DISK_CAP=${AGENTS_DISK_CAP:-150GiB}
-CACHE_SIZE=50GiB
+CACHE_SIZE=30GiB
 BUILD_BASE=0
 REBUILD=0
 
@@ -154,10 +154,9 @@ else
 fi
 # Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
 # below what existing instances use). Box sizes (internal/mode/size.go) set each box's memory and
-# root disk at launch and its limits.cpu per mode. Memory is the cap that binds: 12GiB is 6 small,
-# 3 medium, or 1 large + 2 small. 6 instances let six small boxes fit. limits.cpu=24 counts each
-# box at its Full CPUs (3 Full medium = 12, 1 Full large + 2 small = 12) with room to spare: it is
-# an allocation cap, and the tray's per-box limits.cpu is what protects the PC.
+# root disk at launch and its limits.cpu per mode. 12GiB fits six small, three medium, or one
+# large plus two small. Six small root disks and the cache allocate 138GiB of the 150GiB disk cap.
+# The CPU cap leaves room for each mix in Full mode.
 incus project set "$PROJECT" limits.instances="$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu="$CPU_CAP"
 incus project set "$PROJECT" limits.memory="$MEM_CAP"

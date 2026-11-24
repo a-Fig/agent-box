@@ -555,7 +555,7 @@ func TestCPUsFollowEachBoxSize(t *testing.T) {
 
 func TestSizeTable(t *testing.T) {
 	want := map[string][4]string{
-		"small":  {"1", "2", "2GiB", "20GiB"},
+		"small":  {"1", "2", "2GiB", "18GiB"},
 		"medium": {"2", "4", "4GiB", "30GiB"},
 		"large":  {"4", "8", "8GiB", "40GiB"},
 	}
@@ -571,12 +571,12 @@ func TestSizeTable(t *testing.T) {
 	if SizeOf(nil).Name != DefaultSize || DefaultSize != "medium" {
 		t.Errorf("default size = %s", SizeOf(nil).Name)
 	}
-	for in, n := range map[string]int64{"4GiB": 4 << 30, "512MiB": 512 << 20, "2GB": 2e9, "1024": 1024, " 12GiB\n": 12 << 30} {
+	for in, n := range map[string]int64{"4GiB": 4 << 30, "512MiB": 512 << 20, "2GB": 2e9, "1024": 1024, " 12GiB\n": 12 << 30, "2PiB": 2 << 50, "512 bytes": 512} {
 		if got, ok := ParseBytes(in); !ok || got != n {
 			t.Errorf("ParseBytes(%q) = %d, %v", in, got, ok)
 		}
 	}
-	for _, in := range []string{"", "50%", "-1GiB", "lots"} {
+	for _, in := range []string{"", "50%", "-1GiB", "lots", "8EiB"} {
 		if _, ok := ParseBytes(in); ok {
 			t.Errorf("ParseBytes(%q) ok", in)
 		}

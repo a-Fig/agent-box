@@ -38,13 +38,13 @@ The table lives in `internal/mode/size.go`; `box`, the tray and `box help` read 
 
 | size | CPUs Shared / Full | RAM | root disk |
 |---|---|---|---|
-| small | 1 / 2 | 2GiB | 20GiB |
+| small | 1 / 2 | 2GiB | 18GiB |
 | medium (default) | 2 / 4 | 4GiB | 30GiB |
 | large | 4 / 8 | 8GiB | 40GiB |
 
 - `box` launches every box with `user.box.size`, `limits.memory`, a root disk `size` and the Shared `limits.cpu` on the instance, so no extra profiles are needed. A box without the key (one launched before sizes, or by hand) is medium. Boxes are never resized: memory and disk are fixed at launch.
 - The tray sets each box's `limits.cpu` from its size and the mode on every tick. An agent could rewrite `user.box.size` on its own box to get more CPUs; memory stays as launched, and the project caps still bound the total.
-- Incus counts the caps against configured limits, stopped boxes included. Memory binds first: 12GiB is 6 small, 3 medium, or 1 large and 2 small. `limits.cpu=24` counts every box at its Full CPUs with room to spare; the tray's per-box limits are what protect the PC. Disk can bind too: the 50GiB `cache` volume and images count against the 150GiB, so 150GiB holds at most 4 small boxes' root disks next to them (2026-11-23).
+- Incus counts configured allocations for all boxes, including stopped boxes. With 12GiB of RAM, the project can fit six small boxes, three medium boxes, or one large box and two small boxes. The 24-CPU cap leaves room for those mixes in Full mode. Six small root disks and the 30GiB cache allocate 138GiB, leaving 12GiB for other allocations under the 150GiB disk cap.
 - `box status` works out what fits now from the caps minus the existing boxes' Full CPUs, memory and count, and the disk Incus reports in `incus project info`. A launch Incus refuses for project limits exits 75, like a paused PC.
 
 ## Glue we write
@@ -104,5 +104,5 @@ Boxes are throwaway compute. Push work to git before a box goes.
 
 - **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
 - **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
-- **Disk caps.** Root disk 20/30/40GiB per box by size, set at launch. Project `limits.disk=150GiB` over all boxes, volumes and images. Volume `cache` is `size=50GiB`.
+- **Disk caps.** Root disk 18/30/40GiB per box by size, set at launch. Project `limits.disk=150GiB` over all boxes and volumes, including the 30GiB cache.
 - **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle and uv rebuild it).

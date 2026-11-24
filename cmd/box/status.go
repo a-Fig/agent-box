@@ -67,7 +67,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s.Mode = a.mode(ctx)
 	s.Reason = a.projectKey(ctx, mode.ProjectReasonKey)
 	s.Yielding = s.Reason != ""
-	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil {
+	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
 		s.MaxBoxes, s.SlotsFree = n, max(n-len(insts), 0)
 	}
 	now := mode.Mode(s.Mode)
@@ -102,24 +102,31 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 
 // room works out how many more boxes of each size fit, from the project's
 // caps minus what existing boxes (stopped ones too) are allocated: CPUs at
-// their size's Full count, since the tray raises them to it in Full mode,
+// at least their size's Full count, because the tray raises them in Full mode,
 // memory, instances, and disk as Incus counts it (root disks, volumes,
 // images). A cap that can't be read doesn't limit.
 func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxes int) ([]SizeRoom, string) {
 	instCap := int64(maxBoxes)
-	cpuCap, _ := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
-	memCap, _ := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
+	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
+	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
 	var cpus, mem int64
 	for _, in := range insts {
 		sz := mode.SizeOf(in.Config)
-		cpus += int64(sz.FullCPUs)
-		m, ok := mode.ParseBytes(in.Config["limits.memory"])
+		cfg := in.ExpandedConfig
+		if cfg == nil {
+			cfg = in.Config
+		}
+		cpu, _ := strconv.ParseInt(cfg["limits.cpu"], 10, 64)
+		cpus += max(int64(sz.FullCPUs), cpu)
+		m, ok := mode.ParseBytes(cfg["limits.memory"])
 		if !ok {
 			m, _ = mode.ParseBytes(sz.Memory)
 		}
 		mem += m
 	}
-	diskFree, diskKnown := a.diskFree(ctx)
+	resources := a.projectResources(ctx)
+	diskFree, diskKnown := resources["disk"].remaining()
+	containersFree, containersKnown := resources["containers"].remaining()
 
 	sizes := make([]SizeRoom, len(mode.Sizes))
 	limited := false
@@ -132,13 +139,16 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 		}
 		szMem, _ := mode.ParseBytes(sz.Memory)
 		szDisk, _ := mode.ParseBytes(sz.Disk)
-		if instCap > 0 {
+		if instCap >= 0 {
 			limit(instCap-int64(len(insts)), 1)
 		}
-		if cpuCap > 0 {
+		if containersKnown {
+			limit(containersFree, 1)
+		}
+		if cpuErr == nil && cpuCap >= 0 {
 			limit(cpuCap-cpus, int64(sz.FullCPUs))
 		}
-		if memCap > 0 {
+		if memKnown {
 			limit(memCap-mem, szMem)
 		}
 		if diskKnown {
@@ -162,24 +172,28 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 	return sizes, strings.Join(parts, ", or ")
 }
 
-// diskFree is the project's limits.disk minus what Incus counts against it,
-// from `incus project info`; false when that can't be read or there is no cap.
-func (a *App) diskFree(ctx context.Context) (int64, bool) {
+type projectResource struct{ Limit, Usage *int64 }
+
+func (r projectResource) remaining() (int64, bool) {
+	if r.Limit == nil || r.Usage == nil || *r.Limit < 0 || *r.Usage < 0 {
+		return 0, false
+	}
+	return *r.Limit - *r.Usage, true
+}
+
+// projectResources reads Incus's allocation counters, when available.
+func (a *App) projectResources(ctx context.Context) map[string]projectResource {
 	out, err := a.incusOK(ctx, "project", "info", a.target(a.Project), "--format", "json")
 	if err != nil {
-		return 0, false
+		return nil
 	}
 	var st struct {
-		Resources map[string]struct{ Limit, Usage int64 } `json:"resources"`
+		Resources map[string]projectResource `json:"resources"`
 	}
 	if json.Unmarshal([]byte(out), &st) != nil {
-		return 0, false
+		return nil
 	}
-	d, ok := st.Resources["disk"]
-	if !ok || d.Limit <= 0 {
-		return 0, false
-	}
-	return d.Limit - d.Usage, true
+	return st.Resources
 }
 
 // sizeText is "medium: 2 CPUs/4GiB" for a size as it is now.

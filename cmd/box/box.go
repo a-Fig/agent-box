@@ -122,9 +122,10 @@ func (a *App) incusOK(ctx context.Context, args ...string) (string, error) {
 func (a *App) target(box string) string { return a.Remote + ":" + box }
 
 type instance struct {
-	Name   string            `json:"name"`
-	Status string            `json:"status"` // Running, Stopped, Frozen, ...
-	Config map[string]string `json:"config"`
+	Name           string            `json:"name"`
+	Status         string            `json:"status"` // Running, Stopped, Frozen, ...
+	Config         map[string]string `json:"config"`
+	ExpandedConfig map[string]string `json:"expanded_config"`
 }
 
 func (a *App) list(ctx context.Context) ([]instance, error) {
@@ -229,10 +230,24 @@ func isNoRoom(err error) bool {
 	return errors.As(err, &e)
 }
 
+type existingBoxSize string
+
+func (s existingBoxSize) Error() string { return "existing box has size " + string(s) }
+
+func reusableBox(in *instance, requestedSize string) error {
+	if in.Config[throwawayKey] == "true" {
+		return fmt.Errorf("box %s is a throwaway and cannot be reused", in.Name)
+	}
+	if have := mode.SizeOf(in.Config).Name; requestedSize != "" && have != requestedSize {
+		return existingBoxSize(have)
+	}
+	return nil
+}
+
 // projectLimitRefusal matches Incus's refusals for project limits, like
 // `Reached maximum aggregate value "12GiB" for "limits.memory" in project
 // "agents"` or `Reached maximum number of instances in project "agents"`.
-var projectLimitRefusal = regexp.MustCompile(`(?i)reached maximum|quota|exceed`)
+var projectLimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
 
 func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
 	if !validBox.MatchString(name) {
@@ -396,15 +411,16 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	var inst *instance
 	if paused == "" && !o.New {
 		if inst = find(insts, box); inst != nil {
-			if inst.Config[throwawayKey] == "true" {
-				return JobResult{Box: box, Code: 1}, fmt.Errorf("box %s is a throwaway and cannot be reused", box)
-			}
-			if have := mode.SizeOf(inst.Config).Name; o.Size != "" && have != sz.Name {
-				// Boxes aren't resized: memory and disk are set at launch.
-				fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, have, sz.Name)
-				o.New, inst = true, nil
-			} else if inst.Status == "Frozen" {
-				paused = box + " is paused"
+			switch err := reusableBox(inst, o.Size); have := err.(type) {
+			case existingBoxSize:
+				fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
+				o.New = true
+			case nil:
+				if inst.Status == "Frozen" {
+					paused = box + " is paused"
+				}
+			default:
+				return JobResult{Box: box, Code: 1}, err
 			}
 		}
 	}
@@ -421,6 +437,23 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	defer os.RemoveAll(filepath.Dir(bundle))
 
 	started := false // from here on the remote job may be running
+	if !o.New {
+		paused, err := a.ensureBox(ctx, box, inst, sz, o.Size)
+		var have existingBoxSize
+		switch {
+		case errors.As(err, &have):
+			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
+			o.New = true
+		case isNoRoom(err):
+			fmt.Fprintf(a.Err, "box: %v\n", err)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		case err != nil:
+			return JobResult{Code: 1}, err
+		case paused != "":
+			fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		}
+	}
 	if o.New {
 		ttl := o.TTL
 		if ttl == 0 {
@@ -439,15 +472,6 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 				a.removeQuietly(ctx, box)
 			}
 		}()
-	} else if paused, err := a.ensureBox(ctx, box, inst, sz); err != nil {
-		if isNoRoom(err) {
-			fmt.Fprintf(a.Err, "box: %v\n", err)
-			return JobResult{State: statePaused, Code: exitPaused}, nil
-		}
-		return JobResult{Code: 1}, err
-	} else if paused != "" {
-		fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
-		return JobResult{State: statePaused, Code: exitPaused}, nil
 	}
 
 	job := box + "." + id
@@ -510,16 +534,13 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 
 // ensureBox launches or starts a reused box. When a concurrent run launches
 // or starts it first, it carries on with that one.
-func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size) (paused string, err error) {
+func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size, requestedSize string) (paused string, err error) {
 	if inst != nil && inst.Status == "Running" {
 		return "", nil
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
 		err = a.launch(ctx, box, idleTTL, false, sz)
-		if isNoRoom(err) {
-			return "", err
-		}
 	} else {
 		_, err = a.incusOK(ctx, "start", a.target(box))
 	}
@@ -527,19 +548,24 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 		return "", nil
 	}
 	now, paused := a.check(ctx, box)
-	switch {
-	case paused != "":
+	if paused != "" {
 		return paused, nil
-	case now == nil:
+	}
+	if now == nil {
 		return "", err
-	case now.Config[throwawayKey] == "true":
-		return "", fmt.Errorf("box %s is a throwaway and cannot be reused", box)
+	}
+	if err := reusableBox(now, requestedSize); err != nil {
+		return "", err
+	}
+	switch {
 	case now.Status == "Running":
 		return "", nil
 	case inst == nil: // someone else launched it but it isn't running yet
 		if _, err := a.incusOK(ctx, "start", a.target(box)); err != nil {
-			if now, _ := a.check(ctx, box); now != nil && now.Status == "Running" && now.Config[throwawayKey] != "true" {
-				return "", nil
+			if now, paused := a.check(ctx, box); paused != "" {
+				return paused, nil
+			} else if now != nil && now.Status == "Running" {
+				return "", reusableBox(now, requestedSize)
 			}
 			return "", err
 		}

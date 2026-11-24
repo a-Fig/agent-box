@@ -6,7 +6,7 @@
 # its size (internal/mode/size.go): user.box.size, limits.memory and a root disk size on the
 # instance, which override the values here. The tray sets each box's limits.cpu from its size and
 # the mode on every tick. limits.cpu / limits.memory MUST be set per box: the project caps count them.
-# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes, 50GiB).
+# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes, 30GiB).
 # Boxes are deleted by the tray's reaper after user.expires; only /cache outlives a box, and it
 # may be wiped at any time.
 #

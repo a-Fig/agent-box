@@ -1,6 +1,7 @@
 package mode
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -19,7 +20,7 @@ type Size struct {
 // Sizes is the size table, smallest first. docs/DESIGN.md and the box skill
 // quote it.
 var Sizes = []Size{
-	{Name: "small", SharedCPUs: 1, FullCPUs: 2, Memory: "2GiB", Disk: "20GiB"},
+	{Name: "small", SharedCPUs: 1, FullCPUs: 2, Memory: "2GiB", Disk: "18GiB"},
 	{Name: "medium", SharedCPUs: 2, FullCPUs: 4, Memory: "4GiB", Disk: "30GiB"},
 	{Name: "large", SharedCPUs: 4, FullCPUs: 8, Memory: "8GiB", Disk: "40GiB"},
 }
@@ -79,8 +80,8 @@ func ParseBytes(v string) (int64, bool) {
 		suffix string
 		mult   int64
 	}{
-		{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
-		{"kB", 1e3}, {"KB", 1e3}, {"MB", 1e6}, {"GB", 1e9}, {"TB", 1e12}, {"B", 1},
+		{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40}, {"PiB", 1 << 50}, {"EiB", 1 << 60},
+		{"kB", 1e3}, {"KB", 1e3}, {"MB", 1e6}, {"GB", 1e9}, {"TB", 1e12}, {"PB", 1e15}, {"EB", 1e18}, {"B", 1}, {" bytes", 1},
 	}
 	mult := int64(1)
 	for _, u := range units {
@@ -90,7 +91,7 @@ func ParseBytes(v string) (int64, bool) {
 		}
 	}
 	n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-	if err != nil || n < 0 {
+	if err != nil || n < 0 || n > math.MaxInt64/mult {
 		return 0, false
 	}
 	return n * mult, true

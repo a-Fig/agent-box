@@ -205,7 +205,7 @@ $small = 'sizesmoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 if ($LASTEXITCODE -ne 0) { throw "Creating $small failed" }
 incus --project agents config get "pc:$small" user.box.size     # small
 incus --project agents config get "pc:$small" limits.memory     # 2GiB
-incus --project agents config device get "pc:$small" root size  # 20GiB
+incus --project agents config device get "pc:$small" root size  # 18GiB
 Start-Sleep 10
 incus --project agents config get "pc:$small" limits.cpu        # 1 in Shared, 2 in Full
 & $box status   # "room for:" counts the small box: 1 large, or 2 medium, or 5 small at most
