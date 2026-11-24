@@ -38,6 +38,13 @@ func wslIncus(ctx context.Context, args ...string) ([]byte, error) {
 	return hidden(exec.CommandContext(ctx, "wsl.exe", full...)).Output()
 }
 
+// wslRoot runs a command as root inside the agents distro, without a shell
+// in between (--exec), for the cgroup writes Incus has no command for.
+func wslRoot(ctx context.Context, args ...string) ([]byte, error) {
+	full := append([]string{"-d", distro, "-u", "root", "--exec"}, args...)
+	return hidden(exec.CommandContext(ctx, "wsl.exe", full...)).Output()
+}
+
 // winSensors implements Sensors with Windows APIs.
 type winSensors struct {
 	mu      sync.Mutex

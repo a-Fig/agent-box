@@ -43,7 +43,7 @@ $name = 'smoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
 if ($LASTEXITCODE -ne 0) { throw "Creating $name failed" }
 ```
 
-`box ls` shows names, status and expiry. Leave other boxes alone; the project allows 6 (`limits.instances`).
+`box ls` shows names, status and expiry. Leave other boxes alone; the project allows 10 (`limits.instances`).
 
 ### Run the repository tests and check the idle expiry
 
@@ -198,7 +198,7 @@ show no live child. The two pulls should print `file-ok` and `dir-ok`.
 Not yet run on the PC (2026-11-23); it needs `setup-distro.sh` re-run first, for the new caps.
 
 ```powershell
-incus --project agents project get pc:agents limits.instances   # 6
+incus --project agents project get pc:agents limits.instances   # 10
 incus --project agents project get pc:agents limits.cpu         # 24
 $small = 'sizesmoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 & $box new $small --size small
@@ -208,15 +208,40 @@ incus --project agents config get "pc:$small" limits.memory     # 2GiB
 incus --project agents config device get "pc:$small" root size  # 18GiB
 Start-Sleep 10
 incus --project agents config get "pc:$small" limits.cpu        # 1 in Shared, 2 in Full
-& $box status   # "room for:" counts the small box: 1 large, or 2 medium, or 5 small at most
+& $box status   # "room for:" counts the small box. Shared (12GiB): 1 large, or 2 medium, or 5 small at most
 & $box new --size large
-& $box new --size large   # with 2GiB + 8GiB used, the second large is refused: exit 75, "no room"
+& $box new --size large   # in Shared, with 2GiB + 8GiB used, the second large is refused: exit 75, "no room"
 if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a launch over the memory cap' }
 ```
 
 Remove the boxes it made with `box rm` (check `box ls` for the large one's name). Then, in a repo
 whose box exists as medium, `box run --size small -- true` should say it uses a throwaway small
 box, and leave the medium box as it was.
+
+### Memory cap and reclaim
+
+Needs the tray from the change under test. The cap follows the mode, and never drops below what
+boxes hold:
+
+```powershell
+incus project get pc:agents limits.memory   # 24GiB in Full, 12GiB in Shared, My PC or a game
+```
+
+With a large and a small box (10GiB) plus a medium (4GiB), switching Full to Shared leaves it at
+14GiB; removing the large one takes it to 12GiB within a tick.
+
+Reclaim, on the PC: fill a medium box with about 3GiB that stays resident, then start a game (or
+pick My PC), and watch Windows get the RAM back:
+
+```powershell
+"{0:N2} GB free, vmmem {1:N2} GB" -f ((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB), ((Get-Process vmmemWSL).WorkingSet64/1GB)
+wsl -d agents -u root -- cat /sys/fs/cgroup/lxc.payload.agents_<box>/memory.swap.current   # about 3GiB
+wsl -d agents -u root -- cat /sys/fs/cgroup/lxc.payload.agents_<box>/memory.swap.max       # 0 again
+```
+
+On 2026-11-24 a 3.26GB box went to swap in 3.2s, and within 35s vmmem fell by 3.1 GB and Windows'
+free memory rose by 3.2 GB. Over SSH the tray reads the notification state as busy and yields, so
+`.scratch/traytest.ps1` exercises this path without a game.
 
 ### GPU box
 

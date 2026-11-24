@@ -16,7 +16,10 @@
 .PARAMETER BuildBase
   Also build the `agent-base` image (takes several minutes).
 .PARAMETER MemoryGB
-  WSL VM memory ceiling written to .wslconfig. Default 16.
+  WSL VM memory ceiling written to .wslconfig. Default: installed RAM minus 6 GB for Windows (26 on the 32 GB PC).
+.PARAMETER SwapGB
+  WSL swap written to .wslconfig. Default 24, enough to hold every box's memory: the tray pushes frozen boxes
+  out to swap while a game runs, so the RAM goes back to Windows.
 #>
 [CmdletBinding()]
 param(
@@ -25,7 +28,8 @@ param(
     [string]$BoxtrayPath,
     [string]$TailscaleAuthKey,
     [switch]$BuildBase,
-    [int]$MemoryGB = 16
+    [int]$MemoryGB = 0,
+    [int]$SwapGB = 24
 )
 
 $ErrorActionPreference = 'Stop'
@@ -120,8 +124,14 @@ Note 'done (setup-distro.sh checks that the kernel is 6.12 or newer)'
 
 # --- 2. .wslconfig (merge) -------------------------------------------------
 Step 'Merging %USERPROFILE%\.wslconfig'
+if ($MemoryGB -le 0) {
+    # Installed modules, not TotalPhysicalMemory: that is a little under (hardware reserved) and would round to 25.
+    $ramGB = [int][math]::Floor((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
+    $MemoryGB = [math]::Max(4, $ramGB - 6)
+    Note "memory: $MemoryGB GB of $ramGB GB (6 GB left for Windows)"
+}
 $wantCfg = [ordered]@{
-    'wsl2'         = [ordered]@{ 'memory' = "${MemoryGB}GB"; 'vmIdleTimeout' = '-1' }
+    'wsl2'         = [ordered]@{ 'memory' = "${MemoryGB}GB"; 'swap' = "${SwapGB}GB"; 'vmIdleTimeout' = '-1' }
     'experimental' = [ordered]@{ 'autoMemoryReclaim' = 'gradual'; 'sparseVhd' = 'true' }
 }
 $cfgPath = Join-Path $env:USERPROFILE '.wslconfig'
@@ -146,7 +156,11 @@ foreach ($section in $wantCfg.Keys) {
                 if ($Matches[1] -ieq $key) { $lines[$i] = "$key=$val"; $found = $true; break }
             }
         }
-        if (-not $found) { $lines.Insert($end, "$key=$val"); $end++ }
+        if (-not $found) {
+            $at = $end   # before the blank lines that end the section
+            while ($at -gt $start + 1 -and $lines[$at - 1].Trim() -eq '') { $at-- }
+            $lines.Insert($at, "$key=$val"); $end++
+        }
     }
 }
 $cfgChanged = ($lines -join "`n") -ne $original

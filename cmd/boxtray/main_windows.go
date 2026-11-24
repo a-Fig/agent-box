@@ -47,6 +47,7 @@ func main() {
 		cfg = ""
 	}
 	mgr := mode.New(mode.CLI{Run: wslIncus}, loadMode(cfg))
+	mgr.Reclaim = mode.CgroupReclaim{Run: wslRoot}
 	lg.Printf("mode at start: %s", mgr.Chosen())
 	wake := make(chan struct{}, 1)
 	poke := func() {

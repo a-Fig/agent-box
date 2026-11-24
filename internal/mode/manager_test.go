@@ -18,10 +18,12 @@ type fake struct {
 	failOn  string // a call prefix that returns an error
 	project map[string]string
 	config  map[string]map[string]string // instance -> its own config
+	logCap  bool                         // log project limits.memory writes (only cap tests want them)
 }
 
 func newFake(kv ...string) *fake {
-	f := &fake{state: map[string]string{}, project: map[string]string{}, config: map[string]map[string]string{}}
+	// The project starts at the Shared/My PC budget, so only Full writes the cap.
+	f := &fake{state: map[string]string{}, project: map[string]string{MemoryCapKey: "12GiB"}, config: map[string]map[string]string{}}
 	for i := 0; i < len(kv); i += 2 {
 		f.add(kv[i], kv[i+1])
 	}
@@ -111,7 +113,17 @@ func (f *fake) UnsetInstanceConfig(_ context.Context, n, k string) error {
 	delete(f.config[n], k)
 	return nil
 }
+func (f *fake) ProjectConfig(_ context.Context, k string) (string, error) {
+	if f.failOn == "project get" {
+		return "", errors.New("boom")
+	}
+	return f.project[k], nil
+}
 func (f *fake) SetProjectConfig(_ context.Context, k, v string) error {
+	if k == MemoryCapKey && !f.logCap {
+		f.project[k] = v
+		return nil
+	}
 	if err := f.rec("project %s=%s", k, v); err != nil {
 		return err
 	}
@@ -178,19 +190,208 @@ func TestSharedCapsCPUResumesAndIsIdempotent(t *testing.T) {
 	equal(t, f.take(), []string{"set new limits.cpu=2", "set new limits.cpu.priority=0"})
 }
 
-func TestNeverWritesProjectLimitsOrMemory(t *testing.T) {
+func TestNeverWritesOtherProjectLimitsOrBoxMemory(t *testing.T) {
 	f := newFake("a", "Running")
+	f.logCap = true
 	for _, c := range []Mode{Shared, Full, MyPC, Full} {
 		m := New(f, c)
 		tick(m, 0, false)
 		tick(m, time.Hour, false)
 	}
 	for _, c := range f.take() {
-		if strings.HasPrefix(c, "project ") && !strings.HasPrefix(c, "project user.agent-box.mode=") {
+		if strings.HasPrefix(c, "project ") && !strings.HasPrefix(c, "project user.agent-box.mode=") &&
+			!strings.HasPrefix(c, "project limits.memory=") {
 			t.Errorf("wrote a project limit: %s", c)
 		}
-		if strings.Contains(c, "limits.memory") || strings.Contains(c, "limits.instances") {
+		if strings.HasPrefix(c, "set ") && strings.Contains(c, "limits.memory") || strings.Contains(c, "limits.instances") {
 			t.Errorf("touched %s", c)
+		}
+	}
+}
+
+// memSets is the project limits.memory writes among calls.
+func memSets(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if strings.HasPrefix(c, "project limits.memory=") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestMemoryCapFollowsModeAndOnlyChanges(t *testing.T) {
+	f := newFake("a", "Running")
+	f.logCap = true
+	m := New(f, Full)
+	tick(m, 0, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=24GiB"})
+	tick(m, 5*time.Second, false)
+	equal(t, memSets(f.take()), nil) // already right: no write
+	m.SetChosen(Shared)
+	tick(m, 10*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
+	m.SetChosen(Full)
+	tick(m, 15*time.Second, false)
+	f.take()
+	tick(m, 20*time.Second, true) // a game: My PC's budget
+	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
+
+	f.project[MemoryCapKey] = "12884901888" // the same value, written as bytes
+	tick(m, 25*time.Second, true)
+	equal(t, memSets(f.take()), nil)
+}
+
+func TestMemoryCapNeverBelowWhatBoxesHoldAndTightensAsTheyGo(t *testing.T) {
+	f := newFake("big", "Stopped", "mid", "Running", "small", "Running")
+	f.logCap = true
+	f.config["big"] = map[string]string{SizeKey: "large", MemoryCapKey: "8GiB"}
+	f.config["mid"] = map[string]string{} // no key: medium's 4GiB
+	f.config["small"] = map[string]string{SizeKey: "small", MemoryCapKey: "2GiB"}
+	f.project[MemoryCapKey] = "24GiB"
+	m := New(f, Full)
+	tick(m, 0, false)
+	equal(t, memSets(f.take()), nil)
+
+	f.add("more", "Running")
+	f.config["more"] = map[string]string{SizeKey: "large", MemoryCapKey: "8GiB"}
+	m.SetChosen(Shared) // 22GiB launched, more than Shared's 12GiB
+	tick(m, 5*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=22GiB"})
+
+	f.Delete(context.Background(), "big")
+	f.take()
+	tick(m, 10*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=14GiB"})
+	f.Delete(context.Background(), "more")
+	f.take()
+	tick(m, 15*time.Second, false)
+	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
+}
+
+func TestAllocatedMemoryPrefersExpandedConfig(t *testing.T) {
+	ins := []Instance{
+		{Name: "a", Config: map[string]string{}, ExpandedConfig: map[string]string{MemoryCapKey: "4GiB"}},
+		{Name: "b", Config: map[string]string{MemoryCapKey: "2GiB"}},
+		{Name: "c", Config: map[string]string{SizeKey: "large"}},
+		{Name: "d", Config: map[string]string{MemoryCapKey: "1GiB"}, ExpandedConfig: map[string]string{MemoryCapKey: "512MiB"}},
+	}
+	if got, want := AllocatedMemory(ins), int64(4<<30+2<<30+8<<30+512<<20); got != want {
+		t.Fatalf("allocated %d, want %d", got, want)
+	}
+	for n, s := range map[int64]string{24 << 30: "24GiB", 512 << 20: "512MiB", 1000: "1000", 0: "0"} {
+		if FormatBytes(n) != s {
+			t.Errorf("FormatBytes(%d) = %s", n, FormatBytes(n))
+		}
+	}
+}
+
+func TestStaleYieldReasonIsClearedOnStart(t *testing.T) {
+	f := newFake("a", "Running")
+	f.project[ProjectReasonKey] = "gaming: busy" // left by a tray killed mid-yield
+	m := New(f, Full)
+	tick(m, 0, false)
+	if got := only(f.take(), "project user.agent-box.reason"); len(got) != 1 || got[0] != "project user.agent-box.reason=" {
+		t.Fatalf("reason writes %q", got)
+	}
+	tick(m, time.Second, false)
+	equal(t, only(f.take(), "project user.agent-box.reason"), nil)
+}
+
+func TestMemoryCapReadFailureIsReported(t *testing.T) {
+	f := newFake("a", "Running")
+	f.failOn = "project get"
+	st := tick(New(f, Full), 0, false)
+	if st.Err == nil || memSets(f.take()) != nil {
+		t.Fatalf("err %v", st.Err)
+	}
+}
+
+type fakeReclaim struct {
+	f    *fake
+	fail bool
+}
+
+func (r *fakeReclaim) Reclaim(_ context.Context, n string) error {
+	if err := r.f.rec("reclaim %s", n); err != nil {
+		return err
+	}
+	if r.fail {
+		return errors.New("no swap")
+	}
+	return nil
+}
+
+// only keeps the calls that start with one of the prefixes.
+func only(calls []string, prefixes ...string) []string {
+	var out []string
+	for _, c := range calls {
+		for _, p := range prefixes {
+			if strings.HasPrefix(c, p) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func TestMyPCReclaimsFrozenBoxesOnceAfterPausingAll(t *testing.T) {
+	f := newFake("a", "Running", "b", "Frozen", "c", "Stopped", "g", "Running")
+	f.config["g"] = map[string]string{SizeKey: GPUSize}
+	m := New(f, Full)
+	m.Reclaim = &fakeReclaim{f: f}
+	tick(m, 0, false)
+	f.take()
+
+	tick(m, time.Second, true) // a game starts
+	// b was resumed by Full and is paused again; the GPU box is stopped, not reclaimed.
+	equal(t, only(f.take(), "pause ", "reclaim "), []string{"pause a", "pause b", "reclaim a", "reclaim b"})
+	tick(m, 2*time.Second, true)
+	equal(t, f.take(), nil)
+
+	// Back to Full, then another game: reclaimed afresh.
+	tick(m, 2*time.Minute, false)
+	tick(m, 2*time.Minute+YieldDebounce, false)
+	f.take()
+	tick(m, 3*time.Minute, true)
+	equal(t, only(f.take(), "reclaim "), []string{"reclaim a", "reclaim b"})
+}
+
+func TestReclaimFailureIsReportedNotRetried(t *testing.T) {
+	f := newFake("a", "Frozen")
+	m := New(f, MyPC)
+	m.Reclaim = &fakeReclaim{f: f, fail: true}
+	if st := tick(m, 0, false); st.Err == nil {
+		t.Fatal("no error")
+	}
+	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "reclaim a"})
+	if st := tick(m, time.Second, false); st.Err != nil {
+		t.Fatalf("err %v", st.Err)
+	}
+	equal(t, f.take(), nil)
+}
+
+func TestCgroupReclaimArgs(t *testing.T) {
+	var got []string
+	r := CgroupReclaim{Run: func(_ context.Context, args ...string) ([]byte, error) { got = args; return nil, nil }}
+	if err := r.Reclaim(context.Background(), "box-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 || got[0] != "sh" || got[1] != "-c" || got[3] != "sh" || got[4] != "box-1" {
+		t.Fatalf("args %q", got)
+	}
+	for _, want := range []string{"/sys/fs/cgroup/lxc.payload.agents_$1", "memory.reclaim", "memory.swap.max"} {
+		if !strings.Contains(got[2], want) {
+			t.Errorf("script lacks %q: %s", want, got[2])
+		}
+	}
+	if strings.ContainsAny(got[2], "\\\"") {
+		t.Errorf("script has quotes or backslashes wsl.exe would mangle: %s", got[2])
+	}
+	for _, bad := range []string{"../x", "a b", "", "-rf"} {
+		if r.Reclaim(context.Background(), bad) == nil {
+			t.Errorf("accepted %q", bad)
 		}
 	}
 }
@@ -398,6 +599,7 @@ func TestCLIArgs(t *testing.T) {
 	c.SetInstanceConfig(ctx, "a", "limits.cpu", "2")
 	c.UnsetInstanceConfig(ctx, "a", "limits.cpu.allowance")
 	c.SetProjectConfig(ctx, ProjectModeKey, "full")
+	c.ProjectConfig(ctx, MemoryCapKey)
 	want := [][]string{
 		{"list", "--project", "agents", "--format", "json"},
 		{"pause", "a", "--project", "agents"},
@@ -407,6 +609,7 @@ func TestCLIArgs(t *testing.T) {
 		{"config", "set", "a", "limits.cpu=2", "--project", "agents"},
 		{"config", "unset", "a", "limits.cpu.allowance", "--project", "agents"},
 		{"project", "set", "agents", "user.agent-box.mode=full"},
+		{"project", "get", "agents", "limits.memory"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)
