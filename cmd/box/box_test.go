@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 // fakePC stands in for the incus CLI. git commands run for real.
@@ -46,6 +48,9 @@ type fakePC struct {
 	scriptRC  int
 	pull      func(src, dst string) // file pull -r src dst
 	pulls     []string
+	stdins    []string        // stdin of each launch ("" when none)
+	launched  func(f *fakePC) // runs after each successful launch, under f.mu
+	stopFor   string          // follow stops the box with this user.box.stopped and fails
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -89,6 +94,12 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		return Result{Stdout: f.memory + "\n"}, nil
 	case "launch":
 		f.launches = append(f.launches, args)
+		in := ""
+		if c.Stdin != nil {
+			b, _ := io.ReadAll(c.Stdin)
+			in = string(b)
+		}
+		f.stdins = append(f.stdins, in)
 		if f.refuse != "" {
 			return Result{Stderr: f.refuse, Code: 1}, nil
 		}
@@ -109,6 +120,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			}
 		}
 		f.insts = append(f.insts, instance{Name: name, Status: "Running", Config: cfg})
+		if f.launched != nil {
+			f.launched(f)
+		}
 		if f.launchErr {
 			return Result{}, errors.New("connection reset")
 		}
@@ -157,9 +171,20 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 	case "exec":
 		argv := args[3:] // after "exec pc:box --"
+		for _, in := range f.insts {
+			if "pc:"+in.Name == args[1] && in.Status == "Stopped" {
+				return Result{Stderr: "Error: Instance is not running", Code: 1}, nil
+			}
+		}
 		if f.bash == "" {
 			switch {
 			case isScript(c, "# follow"):
+				if f.stopFor != "" {
+					in := f.inst(args[1])
+					in.Status = "Stopped"
+					in.Config[mode.StoppedKey] = f.stopFor
+					return Result{Stderr: "Error: Instance is not running", Code: 1}, nil
+				}
 				if f.freeze {
 					f.inst(args[1]).Status = "Frozen"
 					return Result{Code: 1}, nil

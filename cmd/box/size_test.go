@@ -218,7 +218,7 @@ func TestMCPSize(t *testing.T) {
 		}
 		b, _ := json.Marshal(tl.InputSchema)
 		json.Unmarshal(b, &schema)
-		if got := strings.Join(schema.Properties["size"].Enum, ","); got != "small,medium,large" {
+		if got := strings.Join(schema.Properties["size"].Enum, ","); got != "small,medium,large,gpu" {
 			t.Errorf("%s size enum = %q", tl.Name, got)
 		}
 	}

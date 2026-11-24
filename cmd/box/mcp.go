@@ -60,13 +60,14 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, box slots, CPUs and RAM per size, and this repo's box with its size and running jobs.`, obj(map[string]any{
+	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
 	{"box_new", "Launch a Linux box on the PC. Returns its name.", obj(map[string]any{
 		"name": str("Box name (lowercase letters, digits, hyphens). Omit for a random one."),
 		"ttl":  str(`How long the box is meant to live, like "2h". Default 2h.`),
 		"size": sizeArg,
+		"gpu":  gpuArg,
 	}), nil},
 	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
@@ -74,6 +75,7 @@ var tools = []tool{
 		"box":     str("Reusable box to use. Default: the repo's own box."),
 		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, deleted after the run."},
 		"size":    sizeArg,
+		"gpu":     gpuArg,
 		"wait":    str(`Stop waiting after this long, like "10m" (the job keeps running; use box_job). Default 10m.`),
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
@@ -102,7 +104,11 @@ var tools = []tool{
 
 // sizeArg is the size property of box_new and box_run.
 var sizeArg = map[string]any{"type": "string", "enum": sizeEnum(),
-	"description": "Box size: small (quick unit tests), medium (default), large (big Gradle/Android builds, memory-hungry suites). An existing repo box of another size isn't resized; the run gets a throwaway of this size."}
+	"description": "Box size: small (quick unit tests), medium (default), large (big Gradle/Android builds, memory-hungry suites), gpu (see gpu). An existing repo box of another size isn't resized; the run gets a throwaway of this size."}
+
+// gpuArg is the gpu property of box_new and box_run.
+var gpuArg = map[string]any{"type": "boolean",
+	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; exit 75 if it's taken. It is stopped if the PC's owner starts a game."}
 
 func sizeEnum() []string {
 	var n []string
@@ -252,6 +258,7 @@ type toolArgs struct {
 	Box     string            `json:"box"`
 	New     bool              `json:"new"`
 	Size    string            `json:"size"`
+	GPU     bool              `json:"gpu"`
 	ID      string            `json:"id"`
 	Wait    string            `json:"wait"`
 	Timeout string            `json:"timeout"`
@@ -329,6 +336,12 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		return textResult("bad arguments: "+err.Error(), true)
 	}
 	args := p.Arguments
+	if args.GPU {
+		if args.Size != "" && args.Size != mode.GPUSize {
+			return textResult("gpu and size "+args.Size+" don't mix", true)
+		}
+		args.Size = mode.GPUSize
+	}
 	out := &tailBuffer{max: 32 << 10}
 	a := *base
 	a.Out, a.Err = out, out

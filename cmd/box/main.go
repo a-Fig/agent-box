@@ -23,14 +23,15 @@ func cancelText(job string, cancelled bool, code int) string {
 
 const usage = `usage:
   box status                                is offloading worth it now? (PC, mode, room, this repo's box)
-  box run [--box name | --new] [--size S] [--env K=V]... [--timeout 30m] -- <cmd...>
+  box run [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
                                             sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
   box jobs [--box name]                     list jobs, newest first
   box cancel <id>                           stop a running job
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
-  box new [name] [--ttl 2h] [--size S]      launch a box with a positive TTL
+  box new [name] [--ttl 2h] [--size S | --gpu]
+                                            launch a box with a positive TTL
   box rm <name>                             delete a box
   box ls                                    list boxes
   box mcp                                   serve MCP on stdio
@@ -40,11 +41,13 @@ Sizes (CPUs in Shared/Full mode, RAM, disk):
   %s.
 --size sets the size of a box that box new or box run launches (default
 medium). A reused box of another size isn't resized: the run gets a throwaway.
+--gpu is --size gpu: the PC's RTX 3070, one GPU box at a time. box run --gpu
+uses a throwaway. The tray stops a GPU box when a game starts or in My PC.
 
 box run exits with the command's exit code, 124 when --timeout fired, or 75
-when the PC or box is paused or has no room. A relative remote path in box
-pull starts at the job's checkout. Settings: BOX_REMOTE (pc), BOX_PROJECT (agents),
-BOX_IMAGE (agent-base).
+when the PC or box is paused, there is no room, or the GPU is taken or was
+stopped. A relative remote path in box pull starts at the job's checkout.
+Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
 // usageText is usage with the size table filled in.
@@ -102,12 +105,16 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	switch args[0] {
 	case "new":
 		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires")
-		size := fs.String("size", "", "small, medium (default) or large")
+		size := fs.String("size", "", mode.SizeNames()+" (default "+mode.DefaultSize+")")
+		gpu := fs.Bool("gpu", false, "same as --size gpu")
 		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 1 {
 			return 2
 		}
+		if !gpuSize(a, size, *gpu) {
+			return 2
+		}
 		name, err := a.New(ctx, fs.Arg(0), *ttl, *size)
-		if isNoRoom(err) {
+		if isTempFail(err) {
 			fmt.Fprintln(a.Err, "box:", err)
 			return exitPaused
 		}
@@ -121,7 +128,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		isNew := fs.Bool("new", false, "use a throwaway box, deleted afterwards")
 		ttl := fs.Duration("ttl", idleTTL, "initial lifetime of a --new box before the job starts")
 		timeout := fs.Duration("timeout", 0, "kill the command after this long (exit 124)")
-		size := fs.String("size", "", "size of a box this run launches: small, medium (default) or large")
+		size := fs.String("size", "", "size of a box this run launches: "+mode.SizeNames()+" (default "+mode.DefaultSize+")")
+		gpu := fs.Bool("gpu", false, "same as --size gpu: run in a throwaway GPU box")
 		envs := envFlags{}
 		fs.Var(envs, "env", "K=V passed to the command (repeatable; no secrets)")
 		if fs.Parse(args[1:]) != nil {
@@ -129,6 +137,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		if *box != "" && *isNew {
 			fmt.Fprintln(a.Err, "box: --box and --new don't mix")
+			return 2
+		}
+		if !gpuSize(a, size, *gpu) {
 			return 2
 		}
 		dir, err := os.Getwd()
@@ -242,6 +253,19 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	}
 	fmt.Fprint(a.Err, usageText())
 	return 2
+}
+
+// gpuSize folds --gpu into --size, refusing --gpu with another size.
+func gpuSize(a *App, size *string, gpu bool) bool {
+	if !gpu {
+		return true
+	}
+	if *size != "" && *size != mode.GPUSize {
+		fmt.Fprintf(a.Err, "box: --gpu and --size %s don't mix\n", *size)
+		return false
+	}
+	*size = mode.GPUSize
+	return true
 }
 
 // parseInterspersed lets flags follow positional arguments ("box new foo --ttl 2h").

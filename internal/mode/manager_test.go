@@ -558,6 +558,7 @@ func TestSizeTable(t *testing.T) {
 		"small":  {"1", "2", "2GiB", "18GiB"},
 		"medium": {"2", "4", "4GiB", "30GiB"},
 		"large":  {"4", "8", "8GiB", "40GiB"},
+		"gpu":    {"4", "6", "8GiB", "40GiB"},
 	}
 	if len(Sizes) != len(want) {
 		t.Fatalf("%d sizes", len(Sizes))

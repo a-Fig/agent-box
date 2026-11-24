@@ -18,6 +18,7 @@ box run -- go test ./...              # sync this worktree to the repo's box and
 box run --new -- 'npm ci && npx vitest run'   # throwaway box, deleted afterwards
 box run --box big -- make test        # a box you name
 box run --size large -- ./gradlew test  # size of a box the run launches: small, medium (default), large
+box run --gpu -- python train.py      # throwaway box with the PC's RTX 3070 (CUDA); one at a time
 box run --env CI=1 --timeout 30m -- npm test  # env for the command; killed with exit 124 after 30m
 box job agent-box.20261123-120000-1a2b  # reattach to a job (the ID is printed at the start)
 box job <id> --offset 65536 --limit 32768  # read a piece of the log without waiting
@@ -34,6 +35,8 @@ box rm scratch
 Boxes are disposable compute. Idle boxes expire after two hours by default. Only package caches in `/cache` survive deletion. `box new --ttl` sets the initial lifetime. Starting a job refreshes the box's expiry to 24 hours. Reading the job's exit code with `box run` or `box job` resets it to two hours.
 
 Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4, 4GiB, 30GiB, the default) and large (4/8, 8GiB, 40GiB). A box records its size in `user.box.size` and is never resized. `--size` picks the size of a box the run launches. If the repo's box exists in another size, the run uses a throwaway box of the requested size and says so. A launch Incus refuses for the project's limits exits 75. [Box sizes](docs/DESIGN.md#box-sizes)
+
+`--gpu` (`--size gpu`: 4/6 CPUs, 8GiB, 40GiB) gives the box the RTX 3070 through WSL's `/dev/dxg`, for CUDA or PyTorch training and inference and GPU builds. GPU runs always use a throwaway box, and only one GPU box runs at a time: another GPU run exits 75 with `the GPU box is in use (job X)`. Because a frozen CUDA process keeps its VRAM, the tray stops a GPU box instead of pausing it when the PC's owner starts a game or picks My PC; its job is lost and `box job` exits 75 saying so. `box status` has a `gpu:` line: free, in use, or unavailable. [The GPU box](docs/DESIGN.md#the-gpu-box)
 
 `--new` launches a fresh box marked `user.box.throwaway=true` and removes it when the exit code is collected. Use `--box` with a reusable box. If the initial box launch loses its connection, look for the printed box name in `box ls` and remove it with `box rm` if it was created.
 
