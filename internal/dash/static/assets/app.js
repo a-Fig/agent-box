@@ -3,7 +3,7 @@
 // untrusted text and reaches the page only as text nodes, under a Content-Security-Policy of
 // default-src 'self'. Widths and colors are set through the CSSOM, never a style attribute.
 
-import { h, icon } from "./dom.js";
+import { h, icon, tickTimes } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
 import { overview, boxes, jobs, jobDetail, modeLabel } from "./views.js";
 import { history } from "./history.js";
@@ -34,7 +34,6 @@ function setTheme(t) {
   try {
     localStorage.setItem(THEME_KEY, t);
   } catch {}
-  shell = null;
   render();
 }
 
@@ -92,7 +91,7 @@ function sidebar(r) {
         "ul",
         { class: "sidebar-menu" },
         Object.entries(VIEWS).map(([id, v]) =>
-          h("li", null, h("a", { class: "menu-button", href: "#" + id, "aria-current": r.name === id ? "page" : null, onclick: () => setDrawer(false) }, icon(v.icon), h("span", { class: "label" }, v.title), counts[id] ? h("span", { class: "menu-count" }, String(counts[id])) : null)),
+          h("li", null, h("a", { class: "menu-button", href: "#" + id, "data-key": "nav-" + id, "aria-current": r.name === id ? "page" : null, onclick: () => setDrawer(false) }, icon(v.icon), h("span", { class: "label" }, v.title), counts[id] ? h("span", { class: "menu-count" }, String(counts[id])) : null)),
         ),
       ),
       S.machines.size ? h("p", { class: "group-label" }, "Machines") : null,
@@ -154,8 +153,47 @@ function render() {
   requestAnimationFrame(draw);
 }
 
+// A redraw replaces the elements under the pointer, so one between a press and its release would
+// drop the click: while a pointer is down, the redraw waits for it to come up.
+let pressed = false;
+let owed = false;
+document.addEventListener("pointerdown", () => (pressed = true), true);
+for (const ev of ["pointerup", "pointercancel"])
+  document.addEventListener(
+    ev,
+    () => {
+      pressed = false;
+      // After the click this release makes has run.
+      if (owed) setTimeout(render, 0);
+      owed = false;
+    },
+    true,
+  );
+
+// What a redraw would lose, by data-key: the focus, and where each scrolled element was (a log
+// tail scrolled up stays there; one at the bottom follows new lines).
+function keep() {
+  const focus = document.activeElement?.closest?.("[data-key]")?.dataset.key;
+  const scroll = new Map();
+  for (const el of root.querySelectorAll("pre[data-key]")) scroll.set(el.dataset.key, el.scrollTop + el.clientHeight >= el.scrollHeight - 8 ? -1 : el.scrollTop);
+  return { focus, scroll };
+}
+
+function restore({ focus, scroll }) {
+  for (const el of root.querySelectorAll("pre[data-key]")) {
+    const at = scroll.get(el.dataset.key);
+    if (at != null && at >= 0) el.scrollTop = at;
+  }
+  if (focus && document.activeElement?.closest?.("[data-key]")?.dataset.key !== focus) root.querySelector(`[data-key="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
+}
+
 function draw() {
   queued = false;
+  if (pressed) {
+    owed = true;
+    return;
+  }
+  const kept = keep();
   if (S.conn === "down" || (S.conn === "loading" && !S.machines.size)) {
     current?.view.leave?.();
     current = null;
@@ -191,6 +229,7 @@ function draw() {
   } else v.update(shell.content, r.key);
   finish(shell.content);
   finish(shell.el.firstChild);
+  restore(kept);
   toastEl();
 }
 
@@ -211,8 +250,10 @@ NARROW.addEventListener("change", () => setDrawer(false));
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && drawer) setDrawer(false);
 });
-// Times on the page ("6m 12s", "expires in 2h") move on without an event; the countdown on the
-// unreachable screen too.
+// Times on the page ("6m 12s", "expires in 2h") move on without an event: each second the ticker
+// rewrites only those spans, and the countdown on the unreachable screen. Every 30s it redraws,
+// for what turns on time alone, such as the tray's heartbeat going stale.
+let ticks = 0;
 setInterval(() => {
   if (S.conn === "down") {
     const n = root.querySelector("[data-retry]");
@@ -220,7 +261,8 @@ setInterval(() => {
       const wait = Math.max(0, Math.round((S.nextTry - Date.now()) / 1000));
       n.textContent = "Trying again " + (wait ? "in " + wait + "s" : "now") + " · every " + RETRY_MS / 1000 + "s";
     }
-  } else render();
+  } else if (++ticks % 30 === 0) render();
+  else tickTimes(root);
 }, 1000);
 
 start();

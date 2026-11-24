@@ -93,6 +93,7 @@ func (s *server) routes() http.Handler {
 	api("GET /api/state", s.handleState)
 	api("GET /api/events", s.handleEvents)
 	api("GET /api/jobs", s.handleJobs)
+	api("GET /api/jobs/{key}", s.handleJob)
 	api("GET /api/jobs/{key}/log", s.handleLog)
 	api("GET /api/history", s.handleHistory)
 	api("POST /api/mode", s.control(s.handleMode))

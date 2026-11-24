@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,7 +179,7 @@ func TestJobsFilter(t *testing.T) {
 			t.Errorf("%q in %s doesn't match", j.Reason, j.Repo)
 		}
 	}
-	last := p.Jobs[len(p.Jobs)-1].StartedAt.Format(time.RFC3339)
+	last := p.Jobs[len(p.Jobs)-1].Key
 	_, _, body = call(t, ts, "GET", "/api/jobs?q=race+suite&repo=lantern&before="+url.QueryEscape(last), "", false)
 	var older dash.JobsPage
 	json.Unmarshal(body, &older)
@@ -220,5 +221,53 @@ func TestEvents(t *testing.T) {
 	s.mu.Unlock()
 	if e := next(); e != dash.EventJob && e != dash.EventMachine && e != dash.EventBox {
 		t.Errorf("then %q", e)
+	}
+}
+
+// Paging goes by (startedAt, key), so jobs that started in the same second all come back.
+func TestJobsPageSameSecond(t *testing.T) {
+	s, ts := start(t, "empty")
+	at := t0.Add(-time.Hour)
+	for _, box := range []string{"a", "b", "c"} {
+		s.done = append(s.done, dash.Job{Key: dash.JobKey(box, "1", at), Box: box, ID: "1", StartedAt: at, State: dash.JobDone})
+	}
+	slices.SortStableFunc(s.done, newest)
+	var seen []string
+	before := ""
+	for range 5 {
+		_, _, body := call(t, ts, "GET", "/api/jobs?limit=1&before="+url.QueryEscape(before), "", false)
+		var p dash.JobsPage
+		json.Unmarshal(body, &p)
+		if len(p.Jobs) == 0 {
+			break
+		}
+		seen = append(seen, p.Jobs[0].Box)
+		before = p.Jobs[0].Key
+	}
+	if strings.Join(seen, "") != "cba" {
+		t.Errorf("paged %v, want c, b, a", seen)
+	}
+}
+
+// One job by key; and a job whose box name a newer box took has no log there.
+func TestJobAndReusedBox(t *testing.T) {
+	s, ts := start(t, "busy")
+	var old dash.Job
+	for _, j := range s.done {
+		if s.findBox(j.Box) < 0 {
+			old = j
+			break
+		}
+	}
+	if code, _, _ := call(t, ts, "GET", "/api/jobs/"+key(old), "", false); code != 200 {
+		t.Errorf("GET a finished job: %d", code)
+	}
+	if code, _, _ := call(t, ts, "GET", "/api/jobs/x%2F1%2F2026-01-01T00:00:00Z", "", false); code != 404 {
+		t.Errorf("GET no job: %d", code)
+	}
+	s.sc.State.Boxes = append(s.sc.State.Boxes, dash.Box{Name: old.Box, Machine: "pc", Size: "small", State: dash.BoxRunning, CreatedAt: old.StartedAt.Add(time.Minute)})
+	s.logs[old.Key] = "not this job's\n"
+	if code, e, _ := call(t, ts, "GET", "/api/jobs/"+key(old)+"/log", "", false); code != 404 || e.Code != dash.CodeNotFound {
+		t.Errorf("log on a reused box name: %d %q", code, e.Code)
 	}
 }

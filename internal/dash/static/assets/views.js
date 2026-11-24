@@ -2,10 +2,10 @@
 // opens, and update, which redraws it when something changes; a view with an input or a log
 // redraws only around them, so typing and scrolling survive the stream's events.
 
-import { h, icon, clock, ago, until, dur, bytes, pct, shortRepo, plural, stamp } from "./dom.js";
+import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, timeEl } from "./dom.js";
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, empty, section, modeLabel };
+export { overview, boxes, jobs, jobDetail, confirmDialog, empty, section, modeLabel, jobBox };
 
 const MODES = [
   ["full", "Full"],
@@ -60,8 +60,15 @@ function reasonEl(j, cls = "row-title") {
 }
 
 function elapsed(j) {
-  const end = j.endedAt ? Date.parse(j.endedAt) : clock.now();
-  return dur((end - Date.parse(j.startedAt)) / 1000);
+  if (!j.endedAt) return timeEl("elapsed", j.startedAt);
+  return dur((Date.parse(j.endedAt) - Date.parse(j.startedAt)) / 1000);
+}
+
+// A job's box is the box of that name made before the job started: names get reused, and a newer
+// box of the same name holds none of this job's log.
+function jobBox(j) {
+  const b = boxOf(j.machine, j.box);
+  return b && Date.parse(b.createdAt) <= Date.parse(j.startedAt) ? b : null;
 }
 
 function jobMeta(j) {
@@ -71,7 +78,7 @@ function jobMeta(j) {
     h("span", null, icon("user"), j.agent?.session || "unknown agent", j.agent?.client ? h("span", { class: "muted" }, "· " + j.agent.client) : null),
     h("span", null, icon("branch"), shortRepo(j.repo), j.branch ? "@" + j.branch : ""),
     h("span", null, icon("box"), j.box, " · ", j.size + (j.gpu ? " GPU" : "")),
-    h("span", { title: stamp(j.startedAt) }, icon("clock"), j.state === "running" || j.state === "paused" ? elapsed(j) : ago(j.endedAt || j.startedAt) + " · took " + elapsed(j)),
+    h("span", { title: stamp(j.startedAt) }, icon("clock"), j.state === "running" || j.state === "paused" ? elapsed(j) : [timeEl("ago", j.endedAt || j.startedAt), " · took " + elapsed(j)]),
   );
 }
 
@@ -80,23 +87,34 @@ function lastLines(text, n) {
   return lines.slice(-n).join("\n");
 }
 
+// Actions in flight, by what they act on, so a button drawn again while its request is out stays
+// disabled and the action isn't sent twice.
+const busy = new Set();
+
 function jobLink(j) {
   return "#jobs/" + encodeURIComponent(j.key);
 }
 
 // Controls. Each goes through act, which keeps the button busy and says what failed.
 
-async function act(btn, fn, done) {
-  if (btn) btn.disabled = true;
+async function act(key, fn, done) {
+  if (busy.has(key)) return;
+  busy.add(key);
+  changed();
   try {
     const out = await fn();
     done?.(out);
   } catch (e) {
     toast(e.message || "That didn't work.", true);
   } finally {
-    if (btn) btn.disabled = false;
+    busy.delete(key);
     changed();
   }
+}
+
+// A control: its data-key lets the page put the focus back on it after a redraw.
+function control(key, props, ...kids) {
+  return h("button", { ...props, "data-key": key, disabled: props.disabled || busy.has(key) }, ...kids);
 }
 
 function confirmDialog({ title, body, action, danger = true, run }) {
@@ -120,9 +138,9 @@ function confirmDialog({ title, body, action, danger = true, run }) {
   go.focus();
 }
 
-function setMode(m, mode, btn) {
+function setMode(m, mode) {
   act(
-    btn,
+    "mode-" + m.id,
     () => post("/api/mode", { mode }),
     (machine) => {
       if (machine?.id) S.machines.set(machine.id, machine);
@@ -130,27 +148,27 @@ function setMode(m, mode, btn) {
   );
 }
 
-function cancelJob(j, btn) {
+function cancelJob(j) {
   confirmDialog({
     title: "Cancel this job?",
     body: "Its command on " + j.box + " is killed and the job ends with exit 130. The agent that started it sees it cancelled.",
     action: "Cancel job",
-    run: () => act(btn, () => post("/api/jobs/" + encodeURIComponent(j.key) + "/cancel"), (job) => job?.key && S.jobs.set(job.key, job)),
+    run: () => act("cancel-" + j.key, () => post("/api/jobs/" + encodeURIComponent(j.key) + "/cancel"), (job) => job?.key && S.jobs.set(job.key, job)),
   });
 }
 
-function deleteBox(b, btn) {
+function deleteBox(b) {
   const running = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"));
   confirmDialog({
     title: "Delete " + b.name + "?",
     body: (running.length ? plural(running.length, "running job") + " on it will be lost. " : "") + "Boxes are compute, not storage: anything on it that wasn't pushed is gone.",
     action: "Delete box",
-    run: () => act(btn, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete"), () => S.boxes.delete(b.machine + "/" + b.name)),
+    run: () => act("del-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete"), () => S.boxes.delete(b.machine + "/" + b.name)),
   });
 }
 
-function extendBox(b, hours, btn) {
-  act(btn, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/extend", { hours }), (box) => box?.name && S.boxes.set(box.machine + "/" + box.name, box));
+function extendBox(b, hours) {
+  act("ext-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/extend", { hours }), (box) => box?.name && S.boxes.set(box.machine + "/" + box.name, box));
 }
 
 // Overview: what is happening on the PC right now.
@@ -164,9 +182,7 @@ function machineCard(m) {
     { class: "segmented segmented-lg", role: "group", "aria-label": "Mode" },
     MODES.map(([id, label]) => {
       const pending = req?.mode === id;
-      const btn = h("button", { "aria-pressed": !m.yielding && !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, title: pending ? "Asked " + ago(req.at) + " from " + req.by : null }, label, pending ? h("span", { class: "muted" }, "· pending") : null);
-      btn.addEventListener("click", () => setMode(m, id, btn));
-      return btn;
+      return control("mode-" + m.id + "-" + id, { "aria-pressed": !m.yielding && !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, title: pending ? "Asked from " + req.by : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }, label, pending ? h("span", { class: "muted" }, "· pending") : null);
     }),
   );
   let state;
@@ -175,8 +191,8 @@ function machineCard(m) {
   let note = null;
   if (req) {
     const what = modeLabel(req.mode);
-    if (m.yielding) note = h("p", { class: "mode-note pending" }, what + " when the game ends. Asked " + ago(req.at) + " from " + req.by + ".");
-    else if (!alive) note = h("p", { class: "mode-note pending" }, what + " is waiting for the tray, which hasn't been seen " + (m.trayLastSeen ? "since " + ago(m.trayLastSeen) : "yet") + ".");
+    if (m.yielding) note = h("p", { class: "mode-note pending" }, what + " when the game ends. Asked ", timeEl("ago", req.at), " from " + req.by + ".");
+    else if (!alive) note = h("p", { class: "mode-note pending" }, what + " is waiting for the tray, which was last seen ", m.trayLastSeen ? timeEl("ago", m.trayLastSeen) : "never", ".");
     else note = h("p", { class: "mode-note pending" }, "Switching to " + what + ": the tray applies it within a few seconds.");
   } else if (m.yielding) note = h("p", { class: "mode-note" }, "A game is running, so every box is frozen until it ends. Games always win.");
   else if (m.mode === "mypc") note = h("p", { class: "mode-note" }, "Boxes are frozen. Pick Shared or Full to let agents run.");
@@ -210,7 +226,7 @@ function machineCard(m) {
       h("span", null, "Room now:"),
       fits.map(([size, k]) => h("span", { class: "badge " + (k > 0 ? "badge-on" : "") }, k + " " + size)),
       h("span", { class: "badge " + (r.gpu > 0 ? "badge-on" : "") }, r.gpu > 0 ? "GPU free" : gpuBox ? "GPU in use" : "no room for GPU"),
-      h("span", { class: "section-aside room-aside" }, h("span", { class: "conn" }, h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? "tray seen " + ago(m.trayLastSeen) : "tray down" + (m.trayLastSeen ? ", last seen " + ago(m.trayLastSeen) : "")), h("span", null, "WSL holds " + bytes(m.wslMemory))),
+      h("span", { class: "section-aside room-aside" }, h("span", { class: "conn" }, h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? timeEl("ago", m.trayLastSeen, "tray seen ") : m.trayLastSeen ? timeEl("ago", m.trayLastSeen, "tray down, last seen ") : "tray down"), h("span", null, "WSL holds " + bytes(m.wslMemory))),
     ),
   );
 }
@@ -226,8 +242,8 @@ function runningRow(j) {
   return h(
     "div",
     null,
-    h("a", { class: "row row-link", href: jobLink(j) }, h("div", { class: "row-grid" }, h("div", null, reasonEl(j), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j)))),
-    j.tail ? h("pre", { class: "log log-short", "data-stick": "1" }, lastLines(j.tail, 12)) : null,
+    h("a", { class: "row row-link", href: jobLink(j), "data-key": "run-" + j.key }, h("div", { class: "row-grid" }, h("div", null, reasonEl(j), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j)))),
+    j.tail ? h("pre", { class: "log log-short", "data-stick": "1", "data-key": "tail-" + j.key }, lastLines(j.tail, 12)) : null,
   );
 }
 
@@ -241,16 +257,10 @@ function boxRow(b, full) {
           "div",
           { class: "menu", role: "group", "aria-label": "Extend " + b.name },
           [1, 4, 24].map((hours) => {
-            const btn = h("button", { class: "btn btn-xs btn-outline", title: "Add " + hours + "h to its expiry" }, "+" + hours + "h");
-            btn.addEventListener("click", () => extendBox(b, hours, btn));
-            return btn;
+            return control("ext-" + b.name + "-" + hours, { class: "btn btn-xs btn-outline", title: "Add " + hours + "h to its expiry", disabled: busy.has("ext-" + b.name), onclick: () => extendBox(b, hours) }, "+" + hours + "h");
           }),
         ),
-        (() => {
-          const btn = h("button", { class: "btn btn-xs btn-danger-ghost" }, "Delete");
-          btn.addEventListener("click", () => deleteBox(b, btn));
-          return btn;
-        })(),
+        control("del-" + b.name, { class: "btn btn-xs btn-danger-ghost", onclick: () => deleteBox(b) }, "Delete"),
       )
     : h("div", { class: "row-control" }, boxBadge(b));
   return h(
@@ -266,8 +276,8 @@ function boxRow(b, full) {
         h("span", null, icon("branch"), shortRepo(b.repo)),
         h("span", { class: "num" }, "mem " + bytes(b.memUsed) + " / " + bytes(b.memLimit)),
         h("span", { class: "num" }, b.state === "running" ? "CPU " + Math.round(b.cpuPct) + "% of " + plural(b.cpus, "CPU") : plural(b.cpus, "CPU")),
-        h("span", { title: b.expiresAt ? stamp(b.expiresAt) : null }, b.expiresAt ? "expires " + until(b.expiresAt) : "no expiry"),
-        full ? h("span", { title: stamp(b.createdAt) }, "made " + ago(b.createdAt)) : null,
+        b.expiresAt ? timeEl("until", b.expiresAt, "expires ") : h("span", null, "no expiry"),
+        full ? timeEl("ago", b.createdAt, "made ") : null,
       ),
       job ? h("a", { class: "meta", href: jobLink(job) }, h("span", null, "running: ", job.reason || job.command)) : null,
       full ? h("div", { class: "bar" }, h("i", { "data-w": pct(b.memUsed, b.memLimit) })) : null,
@@ -300,7 +310,7 @@ const overview = {
 };
 
 function finishedRow(j) {
-  return h("a", { class: "row row-link", href: jobLink(j) }, h("div", { class: "row-grid" }, h("div", null, reasonEl(j), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j))));
+  return h("a", { class: "row row-link", href: jobLink(j), "data-key": "job-" + j.key }, h("div", { class: "row-grid" }, h("div", null, reasonEl(j), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j))));
 }
 
 // Boxes: every box with its full state, and the controls on it.
@@ -331,7 +341,7 @@ const list = { jobs: [], more: false, loading: false, error: "", seq: 0 };
 
 function matches(j) {
   const q = F.q.trim().toLowerCase();
-  if (q && ![j.reason, j.command, j.branch, j.agent?.session].some((v) => (v || "").toLowerCase().includes(q))) return false;
+  if (q && ![j.reason, j.command, j.branch].some((v) => (v || "").toLowerCase().includes(q))) return false;
   if (F.repo && shortRepo(j.repo) !== F.repo) return false;
   if (F.agent && j.agent?.session !== F.agent) return false;
   if (F.kind && j.kind !== F.kind) return false;
@@ -347,7 +357,7 @@ async function fetchJobs(more = false) {
   changed();
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(F)) if (v) p.set(k, v.trim());
-  if (more && list.jobs.length) p.set("before", list.jobs[list.jobs.length - 1].startedAt);
+  if (more && list.jobs.length) p.set("before", list.jobs[list.jobs.length - 1].key);
   p.set("limit", "50");
   try {
     const page = await api("/api/jobs?" + p);
@@ -501,6 +511,8 @@ const jobDetail = {
   mount(el, key) {
     stopTail();
     this.key = key;
+    this.fetched = null;
+    this.missing = false;
     this.head = h("div", { class: "section" });
     this.logHead = h("div", { class: "log-head" });
     tailer.pre = h("pre", { class: "log log-tall", tabindex: "0", "aria-label": "Log" });
@@ -511,9 +523,27 @@ const jobDetail = {
     this.update(el);
   },
   update(el) {
-    const j = S.jobs.get(this.key) || list.jobs.find((x) => x.key === this.key);
+    // The stream's copy is the newest; a job the stream let go (job-gone, or older than the state's
+    // last 50) keeps the last copy seen, and one never seen is asked for.
+    const j = S.jobs.get(this.key) || list.jobs.find((x) => x.key === this.key) || (this.last?.key === this.key ? this.last : null);
+    if (j) this.last = j;
     if (!j) {
-      el.replaceChildren(h("div", { class: "page" }, empty("search", "Job not found", "It isn't among the running jobs or the last finished ones. It may be older than this page has loaded.", h("a", { class: "btn btn-sm btn-outline", href: "#jobs" }, "Back to Jobs"))));
+      stopTail();
+      if (this.fetched !== this.key) {
+        this.fetched = this.key;
+        this.missing = false;
+        api("/api/jobs/" + encodeURIComponent(this.key))
+          .then((job) => (this.last = job))
+          .catch(() => (this.missing = true))
+          .finally(changed);
+      }
+      el.replaceChildren(
+        h(
+          "div",
+          { class: "page" },
+          this.missing ? empty("search", "Job not found", "boxd has no job with this key. Its history keeps jobs for 180 days.", h("a", { class: "btn btn-sm btn-outline", href: "#jobs" }, "Back to Jobs")) : empty("retry", "Loading the job…", null),
+        ),
+      );
       return;
     }
     if (!this.body.isConnected) el.replaceChildren(this.body);
@@ -521,18 +551,14 @@ const jobDetail = {
       stopTail();
       tailer.key = j.key;
       tailer.offset = 0;
-      tailer.gone = !boxOf(j.machine, j.box);
+      tailer.gone = !jobBox(j);
       tailer.status = "";
       tailer.pre.textContent = tailer.gone ? j.tail || "" : "";
       if (!tailer.gone) pull(j, tailer.seq);
     }
     if (tailer.gone && tailer.pre.textContent !== (j.tail || "")) tailer.pre.textContent = j.tail || "";
     const live = j.state === "running" || j.state === "paused";
-    let cancel = null;
-    if (live) {
-      cancel = h("button", { class: "btn btn-sm btn-danger-ghost" }, "Cancel job");
-      cancel.addEventListener("click", () => cancelJob(j, cancel));
-    }
+    const cancel = live ? control("cancel-" + j.key, { class: "btn btn-sm btn-danger-ghost", onclick: () => cancelJob(j) }, "Cancel job") : null;
     const kv = (k, v) => h("dl", { class: "kv" }, h("dt", null, k), h("dd", null, v || "—"));
     this.head.replaceChildren(h("div", { class: "group" }, h("div", { class: "row row-grid" }, h("div", null, reasonEl(j, "headline"), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j), cancel))));
     this.details.replaceChildren(

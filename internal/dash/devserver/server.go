@@ -34,9 +34,19 @@ type server struct {
 	applyAt  time.Time // when the tray picks up a mode request
 }
 
+// newest orders finished jobs as /api/jobs pages them: by startedAt, then key, newest first.
+func newest(a, b dash.Job) int {
+	if c := b.StartedAt.Compare(a.StartedAt); c != 0 {
+		return c
+	}
+	return strings.Compare(b.Key, a.Key)
+}
+
 func newServer(sc fixture.Scenario, now func() time.Time) *server {
+	done := slices.Clone(sc.Jobs.Jobs)
+	slices.SortStableFunc(done, newest)
 	s := &server{
-		now: now, sc: sc, done: slices.Clone(sc.Jobs.Jobs), logs: sc.Logs,
+		now: now, sc: sc, done: done, logs: sc.Logs,
 		subs: map[chan dash.Event]bool{}, player: fixture.NewPlayer(uint64(len(sc.Name)) * 7919),
 		plan: map[string]time.Time{}, before: dash.ModeShared,
 	}
@@ -152,7 +162,8 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 // handleJobs filters the finished jobs as boxd's history will: by repo (its URL or last path
 // element), agent (the session), kind, machine, result, q (a substring of the reason, command or
-// branch), before (startedAt earlier than it) and limit.
+// branch) and limit. before is the last job of the page before, by key: the jobs after it in
+// (startedAt, key) order, newest first, so jobs that started in the same second aren't skipped.
 func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := 50
@@ -164,14 +175,14 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	var before time.Time
+	var before *dash.Job
 	if v := q.Get("before"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
+		t, err := time.Parse(time.RFC3339, v[strings.LastIndex(v, "/")+1:])
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "before must be an RFC3339 time")
+			writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "before must be a job's key, box/id/startedAt")
 			return
 		}
-		before = t
+		before = &dash.Job{Key: v, StartedAt: t}
 	}
 	if v := q.Get("result"); v != "" && !slices.Contains(dash.Results, v) {
 		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "result must be one of "+strings.Join(dash.Results, ", "))
@@ -189,7 +200,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 			q.Get("kind") != "" && q.Get("kind") != j.Kind,
 			q.Get("machine") != "" && q.Get("machine") != j.Machine,
 			q.Get("result") != "" && q.Get("result") != j.Result(),
-			!before.IsZero() && !j.StartedAt.Before(before),
+			before != nil && newest(*before, j) >= 0,
 			text != "" && !strings.Contains(strings.ToLower(j.Reason+"\n"+j.Command+"\n"+j.Branch), text):
 			continue
 		}
@@ -220,6 +231,29 @@ func (s *server) findBox(name string) int {
 	return slices.IndexFunc(s.sc.State.Boxes, func(b dash.Box) bool { return b.Name == name })
 }
 
+// jobBox is the box j ran on, or -1: the box of that name made before j started. Names get
+// reused, and a newer box of the same name holds none of j's log.
+func (s *server) jobBox(j *dash.Job) int {
+	i := s.findBox(j.Box)
+	if i < 0 || s.sc.State.Boxes[i].CreatedAt.After(j.StartedAt) {
+		return -1
+	}
+	return i
+}
+
+// handleJob answers one job by key, running or from history, for a page that has let it go.
+func (s *server) handleJob(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, _ := s.findJob(key)
+	if j == nil {
+		writeErr(w, http.StatusNotFound, dash.CodeNotFound, "no job "+key)
+		return
+	}
+	writeJSON(w, http.StatusOK, *j)
+}
+
 // handleLog answers a page of a job's log from offset: at most 64KiB, cut at a character's start,
 // paused while the box is frozen, and 404 once the box is gone, since logs go with their box.
 func (s *server) handleLog(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +273,7 @@ func (s *server) handleLog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, dash.CodeNotFound, "no job "+key)
 		return
 	}
-	bi := s.findBox(j.Box)
+	bi := s.jobBox(j)
 	if bi < 0 {
 		writeErr(w, http.StatusNotFound, dash.CodeNotFound, "box "+j.Box+" is gone, and its log went with it; the job keeps its tail")
 		return
@@ -391,6 +425,7 @@ func (s *server) end(j *dash.Job, exit int) {
 	j.Tail = fixture.Tail(s.logs[j.Key])
 	delete(s.plan, j.Key)
 	s.done = append([]dash.Job{*j}, s.done...)
+	slices.SortStableFunc(s.done, newest)
 	s.publish(dash.EventJob, *j)
 	if i := s.findBox(j.Box); i >= 0 {
 		b := &s.sc.State.Boxes[i]
@@ -410,6 +445,7 @@ func (s *server) removeBox(name string) {
 			j.Tail = fixture.Tail(s.logs[j.Key])
 			delete(s.plan, j.Key)
 			s.done = append([]dash.Job{*j}, s.done...)
+			slices.SortStableFunc(s.done, newest)
 			s.publish(dash.EventJob, *j)
 		}
 		if j.Box == name {
@@ -417,8 +453,9 @@ func (s *server) removeBox(name string) {
 		}
 	}
 	i := s.findBox(name)
+	gone := s.sc.State.Boxes[i]
 	s.sc.State.Boxes = slices.Delete(s.sc.State.Boxes, i, i+1)
-	s.publish(dash.EventBoxGone, dash.BoxGone{Name: name, Machine: "pc"})
+	s.publish(dash.EventBoxGone, dash.BoxGone{Name: name, Machine: gone.Machine})
 	s.reallot()
 }
 

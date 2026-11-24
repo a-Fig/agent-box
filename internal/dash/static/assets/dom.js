@@ -2,7 +2,7 @@
 // text only, as Murmur's does, so nothing an agent wrote (a reason, a command, a log) can become
 // markup: kids that are strings become text nodes.
 
-export { h, s, icon, clock, ago, until, dur, bytes, pct, stamp, shortRepo, plural };
+export { h, s, icon, clock, ago, until, dur, bytes, pct, stamp, shortRepo, plural, timeEl, tickTimes };
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -82,6 +82,25 @@ function dur(sec) {
   const hr = Math.floor(m / 60);
   if (hr < 48) return hr + "h " + String(m % 60).padStart(2, "0") + "m";
   return Math.floor(hr / 24) + "d " + (hr % 24) + "h";
+}
+
+// A time that moves on by itself ("3m ago", "in 2h", a running job's "6m 12s"): the ticker
+// rewrites only these spans each second, so nothing else is redrawn for the clock's sake.
+function fmtTime(kind, t) {
+  if (kind === "ago") return ago(t);
+  if (kind === "until") return until(t);
+  return dur((clock.now() - Date.parse(t)) / 1000);
+}
+
+function timeEl(kind, t, pre = "", post = "") {
+  return h("span", { "data-time": kind, "data-t": t, "data-pre": pre, "data-post": post, title: stamp(t) }, pre + fmtTime(kind, t) + post);
+}
+
+function tickTimes(root) {
+  for (const el of root.querySelectorAll("[data-time]")) {
+    const text = el.dataset.pre + fmtTime(el.dataset.time, el.dataset.t) + el.dataset.post;
+    if (el.textContent !== text) el.textContent = text;
+  }
 }
 
 function stamp(t) {

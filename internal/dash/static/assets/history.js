@@ -10,27 +10,28 @@ import { empty, section, modeLabel } from "./views.js";
 
 export { history };
 
-const H = { range: "day", data: {}, loading: false, error: "", at: {} };
+const H = { range: "day", data: {}, loading: {}, error: {}, at: {} };
 
 const RESULT_COLORS = { pass: "var(--success)", fail: "var(--destructive)", cancelled: "var(--muted-foreground)", lost: "var(--warning)" };
 const SIZES = ["small", "medium", "large", "gpu"];
 const KINDS = ["go-test", "go-build", "js-test", "py-test", "gradle", "build", "gpu", "other"];
-const slot = (i) => "var(--s" + ((i % 8) + 1) + ")";
+const slot = (i) => "var(--s" + (i < 0 ? 8 : (i % 8) + 1) + ")"; // -1, a kind the table lacks, is drawn as other
 const MODE_COLORS = { full: "var(--s1)", shared: "var(--s3)", mypc: "var(--muted-foreground)", yield: "var(--s2)" };
 const WHY = { yielding: "yielding to a game", mypc: "My PC", full: "caps full", "gpu-busy": "GPU busy" };
 
 async function load(range, force) {
   if (!force && H.data[range] && Date.now() - H.at[range] < 60000) return;
-  H.loading = true;
-  H.error = "";
+  if (H.loading[range]) return;
+  H.loading[range] = true;
+  H.error[range] = "";
   changed();
   try {
     H.data[range] = await api("/api/history?range=" + range);
     H.at[range] = Date.now();
   } catch (e) {
-    H.error = e.message;
+    H.error[range] = e.message;
   }
-  H.loading = false;
+  H.loading[range] = false;
   changed();
 }
 
@@ -92,24 +93,36 @@ function legend(keys, color, name = (k) => k) {
   return h("div", { class: "legend" }, keys.map((k, i) => h("span", null, h("i", { "data-bg": color(k, i) }), name(k))));
 }
 
-// Memory in use against the cap: a 2px line over a faint area, the cap dashed.
+// Memory in use: a 2px line over a faint area. Use mostly sits far under the cap, so the scale
+// is set by use (the larger of its peak x 1.25 and half the cap), with a gridline and label at
+// each GiB step; the cap is a dashed line when it fits under the top, else a note in the corner.
 function memory(buckets, range) {
-  const height = 150, top = 8, bottom = 18, left = 30;
+  const height = 150, top = 8, bottom = 18, left = 36;
   const plotH = height - top - bottom;
+  const GiB = 2 ** 30;
   const cap = Math.max(...buckets.map((b) => b.memCap), 1);
-  const max = Math.max(cap, ...buckets.map((b) => b.memUsed));
+  const peak = Math.max(0, ...buckets.map((b) => b.memUsed));
+  const max = Math.max(peak * 1.25, cap / 2);
+  // Gridlines at a round number of GiB, at most five of them.
+  const stepGiB = [0.5, 1, 2, 4, 8, 16, 32].find((g) => max / (g * GiB) <= 5) || 64;
   const step = (W - left) / buckets.length;
   const x = (i) => left + step * i + step / 2;
   const y = (v) => top + plotH * (1 - v / max);
   const pts = buckets.map((b, i) => x(i).toFixed(1) + "," + y(b.memUsed).toFixed(1));
-  const kids = [
-    s("line", { class: "axis", x1: left, x2: W, y1: top + plotH, y2: top + plotH }),
-    s("line", { x1: left, x2: W, y1: y(cap), y2: y(cap), stroke: "var(--destructive-foreground)", "stroke-dasharray": "4 4", "stroke-width": 1 }),
-    s("text", { x: left - 6, y: y(cap) + 3, "text-anchor": "end" }, bytes(cap).replace(" GiB", "G")),
-    s("text", { x: left - 6, y: top + plotH + 3, "text-anchor": "end" }, "0"),
+  const gib = (v) => (v / GiB).toFixed(v % GiB ? 1 : 0) + "G";
+  const kids = [];
+  for (let v = 0; v <= max + 1; v += stepGiB * GiB) {
+    kids.push(s("line", { class: "axis", x1: left, x2: W, y1: y(v), y2: y(v) }), s("text", { x: left - 6, y: y(v) + 3, "text-anchor": "end" }, v ? gib(v) : "0"));
+  }
+  if (cap <= max) {
+    kids.push(s("line", { x1: left, x2: W, y1: y(cap), y2: y(cap), stroke: "var(--destructive-foreground)", "stroke-dasharray": "4 4", "stroke-width": 1 }, s("title", null, "Cap: " + bytes(cap))));
+  } else {
+    kids.push(s("text", { x: W, y: top + 2, "text-anchor": "end" }, "cap " + bytes(cap) + " ↑"));
+  }
+  kids.push(
     s("polygon", { points: [x(0).toFixed(1) + "," + (top + plotH), ...pts, x(buckets.length - 1).toFixed(1) + "," + (top + plotH)].join(" "), fill: "var(--s1)", "fill-opacity": 0.14 }),
     s("polyline", { points: pts.join(" "), fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }),
-  ];
+  );
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => {
     if (i % every === 0) kids.push(s("text", { x: x(i), y: height - 4, "text-anchor": "middle" }, label(b, range)));
@@ -180,7 +193,7 @@ const history = {
   update(el) {
     // Only its own changes redraw it: the stream's events would otherwise redraw the charts every
     // few seconds and close a tooltip being read.
-    const sig = [H.range, H.at[H.range], H.loading, H.error, el.clientWidth].join("|");
+    const sig = [H.range, H.at[H.range], H.loading[H.range], H.error[H.range], el.clientWidth].join("|");
     if (sig === this.sig && el.firstChild) return;
     this.sig = sig;
     const seg = h(
@@ -208,8 +221,8 @@ const history = {
     const d = H.data[H.range];
     const head = h("div", { class: "page-head machine-head" }, h("div", null, h("h2", null, "History"), h("p", null, "What agents used the PC for, and what games cost them.")), seg);
     let body;
-    if (!d && H.loading) body = empty("retry", "Loading history…", null);
-    else if (!d && H.error) body = empty("alert", "Couldn't load the history", H.error, h("button", { class: "btn btn-sm btn-outline", onclick: () => load(H.range, true) }, "Try again"));
+    if (!d && H.loading[H.range]) body = empty("retry", "Loading history…", null);
+    else if (!d && H.error[H.range]) body = empty("alert", "Couldn't load the history", H.error[H.range], h("button", { class: "btn btn-sm btn-outline", onclick: () => load(H.range, true) }, "Try again"));
     else if (!d) body = null;
     else body = this.charts(d, el.clientWidth);
     el.replaceChildren(h("div", { class: "page" }, head, body));
@@ -257,14 +270,14 @@ const history = {
         { class: "charts" },
         chart("Mode and yields", "The PC's mode, the games it yielded to, and the runs it turned away in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], (k) => (k === "yield" ? "Yielding to a game" : modeLabel(k))), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"))], true),
         chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])], true),
-        chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => (v >= 10 || v === 0 ? Math.round(v) : v.toFixed(1)) + "")), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
-        chart("Memory in use", "Mean of the minute samples, against the " + bytes(Math.max(...B.map((b) => b.memCap))) + " cap (dashed).", sized(half, () => memory(B, range))),
+        chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
+        chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),
         chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), (k) => slot(KINDS.indexOf(k)))),
         chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur)),
         chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s1)")),
         chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s3)")),
       ),
-      h("p", { class: "muted", "data-now": clock.now() }, H.loading ? "Refreshing…" : (range === "day" ? "Each bar is an hour. " : "Each bar is a day, midnight to midnight UTC. ") + (H.at[range] ? "Loaded " + new Date(H.at[range]).toLocaleTimeString() + "." : "")),
+      h("p", { class: "muted", "data-now": clock.now() }, H.loading[range] ? "Refreshing…" : (range === "day" ? "Each bar is an hour. " : "Each bar is a day, midnight to midnight UTC. ") + (H.at[range] ? "Loaded " + new Date(H.at[range]).toLocaleTimeString() + "." : "")),
     ];
   },
 };
