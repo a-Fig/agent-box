@@ -24,7 +24,11 @@ const exitPaused = 75
 // exitDetached is returned when box stops following a job that keeps running.
 const exitDetached = 130
 
-const defaultTTL = 8 * time.Hour
+const (
+	idleTTL    = 2 * time.Hour
+	jobTTL     = 24 * time.Hour
+	expiresKey = "user.expires"
+)
 
 // workRoot holds checkouts (/work/<repo>) and job files (/work/.box) in a box.
 var workRoot = "/work"
@@ -37,6 +41,8 @@ type App struct {
 	Image   string // image alias for new boxes, "agent-base"
 	Out     io.Writer
 	Err     io.Writer
+	Warn    func(string)    // optional destination for warnings instead of Err
+	Notify  func(jobNotice) // optional destination for job and launch notices
 	Now     func() time.Time
 	Rand    func() string // short random suffix for names and job IDs
 }
@@ -51,6 +57,26 @@ func newApp() *App {
 		Err:     os.Stderr,
 		Now:     time.Now,
 		Rand:    randHex,
+	}
+}
+
+func (a *App) warn(message string) {
+	if a.Warn != nil {
+		a.Warn(message)
+		return
+	}
+	fmt.Fprintln(a.Err, message)
+}
+
+type jobNotice struct {
+	Event string `json:"event"`
+	Box   string `json:"box"`
+	Job   string `json:"job,omitempty"`
+}
+
+func (a *App) notify(notice jobNotice) {
+	if a.Notify != nil {
+		a.Notify(notice)
 	}
 }
 
@@ -155,7 +181,7 @@ var validBox = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 // deletes it once that job has finished.
 const throwawayKey = "user.box.throwaway"
 
-// New launches a box. An empty name gets a random one; ttl > 0 sets user.expires.
+// New launches a box with a TTL. An empty name gets a random one.
 func (a *App) New(ctx context.Context, name string, ttl time.Duration) (string, error) {
 	if name == "" {
 		name = "box-" + a.Rand()
@@ -167,15 +193,24 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
 	}
-	// Unqualified, the image would be looked up on the local (laptop) remote.
-	args := []string{"launch", a.target(a.Image), a.target(name)}
-	if ttl > 0 {
-		args = append(args, "-c", "user.expires="+a.Now().Add(ttl).UTC().Format(time.RFC3339))
+	if ttl <= 0 {
+		return errors.New("box TTL must be positive")
 	}
+	// Unqualified, the image would be looked up on the local (laptop) remote.
+	args := []string{"launch", a.target(a.Image), a.target(name), "-c", a.expiryConfig(ttl)}
 	if throwaway {
 		args = append(args, "-c", throwawayKey+"=true")
 	}
 	_, err := a.incusOK(ctx, args...)
+	return err
+}
+
+func (a *App) expiryConfig(ttl time.Duration) string {
+	return expiresKey + "=" + a.Now().Add(ttl).UTC().Format(time.RFC3339)
+}
+
+func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
+	_, err := a.incusOK(ctx, "config", "set", a.target(box), a.expiryConfig(ttl))
 	return err
 }
 
@@ -199,7 +234,7 @@ func (a *App) Ls(ctx context.Context) error {
 	w := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATUS\tEXPIRES")
 	for _, in := range insts {
-		exp := in.Config["user.expires"]
+		exp := in.Config[expiresKey]
 		if exp == "" {
 			exp = "-"
 		}
@@ -257,8 +292,13 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	insts, paused := a.reach(ctx)
 	var inst *instance
 	if paused == "" && !o.New {
-		if inst = find(insts, box); inst != nil && inst.Status == "Frozen" {
-			paused = box + " is paused"
+		if inst = find(insts, box); inst != nil {
+			if inst.Config[throwawayKey] == "true" {
+				return JobResult{Box: box, Code: 1}, fmt.Errorf("box %s is a throwaway and cannot be reused", box)
+			}
+			if inst.Status == "Frozen" {
+				paused = box + " is paused"
+			}
 		}
 	}
 	if paused != "" {
@@ -277,10 +317,10 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if o.New {
 		ttl := o.TTL
 		if ttl == 0 {
-			ttl = defaultTTL
+			ttl = idleTTL
 		}
 		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl); err != nil {
-			return JobResult{Code: 1}, err
+			return JobResult{Box: box, Code: 1}, err
 		}
 		// Until its job starts, a failed run takes its own box with it.
 		defer func() {
@@ -301,8 +341,15 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if _, err := a.incusOK(ctx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
 		return r, err
 	}
+	if err := a.setExpiry(ctx, box, jobTTL); err != nil {
+		return r, fmt.Errorf("set job expiry: %w", err)
+	}
 	// Say the job ID before starting it, so a dropped connection can't lose it.
 	fmt.Fprintf(a.Err, "box: job %s on %s\n", job, box)
+	a.notify(jobNotice{Event: "starting_job", Box: box, Job: job})
+	if err := ctx.Err(); err != nil {
+		return r, err
+	}
 	started = true
 	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, o.Cmd)); err != nil {
 		if o.New {
@@ -331,6 +378,7 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 			continue
 		}
 		fmt.Fprintf(a.Err, "box: launching %s\n", name)
+		a.notify(jobNotice{Event: "launching_box", Box: name})
 		err := a.launch(ctx, name, ttl, true)
 		if !isConflict(err) {
 			return name, err
@@ -348,7 +396,7 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
-		err = a.launch(ctx, box, 0, false)
+		err = a.launch(ctx, box, idleTTL, false)
 	} else {
 		_, err = a.incusOK(ctx, "start", a.target(box))
 	}
@@ -361,11 +409,13 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused
 		return paused, nil
 	case now == nil:
 		return "", err
+	case now.Config[throwawayKey] == "true":
+		return "", fmt.Errorf("box %s is a throwaway and cannot be reused", box)
 	case now.Status == "Running":
 		return "", nil
 	case inst == nil: // someone else launched it but it isn't running yet
 		if _, err := a.incusOK(ctx, "start", a.target(box)); err != nil {
-			if now, _ := a.check(ctx, box); now != nil && now.Status == "Running" {
+			if now, _ := a.check(ctx, box); now != nil && now.Status == "Running" && now.Config[throwawayKey] != "true" {
 				return "", nil
 			}
 			return "", err
@@ -378,7 +428,7 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused
 func (a *App) removeQuietly(ctx context.Context, box string) {
 	fmt.Fprintf(a.Err, "box: removing %s\n", box)
 	if err := a.Rm(context.WithoutCancel(ctx), box); err != nil {
-		fmt.Fprintf(a.Err, "box: removing %s: %v\n", box, err)
+		a.warn(fmt.Sprintf("box: warning: removing %s: %v", box, err))
 	}
 }
 
@@ -394,7 +444,7 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	}
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil {
-		fmt.Fprintf(a.Err, "box: keeping %s: %v\n", box, err)
+		a.warn(fmt.Sprintf("box: warning: keeping %s: %v", box, err))
 		return
 	}
 	if running := strings.Fields(out); len(running) > 0 {
@@ -421,7 +471,7 @@ func (a *App) warnSubmodules(ctx context.Context, top string) {
 		}
 	}
 	if len(paths) > 0 {
-		fmt.Fprintf(a.Err, "box: warning: submodules aren't synced and will be empty in the box: %s\n", strings.Join(paths, " "))
+		a.warn("box: warning: submodules aren't synced and will be empty in the box: " + strings.Join(paths, " "))
 	}
 }
 
@@ -468,6 +518,11 @@ func followScript(job string) string {
 	f := workRoot + "/.box/" + job
 	return "# follow\n" + aliveFn + fmt.Sprintf(`test -f %[1]s.log || { echo "box: no job %[2]s" >&2; exit 3; }
 pid=$(cat %[1]s.pid 2>/dev/null)
+deadline=$((SECONDS + 15))
+while [ -z "$pid" ] && [ ! -f %[1]s.exit ] && [ "$SECONDS" -lt "$deadline" ]; do
+  sleep 0.1
+  pid=$(cat %[1]s.pid 2>/dev/null)
+done
 off=0
 while :; do
   fin=0; [ -f %[1]s.exit ] && fin=1
@@ -528,6 +583,9 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	code, err = strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
 		return "", 1, fmt.Errorf("job %s: bad exit code %q", job, out)
+	}
+	if err := a.setExpiry(context.WithoutCancel(ctx), box, idleTTL); err != nil {
+		a.warn(fmt.Sprintf("box: warning: setting idle expiry on %s: %v", box, err))
 	}
 	return stateDone, code, nil
 }

@@ -20,22 +20,23 @@ import (
 // With bash set, "incus exec" runs the script locally in that bash, so the
 // shell scripts are tested end to end; otherwise exec answers from canned values.
 type fakePC struct {
-	t        *testing.T
-	mu       sync.Mutex
-	insts    []instance
-	mode     string
-	listErr  bool
-	bash     string
-	log      string          // canned follow output
-	exit     string          // canned exit file
-	running  string          // canned output of the running-jobs check
-	race     map[string]bool // names another run launches just before ours
-	block    bool            // follow waits until its context ends
-	pushHang bool            // file push waits until its context ends
-	freeze   bool            // follow freezes the box and fails
-	startErr bool            // the connection drops while starting the job
-	calls    []string
-	pushed   int
+	t         *testing.T
+	mu        sync.Mutex
+	insts     []instance
+	mode      string
+	listErr   bool
+	bash      string
+	log       string          // canned follow output
+	exit      string          // canned exit file
+	running   string          // canned output of the running-jobs check
+	race      map[string]bool // names another run launches just before ours
+	block     bool            // follow waits until its context ends
+	pushHang  bool            // file push waits until its context ends
+	freeze    bool            // follow freezes the box and fails
+	launchErr bool            // the connection drops after creating an instance
+	startErr  bool            // the connection drops while starting the job
+	calls     []string
+	pushed    int
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -87,10 +88,24 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			}
 		}
 		f.insts = append(f.insts, instance{Name: name, Status: "Running", Config: cfg})
+		if f.launchErr {
+			return Result{}, errors.New("connection reset")
+		}
 	case "start":
 		f.inst(args[1]).Status = "Running"
-	case "config": // config get pc:box key
-		return Result{Stdout: f.inst(args[2]).Config[args[3]] + "\n"}, nil
+	case "config":
+		inst := f.inst(args[2])
+		if args[1] == "get" {
+			return Result{Stdout: inst.Config[args[3]] + "\n"}, nil
+		}
+		k, v, ok := strings.Cut(args[3], "=")
+		if args[1] != "set" || !ok {
+			f.t.Fatalf("unexpected incus config arguments: %q", args)
+		}
+		if inst.Config == nil {
+			inst.Config = make(map[string]string)
+		}
+		inst.Config[k] = v
 	case "delete":
 		name := strings.TrimPrefix(args[1], "pc:")
 		for i := range f.insts {
@@ -301,8 +316,11 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file exec exec exec" {
+	if got := f.callList(); got != "list project start file config exec exec exec config" {
 		t.Errorf("incus calls = %s", got)
+	}
+	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
+		t.Errorf("idle expiry = %q", got)
 	}
 	if !strings.Contains(out.String(), "ok\n") || !strings.Contains(out.String(), "job my-repo.20261123-120000-0001") {
 		t.Errorf("output = %q", out)
@@ -316,7 +334,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file exec exec exec exec delete" {
+	if got := f.callList(); got != "list project launch file config exec exec exec config exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -336,6 +354,34 @@ func TestNewSetsExpiry(t *testing.T) {
 	}
 	if _, err := a.New(context.Background(), "Bad;name", 0); err == nil {
 		t.Error("bad name accepted")
+	}
+	if code := run(context.Background(), a, []string{"new", "idle"}, nil); code != 0 {
+		t.Fatalf("box new returned %d", code)
+	}
+	if got := f.inst("idle").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
+		t.Errorf("default expiry = %q", got)
+	}
+}
+
+func TestDetachedRunAndReattachRefreshExpiry(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	a, out := testApp(f)
+	started := a.Now()
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Wait: 10 * time.Millisecond})
+	if err != nil || r.State != stateDetached {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if got := f.inst(r.Box).Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
+		t.Errorf("detached job expiry = %q", got)
+	}
+	a.Now = func() time.Time { return started.Add(3 * time.Hour) }
+	f.block, f.exit = false, "0"
+	finished, err := a.Job(context.Background(), r.Job, 0)
+	if err != nil || finished.State != stateDone {
+		t.Fatalf("Job = %+v, %v\n%s", finished, err, out)
+	}
+	if got := f.inst(r.Box).Config[expiresKey]; got != "2026-11-23T17:00:00Z" {
+		t.Errorf("reattached job idle expiry = %q", got)
 	}
 }
 

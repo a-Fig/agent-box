@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -52,12 +53,12 @@ const pausedHint = "Exit code 75 means the PC or the box is paused: run the comm
 var tools = []tool{
 	{"box_new", "Launch a Linux box on the PC. Returns its name.", obj(map[string]any{
 		"name": str("Box name (lowercase letters, digits, hyphens). Omit for a random one."),
-		"ttl":  str(`How long the box is meant to live, like "8h". Default 8h.`),
+		"ttl":  str(`How long the box is meant to live, like "2h". Default 2h.`),
 	}), nil},
 	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
-		"box":     str("Box to use. Default: the repo's own reused box."),
+		"box":     str("Reusable box to use. Default: the repo's own box."),
 		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, deleted after the run."},
 		"wait":    str(`Stop waiting after this long, like "10m" (the job keeps running; use box_job). Default 10m.`),
 	}, "dir", "command"), jobOutput},
@@ -75,6 +76,7 @@ var jobOutput = obj(map[string]any{
 	"box":      str("Box the job runs in."),
 	"state":    str("done (exitCode is the command's), detached (still running), paused (exitCode 75), or empty after an error."),
 	"exitCode": map[string]any{"type": "integer"},
+	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 }, "exitCode")
 
 // errClientCancelled is the cause of a tool call's context that the client
@@ -96,6 +98,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 	}
 	var callsMu sync.Mutex
 	calls := map[string]context.CancelCauseFunc{} // by request id
+	var suppressInfo atomic.Bool
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -133,10 +136,23 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			}
 			send(rpcMsg{ID: req.ID, Result: map[string]any{
 				"protocolVersion": p.ProtocolVersion,
-				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"capabilities":    map[string]any{"tools": map[string]any{}, "logging": map[string]any{}},
 				"serverInfo":      map[string]any{"name": "box", "version": "0.1.0"},
 			}})
 		case "ping":
+			send(rpcMsg{ID: req.ID, Result: map[string]any{}})
+		case "logging/setLevel":
+			var p struct{ Level string }
+			json.Unmarshal(req.Params, &p)
+			switch p.Level {
+			case "debug", "info":
+				suppressInfo.Store(false)
+			case "notice", "warning", "error", "critical", "alert", "emergency":
+				suppressInfo.Store(true)
+			default:
+				send(rpcMsg{ID: req.ID, Error: &rpcError{-32602, "invalid log level"}})
+				continue
+			}
 			send(rpcMsg{ID: req.ID, Result: map[string]any{}})
 		case "tools/list":
 			send(rpcMsg{ID: req.ID, Result: map[string]any{"tools": tools}})
@@ -151,7 +167,17 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			wg.Add(1)
 			go func(req rpcMsg) {
 				defer wg.Done()
-				res := callTool(callCtx, a, req.Params)
+				res := callTool(callCtx, a, req.Params, func(note jobNotice) {
+					if suppressInfo.Load() || callCtx.Err() != nil {
+						return
+					}
+					data := struct {
+						jobNotice
+						RequestID json.RawMessage `json:"requestId"`
+					}{note, req.ID}
+					params, _ := json.Marshal(map[string]any{"level": "info", "logger": "box", "data": data})
+					send(rpcMsg{Method: "notifications/message", Params: params})
+				})
 				callsMu.Lock()
 				delete(calls, key)
 				callsMu.Unlock()
@@ -191,25 +217,33 @@ func textResult(text string, isErr bool) map[string]any {
 // jobResult reports a box_run or box_job. The job ID, box and exit code go
 // in structuredContent and on the first text line, never in the log tail
 // that follows, so cutting a long log can't lose them.
-func jobResult(r JobResult, err error, log string) map[string]any {
+func jobResult(r JobResult, err error, log string, warnings []string) map[string]any {
 	head := "exit code: " + strconv.Itoa(r.Code)
 	if r.State != "" {
 		head = r.State + ", " + head
 	}
 	if r.Job != "" {
 		head = fmt.Sprintf("job %s on box %s: %s", r.Job, r.Box, head)
+	} else if r.Box != "" {
+		head = fmt.Sprintf("box %s: %s", r.Box, head)
+	}
+	if len(warnings) > 0 {
+		head += "\n" + strings.Join(warnings, "\n")
 	}
 	text := head + "\n" + log
 	if err != nil {
 		text += "\nerror: " + err.Error()
 	}
 	res := textResult(text, err != nil)
-	res["structuredContent"] = r
+	res["structuredContent"] = struct {
+		JobResult
+		Warnings []string `json:"warnings,omitempty"`
+	}{r, warnings}
 	return res
 }
 
 // callTool runs one tool and returns its MCP result.
-func callTool(ctx context.Context, base *App, params json.RawMessage) map[string]any {
+func callTool(ctx context.Context, base *App, params json.RawMessage, notify func(jobNotice)) map[string]any {
 	var p struct {
 		Name      string   `json:"name"`
 		Arguments toolArgs `json:"arguments"`
@@ -221,6 +255,9 @@ func callTool(ctx context.Context, base *App, params json.RawMessage) map[string
 	out := &tailBuffer{max: 32 << 10}
 	a := *base
 	a.Out, a.Err = out, out
+	a.Notify = notify
+	var warnings []string
+	a.Warn = func(message string) { warnings = append(warnings, message) }
 
 	dur := func(s string, def time.Duration) (time.Duration, error) {
 		if s == "" {
@@ -231,7 +268,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage) map[string
 
 	switch p.Name {
 	case "box_new":
-		ttl, err := dur(args.TTL, defaultTTL)
+		ttl, err := dur(args.TTL, idleTTL)
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
@@ -249,14 +286,14 @@ func callTool(ctx context.Context, base *App, params json.RawMessage) map[string
 			return textResult("dir and command are required", true)
 		}
 		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, Box: args.Box, New: args.New, Wait: wait})
-		return jobResult(r, err, out.String())
+		return jobResult(r, err, out.String(), warnings)
 	case "box_job":
 		wait, err := dur(args.Wait, 10*time.Minute)
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
 		r, err := a.Job(ctx, args.ID, wait)
-		return jobResult(r, err, out.String())
+		return jobResult(r, err, out.String(), warnings)
 	case "box_rm":
 		if err := a.Rm(ctx, args.Name); err != nil {
 			return textResult(err.Error(), true)
