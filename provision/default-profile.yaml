@@ -1,13 +1,14 @@
-# `default` profile of the Incus DEFAULT project. The `agents` project is created with
-# features.profiles=false, so its boxes use this profile, and only the admin can edit it.
+# `default` profile of the `agents` project (features.profiles=true, so the project has its own).
 # Applied by setup-distro.sh with
-#   incus profile edit default --project default < default-profile.yaml
+#   incus profile edit default --project agents < default-profile.yaml
 #
-# limits.cpu / limits.memory MUST be set per box: the project caps count them. The tray's
-# modes override limits.cpu per instance (2 in Shared, 4 in Full); memory stays at 4GiB.
-# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes, 50GiB).
-# The root disk is capped at 30GiB (`size`). Boxes are deleted by the tray's reaper after
-# user.expires; only /cache outlives a box, and it may be wiped at any time.
+# Its limits are the medium size, for boxes launched without `box`. `box` launches every box with
+# its size (internal/mode/size.go): user.box.size, limits.memory and a root disk size on the
+# instance, which override the values here. The tray sets each box's limits.cpu from its size and
+# the mode on every tick. limits.cpu / limits.memory MUST be set per box: the project caps count them.
+# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes, 30GiB).
+# Boxes are deleted by the tray's reaper after user.expires; only /cache outlives a box, and it
+# may be wiped at any time.
 #
 # cloud-init: the first boot of a box runs /usr/local/sbin/agent-box-provision.sh. Every step
 # in it is guarded, so boxes launched from the published `agent-base` image (which re-run
@@ -85,7 +86,7 @@ devices:
     type: disk
     path: /
     pool: default
-    size: 30GiB  # root disk quota per box; boxes are compute, not storage (see docs/DESIGN.md)
+    size: 30GiB  # medium root disk; `box` sets each box's own size at launch (see docs/DESIGN.md)
   eth0:
     type: nic
     name: eth0

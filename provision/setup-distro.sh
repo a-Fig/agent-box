@@ -8,9 +8,9 @@
 # Environment:
 #   TS_AUTHKEY        Tailscale auth key. Read from the environment only; never written to disk or logs.
 #                     Without it Tailscale is installed but not joined.
-#   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 12)
+#   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 24)
 #   AGENTS_MEM_CAP    project cap on the sum of limits.memory  (default 12GiB)
-#   AGENTS_MAX_BOXES  project limits.instances                 (default 3)
+#   AGENTS_MAX_BOXES  project limits.instances                 (default 6)
 #   AGENTS_DISK_CAP   project limits.disk, all boxes + volumes (default 150GiB)
 # Flags:
 #   --build-base      build the `agent-base` image if it does not exist
@@ -23,11 +23,11 @@ exec </dev/null
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ZABBLY_FPR="4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
 PROJECT=agents
-CPU_CAP=${AGENTS_CPU_CAP:-12}
+CPU_CAP=${AGENTS_CPU_CAP:-24}
 MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
-MAX_BOXES=${AGENTS_MAX_BOXES:-3}
+MAX_BOXES=${AGENTS_MAX_BOXES:-6}
 DISK_CAP=${AGENTS_DISK_CAP:-150GiB}
-CACHE_SIZE=50GiB
+CACHE_SIZE=30GiB
 BUILD_BASE=0
 REBUILD=0
 
@@ -104,6 +104,18 @@ modprobe btrfs
 echo btrfs > /etc/modules-load.d/agent-box-btrfs.conf
 note "btrfs loaded, and loaded at every boot"
 
+step "lxcfs (boxes see their own memory and CPUs in /proc)"
+# systemd in WSL counts as a container, and incus-lxcfs.service skips containers
+# (ConditionVirtualization=!container). Without lxcfs, a box's /proc/meminfo shows the whole VM,
+# so tools that size themselves from it (Gradle, JVMs, test runners) overshoot their cgroup limit.
+mkdir -p /etc/systemd/system/incus-lxcfs.service.d
+printf '[Unit]
+ConditionVirtualization=
+' > /etc/systemd/system/incus-lxcfs.service.d/wsl.conf
+systemctl daemon-reload
+systemctl enable --now incus-lxcfs >/dev/null 2>&1 || true
+note "incus-lxcfs: $(systemctl is-active incus-lxcfs || true)"
+
 step "Initialising Incus (preseed)"
 if incus storage show default >/dev/null 2>&1; then
   note "storage pool 'default' exists: already initialised, skipping preseed"
@@ -153,7 +165,10 @@ else
   note "created (own profiles; images shared with the default project)"
 fi
 # Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
-# below what existing instances use). Defaults: 3 boxes x 4 CPUs x 4GiB, the Full mode size.
+# below what existing instances use). Box sizes (internal/mode/size.go) set each box's memory and
+# root disk at launch and its limits.cpu per mode. 12GiB fits six small, three medium, or one
+# large plus two small. Six small root disks and the cache allocate 138GiB of the 150GiB disk cap.
+# The CPU cap leaves room for each mix in Full mode.
 incus project set "$PROJECT" limits.instances="$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu="$CPU_CAP"
 incus project set "$PROJECT" limits.memory="$MEM_CAP"
@@ -165,19 +180,37 @@ note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP disk=$DISK_CAP (al
 #   restricted=true                                turns the restricted.* keys on
 #   restricted.containers.privilege=unprivileged   blocks security.privileged=true (the default)
 #   restricted.containers.nesting=allow            boxes need security.nesting=true (default: block)
-#   restricted.devices.disk=managed                only pool-backed disks: root and /cache (default)
+#   restricted.devices.disk=allow                  pool-backed disks (root, /cache) as under `managed`,
+#   restricted.devices.disk.paths=...              plus host paths under these prefixes only: the GPU
+#                                                  box's WSL folders (GPUDevices in internal/mode/size.go)
+#   restricted.devices.unix-char=allow             the GPU box's /dev/dxg (default: block)
 #   restricted.devices.nic=managed                 only NICs on a managed network: incusbr0 (default)
+# The GPU keys, checked against the reference and Incus's source on 2026-11-24
+# (internal/server/project/permissions.go, internal/server/device/disk.go): disk.paths applies
+# only with disk=allow and only to disks without pool=, so pool volumes pass as under `managed`.
+# It matches whole path components of `source`, opens the path with openat2 so a symlink can't
+# lead outside it, and refuses shift=true. No key enforces `readonly`, but boxes are unprivileged
+# and the files belong to host root, so a box can't write them. unix-char is allow or block for
+# every character device; there is no per-path key, so this lets an agent's cert attach any host
+# character device to a box, not only /dev/dxg (docs/DESIGN.md, Isolation).
 # No restricted.* key stops a restricted client cert from creating a custom storage volume: the
 # reference has none for volumes (restricted.devices.disk only limits which disk DEVICES an
-# instance may have; `managed` still lets it attach any pool volume). So the real limit is
+# instance may have; it still lets it attach any pool volume). So the real limit is
 # limits.disk above, which counts custom volumes too. Agents should not store data in a volume,
 # and the reaper only deletes instances, so volumes agents create are bounded, not removed.
 incus project set "$PROJECT" restricted=true \
   restricted.containers.privilege=unprivileged \
   restricted.containers.nesting=allow \
-  restricted.devices.disk=managed \
+  restricted.devices.disk=allow \
+  restricted.devices.disk.paths=/usr/lib/wsl/lib,/usr/lib/wsl/drivers \
+  restricted.devices.unix-char=allow \
   restricted.devices.nic=managed
-note "restricted: unprivileged containers, nesting allowed, managed disks and NICs only"
+note "restricted: unprivileged containers, nesting allowed, managed NICs, pool disks plus the two WSL GPU folders, unix-char devices (for /dev/dxg)"
+if [ -e /dev/dxg ] && [ -d /usr/lib/wsl/lib ] && [ -d /usr/lib/wsl/drivers ]; then
+  note "GPU: /dev/dxg and the WSL GPU folders are present, so gpu boxes can start"
+else
+  note "GPU: /dev/dxg or /usr/lib/wsl/{lib,drivers} is missing, so gpu boxes won't start (needs the NVIDIA driver on Windows)"
+fi
 
 step "Volume 'cache' (shared /cache for Go, npm, Gradle, uv)"
 if incus storage volume show default cache --project "$PROJECT" >/dev/null 2>&1; then
@@ -192,7 +225,7 @@ note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
 
 step "Default profile of the '$PROJECT' project"
 incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
-note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, 30GiB root, nesting, /cache, cloud-init)"
+note "applied default-profile.yaml (medium-size defaults: limits.cpu=2, limits.memory=4GiB, 30GiB root; nesting, /cache, cloud-init)"
 
 # ---------------------------------------------------------------- Tailscale
 step "Tailscale"
@@ -248,6 +281,24 @@ else
 fi
 
 # ---------------------------------------------------------------- VM capability
+step "Reaper (deletes expired boxes every minute, with or without the tray)"
+install -m 0755 "$HERE/reaper.sh" /usr/local/sbin/agent-box-reaper
+install -m 0644 "$HERE/systemd/agent-box-reaper.service" "$HERE/systemd/agent-box-reaper.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agent-box-reaper.timer >/dev/null 2>&1
+note "agent-box-reaper.timer enabled"
+
+step "HTTPS certificate (Let's Encrypt through Tailscale, renewed weekly)"
+install -m 0755 "$HERE/https-cert.sh" /usr/local/sbin/agent-box-https-cert
+install -m 0644 "$HERE/systemd/agent-box-https-cert.service" "$HERE/systemd/agent-box-https-cert.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agent-box-https-cert.timer >/dev/null 2>&1
+if /usr/local/sbin/agent-box-https-cert; then
+  note "Incus serves a trusted certificate; renewed weekly"
+else
+  note "no certificate yet (Tailscale not joined, or HTTPS certificates off in the tailnet's DNS settings); the timer retries weekly"
+fi
+
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then
   note "/dev/kvm present: Incus VMs (incus launch --vm) are possible."
@@ -263,7 +314,7 @@ cat <<'EOF'
   # Laptop, for agents (restricted to the agents project):
   incus config trust add laptop-agents --restricted --projects agents
   #   prints a token; on the laptop:
-  #   incus remote add pc https://agent-box:8443 --token <token>
+  #   incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token <token>
   #   incus project switch agents   # or pass --project agents
 
   # Tray on the PC (admin). It must use a DIFFERENT client cert than agents:
@@ -271,7 +322,7 @@ cat <<'EOF'
   #   on the PC, with its own config dir (e.g. INCUS_CONF=%LOCALAPPDATA%\agent-box\incus):
   #   incus remote add pc https://localhost:8443 --token <token>
 
-  # Web UI: https://agent-box:8443 (import a client cert into the browser; see the Incus UI docs)
+  # Web UI: https://agent-box.<tailnet>.ts.net:8443 (import a client cert into the browser; see the Incus UI docs)
   # List / revoke:  incus config trust list ;  incus config trust remove <fingerprint>
 
 EOF

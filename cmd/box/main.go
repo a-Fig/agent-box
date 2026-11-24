@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 func cancelText(job string, cancelled bool, code int) string {
@@ -20,25 +22,42 @@ func cancelText(job string, cancelled bool, code int) string {
 }
 
 const usage = `usage:
-  box status                                is offloading worth it now? (PC, mode, slots, this repo's box)
-  box run [--box name | --new] [--env K=V]... [--timeout 30m] -- <cmd...>
+  box status                                is offloading worth it now? (PC, mode, room, this repo's box)
+  box run [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
                                             sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
   box jobs [--box name]                     list jobs, newest first
   box cancel <id>                           stop a running job
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
-  box new [name] [--ttl 2h]                 launch a box with a positive TTL
+  box new [name] [--ttl 2h] [--size S | --gpu]
+                                            launch a box with a positive TTL
   box rm <name>                             delete a box
   box ls                                    list boxes
   box mcp                                   serve MCP on stdio
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
 
+Sizes (CPUs in Shared/Full mode, RAM, disk):
+  %s.
+--size sets the size of a box that box new or box run launches (default
+medium). A reused box of another size isn't resized: the run gets a throwaway.
+--gpu is --size gpu: the PC's RTX 3070, one GPU box at a time. box run --gpu
+uses a throwaway. The tray stops a GPU box when a game starts or in My PC.
+
 box run exits with the command's exit code, 124 when --timeout fired, or 75
-when the PC or box is paused. A relative remote path in box pull starts at
-the job's checkout. Settings: BOX_REMOTE (pc), BOX_PROJECT (agents),
-BOX_IMAGE (agent-base).
+when the PC or box is paused, there is no room, or the GPU is taken or was
+stopped. A relative remote path in box pull starts at the job's checkout.
+Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
+
+// usageText is usage with the size table filled in.
+func usageText() string {
+	var sizes []string
+	for _, s := range mode.Sizes {
+		sizes = append(sizes, fmt.Sprintf("%s %d/%d, %s, %s", s.Name, s.SharedCPUs, s.FullCPUs, s.Memory, s.Disk))
+	}
+	return fmt.Sprintf(usage, strings.Join(sizes, "; "))
+}
 
 // envFlags collects repeated --env K=V flags.
 type envFlags map[string]string
@@ -62,12 +81,12 @@ func main() {
 
 func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	if len(args) == 0 {
-		fmt.Fprint(a.Err, usage)
+		fmt.Fprint(a.Err, usageText())
 		return 2
 	}
 	fs := flag.NewFlagSet("box "+args[0], flag.ContinueOnError)
 	fs.SetOutput(a.Err)
-	fs.Usage = func() { fmt.Fprint(a.Err, usage) }
+	fs.Usage = func() { fmt.Fprint(a.Err, usageText()) }
 	fail := func(err error) int {
 		fmt.Fprintln(a.Err, "box:", err)
 		return 1
@@ -86,10 +105,19 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	switch args[0] {
 	case "new":
 		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires")
+		size := fs.String("size", "", mode.SizeNames()+" (default "+mode.DefaultSize+")")
+		gpu := fs.Bool("gpu", false, "same as --size gpu")
 		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 1 {
 			return 2
 		}
-		name, err := a.New(ctx, fs.Arg(0), *ttl)
+		if !gpuSize(a, size, *gpu) {
+			return 2
+		}
+		name, err := a.New(ctx, fs.Arg(0), *ttl, *size)
+		if isTempFail(err) {
+			fmt.Fprintln(a.Err, "box:", err)
+			return exitPaused
+		}
 		if err != nil {
 			return fail(err)
 		}
@@ -100,6 +128,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		isNew := fs.Bool("new", false, "use a throwaway box, deleted afterwards")
 		ttl := fs.Duration("ttl", idleTTL, "initial lifetime of a --new box before the job starts")
 		timeout := fs.Duration("timeout", 0, "kill the command after this long (exit 124)")
+		size := fs.String("size", "", "size of a box this run launches: "+mode.SizeNames()+" (default "+mode.DefaultSize+")")
+		gpu := fs.Bool("gpu", false, "same as --size gpu: run in a throwaway GPU box")
 		envs := envFlags{}
 		fs.Var(envs, "env", "K=V passed to the command (repeatable; no secrets)")
 		if fs.Parse(args[1:]) != nil {
@@ -109,16 +139,19 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			fmt.Fprintln(a.Err, "box: --box and --new don't mix")
 			return 2
 		}
+		if !gpuSize(a, size, *gpu) {
+			return 2
+		}
 		dir, err := os.Getwd()
 		if err != nil {
 			return fail(err)
 		}
-		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout}))
+		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size}))
 	case "job":
 		offset := fs.Int64("offset", 0, "print the log from this byte, without waiting")
 		limit := fs.Int64("limit", 0, "print at most this many bytes of the log (default 32KiB)")
 		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() != 1 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		paged := false
@@ -135,7 +168,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "status":
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		dir, _ := os.Getwd()
@@ -148,7 +181,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	case "jobs":
 		box := fs.String("box", "", "only this box")
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		jobs, err := a.Jobs(ctx, *box)
@@ -161,7 +194,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "cancel":
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 1 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		cancelled, c, err := a.Cancel(ctx, fs.Arg(0))
@@ -172,7 +205,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "pull":
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 3 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		dest, err := a.Pull(ctx, fs.Arg(0), fs.Arg(1), fs.Arg(2))
@@ -184,7 +217,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	case "join":
 		leave := fs.Bool("leave", false, "unregister box and remove the skill")
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		c, err := a.JoinConfig(a.Out)
@@ -197,7 +230,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "rm":
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 1 {
-			fmt.Fprint(a.Err, usage)
+			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		if err := a.Rm(ctx, fs.Arg(0)); err != nil {
@@ -215,11 +248,24 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		return 0
 	case "-h", "--help", "help":
-		fmt.Fprint(a.Out, usage)
+		fmt.Fprint(a.Out, usageText())
 		return 0
 	}
-	fmt.Fprint(a.Err, usage)
+	fmt.Fprint(a.Err, usageText())
 	return 2
+}
+
+// gpuSize folds --gpu into --size, refusing --gpu with another size.
+func gpuSize(a *App, size *string, gpu bool) bool {
+	if !gpu {
+		return true
+	}
+	if *size != "" && *size != mode.GPUSize {
+		fmt.Fprintf(a.Err, "box: --gpu and --size %s don't mix\n", *size)
+		return false
+	}
+	*size = mode.GPUSize
+	return true
 }
 
 // parseInterspersed lets flags follow positional arguments ("box new foo --ttl 2h").

@@ -510,3 +510,76 @@ func TestReaperRetriesFailedDelete(t *testing.T) {
 		t.Fatalf("running after reap = %d", st.Running)
 	}
 }
+
+func TestCPUsFollowEachBoxSize(t *testing.T) {
+	f := newFake("s", "Frozen", "m", "Frozen", "l", "Frozen", "old", "Frozen", "odd", "Frozen")
+	f.config["s"] = map[string]string{SizeKey: "small"}
+	f.config["m"] = map[string]string{SizeKey: "medium"}
+	f.config["l"] = map[string]string{SizeKey: "large"}
+	f.config["odd"] = map[string]string{SizeKey: "huge"} // unknown sizes count as medium
+	m := New(f, Shared)
+	tick(m, 0, false)
+	equal(t, f.take(), []string{
+		"project user.agent-box.mode=shared",
+		"set s limits.cpu=1", "set s limits.cpu.priority=0", "resume s",
+		"set m limits.cpu=2", "set m limits.cpu.priority=0", "resume m",
+		"set l limits.cpu=4", "set l limits.cpu.priority=0", "resume l",
+		"set old limits.cpu=2", "set old limits.cpu.priority=0", "resume old",
+		"set odd limits.cpu=2", "set odd limits.cpu.priority=0", "resume odd",
+	})
+	m.SetChosen(Full)
+	tick(m, time.Second, false)
+	equal(t, f.take(), []string{
+		"project user.agent-box.mode=full",
+		"set s limits.cpu=2", "set s limits.cpu.priority=10",
+		"set m limits.cpu=4", "set m limits.cpu.priority=10",
+		"set l limits.cpu=8", "set l limits.cpu.priority=10",
+		"set old limits.cpu=4", "set old limits.cpu.priority=10",
+		"set odd limits.cpu=4", "set odd limits.cpu.priority=10",
+	})
+	tick(m, 2*time.Second, false)
+	equal(t, f.take(), nil)
+
+	f.config["l"]["limits.cpu"] = "12" // an agent raised a large box's CPUs
+	tick(m, 3*time.Second, false)
+	equal(t, f.take(), []string{"set l limits.cpu=8"})
+
+	m.SetChosen(MyPC)
+	tick(m, 4*time.Second, false)
+	for _, c := range f.take() {
+		if strings.HasPrefix(c, "set ") {
+			t.Errorf("My PC changed a limit: %s", c)
+		}
+	}
+}
+
+func TestSizeTable(t *testing.T) {
+	want := map[string][4]string{
+		"small":  {"1", "2", "2GiB", "18GiB"},
+		"medium": {"2", "4", "4GiB", "30GiB"},
+		"large":  {"4", "8", "8GiB", "40GiB"},
+		"gpu":    {"4", "6", "8GiB", "40GiB"},
+	}
+	if len(Sizes) != len(want) {
+		t.Fatalf("%d sizes", len(Sizes))
+	}
+	for _, s := range Sizes {
+		got := [4]string{fmt.Sprint(s.CPUs(Shared)), fmt.Sprint(s.CPUs(Full)), s.Memory, s.Disk}
+		if got != want[s.Name] || s.CPUs(MyPC) != 0 {
+			t.Errorf("%s = %v", s.Name, got)
+		}
+	}
+	if SizeOf(nil).Name != DefaultSize || DefaultSize != "medium" {
+		t.Errorf("default size = %s", SizeOf(nil).Name)
+	}
+	for in, n := range map[string]int64{"4GiB": 4 << 30, "512MiB": 512 << 20, "2GB": 2e9, "1024": 1024, " 12GiB\n": 12 << 30, "2PiB": 2 << 50, "512 bytes": 512} {
+		if got, ok := ParseBytes(in); !ok || got != n {
+			t.Errorf("ParseBytes(%q) = %d, %v", in, got, ok)
+		}
+	}
+	for _, in := range []string{"", "50%", "-1GiB", "lots", "8EiB"} {
+		if _, ok := ParseBytes(in); ok {
+			t.Errorf("ParseBytes(%q) ok", in)
+		}
+	}
+}

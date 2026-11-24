@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -12,26 +13,38 @@ import (
 
 // StatusReport says whether offloading to the PC is worth it now.
 type StatusReport struct {
-	Advice    string   `json:"advice"`
-	Available bool     `json:"available"` // box_run can start a job now
-	Remote    string   `json:"remote"`
-	Reachable bool     `json:"reachable"`
-	Error     string   `json:"error,omitempty"` // why the PC can't be reached
-	Mode      string   `json:"mode"`            // mypc, shared, full, or "" if unknown
-	Yielding  bool     `json:"yielding"`        // the tray has paused boxes for a game
-	Reason    string   `json:"reason,omitempty"`
-	Boxes     int      `json:"boxes"`
-	MaxBoxes  int      `json:"maxBoxes"`  // -1: no limit
-	SlotsFree int      `json:"slotsFree"` // -1: no limit
-	BoxCPUs   int      `json:"boxCpus"`   // CPUs each box gets now
-	BoxMemory string   `json:"boxMemory"`
-	Repo      string   `json:"repo,omitempty"`    // when run in a git repo
-	RepoBox   *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
+	Advice    string     `json:"advice"`
+	Available bool       `json:"available"` // box_run can start a job now
+	Remote    string     `json:"remote"`
+	Reachable bool       `json:"reachable"`
+	Error     string     `json:"error,omitempty"` // why the PC can't be reached
+	Mode      string     `json:"mode"`            // mypc, shared, full, or "" if unknown
+	Yielding  bool       `json:"yielding"`        // the tray has paused boxes for a game
+	Reason    string     `json:"reason,omitempty"`
+	Boxes     int        `json:"boxes"`
+	MaxBoxes  int        `json:"maxBoxes"`  // -1: no limit
+	SlotsFree int        `json:"slotsFree"` // -1: no limit
+	Sizes     []SizeRoom `json:"sizes"`
+	Room      string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
+	// GPU is "free", "free, but no room ...", "in use: job X" or
+	// "unavailable: ..." (a game or My PC).
+	GPU     string   `json:"gpu"`
+	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
+	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
+}
+
+// SizeRoom is one box size, what a box of it gets now, and how many more
+// fit in the project's caps.
+type SizeRoom struct {
+	mode.Size
+	CPUs int `json:"cpus"` // CPUs a box of this size gets now
+	Fits int `json:"fits"` // more boxes of this size that fit now; -1: no limit
 }
 
 // RepoBox is a repo's own box and the jobs running in it.
 type RepoBox struct {
 	Name    string    `json:"name"`
+	Size    string    `json:"size"`
 	Status  string    `json:"status"`
 	Expires string    `json:"expires,omitempty"`
 	Running []JobInfo `json:"running"`
@@ -57,26 +70,30 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s.Mode = a.mode(ctx)
 	s.Reason = a.projectKey(ctx, mode.ProjectReasonKey)
 	s.Yielding = s.Reason != ""
-	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil {
-		s.MaxBoxes, s.SlotsFree = n, max(n-len(insts), 0)
+	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
+		free := n - len(insts)
+		for _, in := range insts {
+			if reclaimable(in) { // the next launch deletes it first
+				free++
+			}
+		}
+		s.MaxBoxes, s.SlotsFree = n, max(free, 0)
 	}
-	s.BoxMemory = "4GiB"
-	if out, err := a.incusOK(ctx, "profile", "get", a.target("default"), "limits.memory"); err == nil && strings.TrimSpace(out) != "" {
-		s.BoxMemory = strings.TrimSpace(out)
-	}
+	now := mode.Mode(s.Mode)
 	switch {
 	case s.Yielding:
-	case s.Mode == "": // no tray: the profile's limits.cpu applies, which is Shared's
-		s.BoxCPUs = mode.Shared.BoxCPUs()
-	default:
-		s.BoxCPUs = mode.Mode(s.Mode).BoxCPUs()
+		now = mode.MyPC
+	case s.Mode == "": // no tray: boxes keep the Shared CPUs they launched with
+		now = mode.Shared
 	}
+	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes)
+	s.GPU = a.gpuStatus(ctx, s, insts)
 	var repoBox *instance
 	if s.Repo != "" {
 		repoBox = find(insts, s.Repo)
 	}
 	if repoBox != nil {
-		s.RepoBox = &RepoBox{Name: repoBox.Name, Status: repoBox.Status, Expires: repoBox.Config[expiresKey], Running: []JobInfo{}}
+		s.RepoBox = &RepoBox{Name: repoBox.Name, Size: mode.SizeOf(repoBox.Config).Name, Status: repoBox.Status, Expires: repoBox.Config[expiresKey], Running: []JobInfo{}}
 		if repoBox.Status == "Running" {
 			jobs, err := a.boxJobs(ctx, repoBox.Name)
 			if err != nil {
@@ -93,8 +110,151 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	return s
 }
 
+// gpuStatus says whether a GPU box could run now.
+func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) string {
+	switch {
+	case s.Yielding:
+		return "unavailable: the PC is yielding to a game"
+	case s.Mode == string(mode.MyPC):
+		return "unavailable: the PC is in My PC mode"
+	}
+	for _, in := range insts {
+		if mode.IsGPU(in.Config) && a.beingCreated(in) {
+			return "in use: box " + in.Name + ", starting"
+		}
+		if mode.IsGPU(in.Config) && in.Status != "Stopped" {
+			holder, _ := a.gpuHolder(ctx, in)
+			return "in use: " + holder
+		}
+	}
+	for _, sz := range s.Sizes {
+		if sz.GPU && sz.Fits == 0 {
+			return "free, but no room for a gpu box now"
+		}
+	}
+	return "free"
+}
+
+// room works out how many more boxes of each size fit, from the project's
+// caps minus what existing boxes (stopped ones too) are allocated: CPUs at
+// at least their size's Full count, because the tray raises them in Full mode,
+// memory, instances, and disk as Incus counts it (root disks, volumes,
+// images). A cap that can't be read doesn't limit.
+func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxes int) ([]SizeRoom, string) {
+	instCap := int64(maxBoxes)
+	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
+	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
+	var cpus, mem, gpus, reclaimN, reclaimDisk int64
+	for _, in := range insts {
+		sz := mode.SizeOf(in.Config)
+		if reclaimable(in) { // the next launch deletes it first
+			d, _ := mode.ParseBytes(sz.Disk)
+			reclaimN, reclaimDisk = reclaimN+1, reclaimDisk+d
+			continue
+		}
+		if sz.GPU && in.Status != "Stopped" {
+			gpus++
+		}
+		cfg := in.ExpandedConfig
+		if cfg == nil {
+			cfg = in.Config
+		}
+		cpu, _ := strconv.ParseInt(cfg["limits.cpu"], 10, 64)
+		cpus += max(int64(sz.FullCPUs), cpu)
+		m, ok := mode.ParseBytes(cfg["limits.memory"])
+		if !ok {
+			m, _ = mode.ParseBytes(sz.Memory)
+		}
+		mem += m
+	}
+	resources := a.projectResources(ctx)
+	diskFree, diskKnown := resources["disk"].remaining()
+	containersFree, containersKnown := resources["containers"].remaining()
+	diskFree += reclaimDisk
+	containersFree += reclaimN
+
+	sizes := make([]SizeRoom, len(mode.Sizes))
+	limited := false
+	for i, sz := range mode.Sizes {
+		fits := int64(-1)
+		limit := func(free, each int64) {
+			if n := max(free, 0) / each; fits < 0 || n < fits {
+				fits = n
+			}
+		}
+		szMem, _ := mode.ParseBytes(sz.Memory)
+		szDisk, _ := mode.ParseBytes(sz.Disk)
+		if instCap >= 0 {
+			limit(instCap-int64(len(insts))+reclaimN, 1)
+		}
+		if containersKnown {
+			limit(containersFree, 1)
+		}
+		if cpuErr == nil && cpuCap >= 0 {
+			limit(cpuCap-cpus, int64(sz.FullCPUs))
+		}
+		if memKnown {
+			limit(memCap-mem, szMem)
+		}
+		if diskKnown {
+			limit(diskFree, szDisk)
+		}
+		if sz.GPU { // one at a time
+			limit(1-gpus, 1)
+		}
+		sizes[i] = SizeRoom{Size: sz, CPUs: sz.CPUs(now), Fits: int(fits)}
+		limited = limited || (fits >= 0 && !sz.GPU)
+	}
+	var parts []string
+	for i := len(sizes) - 1; i >= 0; i-- { // largest first
+		if sizes[i].Fits > 0 && !sizes[i].GPU { // the gpu line covers the GPU
+			parts = append(parts, fmt.Sprintf("%d %s", sizes[i].Fits, sizes[i].Name))
+		}
+	}
+	switch {
+	case !limited:
+		return sizes, "no limit"
+	case len(parts) == 0:
+		return sizes, "none"
+	}
+	return sizes, strings.Join(parts, ", or ")
+}
+
+type projectResource struct{ Limit, Usage *int64 }
+
+func (r projectResource) remaining() (int64, bool) {
+	if r.Limit == nil || r.Usage == nil || *r.Limit < 0 || *r.Usage < 0 {
+		return 0, false
+	}
+	return *r.Limit - *r.Usage, true
+}
+
+// projectResources reads Incus's allocation counters, when available.
+func (a *App) projectResources(ctx context.Context) map[string]projectResource {
+	out, err := a.incusOK(ctx, "project", "info", a.target(a.Project), "--format", "json")
+	if err != nil {
+		return nil
+	}
+	var st struct {
+		Resources map[string]projectResource `json:"resources"`
+	}
+	if json.Unmarshal([]byte(out), &st) != nil {
+		return nil
+	}
+	return st.Resources
+}
+
+// sizeText is "medium: 2 CPUs/4GiB" for a size as it is now.
+func sizeText(s StatusReport, name string) string {
+	for _, sz := range s.Sizes {
+		if sz.Name == name {
+			return fmt.Sprintf("%s: %d CPUs/%s", sz.Name, sz.CPUs, sz.Memory)
+		}
+	}
+	return name
+}
+
 func advice(s StatusReport, repoBox *instance) (string, bool) {
-	size := fmt.Sprintf("%d CPUs/%s per box", s.BoxCPUs, s.BoxMemory)
 	switch {
 	case s.Mode == string(mode.MyPC):
 		return "unavailable: PC is in My PC mode: run locally", false
@@ -107,13 +267,22 @@ func advice(s StatusReport, repoBox *instance) (string, bool) {
 		if n := len(s.RepoBox.Running); n > 0 {
 			busy = fmt.Sprintf(", %d job(s) running there (runs take turns)", n)
 		}
-		return fmt.Sprintf("available: this repo's box %s is %s%s; %s", repoBox.Name, strings.ToLower(repoBox.Status), busy, size) + modeNote(s), true
+		more := "; room for " + s.Room + " more"
+		switch s.Room {
+		case "none":
+			more = "; no room for more boxes"
+		case "no limit":
+			more = ""
+		}
+		return fmt.Sprintf("available: this repo's box %s (%s) is %s%s%s", repoBox.Name, sizeText(s, s.RepoBox.Size), strings.ToLower(repoBox.Status), busy, more) + modeNote(s), true
 	case s.SlotsFree == 0:
 		return fmt.Sprintf("busy: all %d box slots are taken: run locally, or reuse a box with box_run box", s.MaxBoxes), false
-	case s.SlotsFree < 0:
-		return "available: " + size + modeNote(s), true
+	case s.Room == "none":
+		return "busy: no room for another box (CPU, memory or disk caps): run locally, or reuse a box with box_run box", false
+	case s.Room == "no limit":
+		return "available: " + sizeText(s, mode.DefaultSize) + modeNote(s), true
 	}
-	return fmt.Sprintf("available: %d slot(s) free, %s", s.SlotsFree, size) + modeNote(s), true
+	return "available: room for " + s.Room + modeNote(s), true
 }
 
 func modeNote(s StatusReport) string {
@@ -156,10 +325,18 @@ func writeStatus(w io.Writer, s StatusReport) {
 	} else {
 		fmt.Fprintf(w, "boxes: %d\n", s.Boxes)
 	}
-	fmt.Fprintf(w, "per box: %d CPUs, %s RAM\n", s.BoxCPUs, s.BoxMemory)
+	fmt.Fprintf(w, "room for: %s\n", s.Room)
+	var sizes []string
+	for _, sz := range s.Sizes {
+		if !sz.GPU { // the gpu line covers it
+			sizes = append(sizes, fmt.Sprintf("%s %d CPUs/%s/%s disk", sz.Name, sz.CPUs, sz.Memory, sz.Disk))
+		}
+	}
+	fmt.Fprintf(w, "sizes now: %s (default %s)\n", strings.Join(sizes, ", "), mode.DefaultSize)
+	fmt.Fprintf(w, "gpu: %s\n", s.GPU)
 	switch {
 	case s.RepoBox != nil:
-		fmt.Fprintf(w, "repo box: %s, %s, expires %s\n", s.RepoBox.Name, s.RepoBox.Status, s.RepoBox.Expires)
+		fmt.Fprintf(w, "repo box: %s, %s, %s, expires %s\n", s.RepoBox.Name, s.RepoBox.Size, s.RepoBox.Status, s.RepoBox.Expires)
 		for _, j := range s.RepoBox.Running {
 			fmt.Fprintf(w, "  %s %s since %s\n", j.Job, j.State, j.Started.Format("2006-01-02 15:04:05Z"))
 		}

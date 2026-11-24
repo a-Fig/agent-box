@@ -43,7 +43,7 @@ $name = 'smoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
 if ($LASTEXITCODE -ne 0) { throw "Creating $name failed" }
 ```
 
-`box ls` shows names, status and expiry. Leave other boxes alone; the project allows 3.
+`box ls` shows names, status and expiry. Leave other boxes alone; the project allows 6 (`limits.instances`).
 
 ### Run the repository tests and check the idle expiry
 
@@ -105,7 +105,7 @@ The command should return `75` without printing `THIS_SHOULD_NOT_RUN` in its out
 
 ```powershell
 $original = incus --project agents project get pc:agents limits.cpu
-if ($LASTEXITCODE -ne 0 -or $original -ne '12') { throw 'Unexpected project CPU limit. Stop and verify the target.' }
+if ($LASTEXITCODE -ne 0 -or $original -ne '24') { throw 'Unexpected project CPU limit. Stop and verify the target.' }
 $denial = incus --project agents project set pc:agents limits.cpu=99 2>&1
 $code = $LASTEXITCODE
 if ($code -eq 0) {
@@ -192,3 +192,87 @@ The jobs list shows the job running before cancellation. The page prints `cdef` 
 next offset `6`. The same job ID and offsets can be tested with MCP `box_job`, which returns
 `nextOffset` in `structuredContent`. Cancellation should report exit `130`, and `ps` should
 show no live child. The two pulls should print `file-ok` and `dir-ok`.
+
+### Box sizes
+
+Not yet run on the PC (2026-11-23); it needs `setup-distro.sh` re-run first, for the new caps.
+
+```powershell
+incus --project agents project get pc:agents limits.instances   # 6
+incus --project agents project get pc:agents limits.cpu         # 24
+$small = 'sizesmoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+& $box new $small --size small
+if ($LASTEXITCODE -ne 0) { throw "Creating $small failed" }
+incus --project agents config get "pc:$small" user.box.size     # small
+incus --project agents config get "pc:$small" limits.memory     # 2GiB
+incus --project agents config device get "pc:$small" root size  # 18GiB
+Start-Sleep 10
+incus --project agents config get "pc:$small" limits.cpu        # 1 in Shared, 2 in Full
+& $box status   # "room for:" counts the small box: 1 large, or 2 medium, or 5 small at most
+& $box new --size large
+& $box new --size large   # with 2GiB + 8GiB used, the second large is refused: exit 75, "no room"
+if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a launch over the memory cap' }
+```
+
+Remove the boxes it made with `box rm` (check `box ls` for the large one's name). Then, in a repo
+whose box exists as medium, `box run --size small -- true` should say it uses a throwaway small
+box, and leave the medium box as it was.
+
+### GPU box
+
+Not yet run on the PC (2026-11-24). It needs `setup-distro.sh` re-run first, for the GPU
+restriction keys, and the tray rebuilt, so it stops GPU boxes. Start in Shared or Full, with no
+game running.
+
+```powershell
+incus --project agents project get pc:agents restricted.devices.unix-char   # allow
+incus --project agents project get pc:agents restricted.devices.disk.paths  # /usr/lib/wsl/lib,/usr/lib/wsl/drivers
+& $box status   # gpu: free
+# The CUDA driver API through ctypes: init, a context, a 1 GiB alloc and a copy round trip.
+# A here-string without double quotes, because PowerShell 5.1 mangles nested ones.
+$check = @'
+nvidia-smi && python3 - <<PY
+import ctypes
+c = ctypes.CDLL('libcuda.so.1')
+assert c.cuInit(0) == 0
+n = ctypes.c_int()
+assert c.cuDeviceGetCount(ctypes.byref(n)) == 0 and n.value >= 1
+ctx, d = ctypes.c_void_p(), ctypes.c_uint64()
+assert c.cuCtxCreate_v2(ctypes.byref(ctx), 0, 0) == 0
+assert c.cuMemAlloc_v2(ctypes.byref(d), 1 << 30) == 0
+src, dst = ctypes.create_string_buffer(b'agent-box-gpu-ok', 16), ctypes.create_string_buffer(16)
+assert c.cuMemcpyHtoD_v2(d, src, 16) == 0 and c.cuMemcpyDtoH_v2(dst, d, 16) == 0
+assert dst.raw == src.raw
+print('cuda ok:', n.value, 'device(s), 1 GiB alloc and copy round trip')
+PY
+'@
+Push-Location -LiteralPath $repo
+try {
+    & $box run --gpu -- $check
+    if ($LASTEXITCODE -ne 0) { throw 'GPU box smoke failed' }
+} finally { Pop-Location }
+```
+
+`nvidia-smi` lists the RTX 3070 and the check prints `cuda ok: 1 device(s), ...`; the throwaway
+is gone afterwards (`box ls`). Then check one-at-a-time and the stop for games:
+
+```powershell
+Push-Location -LiteralPath $repo
+& $box run --gpu -- 'nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
+& $box status                           # gpu: in use: job <id>
+& $box run --gpu -- true                # exit 75: the GPU box is in use (job <id>); run on CPU or wait
+if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a second GPU box' }
+Pop-Location
+```
+
+Start a game (or pick My PC in the tray). Within a tick the GPU box shows `STOPPED` in `box ls`,
+and `nvidia-smi` on Windows no longer lists its process. Then:
+
+```powershell
+& $box job '<job ID>'   # exit 75: the GPU box was stopped because the PC's owner started a game
+incus --project agents config get 'pc:<gpu box>' user.box.stopped   # gaming: ...
+incus --project agents config get 'pc:<gpu box>' user.expires       # about 30 minutes from the stop
+```
+
+After the game ends and the tray is back in Shared, the box stays stopped, and the next
+`box run --gpu` deletes it and launches a fresh one.

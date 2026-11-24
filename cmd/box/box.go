@@ -16,6 +16,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 // exitPaused tells callers the box or the PC is paused (or out of reach),
@@ -120,9 +122,11 @@ func (a *App) incusOK(ctx context.Context, args ...string) (string, error) {
 func (a *App) target(box string) string { return a.Remote + ":" + box }
 
 type instance struct {
-	Name   string            `json:"name"`
-	Status string            `json:"status"` // Running, Stopped, Frozen, ...
-	Config map[string]string `json:"config"`
+	Name           string            `json:"name"`
+	Status         string            `json:"status"` // Running, Stopped, Frozen, ...
+	Config         map[string]string `json:"config"`
+	ExpandedConfig map[string]string `json:"expanded_config"`
+	CreatedAt      time.Time         `json:"created_at"`
 }
 
 func (a *App) list(ctx context.Context) ([]instance, error) {
@@ -186,15 +190,241 @@ var validBox = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 // deletes it once that job has finished.
 const throwawayKey = "user.box.throwaway"
 
-// New launches a box with a TTL. An empty name gets a random one.
-func (a *App) New(ctx context.Context, name string, ttl time.Duration) (string, error) {
+// New launches a box of the given size ("" is medium) with a TTL. An empty
+// name gets a random one.
+func (a *App) New(ctx context.Context, name string, ttl time.Duration, size string) (string, error) {
+	sz, err := lookupSize(size)
+	if err != nil {
+		return "", err
+	}
 	if name == "" {
 		name = "box-" + a.Rand()
 	}
-	return name, a.launch(ctx, name, ttl, false)
+	if sz.GPU {
+		insts, err := a.list(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := a.claimGPU(ctx, insts, ""); err != nil {
+			return "", err
+		}
+	}
+	if err := a.launch(ctx, name, ttl, false, sz); err != nil {
+		return name, err
+	}
+	return name, a.confirmGPU(ctx, name, sz)
 }
 
-func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool) error {
+// lookupSize resolves a --size value; "" is the default size.
+func lookupSize(name string) (mode.Size, error) {
+	if name == "" {
+		name = mode.DefaultSize
+	}
+	sz, ok := mode.LookupSize(name)
+	if !ok {
+		return sz, fmt.Errorf("unknown size %q: use %s", name, mode.SizeNames())
+	}
+	return sz, nil
+}
+
+// errNoRoom is a launch that Incus refused for the project's limits. Callers
+// treat it like a paused PC: run locally (exit 75).
+type errNoRoom struct {
+	size   string
+	reason string
+}
+
+func (e *errNoRoom) Error() string {
+	return fmt.Sprintf("no room on the PC for a %s box (%s); run it locally, or ask for a smaller size", e.size, e.reason)
+}
+
+func isNoRoom(err error) bool {
+	var e *errNoRoom
+	return errors.As(err, &e)
+}
+
+// errGPUBusy is a GPU box asked for while another one holds the GPU.
+// Callers exit 75, like a paused PC.
+type errGPUBusy struct{ holder string }
+
+func (e *errGPUBusy) Error() string {
+	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
+}
+
+// isTempFail says whether err means "not now": no room, or the GPU is taken.
+func isTempFail(err error) bool {
+	var g *errGPUBusy
+	return isNoRoom(err) || errors.As(err, &g)
+}
+
+// gpuHolder says what holds the GPU through box in: "job X" for its running
+// jobs, or "box X" when none runs (a box new --gpu box, or a paused one).
+// idle is true only for a running box that was checked and runs no job.
+func (a *App) gpuHolder(ctx context.Context, in instance) (holder string, idle bool) {
+	if in.Status != "Running" {
+		return "box " + in.Name + ", " + strings.ToLower(in.Status), false
+	}
+	out, err := a.incusOK(ctx, "exec", a.target(in.Name), "--", "bash", "-c", runningScript())
+	if jobs := strings.Fields(out); err == nil && len(jobs) > 0 {
+		return "job " + strings.Join(jobs, ", job "), false
+	}
+	return "box " + in.Name, err == nil
+}
+
+// gpuStartGrace is how long a new GPU box counts as starting up. Between
+// launch and its job's PID file, a box runs no job (and Incus creates it
+// stopped before starting it), so until then no other run may take it for
+// dead and delete it.
+const gpuStartGrace = 15 * time.Minute
+
+// starting says whether in is younger than gpuStartGrace.
+func (a *App) starting(in instance) bool {
+	return !in.CreatedAt.IsZero() && a.Now().Sub(in.CreatedAt) < gpuStartGrace
+}
+
+// beingCreated says whether stopped GPU box in may be one a run is launching
+// right now: young, and not marked by the tray. It holds the GPU.
+func (a *App) beingCreated(in instance) bool {
+	return in.Status == "Stopped" && in.Config[mode.StoppedKey] == "" && a.starting(in)
+}
+
+// claimGPU checks that no box but except holds the GPU, so only one GPU box
+// runs at a time. Throwaway GPU boxes that are done are deleted on the way,
+// since they hold 8GiB of the project's memory and would block the next one:
+// stopped ones the tray marked (reclaimable) or that are past startup, and
+// running ones past startup that run no job. Otherwise a running, paused or
+// starting GPU box makes it return errGPUBusy.
+func (a *App) claimGPU(ctx context.Context, insts []instance, except string) error {
+	for _, in := range insts {
+		if in.Name == except || !mode.IsGPU(in.Config) {
+			continue
+		}
+		throwaway := in.Config[throwawayKey] == "true"
+		if in.Status == "Stopped" {
+			switch {
+			case a.beingCreated(in):
+				return &errGPUBusy{holder: "box " + in.Name + ", starting"}
+			case throwaway:
+				a.removeQuietly(ctx, in.Name)
+			}
+			continue
+		}
+		holder, idle := a.gpuHolder(ctx, in)
+		if idle && throwaway && !a.starting(in) {
+			a.removeQuietly(ctx, in.Name)
+			continue
+		}
+		return &errGPUBusy{holder: holder}
+	}
+	return nil
+}
+
+// confirmGPU closes the race between two launches that both passed
+// claimGPU: once GPU box name exists, if another GPU box is running or
+// paused, name is deleted and the caller backs off with errGPUBusy. Both may
+// back off, but the GPU never has two boxes.
+func (a *App) confirmGPU(ctx context.Context, name string, sz mode.Size) error {
+	if !sz.GPU {
+		return nil
+	}
+	insts, err := a.list(ctx)
+	if err != nil {
+		return nil // the launch worked; the next claim sees both boxes
+	}
+	if find(insts, name) == nil { // another run took ours for dead
+		return &errGPUBusy{holder: "a box that replaced " + name}
+	}
+	for _, in := range insts {
+		if in.Name == name || !mode.IsGPU(in.Config) {
+			continue
+		}
+		// A stopped box still being created counts: it is about to run.
+		if in.Status != "Stopped" || a.beingCreated(in) {
+			a.removeQuietly(ctx, name)
+			return &errGPUBusy{holder: "box " + in.Name}
+		}
+	}
+	return nil
+}
+
+// gpuStopped is what to tell an agent whose job's GPU box isn't running
+// (the tray stops GPU boxes for games and My PC), or "" when box isn't a GPU
+// box or is running.
+func (a *App) gpuStopped(ctx context.Context, box string) string {
+	insts, err := a.list(ctx)
+	if err != nil {
+		return ""
+	}
+	in := find(insts, box)
+	if in == nil || !mode.IsGPU(in.Config) || in.Status == "Running" {
+		return ""
+	}
+	why := in.Config[mode.StoppedKey]
+	switch {
+	case strings.HasPrefix(why, "gaming"):
+		return "the GPU box was stopped because the PC's owner started a game; rerun later or on CPU"
+	case why == string(mode.MyPC):
+		return "the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU"
+	}
+	return "the GPU box " + box + " is " + strings.ToLower(in.Status) + "; rerun later or on CPU"
+}
+
+type existingBoxSize string
+
+func (s existingBoxSize) Error() string { return "existing box has size " + string(s) }
+
+func reusableBox(in *instance, requestedSize string) error {
+	if in.Config[throwawayKey] == "true" {
+		return fmt.Errorf("box %s is a throwaway and cannot be reused", in.Name)
+	}
+	if have := mode.SizeOf(in.Config).Name; requestedSize != "" && have != requestedSize {
+		return existingBoxSize(have)
+	}
+	return nil
+}
+
+// projectLimitRefusal matches Incus's refusals for project limits, like
+// `Reached maximum aggregate value "12GiB" for "limits.memory" in project
+// "agents"` or `Reached maximum number of instances in project "agents"`.
+var projectLimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
+
+// reclaimable says whether in is a throwaway GPU box the tray stopped for a
+// game or My PC. It is kept for GPUStoppedTTL so box job can say why its job
+// died, but it still holds a GPU box's memory and disk against the project's
+// caps, so any launch that would not fit deletes it first.
+// Only the tray's mark counts: Incus creates a box stopped before starting
+// it, so an unmarked stopped box may be one a run is launching.
+func reclaimable(in instance) bool {
+	return in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true" && in.Config[mode.StoppedKey] != ""
+}
+
+// reclaim deletes every reclaimable box and says whether there was one.
+func (a *App) reclaim(ctx context.Context) bool {
+	insts, err := a.list(ctx)
+	if err != nil {
+		return false
+	}
+	any := false
+	for _, in := range insts {
+		if reclaimable(in) {
+			a.removeQuietly(ctx, in.Name)
+			any = true
+		}
+	}
+	return any
+}
+
+// launch creates box name. Refused for the project's caps, it deletes
+// reclaimable boxes and tries once more.
+func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
+	err := a.launchOnce(ctx, name, ttl, throwaway, sz)
+	if isNoRoom(err) && a.reclaim(ctx) {
+		err = a.launchOnce(ctx, name, ttl, throwaway, sz)
+	}
+	return err
+}
+
+func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
 	}
@@ -202,12 +432,46 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 		return errors.New("box TTL must be positive")
 	}
 	// Unqualified, the image would be looked up on the local (laptop) remote.
-	args := []string{"launch", a.target(a.Image), a.target(name), "-c", a.expiryConfig(ttl)}
+	// The size's memory and root disk are set here, once; the tray sets
+	// limits.cpu from the size and the mode, so the Shared value is only a start.
+	args := []string{"launch", a.target(a.Image), a.target(name), "-c", a.expiryConfig(ttl),
+		"-c", mode.SizeKey + "=" + sz.Name,
+		"-c", "limits.cpu=" + strconv.Itoa(sz.SharedCPUs),
+		"-c", "limits.memory=" + sz.Memory,
+		"-d", "root,size=" + sz.Disk}
 	if throwaway {
 		args = append(args, "-c", throwawayKey+"=true")
 	}
-	_, err := a.incusOK(ctx, args...)
+	var stdin io.Reader
+	if sz.GPU {
+		args = append(args, gpuConfigArgs()...)
+		// -d only overrides devices a profile already has. New devices go in
+		// as YAML on stdin, which incus launch reads when it isn't a terminal.
+		b, _ := json.Marshal(map[string]any{"devices": mode.GPUDevices})
+		stdin = strings.NewReader(string(b))
+	}
+	res, err := a.incus(ctx, Cmd{Args: args, Stdin: stdin})
+	if err == nil && res.Code != 0 {
+		err = fmt.Errorf("incus launch: %s", strings.TrimSpace(res.Stderr))
+	}
+	if err != nil && projectLimitRefusal.MatchString(err.Error()) {
+		return &errNoRoom{size: sz.Name, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
+	}
 	return err
+}
+
+// gpuConfigArgs are the -c flags for mode.GPUEnv, in a fixed order.
+func gpuConfigArgs() []string {
+	keys := make([]string, 0, len(mode.GPUEnv))
+	for k := range mode.GPUEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var args []string
+	for _, k := range keys {
+		args = append(args, "-c", k+"="+mode.GPUEnv[k])
+	}
+	return args
 }
 
 func (a *App) expiryConfig(ttl time.Duration) string {
@@ -250,10 +514,13 @@ func (a *App) Ls(ctx context.Context) error {
 
 // RunOpts says what box run does.
 type RunOpts struct {
-	Dir  string   // local git worktree
-	Cmd  []string // one shell string, or argv to quote
-	Box  string   // box to use; "" is the repo's own box
-	New  bool     // use a throwaway box, deleted afterwards
+	Dir string   // local git worktree
+	Cmd []string // one shell string, or argv to quote
+	Box string   // box to use; "" is the repo's own box
+	New bool     // use a throwaway box, deleted afterwards
+	// Size of a box launched for this run: "" is medium for a new box and
+	// any size for an existing one.
+	Size string
 	TTL  time.Duration
 	Wait time.Duration     // stop following after this long; 0 waits for the end
 	Env  map[string]string // passed to the command; no secrets (see checkEnv)
@@ -320,6 +587,10 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if err := checkEnv(o.Env); err != nil {
 		return JobResult{Code: 2}, err
 	}
+	sz, err := lookupSize(o.Size)
+	if err != nil {
+		return JobResult{Code: 2}, err
+	}
 	if o.Timeout < 0 {
 		return JobResult{Code: 2}, errors.New("timeout must be positive")
 	}
@@ -338,13 +609,35 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 
 	insts, paused := a.reach(ctx)
 	var inst *instance
+	if sz.GPU && paused == "" {
+		// GPU boxes are throwaways, so an idle box never holds the GPU. The
+		// one exception is a GPU box someone made with box new --gpu.
+		if o.Box == "" {
+			o.New = true
+		} else if inst = find(insts, box); inst == nil || !mode.IsGPU(inst.Config) {
+			return JobResult{Box: box, Code: 2}, fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
+		}
+		except := ""
+		if !o.New {
+			except = box
+		}
+		if err := a.claimGPU(ctx, insts, except); err != nil {
+			fmt.Fprintf(a.Err, "box: %v\n", err)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		}
+	}
 	if paused == "" && !o.New {
 		if inst = find(insts, box); inst != nil {
-			if inst.Config[throwawayKey] == "true" {
-				return JobResult{Box: box, Code: 1}, fmt.Errorf("box %s is a throwaway and cannot be reused", box)
-			}
-			if inst.Status == "Frozen" {
-				paused = box + " is paused"
+			switch err := reusableBox(inst, o.Size); have := err.(type) {
+			case existingBoxSize:
+				fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
+				o.New = true
+			case nil:
+				if inst.Status == "Frozen" {
+					paused = box + " is paused"
+				}
+			default:
+				return JobResult{Box: box, Code: 1}, err
 			}
 		}
 	}
@@ -361,12 +654,33 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	defer os.RemoveAll(filepath.Dir(bundle))
 
 	started := false // from here on the remote job may be running
+	if !o.New {
+		paused, err := a.ensureBox(ctx, box, inst, sz, o.Size)
+		var have existingBoxSize
+		switch {
+		case errors.As(err, &have):
+			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
+			o.New = true
+		case isTempFail(err):
+			fmt.Fprintf(a.Err, "box: %v\n", err)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		case err != nil:
+			return JobResult{Code: 1}, err
+		case paused != "":
+			fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		}
+	}
 	if o.New {
 		ttl := o.TTL
 		if ttl == 0 {
 			ttl = idleTTL
 		}
-		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl); err != nil {
+		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
+			if isTempFail(err) {
+				fmt.Fprintf(a.Err, "box: %v\n", err)
+				return JobResult{State: statePaused, Code: exitPaused}, nil
+			}
 			return JobResult{Box: box, Code: 1}, err
 		}
 		// Until its job starts, a failed run takes its own box with it.
@@ -375,11 +689,6 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 				a.removeQuietly(ctx, box)
 			}
 		}()
-	} else if paused, err := a.ensureBox(ctx, box, inst); err != nil {
-		return JobResult{Code: 1}, err
-	} else if paused != "" {
-		fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
-		return JobResult{State: statePaused, Code: exitPaused}, nil
 	}
 
 	job := box + "." + id
@@ -399,6 +708,18 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	started = true
 	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
+		// The tray stops GPU boxes for games, and another run may then
+		// delete one. Only then does the job surely not run: a frozen box's
+		// job may resume, so it keeps its job ID below.
+		if sz.GPU {
+			if insts, lerr := a.list(ctx); lerr == nil {
+				if in := find(insts, box); in == nil || in.Status == "Stopped" {
+					fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
+					r.State, r.Code = statePaused, exitPaused
+					return r, nil
+				}
+			}
+		}
 		if o.New {
 			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
 		}
@@ -423,7 +744,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
 // existing box: a taken name means another try with a new suffix.
-func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration) (string, error) {
+func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
 	for try := 0; try < 8; try++ {
 		name := base + "-" + a.Rand()
 		if find(insts, name) != nil {
@@ -431,7 +752,10 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		}
 		fmt.Fprintf(a.Err, "box: launching %s\n", name)
 		a.notify(jobNotice{Event: "launching_box", Box: name})
-		err := a.launch(ctx, name, ttl, true)
+		err := a.launch(ctx, name, ttl, true, sz)
+		if err == nil {
+			return name, a.confirmGPU(ctx, name, sz)
+		}
 		if !isConflict(err) {
 			return name, err
 		}
@@ -442,13 +766,13 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 
 // ensureBox launches or starts a reused box. When a concurrent run launches
 // or starts it first, it carries on with that one.
-func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused string, err error) {
+func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size, requestedSize string) (paused string, err error) {
 	if inst != nil && inst.Status == "Running" {
 		return "", nil
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
-		err = a.launch(ctx, box, idleTTL, false)
+		err = a.launch(ctx, box, idleTTL, false, sz)
 	} else {
 		_, err = a.incusOK(ctx, "start", a.target(box))
 	}
@@ -456,19 +780,24 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused
 		return "", nil
 	}
 	now, paused := a.check(ctx, box)
-	switch {
-	case paused != "":
+	if paused != "" {
 		return paused, nil
-	case now == nil:
+	}
+	if now == nil {
 		return "", err
-	case now.Config[throwawayKey] == "true":
-		return "", fmt.Errorf("box %s is a throwaway and cannot be reused", box)
+	}
+	if err := reusableBox(now, requestedSize); err != nil {
+		return "", err
+	}
+	switch {
 	case now.Status == "Running":
 		return "", nil
 	case inst == nil: // someone else launched it but it isn't running yet
 		if _, err := a.incusOK(ctx, "start", a.target(box)); err != nil {
-			if now, _ := a.check(ctx, box); now != nil && now.Status == "Running" && now.Config[throwawayKey] != "true" {
-				return "", nil
+			if now, paused := a.check(ctx, box); paused != "" {
+				return paused, nil
+			} else if now != nil && now.Status == "Running" {
+				return "", reusableBox(now, requestedSize)
 			}
 			return "", err
 		}
@@ -624,6 +953,14 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	}
 	if err != nil {
 		return "", 1, err
+	}
+	// The tray stops a GPU box for games. Its job may look dead (4) or the
+	// exec may just end; either way the agent should hear why.
+	if res.Code != 0 && res.Code != 3 {
+		if msg := a.gpuStopped(ctx, box); msg != "" {
+			fmt.Fprintf(a.Err, "box: %s\n", msg)
+			return statePaused, exitPaused, nil
+		}
 	}
 	switch res.Code {
 	case 0:

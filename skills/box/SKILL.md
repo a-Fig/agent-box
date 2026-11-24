@@ -5,18 +5,22 @@ description: Offload heavy test runs and builds from this laptop to a disposable
 
 # box: offload heavy runs
 
-The laptop has 15 GB RAM and starves under heavy test runs. The gaming PC runs throwaway Linux boxes for them.
+The laptop starves under heavy test runs, so the gaming PC runs throwaway Linux boxes for them.
 
 **Offload** Go `-race`, full vitest/jest/pytest suites, Android/Gradle unit tests, anything that takes over about 2 minutes, and several heavy runs at once. Run quick, focused tests locally.
 
-1. Call `box_status` with your worktree as `dir`. Its first line says whether to offload now. If it says run locally, do that.
+1. Call `box_status` with your worktree as `dir`. Its first line says whether to offload now, or to run locally.
 2. Call `box_run` with `dir` (your worktree's absolute path) and `command`, like `go test -race ./...`. It syncs uncommitted and untracked files, not ignored ones. Set `timeout` for runs that could hang (exit 124 when it fires).
 3. **Exit 75 means the PC is busy, paused or out of reach: run the command locally.**
-4. A long run returns `detached`. Call `box_job` with the job ID to keep waiting, or with `offset`/`limit` to page through the log. Lost the ID? `box_jobs` lists jobs. `box_cancel` stops one.
-5. Fetch reports, coverage or build output with `box_pull` right after the job, into a local directory. The next job on the same repo replaces the checkout.
+4. A long run returns `detached`. Call `box_job` with the job ID to keep waiting, or with `offset`/`limit` to page through the log. `box_jobs` lists jobs; `box_cancel` stops one.
+5. Fetch reports or build output with `box_pull` right after the job: the next job on the repo replaces the checkout.
 
-Boxes are throwaway compute, never storage: idle boxes are deleted after 2 hours, and only package caches in `/cache` survive. Keep your work in git on the laptop.
+Boxes are throwaway compute, never storage: idle boxes are deleted after 2 hours, and only `/cache` survives.
 
 Boxes are shared. **Never put secrets in `env`**; box refuses names like `*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*`.
 
-Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS (npm), uv, JDK 17, gh, git, build-essential. Each box gets 2 CPUs (Shared) or 4 (Full) and 4 GiB RAM.
+**Sizes** (`size` on `box_run`/`box_new`): small 1-2 CPUs/2 GiB for quick unit tests, medium 2-4/4 GiB (default), large 4-8/8 GiB for big Gradle/Android builds and memory-hungry suites. `box_status` says what fits now. Exit 75 also means no room: try smaller or run locally.
+
+**GPU**: `gpu: true` on `box_run` gets the RTX 3070 for CUDA/PyTorch training or inference and GPU builds. One at a time, and Tyler starting a game stops it. Both exit 75: rerun later or on CPU.
+
+Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS (npm), uv, JDK 17, gh, git, build-essential.
