@@ -17,10 +17,10 @@ func TestNewSetsSize(t *testing.T) {
 	if code := run(context.Background(), a, []string{"new", "big", "--size", "large"}, nil); code != 0 {
 		t.Fatalf("box new = %d\n%s", code, out)
 	}
-	if _, err := a.New(context.Background(), "plain", time.Hour, ""); err != nil {
+	if _, err := a.New(context.Background(), "plain", time.Hour, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.New(context.Background(), "little", time.Hour, "small"); err != nil {
+	if _, err := a.New(context.Background(), "little", time.Hour, "small", ""); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []string{
@@ -32,7 +32,7 @@ func TestNewSetsSize(t *testing.T) {
 			t.Errorf("launch %d = %s\nwant %s", i, got, want)
 		}
 	}
-	if _, err := a.New(context.Background(), "odd", time.Hour, "huge"); err == nil || !strings.Contains(err.Error(), "small, medium, large") {
+	if _, err := a.New(context.Background(), "odd", time.Hour, "huge", ""); err == nil || !strings.Contains(err.Error(), "small, medium, large") {
 		t.Errorf("unknown size: %v", err)
 	}
 	if len(f.launches) != 3 {
@@ -68,7 +68,7 @@ func TestLaunchDistinguishesQuotaFromOrdinaryErrors(t *testing.T) {
 	} {
 		f := &fakePC{t: t, refuse: tc.message}
 		a, _ := testApp(f)
-		_, err := a.New(context.Background(), "quota-worker", time.Hour, "small")
+		_, err := a.New(context.Background(), "quota-worker", time.Hour, "small", "")
 		if err == nil || isNoRoom(err) != tc.noRoom {
 			t.Errorf("%s: error = %v, want no room = %t", tc.message, err, tc.noRoom)
 		}

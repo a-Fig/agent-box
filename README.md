@@ -4,7 +4,7 @@ Turns a Windows gaming PC on the tailnet into on-demand, disposable Linux boxes 
 
 - **Incus** in WSL2 does the boxes, API, auth and web UI.
 - **boxtray** sits in the Windows tray: one click picks *My PC*, *Shared* or *Full power*.
-- **box** is a thin sync-and-run CLI + MCP for agents: `box run --new -- go test ./...`.
+- **box** is a thin sync-and-run CLI + MCP for agents: `box run --new --reason "..." -- go test ./...`.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -14,7 +14,9 @@ Build it with `go build ./cmd/box`. It needs the Windows `incus` client with a r
 
 ```sh
 box status                            # worth offloading now? PC, mode, room per size, this repo's box
-box run -- go test ./...              # sync this worktree to the repo's box and run there
+box run --reason "Full test suite for the parser change." -- go test ./...
+                                      # sync this worktree to the repo's box and run there
+                                      # (--reason is required; left out below)
 box run --new -- 'npm ci && npx vitest run'   # throwaway box, deleted afterwards
 box run --box big -- make test        # a box you name
 box run --size large -- ./gradlew test  # size of a box the run launches: small, medium (default), large
@@ -29,6 +31,8 @@ box new scratch --ttl 2h --size small # launch a box (sets user.expires and its 
 box ls                                # boxes, status, expiry
 box rm scratch
 ```
+
+`box run --reason` (required, 10 to 300 characters) says why the run needs a box; `box new --reason` stores one as `user.box.reason`. `box run` records it in `/work/.box/<job>.meta` with the command, repo, branch, commit, size, `--env` names (never values) and who asked, and reports to the dashboard, best effort, a run turned away with exit 75 and how each run ended. Both are self-reported, for display ([docs/ui.md](docs/ui.md#agent-identity)).
 
 `box run` snapshots the worktree, including uncommitted and untracked files, without touching your index. It skips files that are both untracked and ignored. It checks the snapshot out in `/work/<repo>` and runs the command there, logging to `/work/.box/<job>.log` for reattachment. One argument runs as a shell string. Several are quoted word by word. The command returns its exit code, or **75** when the PC is in My PC mode, the box is paused or the PC can't be reached. Run the command locally in those cases. If the box is frozen while a job runs, `box run` and `box job` stop following at once and exit 75 with `job X is paused`. The job resumes if the PC's owner switches back within 15 minutes, or 4 hours once the tray has moved the box's memory to swap; after that the tray stops the box and the job is lost. `box job X` reattaches later. Runs on the same repo and box take turns. The job ID is printed before the job starts. Shallow clones produce snapshots without history. If the repo has checked-out submodules, box warns that their directories will be empty in the box.
 

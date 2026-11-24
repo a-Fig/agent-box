@@ -5,12 +5,10 @@ description: Offload heavy test runs and builds from this laptop to a disposable
 
 # box: offload heavy runs
 
-The laptop starves under heavy test runs, so the gaming PC runs throwaway Linux boxes.
-
 **Offload** Go `-race`, full vitest/jest/pytest suites, Android/Gradle unit tests, anything that takes over about 2 minutes, and several heavy runs at once. Run quick, focused tests locally.
 
 1. Call `box_status` with your worktree as `dir`. Its first line says whether to offload now, or to run locally.
-2. Call `box_run` with `dir` (your worktree's absolute path) and `command`, like `go test -race ./...`. It syncs uncommitted and untracked files, not ignored ones. Set `timeout` for runs that could hang (exit 124 when it fires).
+2. Call `box_run` with `dir` (your worktree's absolute path), `command`, like `go test -race ./...`, and `reason`: a sentence or two on why it needs a box (the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` for runs that could hang (exit 124).
 3. **Exit 75 means the PC is busy, paused or out of reach: run locally (paused jobs resume within 15 min, 4 h once swapped, or are lost).**
 4. A long run returns `detached`. Call `box_job` with the job ID to keep waiting, or with `offset`/`limit` to page through the log. `box_jobs` lists jobs; `box_cancel` stops one.
 5. Fetch reports or build output with `box_pull` right after the job: the next job on the repo replaces the checkout.
@@ -23,4 +21,4 @@ Boxes are throwaway, never storage: idle ones go after 2 hours; only `/cache` su
 
 **GPU**: `gpu: true` on `box_run` gets the RTX 3070 for CUDA/PyTorch training or inference and GPU builds. One at a time, and Tyler starting a game stops it. Both exit 75: rerun later or on CPU.
 
-Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS (npm), uv, JDK 17, gh, git, build-essential.
+Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS, uv, JDK 17, gh, git, build-essential.

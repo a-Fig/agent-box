@@ -48,9 +48,11 @@ type fakePC struct {
 	scriptRC  int
 	pull      func(src, dst string) // file pull -r src dst
 	pulls     []string
-	stdins    []string        // stdin of each launch ("" when none)
-	launched  func(f *fakePC) // runs after each successful launch, under f.mu
-	stopFor   string          // follow stops the box with this user.box.stopped and fails
+	stdins    []string          // stdin of each launch ("" when none)
+	launched  func(f *fakePC)   // runs after each successful launch, under f.mu
+	stopFor   string            // follow stops the box with this user.box.stopped and fails
+	remotes   string            // output of incus remote list --format json
+	files     map[string]string // content of each pushed file, by its target
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -92,6 +94,11 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		return Result{Stdout: f.mode + "\n"}, nil
 	case "profile":
 		return Result{Stdout: f.memory + "\n"}, nil
+	case "remote":
+		if f.remotes == "" {
+			return Result{Stderr: "Error: no remotes", Code: 1}, nil
+		}
+		return Result{Stdout: f.remotes}, nil
 	case "launch":
 		f.launches = append(f.launches, args)
 		in := ""
@@ -158,8 +165,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, nil
 		}
 		f.pushed++
-		if _, err := os.Stat(args[3]); err != nil {
-			f.t.Errorf("pushed bundle missing: %v", err)
+		if b, err := os.ReadFile(args[3]); err != nil {
+			f.t.Errorf("pushed file missing: %v", err)
+		} else if strings.HasSuffix(args[4], ".meta") {
+			if f.files == nil {
+				f.files = map[string]string{}
+			}
+			f.files[args[4]] = string(b)
 		}
 		if f.bash != "" {
 			_, dst, _ := strings.Cut(args[4], ":")
@@ -376,7 +388,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file config exec config exec exec config exec" {
+	if got := f.callList(); got != "list project start file file config exec config exec exec config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -394,7 +406,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file config exec config exec exec config exec exec delete" {
+	if got := f.callList(); got != "list project launch file file config exec config exec exec config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -405,14 +417,14 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 func TestNewSetsExpiry(t *testing.T) {
 	f := &fakePC{t: t}
 	a, _ := testApp(f)
-	name, err := a.New(context.Background(), "", 8*time.Hour, "")
+	name, err := a.New(context.Background(), "", 8*time.Hour, "", "")
 	if err != nil || name != "box-0001" {
 		t.Fatalf("New = %q, %v", name, err)
 	}
 	if exp := f.insts[0].Config["user.expires"]; exp != "2026-11-23T20:00:00Z" {
 		t.Errorf("user.expires = %q", exp)
 	}
-	if _, err := a.New(context.Background(), "Bad;name", 0, ""); err == nil {
+	if _, err := a.New(context.Background(), "Bad;name", 0, "", ""); err == nil {
 		t.Error("bad name accepted")
 	}
 	if code := run(context.Background(), a, []string{"new", "idle"}, nil); code != 0 {

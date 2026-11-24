@@ -62,7 +62,7 @@ function Assert-BoxExpiry([string]$Name, [double]$Hours) {
 Assert-BoxExpiry $name 2
 Push-Location -LiteralPath $repo
 try {
-    & $box run --box $name -- go test ./internal/...
+    & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name -- go test ./internal/...
     if ($LASTEXITCODE -ne 0) { throw 'Remote Go tests failed' }
 } finally { Pop-Location }
 Assert-BoxExpiry $name 2
@@ -72,7 +72,7 @@ Assert-BoxExpiry $name 2
 
 ```powershell
 Push-Location -LiteralPath $repo
-& $box run --box $name -- 'echo smoke-job-started; sleep 75; echo smoke-job-finished; exit 7'
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name -- 'echo smoke-job-started; sleep 75; echo smoke-job-finished; exit 7'
 ```
 
 After `smoke-job-started` appears, press Ctrl-C once. Record the job ID printed by `box`. Keep the PowerShell session open and use its prompt to check the expiry and reattach.
@@ -96,7 +96,7 @@ Use the tray to select My PC and wait until the project reports `mypc`.
 incus --project agents project get pc:agents user.agent-box.mode
 Push-Location -LiteralPath $repo
 try {
-    & $box run --box $name -- 'echo THIS_SHOULD_NOT_RUN'
+    & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name -- 'echo THIS_SHOULD_NOT_RUN'
     if ($LASTEXITCODE -ne 75) { throw 'Expected dry fallback exit 75 in My PC mode' }
 } finally { Pop-Location }
 ```
@@ -125,7 +125,7 @@ if ($LASTEXITCODE -ne 0) { throw "Could not remove smoke box $name" }
 ```powershell
 Push-Location -LiteralPath $repo
 try {
-    $log = & $box run --new -- 'echo throwaway-smoke-ok' 2>&1
+    $log = & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --new -- 'echo throwaway-smoke-ok' 2>&1
     if ($LASTEXITCODE -ne 0) { throw ($log -join "`n") }
 } finally { Pop-Location }
 $text = $log -join "`n"
@@ -154,9 +154,9 @@ try { & $box status } finally { Pop-Location }
 $name = 'toolsmoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
 & $box new $name
 if ($LASTEXITCODE -ne 0) { throw "Creating $name failed" }
-& $box run --box $name --env SMOKE_LABEL=tools -- 'printf "%s\n" "$SMOKE_LABEL"'
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name --env SMOKE_LABEL=tools -- 'printf "%s\n" "$SMOKE_LABEL"'
 if ($LASTEXITCODE -ne 0) { throw 'Environment smoke failed' }
-& $box run --box $name --timeout 1s -- 'sleep 20'
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name --timeout 1s -- 'sleep 20'
 if ($LASTEXITCODE -ne 124) { throw 'Expected exit 124 from the timeout' }
 ```
 
@@ -166,7 +166,7 @@ The environment check prints `tools`. To test forced termination, repeat the tim
 Start a job that produces a log, leaves two artifacts and waits on a child.
 
 ```powershell
-& $box run --box $name -- 'echo abcdefghijk; echo file-ok > smoke-file.txt; mkdir -p smoke-tree/sub; echo dir-ok > smoke-tree/sub/result.txt; sleep 180 & child=$!; echo "CHILD_PID=$child"; wait "$child"'
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name -- 'echo abcdefghijk; echo file-ok > smoke-file.txt; mkdir -p smoke-tree/sub; echo dir-ok > smoke-tree/sub/result.txt; sleep 180 & child=$!; echo "CHILD_PID=$child"; wait "$child"'
 ```
 
 After `CHILD_PID` appears, record the job ID and PID and press Ctrl-C to detach.
@@ -274,7 +274,7 @@ PY
 '@
 Push-Location -LiteralPath $repo
 try {
-    & $box run --gpu -- $check
+    & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --gpu -- $check
     if ($LASTEXITCODE -ne 0) { throw 'GPU box smoke failed' }
 } finally { Pop-Location }
 ```
@@ -284,9 +284,9 @@ is gone afterwards (`box ls`). Then check one-at-a-time and the stop for games:
 
 ```powershell
 Push-Location -LiteralPath $repo
-& $box run --gpu -- 'nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --gpu -- 'nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
 & $box status                           # gpu: in use: job <id>
-& $box run --gpu -- true                # exit 75: the GPU box is in use (job <id>); run on CPU or wait
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --gpu -- true                # exit 75: the GPU box is in use (job <id>); run on CPU or wait
 if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a second GPU box' }
 Pop-Location
 ```

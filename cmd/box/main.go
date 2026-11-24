@@ -23,19 +23,22 @@ func cancelText(job string, cancelled bool, code int) string {
 
 const usage = `usage:
   box status                                is offloading worth it now? (PC, mode, room, this repo's box)
-  box run [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
+  box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
                                             sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
   box jobs [--box name]                     list jobs, newest first
   box cancel <id>                           stop a running job
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
-  box new [name] [--ttl 2h] [--size S | --gpu]
+  box new [name] [--ttl 2h] [--size S | --gpu] [--reason "why"]
                                             launch a box with a positive TTL
   box rm <name>                             delete a box
   box ls                                    list boxes
   box mcp                                   serve MCP on stdio
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
+
+--reason (required for run): one or two sentences, 10 to 300 characters, on
+why this needs a box. The PC's owner sees it on the dashboard.
 
 Sizes (CPUs in Shared/Full mode, RAM, disk):
   %s.
@@ -109,13 +112,19 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires")
 		size := fs.String("size", "", mode.SizeNames()+" (default "+mode.DefaultSize+")")
 		gpu := fs.Bool("gpu", false, "same as --size gpu")
+		reason := fs.String("reason", "", "why this needs a box (optional; 10 to 300 characters)")
 		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 1 {
 			return 2
 		}
 		if !gpuSize(a, size, *gpu) {
 			return 2
 		}
-		name, err := a.New(ctx, fs.Arg(0), *ttl, *size)
+		why, err := checkReason(*reason, false, "--reason")
+		if err != nil {
+			fmt.Fprintln(a.Err, "box:", err)
+			return 2
+		}
+		name, err := a.New(ctx, fs.Arg(0), *ttl, *size, why)
 		if isTempFail(err) {
 			fmt.Fprintln(a.Err, "box:", err)
 			return exitPaused
@@ -134,6 +143,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		gpu := fs.Bool("gpu", false, "same as --size gpu: run in a throwaway GPU box")
 		envs := envFlags{}
 		fs.Var(envs, "env", "K=V passed to the command (repeatable; no secrets)")
+		reason := fs.String("reason", "", "required: one or two sentences (10 to 300 characters) on why this run needs a box")
 		if fs.Parse(args[1:]) != nil {
 			return 2
 		}
@@ -144,11 +154,16 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if !gpuSize(a, size, *gpu) {
 			return 2
 		}
+		why, err := checkReason(*reason, true, "--reason")
+		if err != nil {
+			fmt.Fprintln(a.Err, "box:", err)
+			return 2
+		}
 		dir, err := os.Getwd()
 		if err != nil {
 			return fail(err)
 		}
-		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size}))
+		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why}))
 	case "job":
 		offset := fs.Int64("offset", 0, "print the log from this byte, without waiting")
 		limit := fs.Int64("limit", 0, "print at most this many bytes of the log (default 32KiB)")

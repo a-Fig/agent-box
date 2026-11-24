@@ -140,16 +140,20 @@ The same set everywhere, since everywhere is the same page.
 `box run` records who asked, in `/work/.box/<job>.meta` (JSON) next to `.log` and `.exit`:
 - the reason: one or two sentences from the agent on why this run needs a box. Tyler asked for it
   (2026-11-24). `box run --reason` and `box_run`'s `reason` are required, from 10 to 300
-  characters, and `box_new` takes one too. The page shows it as the job's headline;
+  characters, and `box_new` takes one too (stored as `user.box.reason`). The page shows it as the
+  job's headline;
 - the command, and its `kind` (see Use cases below);
 - the repo (remote URL without credentials), branch and commit;
 - the laptop's hostname and the worktree path;
 - the client: `box mcp` takes the MCP `initialize` `clientInfo` name and version, for example
   `claude-code` or `codex`; the CLI says `cli`;
-- the session: the Murmur session name when the environment has one, else the T3 thread or the
-  agent's own session ID if one is in the environment. Which variables exist is found and written
-  down when this is built. The page shows the Murmur name when there is one, else the worktree's
-  folder name;
+- the session, as `session` and `sessionSource`. Murmur has no variable for its session name (its
+  daemon gives names out; read 2026-11-24), so none is recorded. In order: `T3CODE_THREAD_ID`
+  (`t3`), the T3 thread, which Claude Code and the commands Codex runs see; a tool call's
+  `_meta.threadId` (`t3`), since Codex starts MCP servers with a bare environment; then
+  `CLAUDE_CODE_SESSION_ID` (`claude-code`) and `CODEX_THREAD_ID` (`codex`);
+- `agent.display`, the name the page shows: the Murmur name when there is one, else the
+  worktree's folder name (so, for now, always the folder);
 - the size and the GPU flag.
 
 It is self-reported by the agent's own cert, so it is for display, never for decisions. `--env`
@@ -173,8 +177,12 @@ A command that matches none is `other`.
 ### Refusals
 
 A run turned away with exit 75 never reaches a box, so `box` also sends `POST /api/refusals`
-(`{why, reason, size, gpu, repo, agent}`: `why` is the refusal's cause, `reason` the agent's), as a best effort with a 2s timeout, ignoring errors. Without
-it the history couldn't show what yields and full caps cost.
+(`dash.RefusalBody`: `{why, reason, size, gpu, repo, agent}`, where `reason` is the agent's and
+`agent` its display name), as a best effort with a 2s timeout, ignoring errors. `why` is a cause
+code: `yielding` (My PC with a game as the tray's reason), `mypc`, `full` (Incus refused the
+launch for the project's caps) or `gpu-busy`. A refusal that fits none, such as an unreachable PC
+or a frozen box outside My PC, isn't sent. Without it the history couldn't show what yields and
+full caps cost.
 
 ### Jobs that end with their box
 

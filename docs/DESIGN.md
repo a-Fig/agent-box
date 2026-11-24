@@ -76,7 +76,7 @@ It shells out to the `incus` CLI, using the `pc` remote and the `agents` project
 
 ```
 box status                       # box_status: advice line, reachability, mode + yield reason, free slots, room per size, this repo's box (and size) and running jobs
-box run [--box name|--new] [--size S|--gpu] [--env K=V] [--timeout d] -- <cmd...>   # box_run
+box run --reason "why" [--box name|--new] [--size S|--gpu] [--env K=V] [--timeout d] -- <cmd...>   # box_run
 box job <id> [--offset N --limit N]   # box_job: follow a job, or page through its log
 box jobs [--box name]            # box_jobs: jobs from /work/.box (*.pid, *.exit, *.log), newest first
 box cancel <id>                  # box_cancel: kill the job's session (setsid), write .exit 130
