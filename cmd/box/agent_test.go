@@ -133,6 +133,7 @@ func TestStatus(t *testing.T) {
 				writeStatus(&b, s)
 				want := "mode: full\nboxes: 3 of 3 (0 free)\nroom for: none\n" +
 					"sizes now: small 2 CPUs/2GiB/18GiB disk, medium 4 CPUs/4GiB/30GiB disk, large 8 CPUs/8GiB/40GiB disk (default medium)\n" +
+					"gpu: free, but no room for a gpu box now\n" +
 					"repo box: my-repo, medium, Running"
 				if !strings.Contains(b.String(), want) {
 					t.Errorf("text =\n%s", b.String())

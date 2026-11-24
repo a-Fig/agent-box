@@ -168,19 +168,37 @@ note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP disk=$DISK_CAP (al
 #   restricted=true                                turns the restricted.* keys on
 #   restricted.containers.privilege=unprivileged   blocks security.privileged=true (the default)
 #   restricted.containers.nesting=allow            boxes need security.nesting=true (default: block)
-#   restricted.devices.disk=managed                only pool-backed disks: root and /cache (default)
+#   restricted.devices.disk=allow                  pool-backed disks (root, /cache) as under `managed`,
+#   restricted.devices.disk.paths=...              plus host paths under these prefixes only: the GPU
+#                                                  box's WSL folders (GPUDevices in internal/mode/size.go)
+#   restricted.devices.unix-char=allow             the GPU box's /dev/dxg (default: block)
 #   restricted.devices.nic=managed                 only NICs on a managed network: incusbr0 (default)
+# The GPU keys, checked against the reference and Incus's source on 2026-11-24
+# (internal/server/project/permissions.go, internal/server/device/disk.go): disk.paths applies
+# only with disk=allow and only to disks without pool=, so pool volumes pass as under `managed`.
+# It matches whole path components of `source`, opens the path with openat2 so a symlink can't
+# lead outside it, and refuses shift=true. No key enforces `readonly`, but boxes are unprivileged
+# and the files belong to host root, so a box can't write them. unix-char is allow or block for
+# every character device; there is no per-path key, so this lets an agent's cert attach any host
+# character device to a box, not only /dev/dxg (docs/DESIGN.md, Isolation).
 # No restricted.* key stops a restricted client cert from creating a custom storage volume: the
 # reference has none for volumes (restricted.devices.disk only limits which disk DEVICES an
-# instance may have; `managed` still lets it attach any pool volume). So the real limit is
+# instance may have; it still lets it attach any pool volume). So the real limit is
 # limits.disk above, which counts custom volumes too. Agents should not store data in a volume,
 # and the reaper only deletes instances, so volumes agents create are bounded, not removed.
 incus project set "$PROJECT" restricted=true \
   restricted.containers.privilege=unprivileged \
   restricted.containers.nesting=allow \
-  restricted.devices.disk=managed \
+  restricted.devices.disk=allow \
+  restricted.devices.disk.paths=/usr/lib/wsl/lib,/usr/lib/wsl/drivers \
+  restricted.devices.unix-char=allow \
   restricted.devices.nic=managed
-note "restricted: unprivileged containers, nesting allowed, managed disks and NICs only"
+note "restricted: unprivileged containers, nesting allowed, managed NICs, pool disks plus the two WSL GPU folders, unix-char devices (for /dev/dxg)"
+if [ -e /dev/dxg ] && [ -d /usr/lib/wsl/lib ] && [ -d /usr/lib/wsl/drivers ]; then
+  note "GPU: /dev/dxg and the WSL GPU folders are present, so gpu boxes can start"
+else
+  note "GPU: /dev/dxg or /usr/lib/wsl/{lib,drivers} is missing, so gpu boxes won't start (needs the NVIDIA driver on Windows)"
+fi
 
 step "Volume 'cache' (shared /cache for Go, npm, Gradle, uv)"
 if incus storage volume show default cache --project "$PROJECT" >/dev/null 2>&1; then

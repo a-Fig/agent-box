@@ -25,9 +25,12 @@ type StatusReport struct {
 	MaxBoxes  int        `json:"maxBoxes"`  // -1: no limit
 	SlotsFree int        `json:"slotsFree"` // -1: no limit
 	Sizes     []SizeRoom `json:"sizes"`
-	Room      string     `json:"room"`              // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
-	Repo      string     `json:"repo,omitempty"`    // when run in a git repo
-	RepoBox   *RepoBox   `json:"repoBox,omitempty"` // the repo's own box, when it exists
+	Room      string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
+	// GPU is "free", "free, but no room ...", "in use: job X" or
+	// "unavailable: ..." (a game or My PC).
+	GPU     string   `json:"gpu"`
+	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
+	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
 }
 
 // SizeRoom is one box size, what a box of it gets now, and how many more
@@ -78,6 +81,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 		now = mode.Shared
 	}
 	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes)
+	s.GPU = a.gpuStatus(ctx, s, insts)
 	var repoBox *instance
 	if s.Repo != "" {
 		repoBox = find(insts, s.Repo)
@@ -100,6 +104,28 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	return s
 }
 
+// gpuStatus says whether a GPU box could run now.
+func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) string {
+	switch {
+	case s.Yielding:
+		return "unavailable: the PC is yielding to a game"
+	case s.Mode == string(mode.MyPC):
+		return "unavailable: the PC is in My PC mode"
+	}
+	for _, in := range insts {
+		if mode.IsGPU(in.Config) && in.Status != "Stopped" {
+			holder, _ := a.gpuHolder(ctx, in)
+			return "in use: " + holder
+		}
+	}
+	for _, sz := range s.Sizes {
+		if sz.GPU && sz.Fits == 0 {
+			return "free, but no room for a gpu box now"
+		}
+	}
+	return "free"
+}
+
 // room works out how many more boxes of each size fit, from the project's
 // caps minus what existing boxes (stopped ones too) are allocated: CPUs at
 // at least their size's Full count, because the tray raises them in Full mode,
@@ -109,9 +135,12 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 	instCap := int64(maxBoxes)
 	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
 	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
-	var cpus, mem int64
+	var cpus, mem, gpus int64
 	for _, in := range insts {
 		sz := mode.SizeOf(in.Config)
+		if sz.GPU && in.Status != "Stopped" {
+			gpus++
+		}
 		cfg := in.ExpandedConfig
 		if cfg == nil {
 			cfg = in.Config
@@ -154,12 +183,15 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 		if diskKnown {
 			limit(diskFree, szDisk)
 		}
+		if sz.GPU { // one at a time
+			limit(1-gpus, 1)
+		}
 		sizes[i] = SizeRoom{Size: sz, CPUs: sz.CPUs(now), Fits: int(fits)}
-		limited = limited || fits >= 0
+		limited = limited || (fits >= 0 && !sz.GPU)
 	}
 	var parts []string
 	for i := len(sizes) - 1; i >= 0; i-- { // largest first
-		if sizes[i].Fits > 0 {
+		if sizes[i].Fits > 0 && !sizes[i].GPU { // the gpu line covers the GPU
 			parts = append(parts, fmt.Sprintf("%d %s", sizes[i].Fits, sizes[i].Name))
 		}
 	}
@@ -278,11 +310,14 @@ func writeStatus(w io.Writer, s StatusReport) {
 		fmt.Fprintf(w, "boxes: %d\n", s.Boxes)
 	}
 	fmt.Fprintf(w, "room for: %s\n", s.Room)
-	sizes := make([]string, len(s.Sizes))
-	for i, sz := range s.Sizes {
-		sizes[i] = fmt.Sprintf("%s %d CPUs/%s/%s disk", sz.Name, sz.CPUs, sz.Memory, sz.Disk)
+	var sizes []string
+	for _, sz := range s.Sizes {
+		if !sz.GPU { // the gpu line covers it
+			sizes = append(sizes, fmt.Sprintf("%s %d CPUs/%s/%s disk", sz.Name, sz.CPUs, sz.Memory, sz.Disk))
+		}
 	}
 	fmt.Fprintf(w, "sizes now: %s (default %s)\n", strings.Join(sizes, ", "), mode.DefaultSize)
+	fmt.Fprintf(w, "gpu: %s\n", s.GPU)
 	switch {
 	case s.RepoBox != nil:
 		fmt.Fprintf(w, "repo box: %s, %s, %s, expires %s\n", s.RepoBox.Name, s.RepoBox.Size, s.RepoBox.Status, s.RepoBox.Expires)

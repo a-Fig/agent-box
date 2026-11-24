@@ -15,6 +15,10 @@ type Size struct {
 	FullCPUs   int    `json:"fullCpus"`
 	Memory     string `json:"memory"` // limits.memory
 	Disk       string `json:"disk"`   // root disk size
+	// GPU boxes get the PC's RTX 3070 (GPUDevices, GPUEnv). One runs at a
+	// time, always as a throwaway, and the tray stops it rather than pausing
+	// it, because a frozen CUDA process keeps its VRAM.
+	GPU bool `json:"gpu,omitempty"`
 }
 
 // Sizes is the size table, smallest first. docs/DESIGN.md and the box skill
@@ -23,7 +27,35 @@ var Sizes = []Size{
 	{Name: "small", SharedCPUs: 1, FullCPUs: 2, Memory: "2GiB", Disk: "18GiB"},
 	{Name: "medium", SharedCPUs: 2, FullCPUs: 4, Memory: "4GiB", Disk: "30GiB"},
 	{Name: "large", SharedCPUs: 4, FullCPUs: 8, Memory: "8GiB", Disk: "40GiB"},
+	{Name: GPUSize, SharedCPUs: 4, FullCPUs: 6, Memory: "8GiB", Disk: "40GiB", GPU: true},
 }
+
+// GPUSize is the name of the GPU box size.
+const GPUSize = "gpu"
+
+// GPUDevices are the Incus devices that give a box the GPU under WSL2,
+// proven by hand on the PC on 2026-11-24: WSL exposes the GPU as /dev/dxg,
+// its user-space libraries (libcuda, libnvidia-ml, nvidia-smi) in
+// /usr/lib/wsl/lib, and Windows' driver store in /usr/lib/wsl/drivers,
+// without which nvidia-smi can't reach the driver. The project must allow
+// unix-char devices and these two host paths (provision/setup-distro.sh).
+var GPUDevices = map[string]map[string]string{
+	"dxg":        {"type": "unix-char", "path": "/dev/dxg", "mode": "0666"},
+	"wsllib":     {"type": "disk", "source": "/usr/lib/wsl/lib", "path": "/usr/lib/wsl/lib", "readonly": "true"},
+	"wsldrivers": {"type": "disk", "source": "/usr/lib/wsl/drivers", "path": "/usr/lib/wsl/drivers", "readonly": "true"},
+}
+
+// GPUEnv is the instance config a GPU box gets beside GPUDevices, so CUDA
+// programs find WSL's libcuda.
+var GPUEnv = map[string]string{"environment.LD_LIBRARY_PATH": "/usr/lib/wsl/lib"}
+
+// StoppedKey is the instance key the tray sets on a GPU box just before it
+// stops it, saying why ("mypc", or the yield reason like "gaming: steam:570"),
+// so `box` can tell the agent its job was killed on purpose.
+const StoppedKey = "user.box.stopped"
+
+// IsGPU says whether an instance's config records the GPU size.
+func IsGPU(config map[string]string) bool { return config[SizeKey] == GPUSize }
 
 // SizeKey is the instance config key that holds a box's size.
 const SizeKey = "user.box.size"
@@ -32,7 +64,7 @@ const SizeKey = "user.box.size"
 // none is asked for.
 const DefaultSize = "medium"
 
-// SizeNames is "small, medium, large", for help text and errors.
+// SizeNames is "small, medium, large, gpu", for help text and errors.
 func SizeNames() string {
 	n := make([]string, len(Sizes))
 	for i, s := range Sizes {

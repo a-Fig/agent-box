@@ -21,6 +21,10 @@ const (
 	// YieldDebounce is how long the game signal must stay clear before the
 	// chosen mode comes back, so alt-tab doesn't freeze and thaw the boxes.
 	YieldDebounce = 20 * time.Second
+	// GPUStoppedTTL is how long a GPU box the tray stopped is kept (by
+	// shortening its user.expires), so `box job` can still say what happened
+	// and `box pull` can fetch partial output. Its job is gone either way.
+	GPUStoppedTTL = 30 * time.Minute
 )
 
 // Status is what one Tick found and did.
@@ -108,7 +112,11 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		st.Running = m.last.Running
 	} else {
 		ins, errs = m.reap(ctx, now, ins, errs)
-		st.Running, errs = m.applyInstances(ctx, now, st.Effective, ins, errs)
+		why := string(MyPC)
+		if m.yielding {
+			why = yieldReason(true, m.reason)
+		}
+		st.Running, errs = m.applyInstances(ctx, now, st.Effective, why, ins, errs)
 	}
 	st.Err = errors.Join(errs...)
 	m.last = st
@@ -195,15 +203,20 @@ func (m *Manager) applyProject(ctx context.Context, eff Mode) error {
 	return m.Incus.SetProjectConfig(ctx, ProjectModeKey, string(eff))
 }
 
-func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, ins []Instance, errs []error) (running int, _ []error) {
+// applyInstances brings each instance in line with eff. why is what a GPU
+// box stopped in My PC is told (StoppedKey).
+func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, why string, ins []Instance, errs []error) (running int, _ []error) {
 	seen := map[string]bool{}
 	for _, in := range ins {
 		seen[in.Name] = true
 		state := strings.ToLower(in.Status)
 		var err error
-		if eff == MyPC {
+		switch {
+		case eff == MyPC && IsGPU(in.Config):
+			state, err = m.stopGPU(ctx, now, in, state, why)
+		case eff == MyPC:
 			state, err = m.freeze(ctx, now, in.Name, state)
-		} else {
+		default:
 			state, err = m.thaw(ctx, eff, in, state)
 		}
 		if err != nil {
@@ -245,6 +258,43 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name, state string)
 		delete(m.frozenSince, name)
 	}
 	return state, nil
+}
+
+// stopGPU is the My PC step for a GPU box: stop, not pause, because a frozen
+// CUDA process keeps its VRAM and a game needs it back. Before stopping it
+// records why (StoppedKey) and shortens the box's expiry to GPUStoppedTTL,
+// since its job dies with it. If the stop fails the box is paused, so it at
+// least stops computing, and the stop is retried next tick.
+func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state, why string) (string, error) {
+	if state != "running" && state != "frozen" {
+		delete(m.frozenSince, in.Name)
+		return state, nil
+	}
+	var errs []error
+	if in.Config[StoppedKey] != why {
+		if err := m.Incus.SetInstanceConfig(ctx, in.Name, StoppedKey, why); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	soon := now.Add(GPUStoppedTTL)
+	if exp, err := time.Parse(time.RFC3339, in.Config[ExpiresKey]); err != nil || exp.After(soon) {
+		if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, soon.UTC().Format(time.RFC3339)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := m.Incus.Stop(ctx, in.Name); err != nil {
+		errs = append(errs, err)
+		if state == "running" {
+			if perr := m.Incus.Pause(ctx, in.Name); perr != nil {
+				errs = append(errs, perr)
+			} else {
+				state = "frozen"
+			}
+		}
+		return state, errors.Join(errs...)
+	}
+	delete(m.frozenSince, in.Name)
+	return "stopped", errors.Join(errs...)
 }
 
 // thaw is the Shared/Full step for one instance. Every tick it compares the

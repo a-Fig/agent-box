@@ -217,3 +217,62 @@ if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a launch over the memory
 Remove the boxes it made with `box rm` (check `box ls` for the large one's name). Then, in a repo
 whose box exists as medium, `box run --size small -- true` should say it uses a throwaway small
 box, and leave the medium box as it was.
+
+### GPU box
+
+Not yet run on the PC (2026-11-24). It needs `setup-distro.sh` re-run first, for the GPU
+restriction keys, and the tray rebuilt, so it stops GPU boxes. Start in Shared or Full, with no
+game running.
+
+```powershell
+incus --project agents project get pc:agents restricted.devices.unix-char   # allow
+incus --project agents project get pc:agents restricted.devices.disk.paths  # /usr/lib/wsl/lib,/usr/lib/wsl/drivers
+& $box status   # gpu: free
+# The CUDA driver API through ctypes: init, a context, a 1 GiB alloc and a copy round trip.
+# A here-string without double quotes, because PowerShell 5.1 mangles nested ones.
+$check = @'
+/usr/lib/wsl/lib/nvidia-smi && python3 - <<PY
+import ctypes
+c = ctypes.CDLL('libcuda.so.1')
+assert c.cuInit(0) == 0
+n = ctypes.c_int()
+assert c.cuDeviceGetCount(ctypes.byref(n)) == 0 and n.value >= 1
+ctx, d = ctypes.c_void_p(), ctypes.c_uint64()
+assert c.cuCtxCreate_v2(ctypes.byref(ctx), 0, 0) == 0
+assert c.cuMemAlloc_v2(ctypes.byref(d), 1 << 30) == 0
+src, dst = ctypes.create_string_buffer(b'agent-box-gpu-ok', 16), ctypes.create_string_buffer(16)
+assert c.cuMemcpyHtoD_v2(d, src, 16) == 0 and c.cuMemcpyDtoH_v2(dst, d, 16) == 0
+assert dst.raw == src.raw
+print('cuda ok:', n.value, 'device(s), 1 GiB alloc and copy round trip')
+PY
+'@
+Push-Location -LiteralPath $repo
+try {
+    & $box run --gpu -- $check
+    if ($LASTEXITCODE -ne 0) { throw 'GPU box smoke failed' }
+} finally { Pop-Location }
+```
+
+`nvidia-smi` lists the RTX 3070 and the check prints `cuda ok: 1 device(s), ...`; the throwaway
+is gone afterwards (`box ls`). Then check one-at-a-time and the stop for games:
+
+```powershell
+Push-Location -LiteralPath $repo
+& $box run --gpu -- '/usr/lib/wsl/lib/nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
+& $box status                           # gpu: in use: job <id>
+& $box run --gpu -- true                # exit 75: the GPU box is in use (job <id>); run on CPU or wait
+if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a second GPU box' }
+Pop-Location
+```
+
+Start a game (or pick My PC in the tray). Within a tick the GPU box shows `STOPPED` in `box ls`,
+and `nvidia-smi` on Windows no longer lists its process. Then:
+
+```powershell
+& $box job '<job ID>'   # exit 75: the GPU box was stopped because the PC's owner started a game
+incus --project agents config get 'pc:<gpu box>' user.box.stopped   # gaming: ...
+incus --project agents config get 'pc:<gpu box>' user.expires       # about 30 minutes from the stop
+```
+
+After the game ends and the tray is back in Shared, the box stays stopped, and the next
+`box run --gpu` deletes it and launches a fresh one.

@@ -199,7 +199,19 @@ func (a *App) New(ctx context.Context, name string, ttl time.Duration, size stri
 	if name == "" {
 		name = "box-" + a.Rand()
 	}
-	return name, a.launch(ctx, name, ttl, false, sz)
+	if sz.GPU {
+		insts, err := a.list(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := a.claimGPU(ctx, insts, ""); err != nil {
+			return "", err
+		}
+	}
+	if err := a.launch(ctx, name, ttl, false, sz); err != nil {
+		return name, err
+	}
+	return name, a.confirmGPU(ctx, name, sz)
 }
 
 // lookupSize resolves a --size value; "" is the default size.
@@ -228,6 +240,104 @@ func (e *errNoRoom) Error() string {
 func isNoRoom(err error) bool {
 	var e *errNoRoom
 	return errors.As(err, &e)
+}
+
+// errGPUBusy is a GPU box asked for while another one holds the GPU.
+// Callers exit 75, like a paused PC.
+type errGPUBusy struct{ holder string }
+
+func (e *errGPUBusy) Error() string {
+	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
+}
+
+// isTempFail says whether err means "not now": no room, or the GPU is taken.
+func isTempFail(err error) bool {
+	var g *errGPUBusy
+	return isNoRoom(err) || errors.As(err, &g)
+}
+
+// gpuHolder says what holds the GPU through box in: "job X" for its running
+// jobs, or "box X" when none runs (a box new --gpu box, or a paused one).
+// idle is true only for a running box that was checked and runs no job.
+func (a *App) gpuHolder(ctx context.Context, in instance) (holder string, idle bool) {
+	if in.Status != "Running" {
+		return "box " + in.Name + ", " + strings.ToLower(in.Status), false
+	}
+	out, err := a.incusOK(ctx, "exec", a.target(in.Name), "--", "bash", "-c", runningScript())
+	if jobs := strings.Fields(out); err == nil && len(jobs) > 0 {
+		return "job " + strings.Join(jobs, ", job "), false
+	}
+	return "box " + in.Name, err == nil
+}
+
+// claimGPU checks that no box but except holds the GPU, so only one GPU box
+// runs at a time. Throwaway GPU boxes that are stopped (the tray stops GPU
+// boxes for games) or run no job any more are deleted on the way: they hold
+// 8GiB of the project's memory and would block the next one. Otherwise a
+// running or paused GPU box makes it return errGPUBusy.
+func (a *App) claimGPU(ctx context.Context, insts []instance, except string) error {
+	for _, in := range insts {
+		if in.Name == except || !mode.IsGPU(in.Config) {
+			continue
+		}
+		throwaway := in.Config[throwawayKey] == "true"
+		if in.Status == "Stopped" {
+			if throwaway {
+				a.removeQuietly(ctx, in.Name)
+			}
+			continue
+		}
+		holder, idle := a.gpuHolder(ctx, in)
+		if idle && throwaway {
+			a.removeQuietly(ctx, in.Name)
+			continue
+		}
+		return &errGPUBusy{holder: holder}
+	}
+	return nil
+}
+
+// confirmGPU closes the race between two launches that both passed
+// claimGPU: once GPU box name exists, if another GPU box is running or
+// paused, name is deleted and the caller backs off with errGPUBusy. Both may
+// back off, but the GPU never has two boxes.
+func (a *App) confirmGPU(ctx context.Context, name string, sz mode.Size) error {
+	if !sz.GPU {
+		return nil
+	}
+	insts, err := a.list(ctx)
+	if err != nil {
+		return nil // the launch worked; the next claim sees both boxes
+	}
+	for _, in := range insts {
+		if in.Name != name && mode.IsGPU(in.Config) && in.Status != "Stopped" {
+			a.removeQuietly(ctx, name)
+			return &errGPUBusy{holder: "box " + in.Name}
+		}
+	}
+	return nil
+}
+
+// gpuStopped is what to tell an agent whose job's GPU box isn't running
+// (the tray stops GPU boxes for games and My PC), or "" when box isn't a GPU
+// box or is running.
+func (a *App) gpuStopped(ctx context.Context, box string) string {
+	insts, err := a.list(ctx)
+	if err != nil {
+		return ""
+	}
+	in := find(insts, box)
+	if in == nil || !mode.IsGPU(in.Config) || in.Status == "Running" {
+		return ""
+	}
+	why := in.Config[mode.StoppedKey]
+	switch {
+	case strings.HasPrefix(why, "gaming"):
+		return "the GPU box was stopped because the PC's owner started a game; rerun later or on CPU"
+	case why == string(mode.MyPC):
+		return "the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU"
+	}
+	return "the GPU box " + box + " is " + strings.ToLower(in.Status) + "; rerun later or on CPU"
 }
 
 type existingBoxSize string
@@ -267,11 +377,36 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 	if throwaway {
 		args = append(args, "-c", throwawayKey+"=true")
 	}
-	_, err := a.incusOK(ctx, args...)
+	var stdin io.Reader
+	if sz.GPU {
+		args = append(args, gpuConfigArgs()...)
+		// -d only overrides devices a profile already has. New devices go in
+		// as YAML on stdin, which incus launch reads when it isn't a terminal.
+		b, _ := json.Marshal(map[string]any{"devices": mode.GPUDevices})
+		stdin = strings.NewReader(string(b))
+	}
+	res, err := a.incus(ctx, Cmd{Args: args, Stdin: stdin})
+	if err == nil && res.Code != 0 {
+		err = fmt.Errorf("incus launch: %s", strings.TrimSpace(res.Stderr))
+	}
 	if err != nil && projectLimitRefusal.MatchString(err.Error()) {
 		return &errNoRoom{size: sz.Name, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
 	}
 	return err
+}
+
+// gpuConfigArgs are the -c flags for mode.GPUEnv, in a fixed order.
+func gpuConfigArgs() []string {
+	keys := make([]string, 0, len(mode.GPUEnv))
+	for k := range mode.GPUEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var args []string
+	for _, k := range keys {
+		args = append(args, "-c", k+"="+mode.GPUEnv[k])
+	}
+	return args
 }
 
 func (a *App) expiryConfig(ttl time.Duration) string {
@@ -409,6 +544,23 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 
 	insts, paused := a.reach(ctx)
 	var inst *instance
+	if sz.GPU && paused == "" {
+		// GPU boxes are throwaways, so an idle box never holds the GPU. The
+		// one exception is a GPU box someone made with box new --gpu.
+		if o.Box == "" {
+			o.New = true
+		} else if inst = find(insts, box); inst == nil || !mode.IsGPU(inst.Config) {
+			return JobResult{Box: box, Code: 2}, fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
+		}
+		except := ""
+		if !o.New {
+			except = box
+		}
+		if err := a.claimGPU(ctx, insts, except); err != nil {
+			fmt.Fprintf(a.Err, "box: %v\n", err)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		}
+	}
 	if paused == "" && !o.New {
 		if inst = find(insts, box); inst != nil {
 			switch err := reusableBox(inst, o.Size); have := err.(type) {
@@ -444,7 +596,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		case errors.As(err, &have):
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
-		case isNoRoom(err):
+		case isTempFail(err):
 			fmt.Fprintf(a.Err, "box: %v\n", err)
 			return JobResult{State: statePaused, Code: exitPaused}, nil
 		case err != nil:
@@ -460,7 +612,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			ttl = idleTTL
 		}
 		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
-			if isNoRoom(err) {
+			if isTempFail(err) {
 				fmt.Fprintf(a.Err, "box: %v\n", err)
 				return JobResult{State: statePaused, Code: exitPaused}, nil
 			}
@@ -524,6 +676,9 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		fmt.Fprintf(a.Err, "box: launching %s\n", name)
 		a.notify(jobNotice{Event: "launching_box", Box: name})
 		err := a.launch(ctx, name, ttl, true, sz)
+		if err == nil {
+			return name, a.confirmGPU(ctx, name, sz)
+		}
 		if !isConflict(err) {
 			return name, err
 		}
@@ -721,6 +876,14 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	}
 	if err != nil {
 		return "", 1, err
+	}
+	// The tray stops a GPU box for games. Its job may look dead (4) or the
+	// exec may just end; either way the agent should hear why.
+	if res.Code != 0 && res.Code != 3 {
+		if msg := a.gpuStopped(ctx, box); msg != "" {
+			fmt.Fprintf(a.Err, "box: %s\n", msg)
+			return statePaused, exitPaused, nil
+		}
 	}
 	switch res.Code {
 	case 0:
