@@ -31,7 +31,8 @@ tray in Shared or Full. It creates disposable boxes and removes only the ones it
 ### Build box and make a test box
 
 ```powershell
-$box = Join-Path (Resolve-Path .).Path '.scratchinox.exe'
+New-Item -ItemType Directory -Force '.scratch/bin' | Out-Null
+$box = Join-Path (Resolve-Path .).Path '.scratch/bin/box.exe'
 bash .scratch/golock.sh go build -o .scratch/bin/box.exe ./cmd/box
 $repo = (Resolve-Path .).Path
 incus --version
@@ -139,3 +140,55 @@ if ($instances | Where-Object { $_.name -eq $throwaway }) { throw "Throwaway $th
 ```
 
 If a previous step left the named smoke box behind, use `box ls` to confirm the printed name and remove only that box.
+
+### Test status, job control, log pages, and artifact pulls
+
+Run `box status` in the repo and again from a directory outside Git, such as the laptop's temp
+directory. Both show mode, capacity and advice. The repo run also shows its named box or tells
+you that it has yet to be created.
+
+```powershell
+& $box status
+Push-Location -LiteralPath $env:TEMP
+try { & $box status } finally { Pop-Location }
+$name = 'toolsmoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
+& $box new $name
+if ($LASTEXITCODE -ne 0) { throw "Creating $name failed" }
+& $box run --box $name --env SMOKE_LABEL=tools -- 'printf "%s\n" "$SMOKE_LABEL"'
+if ($LASTEXITCODE -ne 0) { throw 'Environment smoke failed' }
+& $box run --box $name --timeout 1s -- 'sleep 20'
+if ($LASTEXITCODE -ne 124) { throw 'Expected exit 124 from the timeout' }
+```
+
+The environment check prints `tools`. To test forced termination, repeat the timeout with
+`trap "" TERM; sleep 20` as the shell command. It returns `124` after the 10-second grace period.
+
+Start a job that produces a log, leaves two artifacts and waits on a child.
+
+```powershell
+& $box run --box $name -- 'echo abcdefghijk; echo file-ok > smoke-file.txt; mkdir -p smoke-tree/sub; echo dir-ok > smoke-tree/sub/result.txt; sleep 180 & child=$!; echo "CHILD_PID=$child"; wait "$child"'
+```
+
+After `CHILD_PID` appears, record the job ID and PID and press Ctrl-C to detach.
+
+```powershell
+$job = '<printed job ID>'
+$child = '<printed child PID>'
+& $box jobs --box $name
+& $box job $job --offset 2 --limit 4
+& $box cancel $job
+& $box job $job
+if ($LASTEXITCODE -ne 130) { throw 'Cancelled job did not return 130' }
+incus --project agents exec "pc:$name" -- ps -o stat= -p $child
+$out = Join-Path (Resolve-Path .).Path ".scratch/smoke/$name"
+& $box pull $job smoke-file.txt $out
+& $box pull $job smoke-tree $out
+Get-Content (Join-Path $out 'smoke-file.txt')
+Get-Content (Join-Path $out 'smoke-tree/sub/result.txt')
+& $box rm $name
+```
+
+The jobs list shows the job running before cancellation. The page prints `cdef` and reports
+next offset `6`. The same job ID and offsets can be tested with MCP `box_job`, which returns
+`nextOffset` in `structuredContent`. Cancellation should report exit `130`, and `ps` should
+show no live child. The two pulls should print `file-ok` and `dir-ok`.

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,14 +37,51 @@ func TestCheckEnv(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidOptionsBeforeStarting(t *testing.T) {
+	for name, opts := range map[string]RunOpts{
+		"conflicting boxes": {Cmd: []string{"true"}, Box: "named", New: true},
+		"negative wait":     {Cmd: []string{"true"}, Wait: -time.Second},
+		"NUL env value":     {Cmd: []string{"true"}, Env: map[string]string{"CI": "a\x00b"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakePC{t: t}
+			a, _ := testApp(f)
+			if r, err := a.Run(context.Background(), opts); err == nil || r.Code != 2 || f.callList() != "" {
+				t.Errorf("Run = %+v, %v; Incus calls %q", r, err, f.callList())
+			}
+		})
+	}
+}
+
 func TestPayload(t *testing.T) {
 	got := payload(RunOpts{Cmd: []string{"go test ./..."}, Env: map[string]string{"B": "it's", "A": "1"}, Timeout: 90*time.Second + time.Millisecond})
-	want := "export A='1'\nexport B='it'\\''s'\ntimeout -k 10s 91s bash -c 'go test ./...'"
-	if got != want {
-		t.Errorf("payload =\n%s\nwant\n%s", got, want)
+	if !strings.HasPrefix(got, "export A='1' || exit 2\nexport B='it'\\''s' || exit 2\n") ||
+		!strings.Contains(got, "-k 10s 90.001s /bin/bash") || !strings.Contains(got, "go test ./...") {
+		t.Errorf("payload =\n%s", got)
 	}
 	if got := payload(RunOpts{Cmd: []string{"echo", "a b"}}); got != `'echo' 'a b'` {
 		t.Errorf("plain payload = %q", got)
+	}
+}
+
+func TestPayloadPreservesExitCodeOnHardTimeout(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux process-group signals")
+	}
+	bash := gitBash(t)
+	for _, tc := range []struct {
+		command string
+		code    int
+	}{
+		{`printf 'stdout'; printf 'stderr' >&2; trap '' TERM; sleep 20`, 124},
+		{`printf 'stdout'; printf 'stderr' >&2; exit 137`, 137},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		res, err := (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", payload(RunOpts{Cmd: []string{tc.command}, Timeout: 100 * time.Millisecond})}})
+		cancel()
+		if err != nil || res.Code != tc.code || res.Stdout != "stdout" || !strings.Contains(res.Stderr, "stderr") {
+			t.Errorf("payload %q = %+v, %v", tc.command, res, err)
+		}
 	}
 }
 
@@ -56,6 +94,8 @@ func TestStatus(t *testing.T) {
 	}{
 		"unreachable": {&fakePC{listErr: true}, "unavailable: can't reach pc (incus list: Error: connection refused): run locally", false},
 		"my pc":       {&fakePC{mode: "mypc", project: limits}, "unavailable: PC is in My PC mode: run locally", false},
+		"repo box frozen": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "my-repo", Status: "Frozen"}}},
+			"unavailable: this repo's box my-repo is frozen: run locally", false},
 		"yielding": {&fakePC{mode: "shared", project: map[string]string{"limits.instances": "3", "user.agent-box.reason": "Steam game running"}},
 			"unavailable: PC is yielding to a game (Steam game running): run locally", false},
 		"free slots": {&fakePC{mode: "shared", project: limits, memory: "4GiB", insts: []instance{{Name: "other", Status: "Running"}}},
@@ -154,6 +194,33 @@ func TestCancel(t *testing.T) {
 	}
 }
 
+func TestJobScriptsRequireMatchingJob(t *testing.T) {
+	bash := gitBash(t)
+	old := workRoot
+	workRoot = filepath.ToSlash(t.TempDir())
+	defer func() { workRoot = old }()
+	if err := os.MkdirAll(filepath.Join(workRoot, ".box"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(workRoot, "checkout"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	job := "sample.20261123-120000-0001"
+	ctx := context.Background()
+	res, err := (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", checkoutScript(job)}})
+	if err != nil || res.Code != 3 || !strings.Contains(res.Stderr, "no job") {
+		t.Errorf("lookup of nonexistent job = %+v, %v", res, err)
+	}
+	file := workRoot + "/.box/" + job
+	write(t, file+".log", "starting\n")
+	// Delay PID publication, then model a job finishing before it can be cancelled.
+	setup := "sleep() { echo 0 > " + shq(file+".exit") + "; }\n"
+	res, err = (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", setup + cancelScript(job)}})
+	if err != nil || res.Code != 0 || strings.TrimSpace(res.Stdout) != "finished 0" {
+		t.Errorf("cancel during startup = %+v, %v", res, err)
+	}
+}
+
 func TestLogPage(t *testing.T) {
 	f := &fakePC{t: t, script: "running - 100\nabcdefghij"}
 	a, _ := testApp(f)
@@ -173,6 +240,21 @@ func TestLogPage(t *testing.T) {
 	}
 	if _, err := a.LogPage(context.Background(), "my-repo.20261123-120000-0001", -1, 0); err == nil {
 		t.Error("negative offset accepted")
+	}
+	if _, err := a.LogPage(context.Background(), "my-repo.20261123-120000-0001", 1<<63-1, 0); err == nil {
+		t.Error("overflowing offset accepted")
+	}
+	f.script = "done 0 5\n"
+	if p, err := a.LogPage(context.Background(), "my-repo.20261123-120000-0001", 10, 0); err != nil || p.More || p.LogBytes != 5 || p.NextOffset != 10 {
+		t.Errorf("page past end = %+v, %v", p, err)
+	}
+}
+
+func TestMCPLogPagePreservesSplitUTF8(t *testing.T) {
+	p := Page{Text: "\xc3", NextOffset: 1}
+	got := pageResult(p)["structuredContent"].(map[string]any)
+	if got["logBase64"] != "ww==" || got["nextOffset"] != int64(1) {
+		t.Errorf("structured page = %v", got)
 	}
 }
 
@@ -220,6 +302,50 @@ func TestPull(t *testing.T) {
 		if _, err := a.Pull(context.Background(), bad[0], bad[1], t.TempDir()); err == nil {
 			t.Errorf("Pull(%q, %q) accepted", bad[0], bad[1])
 		}
+	}
+}
+
+func TestPullKeepsFileCreatedDuringTransfer(t *testing.T) {
+	local := t.TempDir()
+	f := &fakePC{t: t, pull: func(_, staging string) {
+		write(t, filepath.Join(staging, "result.txt"), "remote")
+		write(t, filepath.Join(local, "result.txt"), "local")
+	}}
+	a, _ := testApp(f)
+	if _, err := a.Pull(context.Background(), "my-repo", "/tmp/result.txt", local); err == nil {
+		t.Fatal("pull replaced a file created during transfer")
+	}
+	if got, err := os.ReadFile(filepath.Join(local, "result.txt")); err != nil || string(got) != "local" {
+		t.Errorf("local result = %q, %v", got, err)
+	}
+}
+
+func TestPullRejectsNonLocalWindowsName(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path rules")
+	}
+	f := &fakePC{t: t}
+	a, _ := testApp(f)
+	for _, p := range []string{`/tmp/parent\nested.txt`, `/tmp/CON.txt`} {
+		if _, err := a.Pull(context.Background(), "my-repo", p, t.TempDir()); err == nil || !strings.Contains(err.Error(), "local file name") {
+			t.Errorf("Pull(%q) = %v", p, err)
+		}
+	}
+	if c := f.callList(); c != "" {
+		t.Errorf("unexpected Incus calls: %s", c)
+	}
+}
+
+func TestJobsReturnsFailureForExplicitBox(t *testing.T) {
+	a, _ := testApp(&fakePC{t: t})
+	a.R = runnerFunc(func(c Cmd) Result {
+		if c.Args[2] == "list" {
+			return Result{Stdout: `[{"name":"my-repo","status":"Running"}]`}
+		}
+		return Result{Code: 1, Stderr: "connection reset"}
+	})
+	if _, err := a.Jobs(context.Background(), "my-repo"); err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Errorf("Jobs = %v", err)
 	}
 }
 
@@ -288,7 +414,8 @@ func TestJoinAndLeave(t *testing.T) {
 	if fmt.Sprint(agents.calls) != fmt.Sprint(want) {
 		t.Errorf("calls =\n%q\nwant\n%q", agents.calls, want)
 	}
-	skillsAt := []string{filepath.Join(home, ".claude", "skills", "box", "SKILL.md"), filepath.Join(configDir, "skills", "box", "SKILL.md")}
+	skillsAt := []string{filepath.Join(home, ".claude", "skills", "box", "SKILL.md"), filepath.Join(configDir, "skills", "box", "SKILL.md"),
+		filepath.Join(home, ".codex", "skills", "box", "SKILL.md")}
 	for _, p := range skillsAt {
 		if b, err := os.ReadFile(p); err != nil || string(b) != skills.Box {
 			t.Errorf("skill at %s: %v", p, err)
@@ -312,6 +439,54 @@ func TestJoinAndLeave(t *testing.T) {
 	}
 	if s := out.String(); !strings.Contains(s, "claude: removed MCP server box") {
 		t.Errorf("leave report =\n%s", s)
+	}
+}
+
+func TestJoinUsesAlternateCodexHome(t *testing.T) {
+	home := isolateHome(t)
+	custom := filepath.Join(home, "custom-codex")
+	t.Setenv("CODEX_HOME", custom)
+	c := joinConfig{
+		Home: home, CodexHome: os.Getenv("CODEX_HOME"), Exe: filepath.Join(home, "box.exe"), Out: io.Discard,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	ctx := context.Background()
+	if err := join(ctx, c, false); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(custom, "skills", "box", "SKILL.md")
+	if b, err := os.ReadFile(p); err != nil || string(b) != skills.Box {
+		t.Fatalf("custom skill = %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
+		t.Errorf("default Codex directory was used: %v", err)
+	}
+	if err := join(ctx, c, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Errorf("custom skill still there: %v", err)
+	}
+}
+
+func TestJoinAndLeaveKeepCustomSkill(t *testing.T) {
+	home := isolateHome(t)
+	c := joinConfig{
+		Home: home, Exe: filepath.Join(home, "box.exe"), Out: io.Discard,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	p := filepath.Join(home, ".codex", "skills", "box", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, p, "local skill\n")
+	for _, leave := range []bool{false, true} {
+		if err := join(context.Background(), c, leave); err == nil || !strings.Contains(err.Error(), "existing skill") {
+			t.Errorf("join(leave=%t) = %v", leave, err)
+		}
+		if got, err := os.ReadFile(p); err != nil || string(got) != "local skill\n" {
+			t.Errorf("local skill after join(leave=%t) = %q, %v", leave, got, err)
+		}
 	}
 }
 

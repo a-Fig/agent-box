@@ -38,8 +38,7 @@ type RepoBox struct {
 }
 
 // Status reports the PC's state and, when dir is in a git repo, the repo's
-// box and its running jobs. Only failing to read the repo is an error: an
-// unreachable PC is a report.
+// box and its running jobs. An unreachable PC is included in the report.
 func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s := StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1}
 	if dir != "" {
@@ -101,6 +100,8 @@ func advice(s StatusReport, repoBox *instance) (string, bool) {
 		return "unavailable: PC is in My PC mode: run locally", false
 	case s.Yielding:
 		return fmt.Sprintf("unavailable: PC is yielding to a game (%s): run locally", s.Reason), false
+	case repoBox != nil && repoBox.Status == "Frozen":
+		return fmt.Sprintf("unavailable: this repo's box %s is frozen: run locally", repoBox.Name), false
 	case repoBox != nil && repoBox.Config[throwawayKey] != "true":
 		busy := ""
 		if n := len(s.RepoBox.Running); n > 0 {

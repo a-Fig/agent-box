@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // A hand-written MCP server: JSON-RPC 2.0, one message per line on stdio.
@@ -82,7 +84,7 @@ var tools = []tool{
 	{"box_jobs", "List jobs, newest first, with state (running, done with exit code, died), start time and log size. Use it to find a job ID you lost.", obj(map[string]any{
 		"box": str("Only this box. Default: every running box."),
 	}), nil},
-	{"box_cancel", "Stop a running job and everything it started. Its exit code becomes 130.", obj(map[string]any{
+	{"box_cancel", "Stop a running job's process session. A cancelled job exits 130.", obj(map[string]any{
 		"id": str("Job ID."),
 	}, "id"), nil},
 	{"box_pull", "Copy a file or directory (test reports, coverage, build output) from a box into a local directory, as <localDir>/<name>. It never replaces an existing file and drops symlinks. Pull right after the job: the next job on the same repo replaces the checkout.", obj(map[string]any{
@@ -106,6 +108,7 @@ var jobOutput = obj(map[string]any{
 	"nextOffset": map[string]any{"type": "integer", "description": "Offset of the next page."},
 	"logBytes":   map[string]any{"type": "integer", "description": "Size of the log so far."},
 	"more":       map[string]any{"type": "boolean", "description": "The log goes on past this page, or the job is still running."},
+	"logBase64":  str("Exact log bytes when this page does not contain complete UTF-8 text."),
 }, "exitCode")
 
 // errClientCancelled is the cause of a tool call's context that the client
@@ -253,10 +256,14 @@ func pageResult(p Page) map[string]any {
 		code = 1
 	}
 	res := textResult(p.pageHead()+"\n"+p.Text, false)
-	res["structuredContent"] = map[string]any{
+	structured := map[string]any{
 		"job": p.Job, "box": p.Box, "state": p.State, "exitCode": code,
 		"offset": p.Offset, "nextOffset": p.NextOffset, "logBytes": p.LogBytes, "more": p.More,
 	}
+	if !utf8.ValidString(p.Text) {
+		structured["logBase64"] = base64.StdEncoding.EncodeToString([]byte(p.Text))
+	}
+	res["structuredContent"] = structured
 	return res
 }
 

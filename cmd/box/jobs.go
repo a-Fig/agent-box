@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,23 +75,26 @@ tail -c +%[3]d %[2]s.log | head -c %[4]d
 // .exit if the wrapper didn't, so followers stop. It prints "cancelled" or
 // "finished", then the exit code, and exits 3 for an unknown job.
 func cancelScript(job string) string {
-	return "# cancel\n" + aliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
+	return "# cancel\n" + aliveFn + jobPIDFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
 j=%s
 test -f "$j.log" || exit 3
+pid=$(jobpid "$j")
 if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
-pid=$(cat "$j.pid" 2>/dev/null)
-if alive "$pid" "$j"; then
-  if [ "$(ps -o sid= -p "$pid" | tr -d ' ')" = "$pid" ]; then
-    pkill -TERM -s "$pid"
-    for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
-    pkill -KILL -s "$pid"
-  else
-    kill -TERM "$pid"
-  fi
-  sleep 0.2
+case "$pid" in ''|*[!0-9]*) echo "job $j has no wrapper PID" >&2; exit 4 ;; esac
+if ! alive "$pid" "$j" || [ "$(ps -o sid= -p "$pid" | tr -d ' ')" != "$pid" ]; then
+  if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+  echo "cannot identify the session for job $j" >&2
+  exit 4
 fi
-[ -f "$j.exit" ] || { echo %d > "$j.exit.tmp" && mv "$j.exit.tmp" "$j.exit"; }
-echo "cancelled $(cat "$j.exit")"
+if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then exit 4; fi
+for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
+if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then exit 4; fi
+if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+verdict=finished
+if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then verdict=cancelled; fi
+rm -f "$j.cancel.$$"
+test -f "$j.exit" || exit 4
+echo "$verdict $(cat "$j.exit")"
 `, workRoot, job, exitDetached)
 }
 
@@ -152,6 +158,9 @@ func (a *App) Jobs(ctx context.Context, box string) ([]JobInfo, error) {
 		}
 		js, err := a.boxJobs(ctx, in.Name)
 		if err != nil {
+			if box != "" {
+				return nil, err
+			}
 			a.warn(fmt.Sprintf("box: listing jobs in %s: %v", in.Name, err))
 			continue
 		}
@@ -207,6 +216,9 @@ func (a *App) LogPage(ctx context.Context, job string, offset, limit int64) (Pag
 	if offset < 0 || limit < 0 {
 		return Page{}, errors.New("offset and limit can't be negative")
 	}
+	if offset > math.MaxInt64-maxPage {
+		return Page{}, errors.New("offset is too large")
+	}
 	if limit == 0 {
 		limit = defaultPage
 	}
@@ -229,7 +241,9 @@ func (a *App) LogPage(ctx context.Context, job string, offset, limit int64) (Pag
 	}
 	p := Page{JobInfo: jobs[0], Offset: offset, Text: text}
 	p.NextOffset = offset + int64(len(text))
-	p.LogBytes = max(p.LogBytes, p.NextOffset) // the log grew while it was read
+	if len(text) != 0 {
+		p.LogBytes = max(p.LogBytes, p.NextOffset) // the log grew while it was read
+	}
 	p.More = p.NextOffset < p.LogBytes || p.State == jobRunning || p.State == jobStarting
 	return p, nil
 }
@@ -262,7 +276,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("cancel %s: %s", job, strings.TrimSpace(res.Stderr))
 	}
 	f := strings.Fields(res.Stdout)
-	if len(f) != 2 {
+	if len(f) != 2 || (f[0] != "cancelled" && f[0] != "finished") {
 		return false, 0, fmt.Errorf("cancel %s: unexpected output %q", job, res.Stdout)
 	}
 	code, err = strconv.Atoi(f[1])
@@ -280,7 +294,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 func checkoutScript(job string) string {
 	s := "# checkout\nr=\n"
 	if job != "" {
-		s += fmt.Sprintf("r=$(cat %s/.box/%s.repo 2>/dev/null)\n", workRoot, job)
+		s += fmt.Sprintf("test -f %[1]s/.box/%[2]s.log || { echo 'no job %[2]s' >&2; exit 3; }\nr=$(cat %[1]s/.box/%[2]s.repo 2>/dev/null)\n", workRoot, job)
 	}
 	return s + fmt.Sprintf(`if [ -z "$r" ]; then
   set --
@@ -290,6 +304,19 @@ func checkoutScript(job string) string {
 fi
 echo %[1]s/"$r"
 `, workRoot)
+}
+
+var windowsDeviceName = regexp.MustCompile(`(?i)^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³])$`)
+
+func localPullName(name string) bool {
+	if !filepath.IsLocal(name) || filepath.Base(name) != name {
+		return false
+	}
+	if runtime.GOOS != "windows" {
+		return true
+	}
+	stem, _, _ := strings.Cut(name, ".")
+	return strings.TrimRight(name, " .") == name && !windowsDeviceName.MatchString(strings.TrimRight(stem, " "))
 }
 
 // Pull copies a file or directory from a box into the local directory
@@ -324,6 +351,9 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	if name == "/" || name == "." || name == ".." {
 		return "", fmt.Errorf("can't pull %s", remote)
 	}
+	if !localPullName(name) {
+		return "", fmt.Errorf("can't use %q as a local file name", name)
+	}
 
 	local, err := filepath.Abs(local)
 	if err != nil {
@@ -335,6 +365,8 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	dest := filepath.Join(local, name)
 	if _, err := os.Lstat(dest); err == nil {
 		return "", fmt.Errorf("%s already exists; remove it or pull into another directory", dest)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
 	staging, err := os.MkdirTemp(local, ".box-pull-")
 	if err != nil {
@@ -350,6 +382,9 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	}
 	if len(entries) != 1 {
 		return "", fmt.Errorf("pull of %s left %d entries, want 1", remote, len(entries))
+	}
+	if entries[0].Name() != name || (!entries[0].Type().IsRegular() && !entries[0].IsDir()) {
+		return "", fmt.Errorf("pull of %s did not produce a regular file or directory named %q", remote, name)
 	}
 	got := filepath.Join(staging, entries[0].Name())
 	var dropped []string
@@ -370,7 +405,17 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	if len(dropped) > 0 {
 		a.warn("box: warning: dropped links and special files: " + strings.Join(dropped, " "))
 	}
-	if err := os.Rename(got, dest); err != nil {
+	// Reserve a directory name before copying it. CopyFS alone would merge
+	// into an existing directory. For files it already uses exclusive creation.
+	if !entries[0].IsDir() {
+		err = os.CopyFS(local, os.DirFS(staging))
+	} else if err = os.Mkdir(dest, 0o755); err == nil {
+		err = os.CopyFS(dest, os.DirFS(got))
+		if err != nil {
+			err = errors.Join(err, os.RemoveAll(dest))
+		}
+	}
+	if err != nil {
 		return "", err
 	}
 	return dest, nil
