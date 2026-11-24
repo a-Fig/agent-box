@@ -65,7 +65,7 @@ func control(next http.Handler) http.Handler {
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, dash.CodeBadRequest, "no streaming")
+		writeError(w, http.StatusInternalServerError, dash.CodeIncus, "no streaming")
 		return
 	}
 	st, ch, cancel := s.W.Subscribe()
@@ -193,7 +193,14 @@ func readLog(ctx context.Context, inc Incus, j dash.Job, offset int64) (dash.Log
 	if err != nil {
 		return dash.LogChunk{}, errors.New("bad log size")
 	}
-	data = cutUTF8(data)
+	if offset+int64(len(data)) < size {
+		// A character cut by the chunk's end comes whole in the next one. At
+		// the log's end nothing more follows, so the bytes are kept: dropping
+		// them would never reach eof.
+		if cut := cutUTF8(data); len(cut) > 0 {
+			data = cut
+		}
+	}
 	next := offset + int64(len(data))
 	return dash.LogChunk{Offset: next, Data: strings.ToValidUTF8(string(data), "�"), EOF: next >= size}, nil
 }
@@ -221,7 +228,7 @@ func (s *Server) refusal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "why is one of "+strings.Join(dash.Refusals, ", "))
 		return
 	}
-	b.Reason, b.Size, b.Repo, b.Agent = clip(b.Reason, 300), clip(b.Size, 16), clip(b.Repo, 300), clip(b.Agent, 100)
+	b.Reason, b.Size, b.Repo, b.Agent = clip(b.Reason, 300), clip(b.Size, 16), Mask(clip(b.Repo, 300)), clip(b.Agent, 100)
 	s.W.record(record{Type: recRefusal, Refusal: &b})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -233,7 +240,7 @@ func (s *Server) ended(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "the body is {box, id, exit, endedAt, tail}")
 		return
 	}
-	if !s.W.EndJob(b) {
+	if !s.W.EndJob(r.Context(), b) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "no running job "+b.Box+"."+b.ID)
 		return
 	}

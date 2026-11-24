@@ -48,7 +48,8 @@ type Watcher struct {
 	boxes    map[string]dash.Box
 	known    map[string]boxRec // box id -> what was recorded as created
 	live     map[string]*dash.Job
-	repoOf   map[string]string // box -> the repo of its latest job
+	repoOf   map[string]string    // box -> the repo of its latest job
+	died     map[string]time.Time // job key -> when a scan first saw it died
 	cpu      map[string]cpuMark
 	lastMode *modeRec
 	lastReq  string
@@ -67,6 +68,7 @@ func (w *Watcher) init() {
 	}
 	w.boxes, w.known, w.live = map[string]dash.Box{}, map[string]boxRec{}, map[string]*dash.Job{}
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
+	w.died = map[string]time.Time{}
 	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
@@ -140,7 +142,7 @@ func (w *Watcher) Poll(ctx context.Context) {
 		present[in.Name] = in
 	}
 	// Jobs first, so a box's repo is known before the box is built.
-	w.applyJobs(now, ins, scans)
+	w.applyJobs(now, ins, scans, "")
 	for _, in := range ins {
 		boxes[in.Name] = w.box(now, in)
 	}
@@ -193,7 +195,31 @@ func holds(created, started time.Time) bool {
 // EndJob applies box's report of how a job ended (POST /api/jobs/ended). It
 // takes it only for a job boxd knows is running or paused, and says whether
 // it did.
-func (w *Watcher) EndJob(b dash.JobEndedBody) bool {
+//
+// box posts the report before it deletes a throwaway, so when the job isn't
+// live yet (it ran between two polls, or a poll's scan is still in flight)
+// boxd scans that box now and then applies the report.
+func (w *Watcher) EndJob(ctx context.Context, b dash.JobEndedBody) bool {
+	if w.endJob(b) {
+		return true
+	}
+	ins, err := w.Incus.Instances(ctx)
+	if err != nil {
+		return false
+	}
+	for _, in := range ins {
+		if in.Name != b.Box || in.Status != "Running" {
+			continue
+		}
+		scans := w.scanAll(ctx, []Instance{in})
+		w.mu.Lock()
+		w.applyJobs(w.Now().UTC(), []Instance{in}, scans, in.Name)
+		w.mu.Unlock()
+	}
+	return w.endJob(b)
+}
+
+func (w *Watcher) endJob(b dash.JobEndedBody) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.init()
@@ -202,15 +228,16 @@ func (w *Watcher) EndJob(b dash.JobEndedBody) bool {
 			continue
 		}
 		before := *j
-		at := b.EndedAt.UTC()
-		if at.IsZero() || at.Before(j.StartedAt) {
-			at = w.Now().UTC()
+		at, now := b.EndedAt.UTC(), w.Now().UTC()
+		if at.IsZero() || at.Before(j.StartedAt) || at.After(now) {
+			at = now // the laptop's clock may be off
 		}
 		exit := b.Exit
 		j.State, j.Exit, j.EndedAt = dash.JobDone, &exit, &at
 		if t := tailOf([]byte(b.Tail)); t != "" {
 			j.Tail = t
 		}
+		delete(w.died, key)
 		w.settle(key, j, before)
 		return true
 	}
@@ -227,8 +254,14 @@ func mapKeys(m map[string]bool) func(func(string) bool) {
 	}
 }
 
-// applyJobs updates the jobs from the scans and the boxes' states.
-func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]scanned) {
+// diedAfter is how long a job may look died (its wrapper gone, no .exit)
+// before it counts as lost: box cancel kills the wrapper first and writes
+// .exit up to 5s later.
+const diedAfter = 10 * time.Second
+
+// applyJobs updates the jobs from the scans and the boxes' states. With only
+// set, ins and scans hold that box alone, and other boxes' jobs are left be.
+func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]scanned, only string) {
 	byName := map[string]Instance{}
 	for _, in := range ins {
 		byName[in.Name] = in
@@ -271,14 +304,24 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 					j.EndedAt = &now
 				}
 			case "died":
-				j.State, j.EndedAt = dash.JobLost, &now
+				if first, ok := w.died[key]; !ok {
+					w.died[key] = now
+				} else if now.Sub(first) >= diedAfter {
+					j.State, j.EndedAt = dash.JobLost, &now
+				}
 			default:
 				j.State = dash.JobRunning
+			}
+			if s.State != "died" || j.State == dash.JobLost {
+				delete(w.died, key)
 			}
 			w.settle(key, j, before)
 		}
 	}
 	for key, j := range w.live {
+		if only != "" && j.Box != only {
+			continue
+		}
 		in, ok := byName[j.Box]
 		before := *j
 		switch {
@@ -286,7 +329,7 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			j.State, j.EndedAt = dash.JobLost, &now // the box went (or is a new one by the same name)
 		case in.Status == "Frozen":
 			j.State = dash.JobPaused
-		case in.Status == "Stopped":
+		case in.Status == "Stopped" || in.Status == "Error":
 			j.State, j.EndedAt = dash.JobLost, &now // stopping a box kills its jobs
 		case in.Status == "Running":
 			if _, scanned := scans[j.Box]; scanned && !seen[key] {

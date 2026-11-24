@@ -136,15 +136,33 @@ func (s *Socket) Project(ctx context.Context) (Project, error) {
 func (s *Socket) Exec(ctx context.Context, name, script string, args ...string) ([]byte, error) {
 	argv := append([]string{"exec", "--project", s.Proj, name, "--", "bash", "-c", script, "boxd"}, args...)
 	cmd := exec.CommandContext(ctx, "incus", argv...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, &stdout, &stderr
+	stdout, stderr := &capped{max: maxExecOut}, &capped{max: 64 << 10}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, stdout, stderr
 	err := cmd.Run()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ctx.Err() == nil {
-		return stdout.Bytes(), &ExitError{Code: ee.ExitCode(), Stderr: stderr.String()}
+		return stdout.Bytes(), &ExitError{Code: ee.ExitCode(), Stderr: string(stderr.Bytes())}
 	}
 	if err != nil {
 		return stdout.Bytes(), fmt.Errorf("incus exec %s: %w", name, err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// maxExecOut bounds what boxd reads from a box: a scan of maxScanJobs jobs
+// with their meta and tails, or a log chunk, is well under it.
+const maxExecOut = 8 << 20
+
+// capped keeps the first max bytes written and drops the rest, so a box
+// can't make boxd hold more.
+type capped struct {
+	bytes.Buffer
+	max int
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	if room := c.max - c.Len(); room > 0 {
+		c.Buffer.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
 }

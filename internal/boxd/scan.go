@@ -15,15 +15,17 @@ import (
 
 // The job files `box run` leaves in a box, /work/.box/<job>.{log,pid,exit,meta}
 // where job is "<box>.<id>" (cmd/box/jobs.go). These scripts read them the same
-// way box does; alive and jobstate are copies of cmd/box's.
+// way box does; alive and jobstate follow cmd/box's, reading at most a few
+// bytes of each file and checking .exit again once the wrapper is gone.
 const jobDir = "/work/.box"
 
 const aliveFn = `alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && { [ ! -r /proc/"$1"/cmdline ] || grep -aqF "$2" /proc/"$1"/cmdline; }; }
 `
 
 const jobStateFn = `jobstate() {
-  if [ -f "$1.exit" ]; then echo "done $(cat "$1.exit")"
-  elif alive "$(cat "$1.pid" 2>/dev/null)" "$1"; then echo "running -"
+  if [ -f "$1.exit" ]; then echo "done $(head -c 16 "$1.exit")"
+  elif alive "$(head -c 16 "$1.pid" 2>/dev/null)" "$1"; then echo "running -"
+  elif [ -f "$1.exit" ]; then echo "done $(head -c 16 "$1.exit")"
   elif [ -f "$1.pid" ] || [ -n "$(find "$1.log" -mmin +1 2>/dev/null)" ]; then echo "died -"
   else echo "starting -"
   fi
@@ -34,12 +36,15 @@ const jobStateFn = `jobstate() {
 //
 //	J <job> <state> <exit|-> <logbytes> <exit mtime|0> <meta base64|-> <tail base64|->
 //
+// It looks at the newest maxScanJobs jobs only (job names sort by start).
 // Jobs named in its arguments (ones boxd has already recorded as ended) get
 // "-" for meta and tail, so a long-lived box costs little to scan.
 var scanScript = "# boxd scan\n" + aliveFn + jobStateFn + fmt.Sprintf(`cd %s 2>/dev/null || exit 0
 declare -A skip; for s in "$@"; do skip[$s]=1; done
-for l in *.log; do
-  [ -e "$l" ] || continue
+logs=(*.log); [ -e "${logs[0]}" ] || exit 0
+n=%d; first=$(( ${#logs[@]} > n ? ${#logs[@]} - n : 0 ))
+for l in "${logs[@]:first}"; do
+  [ -f "$l" ] || continue # a FIFO or a device would hang the reads
   j=${l%%.log}
   st=$(jobstate "$j")
   mt=0; [ -f "$j.exit" ] && mt=$(stat -c %%Y "$j.exit")
@@ -52,7 +57,7 @@ for l in *.log; do
   echo "J $j $st $(( $(wc -c < "$l") )) $mt $meta $tail"
 done
 exit 0
-`, jobDir, dash.TailBytes)
+`, jobDir, maxScanJobs, dash.TailBytes)
 
 // logScript prints the log's size, then up to limit bytes of it from offset.
 // It exits 3 when the job isn't there.
@@ -63,6 +68,9 @@ echo $(( $(wc -c < %[2]s.log) ))
 tail -c +%[3]d %[2]s.log | head -c %[4]d
 `, jobDir, job, offset+1, dash.MaxLogChunk)
 }
+
+// maxScanJobs bounds a scan of a long-lived box.
+const maxScanJobs = 200
 
 var validJob = regexp.MustCompile(`^[a-z][a-z0-9-]*\.[0-9]{8}-[0-9]{6}-[0-9a-f]+$`)
 

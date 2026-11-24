@@ -201,7 +201,7 @@ func (h *History) Record(r record) error {
 	r.At = r.At.UTC()
 	if r.Job != nil {
 		j := *r.Job
-		j.Command, j.Reason, j.Tail = Mask(j.Command), Mask(j.Reason), Mask(j.Tail)
+		j.Command, j.Reason, j.Tail, j.Repo = Mask(j.Command), Mask(j.Reason), Mask(j.Tail), Mask(j.Repo)
 		if r.Type == recJobStart {
 			j.Tail = ""
 		}
@@ -261,6 +261,8 @@ func (h *History) Prune() error {
 		t, err := time.Parse("2006-01-02", strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".jsonl"))
 		return t, err == nil
 	}
+	h.mu.Lock() // Record appends to these files
+	defer h.mu.Unlock()
 	var errs []error
 	for _, k := range []struct {
 		prefix string
@@ -285,9 +287,7 @@ func (h *History) Prune() error {
 			}
 		}
 	}
-	h.mu.Lock()
 	h.dropOldTails()
-	h.mu.Unlock()
 	if len(errs) > 0 {
 		return fmt.Errorf("prune history: %v", errs)
 	}
