@@ -51,15 +51,11 @@ memory released from the tray) and retry every 10s, rather than leaving a browse
   - Users from other tailnets who were shared in do get a login header, so the check is an
     allowlist that fails closed when it is empty.
 - **The login names Tyler, not a person at a keyboard.** Agents on the laptop also arrive as Tyler,
-  so they could call the controls too. This is accepted, because the controls do no more than
-  `box` already lets agents do, with one exception, the mode. Every control is written to the
+  so they could call the controls too. This is accepted. Every control is written to the
   history with the caller's tailnet device (from `X-Forwarded-For`, looked up with
   `tailscale whois`), and the page shows it.
-- **Mode is the one control agents can't otherwise reach.** A mode request is honoured only when
-  the browser that sent it presents a session cookie. `boxd` sets that cookie only after a
-  click-through on the page: an HTML confirm that the page itself serves, which needs a real
-  browser with JS. That stops a casual `curl`, not a determined agent. The skill never mentions
-  the API.
+- **That includes the mode**, which agents' restricted certs can't change themselves. Tyler is
+  fine with that (2026-11-24): the log shows which device switched it.
 - **Requests from other sites.** Controls are `POST` only, with a JSON body and an `X-Agent-Box: 1`
   header. Another site can't send that without a CORS preflight, which `boxd` never grants.
 - **Agents' text is shown, never run.** Commands, branches and log tails are written by agents.
@@ -224,7 +220,7 @@ JSON over HTTPS, on the same origin as the page.
   - 400 for a bad request;
   - 403 when the caller isn't an owner;
   - 404 for something that's gone;
-  - 409 for a request that can't be applied now (`code: "yielding"`, `"no-session"` and so on);
+  - 409 for a request that can't be applied now (for example `code: "yielding"`);
   - 502 when Incus failed.
 
 ### Live updates
@@ -244,8 +240,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&before=&limit=` | finished jobs from history, newest first |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call |
 | `GET /api/history?range=day\|week` | `{buckets}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byReason}, medianSeconds: {byRepo}, memUsed, memCap}`. A day has hourly buckets, a week daily ones. The mode timeline is a separate `segments: [{start, end, mode, reason}]`. |
-| `POST /api/mode` | `{mode}`; needs the session cookie |
-| `POST /api/session` | sets the session cookie after the page's confirm |
+| `POST /api/mode` | `{mode}` |
 | `POST /api/jobs/{key}/cancel` | |
 | `POST /api/boxes/{name}/delete` | |
 | `POST /api/boxes/{name}/extend` | `{hours}` |
@@ -294,7 +289,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 2. **`boxd`'s read side:** polling Incus, the history files, `/api/state`, `/api/events`, logs and
    the owner check. History is recorded from here on.
 3. **The page**, against the devserver, then live. This runs in parallel with 2.
-4. **The controls,** with the session cookie, the tray's mode request and the tray's heartbeat.
+4. **The controls,** with the tray's mode request and the tray's heartbeat.
 5. **`box ui`, `box app`,** the tray's **Open dashboard**, and the "PC unreachable" screen.
 6. **The history page and its charts.**
 
