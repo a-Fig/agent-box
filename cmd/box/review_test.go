@@ -306,3 +306,62 @@ func TestFollowWaitsForLauncherPID(t *testing.T) {
 		t.Fatalf("follow = %+v, %v", res, err)
 	}
 }
+
+// pausesOnFollow pauses the PC shortly after the job's follow starts.
+type pausesOnFollow struct {
+	*fakePC
+	pause func(f *fakePC)
+}
+
+func (p *pausesOnFollow) Run(ctx context.Context, c Cmd) (Result, error) {
+	if c.Name == "incus" && isScript(c, "# follow") {
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			p.pause(p.fakePC)
+		}()
+	}
+	return p.fakePC.Run(ctx, c)
+}
+
+func TestAttachReportsBoxFrozenMidRun(t *testing.T) {
+	for name, pause := range map[string]func(f *fakePC){
+		"frozen": func(f *fakePC) { f.insts[0].Status = "Frozen" },
+		"mypc":   func(f *fakePC) { f.mode = "mypc" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
+			a, out := testApp(f)
+			a.PausePoll = 5 * time.Millisecond
+			a.R = &pausesOnFollow{fakePC: f, pause: pause}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			start := time.Now()
+			r, err := a.Run(ctx, RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
+			if err != nil || r.State != statePaused || r.Code != exitPaused {
+				t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+			}
+			if d := time.Since(start); d > 5*time.Second {
+				t.Errorf("took %v, want a prompt return", d)
+			}
+			want := "box: job " + r.Job + " is paused (the PC's owner is using it); it resumes when they switch back. Wait with: box job " + r.Job + ", or run it locally"
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("output lacks %q:\n%s", want, out)
+			}
+			if strings.Contains(out.String(), "still running") {
+				t.Errorf("reported detached:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestAttachFollowsAHealthyBoxPastPolls(t *testing.T) {
+	f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
+	a, out := testApp(f)
+	a.PausePoll = time.Millisecond
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Wait: 50 * time.Millisecond})
+	if err != nil || r.State != stateDetached || r.Code != exitDetached {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+}

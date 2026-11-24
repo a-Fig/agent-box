@@ -53,7 +53,7 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-const pausedHint = "Exit code 75 means the PC or the box is paused: run the command locally instead."
+const pausedHint = "Exit code 75 means the PC or box is paused or busy: run the command locally, or if a running job was paused, wait for it with box_job."
 
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}

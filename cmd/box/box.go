@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"text/tabwriter"
 	"time"
 
@@ -48,6 +49,9 @@ type App struct {
 	Notify  func(jobNotice) // optional destination for job and launch notices
 	Now     func() time.Time
 	Rand    func() string // short random suffix for names and job IDs
+	// PausePoll is how often attach checks whether the box was frozen; zero
+	// is pausePoll.
+	PausePoll time.Duration
 	// JoinConfig says where box join registers and installs; tests replace it.
 	JoinConfig func(out io.Writer) (joinConfig, error)
 }
@@ -933,7 +937,51 @@ done
 `, f, job)
 }
 
+// pausePoll is how often attach looks for a box frozen mid-run.
+const pausePoll = 5 * time.Second
+
+// pausedMidRun says what is true of a job whose box was frozen: it keeps
+// its place and resumes when the PC's owner switches back.
+func pausedMidRun(job string) string {
+	return fmt.Sprintf("box: job %s is paused (the PC's owner is using it); it resumes when they switch back. Wait with: box job %s, or run it locally", job, job)
+}
+
+// watchPause polls until ctx ends. When the box is frozen or the PC is in My
+// PC mode it records that and calls stop. A frozen box freezes the follow
+// process too, so nothing else would notice. GPU boxes are skipped: the tray
+// stops them, and attach words that itself.
+func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFunc, hit *atomic.Bool) {
+	every := a.PausePoll
+	if every <= 0 {
+		every = pausePoll
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		insts, err := a.list(ctx)
+		if err != nil {
+			continue
+		}
+		in := find(insts, box)
+		if in == nil || mode.IsGPU(in.Config) {
+			continue
+		}
+		if in.Status == "Frozen" || (in.Status == "Running" && a.mode(ctx) == "mypc") {
+			hit.Store(true)
+			stop()
+			return
+		}
+	}
+}
+
 // attach streams a job's log until the job exits and returns its exit code.
+// If the box is frozen meanwhile it returns statePaused promptly: the job
+// survives and resumes when the box is thawed.
 func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state string, code int, err error) {
 	box, _, _ := strings.Cut(job, ".")
 	f := workRoot + "/.box/" + job
@@ -943,10 +991,24 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		follow, cancel = context.WithTimeout(ctx, wait)
 		defer cancel()
 	}
-	res, err := a.incus(follow, Cmd{
+	run, stop := context.WithCancel(follow)
+	defer stop()
+	var hit atomic.Bool
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		a.watchPause(run, box, stop, &hit)
+	}()
+	res, err := a.incus(run, Cmd{
 		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
 		Stdout: a.Out, Stderr: a.Err,
 	})
+	stop()
+	<-watched
+	if hit.Load() && ctx.Err() == nil && (err != nil || res.Code != 0) {
+		fmt.Fprintln(a.Err, pausedMidRun(job))
+		return statePaused, exitPaused, nil
+	}
 	if follow.Err() != nil {
 		fmt.Fprintf(a.Err, "box: job %s is still running; reattach with: box job %s\n", job, job)
 		return stateDetached, exitDetached, nil
