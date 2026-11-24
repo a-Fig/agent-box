@@ -66,6 +66,37 @@ func TestRunNewKeepsBoxWhenPaused(t *testing.T) {
 	}
 }
 
+type startsDuringIdleCheck struct {
+	*fakePC
+	job string
+}
+
+func (f *startsDuringIdleCheck) Run(ctx context.Context, c Cmd) (Result, error) {
+	result, err := f.fakePC.Run(ctx, c)
+	if c.Name == "incus" && isScript(c, "# running jobs") && f.job != "" {
+		// A second caller starts its job and publishes its expiry after the scan.
+		f.running, f.job = f.job, ""
+	}
+	return result, err
+}
+
+func TestReattachKeepsExpiryWhenAnotherJobStartsAfterScan(t *testing.T) {
+	const box = "my-repo"
+	const deadline = "2026-11-24T12:00:00Z"
+	f := &fakePC{t: t, exit: "0", insts: []instance{{
+		Name: box, Status: "Running", Config: map[string]string{expiresKey: deadline},
+	}}}
+	a, _ := testApp(f)
+	a.R = &startsDuringIdleCheck{fakePC: f, job: box + ".20261123-120000-0002"}
+	r, err := a.Job(context.Background(), box+".20261123-120000-0001", 0)
+	if err != nil || r.State != stateDone {
+		t.Fatalf("Job = %+v, %v", r, err)
+	}
+	if got := f.inst(box).Config[expiresKey]; got != deadline {
+		t.Errorf("active expiry = %q, want %q", got, deadline)
+	}
+}
+
 func TestJobRemovesThrowawayBoxOnceDone(t *testing.T) {
 	f := &fakePC{t: t, block: true}
 	a, out := testApp(f)

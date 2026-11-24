@@ -603,6 +603,19 @@ func (a *App) markIdle(ctx context.Context, box string) {
 	}
 	if err := a.setExpiry(ctx, box, idleTTL); err != nil {
 		a.warn(fmt.Sprintf("box: warning: setting idle expiry on %s: %v", box, err))
+		return
+	}
+	// A job can publish its PID and refresh the deadline after the first
+	// scan but before our idle write. Restore the job deadline in that case.
+	// A job that starts after this scan refreshes its own deadline.
+	out, err = a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
+	if err != nil {
+		a.warn(fmt.Sprintf("box: warning: rechecking active jobs on %s: %v", box, err))
+	} else if len(strings.Fields(out)) == 0 {
+		return
+	}
+	if err := a.setExpiry(ctx, box, jobTTL); err != nil {
+		a.warn(fmt.Sprintf("box: warning: restoring job expiry on %s: %v", box, err))
 	}
 }
 
