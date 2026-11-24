@@ -1,0 +1,226 @@
+// The dashboard's page. Plain DOM, no framework and no build step, as Murmur's page: boxd embeds
+// these files as they are. Everything an agent wrote (reasons, commands, branches, logs) is
+// untrusted text and reaches the page only as text nodes, under a Content-Security-Policy of
+// default-src 'self'. Widths and colors are set through the CSSOM, never a style attribute.
+
+import { h, icon } from "./dom.js";
+import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
+import { overview, boxes, jobs, jobDetail, modeLabel } from "./views.js";
+import { history } from "./history.js";
+
+const root = document.getElementById("root");
+const NARROW = window.matchMedia("(max-width: 767px)");
+
+const VIEWS = {
+  overview: { title: "Overview", icon: "grid", view: overview },
+  boxes: { title: "Boxes", icon: "box", view: boxes },
+  jobs: { title: "Jobs", icon: "list", view: jobs },
+  history: { title: "History", icon: "chart", view: history },
+};
+
+// The theme, as Murmur's: Dim by default, Dark and Light as options, chosen with a segmented
+// radio group. theme.js applied the saved one before the page painted.
+const THEMES = [
+  ["dark", "Dark"],
+  ["dim", "Dim"],
+  ["light", "Light"],
+];
+const THEME_KEY = "agent-box:theme";
+function theme() {
+  return document.documentElement.dataset.theme || "dim";
+}
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try {
+    localStorage.setItem(THEME_KEY, t);
+  } catch {}
+  shell = null;
+  render();
+}
+
+function themeSwitch() {
+  return h(
+    "div",
+    { class: "segmented", role: "radiogroup", "aria-label": "Theme" },
+    THEMES.map(([id, label]) =>
+      h(
+        "button",
+        {
+          role: "radio",
+          "aria-checked": theme() === id ? "true" : "false",
+          tabindex: theme() === id ? 0 : -1,
+          "data-key": "theme-" + id,
+          onclick: () => setTheme(id),
+          onkeydown: (e) => {
+            // One Tab stop; the arrow keys move the choice (WCAG 4.1.2).
+            const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+            if (!step) return;
+            e.preventDefault();
+            const i = THEMES.findIndex(([t]) => t === theme());
+            const next = THEMES[(i + step + THEMES.length) % THEMES.length][0];
+            setTheme(next);
+            root.querySelector(`[data-key="theme-${next}"]`)?.focus();
+          },
+        },
+        label,
+      ),
+    ),
+  );
+}
+
+// Routes: #overview, #boxes, #jobs, #jobs/<key>, #history.
+function route() {
+  const [name, ...rest] = location.hash.slice(1).split("/");
+  if (name === "jobs" && rest.length) return { name: "jobs", key: decodeURIComponent(rest.join("/")) };
+  return { name: VIEWS[name] ? name : "overview" };
+}
+
+let shell = null; // { el, side, content, title, mounted }
+let drawer = false;
+
+function sidebar(r) {
+  const live = jobsOf((j) => j.state === "running" || j.state === "paused").length;
+  const counts = { boxes: S.boxes.size || null, jobs: live || null };
+  return h(
+    "aside",
+    { class: "sidebar", "data-app-sidebar": true, "aria-label": "Navigation" },
+    h("div", { class: "sidebar-header" }, h("img", { class: "brand-mark", src: "/assets/favicon.svg", alt: "" }), h("span", { class: "brand" }, "agent-box")),
+    h(
+      "nav",
+      { class: "sidebar-body" },
+      h(
+        "ul",
+        { class: "sidebar-menu" },
+        Object.entries(VIEWS).map(([id, v]) =>
+          h("li", null, h("a", { class: "menu-button", href: "#" + id, "aria-current": r.name === id ? "page" : null, onclick: () => setDrawer(false) }, icon(v.icon), h("span", { class: "label" }, v.title), counts[id] ? h("span", { class: "menu-count" }, String(counts[id])) : null)),
+        ),
+      ),
+      S.machines.size ? h("p", { class: "group-label" }, "Machines") : null,
+      [...S.machines.values()].map((m) =>
+        h(
+          "div",
+          { class: "side-machine" },
+          h("span", { class: "side-machine-name" }, h("span", { class: "dot " + (m.yielding ? "dot-warn" : m.mode === "mypc" ? "dot-off" : "dot-on") }), m.name),
+          h("span", { class: "side-machine-line" }, m.yielding ? "Yielding to a game" : modeLabel(m.mode), m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) + " pending" : ""),
+          trayAlive(m) ? null : h("span", { class: "side-machine-line" }, "Tray down"),
+        ),
+      ),
+    ),
+    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", { class: "conn" }, h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…")),
+  );
+}
+
+function setDrawer(open) {
+  drawer = open && NARROW.matches;
+  render();
+}
+
+function unreachable() {
+  const wait = Math.max(0, Math.round((S.nextTry - Date.now()) / 1000));
+  return h(
+    "div",
+    { class: "full-screen" },
+    h(
+      "div",
+      { class: "empty", role: "alert" },
+      h("span", { class: "empty-ico" }, icon("offline")),
+      h("p", { class: "empty-title" }, "PC unreachable"),
+      h("p", { class: "empty-line" }, "The dashboard runs on the PC, and it isn't answering. It is probably asleep or off, or its memory was released from the tray, which stops the agents' Linux."),
+      h("p", { class: "empty-line", "data-retry": true }, "Trying again " + (wait ? "in " + wait + "s" : "now") + " · every " + RETRY_MS / 1000 + "s"),
+      h("button", { class: "btn btn-sm btn-outline", onclick: retryNow }, icon("retry"), "Try now"),
+      h("div", { class: "sidebar-foot" }, themeSwitch()),
+    ),
+  );
+}
+
+function loading() {
+  return h("div", { class: "full-screen" }, h("div", { class: "empty", role: "status" }, h("span", { class: "empty-ico" }, icon("retry", "spin")), h("p", { class: "empty-title" }, "Connecting to the PC…")));
+}
+
+// Widths, fills and scroll positions the views asked for with data- attributes, set through the
+// CSSOM, which the CSP allows where a style attribute isn't.
+function finish(el) {
+  for (const n of el.querySelectorAll("[data-w]")) n.style.width = Math.max(0, Math.min(100, Number(n.dataset.w))) + "%";
+  for (const n of el.querySelectorAll("[data-bg]")) n.style.background = n.dataset.bg;
+  for (const n of el.querySelectorAll("[data-stick]")) n.scrollTop = n.scrollHeight;
+}
+
+let current = null; // { name, key, view }
+let queued = false;
+
+function render() {
+  if (queued) return;
+  queued = true;
+  requestAnimationFrame(draw);
+}
+
+function draw() {
+  queued = false;
+  if (S.conn === "down" || (S.conn === "loading" && !S.machines.size)) {
+    current?.view.leave?.();
+    current = null;
+    shell = null;
+    root.replaceChildren(S.conn === "down" ? unreachable() : loading());
+    toastEl();
+    return;
+  }
+  const r = route();
+  const v = r.key ? jobDetail : VIEWS[r.name].view;
+  if (!shell) {
+    const content = h("main", { class: "content", id: "content" });
+    const title = h("h1", null);
+    const top = h("header", { class: "topbar" }, h("button", { class: "icon-btn menu-toggle", "aria-label": "Open navigation", onclick: () => setDrawer(true) }, icon("menu")), title);
+    const el = h("div", { class: "app" }, h("span"), h("div", { class: "main" }, top, content));
+    shell = { el, content, title };
+    root.replaceChildren(el);
+    current = null;
+  }
+  shell.el.classList.toggle("drawer-open", drawer);
+  shell.el.firstChild.replaceWith(sidebar(r));
+  const scrim = shell.el.querySelector(".drawer-scrim");
+  if (drawer && !scrim) shell.el.append(h("div", { class: "drawer-scrim", onclick: () => setDrawer(false) }));
+  if (!drawer) scrim?.remove();
+  const name = r.key ? "job" : r.name;
+  shell.title.textContent = r.key ? "Job" : VIEWS[r.name].title;
+  document.title = (r.key ? "Job" : VIEWS[r.name].title) + " · agent-box";
+  if (!current || current.name !== name || current.key !== r.key) {
+    current?.view.leave?.();
+    current = { name, key: r.key, view: v };
+    shell.content.scrollTop = 0;
+    v.mount(shell.content, r.key);
+  } else v.update(shell.content, r.key);
+  finish(shell.content);
+  finish(shell.el.firstChild);
+  toastEl();
+}
+
+function toastEl() {
+  let t = document.querySelector(".toast");
+  if (!S.toast) return t?.remove();
+  if (!t) document.body.append((t = h("div", { class: "toast", role: "status" })));
+  t.className = "toast" + (S.toast.bad ? " bad" : "");
+  t.textContent = S.toast.text;
+}
+
+setChanged(render);
+window.addEventListener("hashchange", () => {
+  drawer = false;
+  render();
+});
+NARROW.addEventListener("change", () => setDrawer(false));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && drawer) setDrawer(false);
+});
+// Times on the page ("6m 12s", "expires in 2h") move on without an event; the countdown on the
+// unreachable screen too.
+setInterval(() => {
+  if (S.conn === "down") {
+    const n = root.querySelector("[data-retry]");
+    if (n) {
+      const wait = Math.max(0, Math.round((S.nextTry - Date.now()) / 1000));
+      n.textContent = "Trying again " + (wait ? "in " + wait + "s" : "now") + " · every " + RETRY_MS / 1000 + "s";
+    }
+  } else render();
+}, 1000);
+
+start();
