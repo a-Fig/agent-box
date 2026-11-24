@@ -86,6 +86,8 @@ box rm <name>                    # box_rm
 box ls                           # box_ls
 box mcp                          # serve the tools on stdio
 box join [--leave]               # register box mcp with claude/codex (user scope) and install skills/box/SKILL.md
+box ui [--url U]                 # the dashboard (docs/ui.md) in the browser: https://<host>/ of the pc remote
+box app [--url U] [--wait]       # the same page in a window of its own (internal/desktop); for people, so not an MCP tool
 ```
 
 `box status` reads `user.agent-box.mode` and `user.agent-box.reason` (set by the tray while it yields to a game) and the caps from the project, counts slots as `limits.instances` minus existing boxes, and says how many of each size fit (see Box sizes). `box join` uses the agents' own CLIs and never edits their config files. Env names that look like secrets are refused, since boxes are shared.
@@ -96,6 +98,8 @@ box join [--leave]               # register box mcp with claude/codex (user scop
 3. Exits with the remote exit code, or 75 when the PC is paused, so callers can fall back to running locally.
 
 By default it reuses one box per repo, which keeps caches and `node_modules` warm. `--new` creates a throwaway box. `--size` sets the size of a box the run launches (medium by default); when the repo's box exists in another size, the run uses a throwaway of the requested size and says so.
+
+`box app` is a window around the page `box ui` opens, as `mur app` is in Murmur: the system's web view (WebView2 on Windows) through [glaze](https://github.com/crgimenes/glaze), which loads it at run time with purego, so there is no cgo and `box` still cross-compiles. glaze (and purego under it) is box's one dependency beyond `golang.org/x/sys`. The reason is the same as Murmur's app: a native window needs the platform's web view, and glaze is the cgo-free way to it that Murmur already runs on Windows; it raised `go.mod` to Go 1.27.1. Linux builds get the window only with `-tags desktop`, because purego makes the binary link glibc dynamically; macOS has none yet. When the PC doesn't answer, the window shows the page's "PC unreachable" screen from the copy of `internal/dash/static` built into `box`, served on loopback, whose `/api/state` checks the PC each time the page retries (every 10s) and sends the window there once it answers.
 
 ### 2. Tray app (Windows): mode switch + gaming yield
 

@@ -36,6 +36,8 @@ const usage = `usage:
   box ls                                    list boxes
   box mcp                                   serve MCP on stdio
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
+  box ui [--url U]                          open the PC's dashboard in the browser
+  box app [--url U] [--wait]                open the dashboard in a window of its own
 
 --reason (required for run): one or two sentences, 10 to 300 characters, on
 why this needs a box. The PC's owner sees it on the dashboard.
@@ -52,6 +54,7 @@ when the PC or box is paused, there is no room, or the GPU is taken or was
 stopped. A job paused mid-run resumes if the PC's owner switches back within
 15 minutes (4 hours once its memory is moved to swap), else it is lost; box job
 reattaches. A relative remote path in box pull starts at the job's checkout.
+The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
@@ -264,6 +267,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			return fail(err)
 		}
 		return 0
+	case "ui":
+		return runUI(ctx, a, fs, args[1:])
+	case "app":
+		return runApp(ctx, a, fs, args[1:])
 	case "-h", "--help", "help":
 		fmt.Fprint(a.Out, usageText())
 		return 0

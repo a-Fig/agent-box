@@ -311,31 +311,14 @@ func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.
 	a.Post(ctx, "https://"+host+"/api/jobs/ended", b)
 }
 
-// pcHost is the host name of the Incus remote, where boxd also answers
-// (behind tailscale serve, on 443), or "" if it can't be read. Incus 7 has no
-// remote get-url, so it reads remote list's JSON: Addrs, or Addr before 6.x.
+// pcHost is the host of the Incus remote, where boxd also answers (behind
+// tailscale serve, on 443), or "" if it can't be read (DashURL).
 func (a *App) pcHost(ctx context.Context) string {
-	out, err := a.incusOK(ctx, "remote", "list", "--format", "json")
+	u, err := a.DashURL(ctx)
 	if err != nil {
 		return ""
 	}
-	var remotes map[string]struct {
-		Addrs []string
-		Addr  string
-	}
-	if json.Unmarshal([]byte(out), &remotes) != nil {
-		return ""
-	}
-	r := remotes[a.Remote]
-	addr := r.Addr
-	if len(r.Addrs) > 0 {
-		addr = r.Addrs[0]
-	}
-	u, err := url.Parse(addr)
-	if err != nil || u.Scheme != "https" {
-		return ""
-	}
-	return u.Hostname()
+	return strings.TrimSuffix(strings.TrimPrefix(u, "https://"), "/")
 }
 
 // postJSON is App.Post outside tests.

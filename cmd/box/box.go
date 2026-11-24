@@ -68,6 +68,8 @@ type App struct {
 	Getenv func(string) string
 	// Post sends a refusal to boxd; nil sends none. Errors are ignored.
 	Post func(ctx context.Context, url string, body []byte) error
+	// Browse opens an address in the person's browser; tests replace it.
+	Browse func(url string) error
 }
 
 func newApp() *App {
@@ -83,6 +85,7 @@ func newApp() *App {
 
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
+		Browse:     browse,
 	}
 }
 

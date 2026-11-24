@@ -39,9 +39,13 @@ Incus's own UI stays on port 8443, for raw admin.
 ### When the PC can't be reached
 
 `boxd` lives in the distro, so it is gone whenever the PC is off or asleep, or WSL has stopped. The
-tray's **Release memory** does exactly that. The app and `box ui` check the address first. If it
-doesn't answer, they show a clear "PC unreachable" screen naming the likely reason (asleep, or
-memory released from the tray) and retry every 10s, rather than leaving a browser error.
+tray's **Release memory** does exactly that. The page then shows a clear "PC unreachable" screen
+naming the likely reason (asleep, or memory released from the tray) and retries every 10s. A
+browser that can't load the page at all shows its own error, so `box ui` only opens the address.
+`box app` starts on the page's copy built into `box`, served on loopback, where every `/api` call
+fails as the PC's would, and `/api/state` first checks whether the PC answers now: the page's
+"Connecting" and "PC unreachable" screens and its 10s retry are the same, and once the PC
+answers, the window goes to it (2026-11-24).
 
 ## Who may look and act
 
