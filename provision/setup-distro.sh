@@ -305,6 +305,38 @@ else
   note "no certificate yet (Tailscale not joined, or HTTPS certificates off in the tailnet's DNS settings); the timer retries weekly"
 fi
 
+step "Dashboard server (boxd, docs/ui.md)"
+# boxd is copied in by install-pc.ps1 -BoxdPath; without it this step only reports.
+if [ -f "$HERE/boxd" ]; then
+  install -D -m 0755 "$HERE/boxd" /opt/agent-box/bin/boxd
+  install -m 0644 "$HERE/systemd/agent-box-boxd.service" /etc/systemd/system/
+  install -d -m 0755 /etc/agent-box
+  # The owner is the tailnet login this node belongs to (Tyler's). It is read here, never
+  # written into the repo, which is public. A tagged node has no login: the list stays empty
+  # and boxd refuses everyone until it is filled in by hand.
+  if [ ! -s /etc/agent-box/boxd.json ]; then
+    owner=$(tailscale status --json 2>/dev/null | python3 -c 'import json, sys
+d = json.load(sys.stdin); u = d.get("User", {}).get(str(d["Self"].get("UserID", "")), {})
+print(u.get("LoginName", "") if not d["Self"].get("Tags") else "")' 2>/dev/null || true)
+    if [ -n "$owner" ]; then owners="[\"$owner\"]"; else owners="[]"; fi
+    printf '{"owners": %s, "listen": "127.0.0.1:7766"}\n' "$owners" > /etc/agent-box/boxd.json
+    chmod 0644 /etc/agent-box/boxd.json
+    [ -n "$owner" ] || note "WARNING: no tailnet login found; add owners to /etc/agent-box/boxd.json by hand"
+  fi
+  systemctl daemon-reload
+  systemctl enable agent-box-boxd.service >/dev/null 2>&1
+  systemctl restart agent-box-boxd.service
+  note "boxd: $(systemctl is-active agent-box-boxd.service || true), owners in /etc/agent-box/boxd.json"
+  if tailscale status >/dev/null 2>&1; then
+    tailscale serve --bg --https=443 http://127.0.0.1:7766 >/dev/null
+    note "tailscale serve: https://<this node>.<tailnet>.ts.net/ -> 127.0.0.1:7766 (tailnet only)"
+  else
+    note "Tailscale is not up: run 'tailscale serve --bg --https=443 http://127.0.0.1:7766' once it is"
+  fi
+else
+  note "not installed (pass -BoxdPath to install-pc.ps1)"
+fi
+
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then
   note "/dev/kvm present: Incus VMs (incus launch --vm) are possible."
