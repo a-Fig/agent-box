@@ -135,8 +135,28 @@ $wantCfg = [ordered]@{
     'experimental' = [ordered]@{ 'autoMemoryReclaim' = 'gradual'; 'sparseVhd' = 'true' }
 }
 $cfgPath = Join-Path $env:USERPROFILE '.wslconfig'
+# Read the bytes and decode them ourselves: PowerShell 5.1's Get-Content assumes the ANSI code page
+# without a BOM. Keep the file's encoding (BOM or not), line endings and final newline.
 $lines = New-Object System.Collections.Generic.List[string]
-if (Test-Path -LiteralPath $cfgPath) { foreach ($l in (Get-Content -LiteralPath $cfgPath)) { $lines.Add([string]$l) } }
+$enc = New-Object Text.UTF8Encoding($false)
+$eol = "`r`n"
+$finalEol = $true
+if (Test-Path -LiteralPath $cfgPath) {
+    $bytes = [IO.File]::ReadAllBytes($cfgPath)
+    $reader = New-Object IO.StreamReader((New-Object IO.MemoryStream(, $bytes)), $enc, $true)   # true: detect a BOM
+    $text = $reader.ReadToEnd()
+    $enc = $reader.CurrentEncoding
+    $reader.Dispose()
+    $hasBom = ($bytes.Length -ge 2 -and (($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB) -or ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) -or ($bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF)))
+    if (-not $hasBom -and $enc -is [Text.UTF8Encoding]) { $enc = New-Object Text.UTF8Encoding($false) }
+    if ($text.Length -gt 0) {
+        if ($text -notmatch "`r`n" -and $text -match "`n") { $eol = "`n" }
+        $finalEol = $text.EndsWith("`n")
+        $body = $text -replace "`r?`n$", ''
+
+        foreach ($l in ($body -split "`r?`n")) { $lines.Add([string]$l) }
+    }
+}
 $original = ($lines -join "`n")
 foreach ($section in $wantCfg.Keys) {
     $start = -1
@@ -169,7 +189,9 @@ if ($cfgChanged) {
         $bak = "$cfgPath.agent-box.bak"
         if (-not (Test-Path -LiteralPath $bak)) { Copy-Item -LiteralPath $cfgPath -Destination $bak; Note "backup: $bak" }
     }
-    [IO.File]::WriteAllLines($cfgPath, $lines, (New-Object Text.UTF8Encoding($false)))
+    $out = ($lines -join $eol)
+    if ($finalEol) { $out += $eol }
+    [IO.File]::WriteAllText($cfgPath, $out, $enc)
     Note "updated $cfgPath (other settings kept)"
 } else {
     Note 'already up to date'

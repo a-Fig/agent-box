@@ -172,10 +172,12 @@ fi
 # the 30GiB cache allocate 210GiB, the disk cap. The CPU cap leaves room for each mix in Full.
 incus project set "$PROJECT" limits.instances="$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu="$CPU_CAP"
-if [ -z "$(incus project get "$PROJECT" limits.memory)" ]; then
+# A failed read prints nothing too; only a read that worked and came back empty means unset.
+MEM_NOW=$(incus project get "$PROJECT" limits.memory) || die "could not read limits.memory of project $PROJECT"
+if [ -z "$MEM_NOW" ]; then
   incus project set "$PROJECT" limits.memory="$MEM_CAP"
+  MEM_NOW=$MEM_CAP
 fi
-MEM_NOW=$(incus project get "$PROJECT" limits.memory)
 # limits.disk: "maximum value of the aggregate disk space used by all instance volumes, custom
 # volumes, and images of the project" (project config reference, key limits.disk).
 incus project set "$PROJECT" limits.disk="$DISK_CAP"

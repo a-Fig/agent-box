@@ -53,7 +53,11 @@ func (f *fake) List(context.Context) ([]Instance, error) {
 		for k, v := range f.config[n] {
 			cfg[k] = v
 		}
-		out = append(out, Instance{Name: n, Status: f.state[n], Config: cfg})
+		in := Instance{Name: n, Status: f.state[n], Config: cfg}
+		if f.state[n] != "Stopped" {
+			in.State = &InstanceState{Pid: int64(1000 + len(out))}
+		}
+		out = append(out, in)
 	}
 	return out, nil
 }
@@ -304,95 +308,6 @@ func TestMemoryCapReadFailureIsReported(t *testing.T) {
 	st := tick(New(f, Full), 0, false)
 	if st.Err == nil || memSets(f.take()) != nil {
 		t.Fatalf("err %v", st.Err)
-	}
-}
-
-type fakeReclaim struct {
-	f    *fake
-	fail bool
-}
-
-func (r *fakeReclaim) Reclaim(_ context.Context, n string) error {
-	if err := r.f.rec("reclaim %s", n); err != nil {
-		return err
-	}
-	if r.fail {
-		return errors.New("no swap")
-	}
-	return nil
-}
-
-// only keeps the calls that start with one of the prefixes.
-func only(calls []string, prefixes ...string) []string {
-	var out []string
-	for _, c := range calls {
-		for _, p := range prefixes {
-			if strings.HasPrefix(c, p) {
-				out = append(out, c)
-				break
-			}
-		}
-	}
-	return out
-}
-
-func TestMyPCReclaimsFrozenBoxesOnceAfterPausingAll(t *testing.T) {
-	f := newFake("a", "Running", "b", "Frozen", "c", "Stopped", "g", "Running")
-	f.config["g"] = map[string]string{SizeKey: GPUSize}
-	m := New(f, Full)
-	m.Reclaim = &fakeReclaim{f: f}
-	tick(m, 0, false)
-	f.take()
-
-	tick(m, time.Second, true) // a game starts
-	// b was resumed by Full and is paused again; the GPU box is stopped, not reclaimed.
-	equal(t, only(f.take(), "pause ", "reclaim "), []string{"pause a", "pause b", "reclaim a", "reclaim b"})
-	tick(m, 2*time.Second, true)
-	equal(t, f.take(), nil)
-
-	// Back to Full, then another game: reclaimed afresh.
-	tick(m, 2*time.Minute, false)
-	tick(m, 2*time.Minute+YieldDebounce, false)
-	f.take()
-	tick(m, 3*time.Minute, true)
-	equal(t, only(f.take(), "reclaim "), []string{"reclaim a", "reclaim b"})
-}
-
-func TestReclaimFailureIsReportedNotRetried(t *testing.T) {
-	f := newFake("a", "Frozen")
-	m := New(f, MyPC)
-	m.Reclaim = &fakeReclaim{f: f, fail: true}
-	if st := tick(m, 0, false); st.Err == nil {
-		t.Fatal("no error")
-	}
-	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "reclaim a"})
-	if st := tick(m, time.Second, false); st.Err != nil {
-		t.Fatalf("err %v", st.Err)
-	}
-	equal(t, f.take(), nil)
-}
-
-func TestCgroupReclaimArgs(t *testing.T) {
-	var got []string
-	r := CgroupReclaim{Run: func(_ context.Context, args ...string) ([]byte, error) { got = args; return nil, nil }}
-	if err := r.Reclaim(context.Background(), "box-1"); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 5 || got[0] != "sh" || got[1] != "-c" || got[3] != "sh" || got[4] != "box-1" {
-		t.Fatalf("args %q", got)
-	}
-	for _, want := range []string{"/sys/fs/cgroup/lxc.payload.agents_$1", "memory.reclaim", "memory.swap.max"} {
-		if !strings.Contains(got[2], want) {
-			t.Errorf("script lacks %q: %s", want, got[2])
-		}
-	}
-	if strings.ContainsAny(got[2], "\\\"") {
-		t.Errorf("script has quotes or backslashes wsl.exe would mangle: %s", got[2])
-	}
-	for _, bad := range []string{"../x", "a b", "", "-rf"} {
-		if r.Reclaim(context.Background(), bad) == nil {
-			t.Errorf("accepted %q", bad)
-		}
 	}
 }
 

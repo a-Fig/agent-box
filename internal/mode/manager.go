@@ -42,7 +42,8 @@ type Status struct {
 // every step is idempotent, so a failed call is retried on the next tick.
 type Manager struct {
 	Incus Incus
-	// Reclaim, if set, pushes each box frozen in My PC out to swap.
+	// Reclaim, if set, pushes each box frozen in My PC out to swap, in the
+	// background (reclaim.go).
 	Reclaim Reclaimer
 
 	mu     sync.Mutex // guards chosen
@@ -57,7 +58,7 @@ type Manager struct {
 	pubReason   string // user.agent-box.reason as last read or written
 	reasonRead  bool   // pubReason was read from the project once
 	frozenSince map[string]time.Time
-	reclaimed   map[string]bool   // frozen instances already pushed to swap
+	rc          reclaims
 	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
 }
@@ -91,8 +92,9 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	if st.Effective != m.applied {
 		m.applied, m.projectDone = st.Effective, false
 		m.frozenSince = map[string]time.Time{}
-		m.reclaimed = map[string]bool{}
+		m.rc.forgetAll()
 	}
+	m.rc.init()
 
 	var errs []error
 	if !m.projectDone {
@@ -130,6 +132,12 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		why := string(MyPC)
 		if m.yielding {
 			why = yieldReason(true, m.reason)
+		}
+		if m.Reclaim != nil {
+			errs = append(errs, m.rc.harvest(now)...)
+			if err := m.sweepSwap(ctx, ins); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		st.Running, errs = m.applyInstances(ctx, now, st.Effective, why, ins, errs)
 	}
@@ -261,7 +269,6 @@ func AllocatedMemory(ins []Instance) int64 {
 // box stopped in My PC is told (StoppedKey).
 func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, why string, ins []Instance, errs []error) (running int, _ []error) {
 	seen := map[string]bool{}
-	var reclaim []string
 	for _, in := range ins {
 		seen[in.Name] = true
 		state := strings.ToLower(in.Status)
@@ -270,9 +277,10 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 		case eff == MyPC && IsGPU(in.Config):
 			state, err = m.stopGPU(ctx, now, in, state, why)
 		case eff == MyPC:
+			prev := state
 			state, err = m.freeze(ctx, now, in.Name, state)
-			if state == "frozen" && !m.reclaimed[in.Name] {
-				reclaim = append(reclaim, in.Name)
+			if m.Reclaim != nil && err == nil {
+				state, err = m.reclaimFrozen(ctx, now, in, prev, state)
 			}
 		case IsGPU(in.Config) && state == "stopped" && in.Config[StoppedKey] != "":
 			// Stays stopped; stopGPU retries a failed expiry write.
@@ -292,22 +300,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 			delete(m.frozenSince, name)
 		}
 	}
-	for name := range m.reclaimed {
-		if !seen[name] {
-			delete(m.reclaimed, name)
-		}
-	}
-	// After every box is paused, so a game gets the CPUs back first. One try
-	// per freeze: a reclaim that fails isn't repeated every tick, since each
-	// can take seconds. The 15-minute stop frees the memory either way.
-	if m.Reclaim != nil {
-		for _, name := range reclaim {
-			m.reclaimed[name] = true
-			if err := m.Reclaim.Reclaim(ctx, name); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
+	m.rc.prune(seen)
 	return running, errs
 }
 
@@ -411,8 +404,11 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 			}
 		}
 	}
+	if err := m.closeSwapBeforeRun(ctx, in.Name); err != nil {
+		errs = append(errs, err)
+	}
 	if err := errors.Join(errs...); err != nil {
-		return state, err // stay frozen until the limits are right
+		return state, err // stay frozen until the limits and swap are right
 	}
 	if state == "frozen" {
 		if err := m.Incus.Resume(ctx, in.Name); err != nil {
