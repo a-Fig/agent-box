@@ -19,6 +19,10 @@ const (
 	// FrozenStop is how long an instance may stay frozen in My PC before it is
 	// stopped to free its RAM.
 	FrozenStop = 15 * time.Minute
+	// FrozenSwappedStop replaces FrozenStop for a CPU box whose reclaim ran
+	// and left it holding ReclaimLeft or less: frozen and in swap, it costs
+	// Windows next to no RAM, so its job may wait for Tyler much longer.
+	FrozenSwappedStop = 4 * time.Hour
 	// YieldDebounce is how long the game signal must stay clear before the
 	// chosen mode comes back, so alt-tab doesn't freeze and thaw the boxes.
 	YieldDebounce = 20 * time.Second
@@ -61,7 +65,7 @@ type Manager struct {
 	projectDone bool   // mode label set for applied
 	pubReason   string // user.agent-box.reason as last read or written
 	reasonRead  bool   // pubReason was read from the project once
-	frozenSince map[string]time.Time
+	frozenSince map[string]frozenAt
 	rc          reclaims
 	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
@@ -117,7 +121,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	}
 	if st.Effective != m.applied {
 		m.applied, m.projectDone = st.Effective, false
-		m.frozenSince = map[string]time.Time{}
+		m.frozenSince = map[string]frozenAt{}
 		m.rc.forgetAll()
 	}
 	m.rc.init()
@@ -313,7 +317,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 			state, err = m.stopGPU(ctx, now, in, state, why)
 		case eff == MyPC:
 			prev := state
-			state, err = m.freeze(ctx, now, in.Name, state)
+			state, err = m.freeze(ctx, now, in.Name, pidOf(in), state)
 			if m.Reclaim != nil && err == nil {
 				m.reclaimFrozen(now, in, prev, state)
 			}
@@ -339,20 +343,37 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 	return running, errs
 }
 
+// frozenAt is when an instance was first seen frozen, for one identity: a
+// box recreated under the same name (a new init PID) starts a new timer.
+type frozenAt struct {
+	at  time.Time
+	pid int64
+}
+
+// frozenLimit is how long box name (init PID pid) may stay frozen: 4 hours
+// once a reclaim of this freeze ran and left ReclaimLeft or less, else 15
+// minutes (no reclaim yet, one that left more, or no swap to go to).
+func (m *Manager) frozenLimit(name string, pid int64) time.Duration {
+	if j := m.rc.jobs[name]; m.Reclaim != nil && j != nil && pid > 0 && j.pid == pid && j.done && j.left <= ReclaimLeft {
+		return FrozenSwappedStop
+	}
+	return FrozenStop
+}
+
 // freeze is the My PC step for one instance; it returns the state it ends in.
-func (m *Manager) freeze(ctx context.Context, now time.Time, name, state string) (string, error) {
+func (m *Manager) freeze(ctx context.Context, now time.Time, name string, pid int64, state string) (string, error) {
 	switch state {
 	case "running":
 		if err := m.Incus.Pause(ctx, name); err != nil {
 			return state, err
 		}
-		m.frozenSince[name] = now
+		m.frozenSince[name] = frozenAt{now, pid}
 		return "frozen", nil
 	case "frozen":
 		since, ok := m.frozenSince[name]
-		if !ok {
-			m.frozenSince[name] = now
-		} else if now.Sub(since) >= FrozenStop {
+		if !ok || since.pid != pid {
+			m.frozenSince[name] = frozenAt{now, pid}
+		} else if now.Sub(since.at) >= m.frozenLimit(name, pid) {
 			if err := m.Incus.Stop(ctx, name); err != nil {
 				return state, err
 			}

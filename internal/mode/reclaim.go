@@ -16,8 +16,8 @@ import (
 // reclaiming a frozen box is a single memory.reclaim write: nothing is opened
 // for it and nothing needs putting back, so a reclaim that is cancelled,
 // killed or raced can't leave a box in a state that needs repair. Reclaim is
-// best effort: nothing acts on how much a box still holds afterwards, and
-// only FrozenStop stops a frozen CPU box.
+// best effort and never stops a box itself; what it leaves only picks the
+// frozen limit (FrozenStop, or FrozenSwappedStop when ReclaimLeft or less).
 type Reclaimer interface {
 	// EnsureSwap sets memory.swap.max on each box's cgroup where it differs
 	// and returns an error for each box it couldn't (nil entries are fine).
@@ -37,13 +37,16 @@ type SwapBox struct {
 }
 
 // Reclaimed is one reclaim that ran: what the box still holds afterwards,
-// for the log and the dashboard. Nothing acts on it.
+// for the log and the dashboard. Only frozenLimit reads it.
 type Reclaimed struct {
 	Name string
 	Left int64
 }
 
 const (
+	// ReclaimLeft is the most a box may still hold after a reclaim for its
+	// freeze to get FrozenSwappedStop; measured leftovers were about 10MB.
+	ReclaimLeft = 256 << 20
 	// ReclaimTimeout bounds one reclaim attempt inside the distro.
 	ReclaimTimeout = 60 * time.Second
 	// ReclaimRetry is the wait before retrying a reclaim whose write never
@@ -62,6 +65,7 @@ type reclaimJob struct {
 	next   time.Time
 	cancel context.CancelFunc // set while an attempt runs
 	done   bool               // the write happened; no more attempts this freeze
+	left   int64              // what the box held after it (set when done)
 }
 
 type reclaimResult struct {
@@ -122,7 +126,7 @@ func (r *reclaims) harvest(now time.Time) (done []Reclaimed, errs []error) {
 		}
 		j.cancel = nil
 		if x.ran {
-			j.done = true
+			j.done, j.left = true, x.left
 			done = append(done, Reclaimed{x.name, x.left})
 			continue
 		}

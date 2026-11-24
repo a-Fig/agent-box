@@ -388,3 +388,47 @@ func TestCgroupReclaimArgs(t *testing.T) {
 		t.Fatalf("results %v", res)
 	}
 }
+
+// A box whose reclaim ran and left ReclaimLeft or less may stay frozen for
+// FrozenSwappedStop; every other frozen box keeps FrozenStop.
+func TestSwappedBoxesStayFrozenLonger(t *testing.T) {
+	f, m, r := newReclaimFake("ok", "Running", "full", "Running", "never", "Running")
+	r.left["ok"] = 10 << 20
+	r.left["full"] = ReclaimLeft + 1 // no swap to go to, or swap ran out
+	r.notRan["never"] = true
+	rtick(m, 0, false)
+	rtick(m, time.Second, true) // a game: all three paused, reclaims start
+	rtick(m, 2*time.Second, true)
+	f.take()
+	rtick(m, time.Second+FrozenStop, true)
+	equal(t, only(f.take(), "stop "), []string{"stop full", "stop never"})
+	rtick(m, time.Hour, true)
+	equal(t, only(f.take(), "stop "), nil)
+	rtick(m, time.Second+FrozenSwappedStop, true)
+	equal(t, only(f.take(), "stop "), []string{"stop ok"})
+}
+
+// The long limit belongs to one instance: a box recreated under the same
+// name while frozen starts a new 15-minute timer until its own reclaim ran.
+func TestFrozenLimitFollowsTheInstance(t *testing.T) {
+	f, m, r := newReclaimFake("a", "Running")
+	r.left["a"] = 10 << 20
+	rtick(m, 0, false)
+	rtick(m, time.Second, true)
+	rtick(m, 2*time.Second, true)
+	if got := m.frozenLimit("a", 1000); got != FrozenSwappedStop {
+		t.Fatalf("limit %v", got)
+	}
+	f.Delete(context.Background(), "a")
+	f.add("x", "Stopped") // shifts the fake's PIDs: the new a is 1000+1
+	f.add("a", "Frozen")
+	f.setCfg("a", MemoryCapKey, "4GiB")
+	r.notRan["a"] = true // its reclaim doesn't get to run
+	rtick(m, time.Minute, true)
+	if got := m.frozenLimit("a", 1001); got != FrozenStop {
+		t.Fatalf("new instance limit %v", got)
+	}
+	f.take()
+	rtick(m, time.Minute+FrozenStop, true)
+	equal(t, only(f.take(), "stop "), []string{"stop a"})
+}
