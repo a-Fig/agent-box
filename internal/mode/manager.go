@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -34,14 +35,20 @@ type Status struct {
 	Yielding  bool   // a game is running (or just ended, within the debounce)
 	Reason    string // why, e.g. "steam:570"
 	Running   int    // instances running after this tick
-	Down      bool   // the Incus host was not reachable, nothing was applied
+	Down      bool   // the Incus host was not reachable (or Release memory runs), nothing was applied
 	Err       error  // joined errors from this tick; the failed parts retry next tick
+	// Reclaimed lists the reclaims that ended since the last tick, with
+	// what each box still holds, for the log. Nothing acts on it.
+	Reclaimed []Reclaimed
 }
 
 // Manager drives instances toward the effective mode. Call Tick regularly;
 // every step is idempotent, so a failed call is retried on the next tick.
 type Manager struct {
 	Incus Incus
+	// Reclaim, if set, lets every box swap up to its memory limit and pushes
+	// each box frozen in My PC out to swap, in the background (reclaim.go).
+	Reclaim Reclaimer
 
 	mu     sync.Mutex // guards chosen
 	chosen Mode
@@ -52,10 +59,20 @@ type Manager struct {
 	reason      string
 	applied     Mode   // effective mode the fields below belong to
 	projectDone bool   // mode label set for applied
-	pubReason   string // user.agent-box.reason last written ("" = never or cleared)
+	pubReason   string // user.agent-box.reason as last read or written
+	reasonRead  bool   // pubReason was read from the project once
 	frozenSince map[string]time.Time
+	rc          reclaims
 	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
+
+	// Release memory (BeginRelease) holds this while `wsl --terminate`
+	// runs; no tick, reclaim or swap call starts then. cancelMu guards
+	// tickCancel, which cancels the tick in progress.
+	releasing  atomic.Bool
+	cancelMu   sync.Mutex
+	tickCancel context.CancelFunc
+	workCtx    context.Context // the caller's context, for reclaims (guarded by tickMu)
 }
 
 // New returns a Manager that starts in the chosen mode.
@@ -78,6 +95,20 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	m.tickMu.Lock()
 	defer m.tickMu.Unlock()
 
+	// A tick that starts while Release memory runs calls nothing: any
+	// wsl.exe -d agents would start the distro again. One already running is
+	// cancelled by BeginRelease, so it stops calling out.
+	m.workCtx = ctx // reclaims outlive the tick
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m.cancelMu.Lock()
+	m.tickCancel = cancel
+	m.cancelMu.Unlock()
+	defer func() { m.cancelMu.Lock(); m.tickCancel = nil; m.cancelMu.Unlock() }()
+	if m.releasing.Load() {
+		return Status{Chosen: m.Chosen(), Effective: m.Chosen(), Down: true}
+	}
+
 	m.updateYield(now, gaming, reason)
 	st := Status{Chosen: m.Chosen(), Yielding: m.yielding, Reason: m.reason}
 	st.Effective = st.Chosen
@@ -87,7 +118,9 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	if st.Effective != m.applied {
 		m.applied, m.projectDone = st.Effective, false
 		m.frozenSince = map[string]time.Time{}
+		m.rc.forgetAll()
 	}
+	m.rc.init()
 
 	var errs []error
 	if !m.projectDone {
@@ -98,7 +131,14 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		}
 	}
 	// Why the PC is yielding, for `box status`. Written only on change, so the
-	// common case (never yielding) costs no calls.
+	// common case (never yielding) costs no calls. It is read once first: a
+	// tray killed mid-yield (a crash during a game) leaves a reason behind,
+	// and `box status` would say the PC is busy until the next game ended.
+	if !m.reasonRead {
+		if cur, err := m.Incus.ProjectConfig(ctx, ProjectReasonKey); err == nil {
+			m.pubReason, m.reasonRead = cur, true
+		}
+	}
 	if want := yieldReason(m.yielding, m.reason); want != m.pubReason {
 		if err := m.Incus.SetProjectConfig(ctx, ProjectReasonKey, want); err != nil {
 			errs = append(errs, err)
@@ -116,7 +156,22 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		if m.yielding {
 			why = yieldReason(true, m.reason)
 		}
+		if m.Reclaim != nil {
+			var rerrs []error
+			st.Reclaimed, rerrs = m.rc.harvest(now)
+			errs = append(errs, rerrs...)
+		}
+		// Pausing, GPU stops and thawing come first; upkeep that a game
+		// doesn't wait for (the memory cap, swap limits) runs after.
 		st.Running, errs = m.applyInstances(ctx, now, st.Effective, why, ins, errs)
+		if ctx.Err() == nil {
+			if err := m.applyMemoryCap(ctx, st.Effective, ins); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if m.Reclaim != nil && ctx.Err() == nil {
+			errs = append(errs, m.ensureSwap(ctx, ins)...)
+		}
 	}
 	st.Err = errors.Join(errs...)
 	m.last = st
@@ -203,19 +258,65 @@ func (m *Manager) applyProject(ctx context.Context, eff Mode) error {
 	return m.Incus.SetProjectConfig(ctx, ProjectModeKey, string(eff))
 }
 
+// applyMemoryCap sets the project's limits.memory to the mode's budget
+// (MemoryBudgets), or to what existing instances already hold if that is
+// more, since Incus refuses a cap below it. So the cap tightens as boxes go
+// away. It writes only when the value differs.
+func (m *Manager) applyMemoryCap(ctx context.Context, eff Mode, ins []Instance) error {
+	want, ok := ParseBytes(MemoryBudgets[eff])
+	if !ok {
+		return fmt.Errorf("no memory budget for mode %q", eff)
+	}
+	want = max(want, AllocatedMemory(ins))
+	cur, err := m.Incus.ProjectConfig(ctx, MemoryCapKey)
+	if err != nil {
+		return err
+	}
+	if have, ok := ParseBytes(cur); ok && have == want {
+		return nil
+	}
+	return m.Incus.SetProjectConfig(ctx, MemoryCapKey, FormatBytes(want))
+}
+
+// AllocatedMemory is the limits.memory of every instance added up, stopped
+// ones too, the way Incus counts it against the project cap: the expanded
+// config (profiles included), then the instance's own, then its size.
+func AllocatedMemory(ins []Instance) int64 {
+	var sum int64
+	for _, in := range ins {
+		v, ok := in.ExpandedConfig[MemoryCapKey]
+		if !ok {
+			v = in.Config[MemoryCapKey]
+		}
+		n, ok := ParseBytes(v)
+		if !ok {
+			n, _ = ParseBytes(SizeOf(in.Config).Memory)
+		}
+		sum += n
+	}
+	return sum
+}
+
 // applyInstances brings each instance in line with eff. why is what a GPU
 // box stopped in My PC is told (StoppedKey).
 func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, why string, ins []Instance, errs []error) (running int, _ []error) {
 	seen := map[string]bool{}
 	for _, in := range ins {
 		seen[in.Name] = true
+		if ctx.Err() != nil { // Release memory: call out no more
+			continue
+		}
 		state := strings.ToLower(in.Status)
 		var err error
 		switch {
 		case eff == MyPC && IsGPU(in.Config):
 			state, err = m.stopGPU(ctx, now, in, state, why)
 		case eff == MyPC:
+			prev := state
 			state, err = m.freeze(ctx, now, in.Name, state)
+			if m.Reclaim != nil && err == nil {
+				m.reclaimFrozen(now, in, prev, state)
+			}
 		case IsGPU(in.Config) && state == "stopped" && in.Config[StoppedKey] != "":
 			// Stays stopped; stopGPU retries a failed expiry write.
 			state, err = m.stopGPU(ctx, now, in, state, why)
@@ -234,6 +335,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 			delete(m.frozenSince, name)
 		}
 	}
+	m.rc.prune(seen)
 	return running, errs
 }
 
@@ -348,3 +450,28 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 	}
 	return state, nil
 }
+
+// BeginRelease is called before the tray's "Release memory" runs `wsl
+// --terminate`. It returns false, doing nothing, if a release is already
+// running: one termination at a time. Otherwise it cancels the tick in
+// progress and waits for it, drops queued and running reclaims and waits
+// for their wsl.exe calls to end, and keeps any new tick from calling out
+// until EndRelease.
+func (m *Manager) BeginRelease() bool {
+	if !m.releasing.CompareAndSwap(false, true) {
+		return false
+	}
+	m.cancelMu.Lock()
+	if m.tickCancel != nil {
+		m.tickCancel()
+	}
+	m.cancelMu.Unlock()
+	m.tickMu.Lock()
+	m.rc.forgetAll()
+	m.tickMu.Unlock()
+	m.rc.wait()
+	return true
+}
+
+// EndRelease lets ticks and reclaims call out again.
+func (m *Manager) EndRelease() { m.releasing.Store(false) }

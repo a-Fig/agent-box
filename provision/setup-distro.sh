@@ -9,9 +9,9 @@
 #   TS_AUTHKEY        Tailscale auth key. Read from the environment only; never written to disk or logs.
 #                     Without it Tailscale is installed but not joined.
 #   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 24)
-#   AGENTS_MEM_CAP    project cap on the sum of limits.memory  (default 12GiB)
-#   AGENTS_MAX_BOXES  project limits.instances                 (default 6)
-#   AGENTS_DISK_CAP   project limits.disk, all boxes + volumes (default 150GiB)
+#   AGENTS_MEM_CAP    first limits.memory, before the tray owns it (default 12GiB)
+#   AGENTS_MAX_BOXES  project limits.instances                 (default 10)
+#   AGENTS_DISK_CAP   project limits.disk, all boxes + volumes (default 210GiB)
 # Flags:
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
@@ -25,8 +25,8 @@ ZABBLY_FPR="4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
 PROJECT=agents
 CPU_CAP=${AGENTS_CPU_CAP:-24}
 MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
-MAX_BOXES=${AGENTS_MAX_BOXES:-6}
-DISK_CAP=${AGENTS_DISK_CAP:-150GiB}
+MAX_BOXES=${AGENTS_MAX_BOXES:-10}
+DISK_CAP=${AGENTS_DISK_CAP:-210GiB}
 CACHE_SIZE=30GiB
 BUILD_BASE=0
 REBUILD=0
@@ -164,18 +164,24 @@ else
     -c user.agent-box.mode=shared
   note "created (own profiles; images shared with the default project)"
 fi
-# Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
-# below what existing instances use). Box sizes (internal/mode/size.go) set each box's memory and
-# root disk at launch and its limits.cpu per mode. 12GiB fits six small, three medium, or one
-# large plus two small. Six small root disks and the cache allocate 138GiB of the 150GiB disk cap.
-# The CPU cap leaves room for each mix in Full mode.
+# Allocation caps (docs/DESIGN.md, Box sizes). Box sizes (internal/mode/size.go) set each box's
+# memory and root disk at launch and its limits.cpu per mode. The tray owns limits.memory: 24GiB
+# in Full, 12GiB otherwise, never below what boxes already hold. So it is set here only on a new
+# project; setting it again could fail (Incus won't lower it below what is in use) or fight the
+# tray. 24GiB fits 12 small boxes, so 10 instances is the binding cap; 10 small root disks and
+# the 30GiB cache allocate 210GiB, the disk cap. The CPU cap leaves room for each mix in Full.
 incus project set "$PROJECT" limits.instances="$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu="$CPU_CAP"
-incus project set "$PROJECT" limits.memory="$MEM_CAP"
+# A failed read prints nothing too; only a read that worked and came back empty means unset.
+MEM_NOW=$(incus project get "$PROJECT" limits.memory) || die "could not read limits.memory of project $PROJECT"
+if [ -z "$MEM_NOW" ]; then
+  incus project set "$PROJECT" limits.memory="$MEM_CAP"
+  MEM_NOW=$MEM_CAP
+fi
 # limits.disk: "maximum value of the aggregate disk space used by all instance volumes, custom
 # volumes, and images of the project" (project config reference, key limits.disk).
 incus project set "$PROJECT" limits.disk="$DISK_CAP"
-note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_CAP disk=$DISK_CAP (allocation caps, not usage caps)"
+note "caps: instances=$MAX_BOXES cpu=$CPU_CAP memory=$MEM_NOW (the tray sets it by mode) disk=$DISK_CAP (allocation caps, not usage caps)"
 # Restricted project. Keys per https://linuxcontainers.org/incus/docs/main/reference/projects/
 #   restricted=true                                turns the restricted.* keys on
 #   restricted.containers.privilege=unprivileged   blocks security.privileged=true (the default)

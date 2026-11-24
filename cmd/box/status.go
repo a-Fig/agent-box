@@ -140,18 +140,22 @@ func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) s
 // at least their size's Full count, because the tray raises them in Full mode,
 // memory, instances, and disk as Incus counts it (root disks, volumes,
 // images). A cap that can't be read doesn't limit.
+//
+// A launch the caps refuse deletes reclaimable boxes and tries again, so a
+// size fits if it fits as things are, or once those boxes are gone. In the
+// second case the memory cap is the one the tray applies to the boxes left,
+// max(the mode's budget, what they hold), since a tick can lower it to that
+// between the delete and the retry.
 func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxes int) ([]SizeRoom, string) {
 	instCap := int64(maxBoxes)
 	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
 	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
-	var cpus, mem, gpus, reclaimN, reclaimDisk int64
+	// held is what existing boxes allocate; evict is the reclaimable part.
+	type alloc struct{ n, cpus, mem, disk int64 }
+	var held, evict alloc
+	var gpus int64
 	for _, in := range insts {
 		sz := mode.SizeOf(in.Config)
-		if reclaimable(in) { // the next launch deletes it first
-			d, _ := mode.ParseBytes(sz.Disk)
-			reclaimN, reclaimDisk = reclaimN+1, reclaimDisk+d
-			continue
-		}
 		if sz.GPU && in.Status != "Stopped" {
 			gpus++
 		}
@@ -160,47 +164,64 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 			cfg = in.Config
 		}
 		cpu, _ := strconv.ParseInt(cfg["limits.cpu"], 10, 64)
-		cpus += max(int64(sz.FullCPUs), cpu)
 		m, ok := mode.ParseBytes(cfg["limits.memory"])
 		if !ok {
 			m, _ = mode.ParseBytes(sz.Memory)
 		}
-		mem += m
+		d, _ := mode.ParseBytes(sz.Disk)
+		one := alloc{1, max(int64(sz.FullCPUs), cpu), m, d}
+		held = alloc{held.n + one.n, held.cpus + one.cpus, held.mem + one.mem, held.disk + one.disk}
+		if reclaimable(in) { // the next launch deletes it first
+			evict = alloc{evict.n + one.n, evict.cpus + one.cpus, evict.mem + one.mem, evict.disk + one.disk}
+		}
 	}
 	resources := a.projectResources(ctx)
 	diskFree, diskKnown := resources["disk"].remaining()
 	containersFree, containersKnown := resources["containers"].remaining()
-	diskFree += reclaimDisk
-	containersFree += reclaimN
+	evictMemCap := memCap
+	if b, ok := mode.ParseBytes(mode.MemoryBudgets[now]); ok && evict.n > 0 {
+		evictMemCap = min(memCap, max(b, held.mem-evict.mem))
+	}
 
 	sizes := make([]SizeRoom, len(mode.Sizes))
 	limited := false
 	for i, sz := range mode.Sizes {
-		fits := int64(-1)
-		limit := func(free, each int64) {
-			if n := max(free, 0) / each; fits < 0 || n < fits {
-				fits = n
-			}
-		}
 		szMem, _ := mode.ParseBytes(sz.Memory)
 		szDisk, _ := mode.ParseBytes(sz.Disk)
-		if instCap >= 0 {
-			limit(instCap-int64(len(insts))+reclaimN, 1)
+		// fitsWith is how many fit once the boxes in gone are deleted, under
+		// memory cap mc; -1 when no cap limits.
+		fitsWith := func(gone alloc, mc int64) int64 {
+			fits := int64(-1)
+			limit := func(free, each int64) {
+				if n := max(free, 0) / each; fits < 0 || n < fits {
+					fits = n
+				}
+			}
+			if instCap >= 0 {
+				limit(instCap-held.n+gone.n, 1)
+			}
+			if containersKnown {
+				limit(containersFree+gone.n, 1)
+			}
+			if cpuErr == nil && cpuCap >= 0 {
+				limit(cpuCap-held.cpus+gone.cpus, int64(sz.FullCPUs))
+			}
+			if memKnown {
+				limit(mc-held.mem+gone.mem, szMem)
+			}
+			if diskKnown {
+				limit(diskFree+gone.disk, szDisk)
+			}
+			if sz.GPU { // one at a time
+				limit(1-gpus, 1)
+			}
+			return fits
 		}
-		if containersKnown {
-			limit(containersFree, 1)
-		}
-		if cpuErr == nil && cpuCap >= 0 {
-			limit(cpuCap-cpus, int64(sz.FullCPUs))
-		}
-		if memKnown {
-			limit(memCap-mem, szMem)
-		}
-		if diskKnown {
-			limit(diskFree, szDisk)
-		}
-		if sz.GPU { // one at a time
-			limit(1-gpus, 1)
+		fits := fitsWith(alloc{}, memCap)
+		if evict.n > 0 {
+			if f := fitsWith(evict, evictMemCap); f > fits || f < 0 {
+				fits = f
+			}
 		}
 		sizes[i] = SizeRoom{Size: sz, CPUs: sz.CPUs(now), Fits: int(fits)}
 		limited = limited || (fits >= 0 && !sz.GPU)

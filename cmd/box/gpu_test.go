@@ -314,6 +314,30 @@ func TestStatusDoesntCountStoppedGPUThrowaways(t *testing.T) {
 	}
 }
 
+// In Shared, a stopped GPU throwaway (8GiB) plus 6GiB of other boxes holds
+// the tray's cap at 14GiB. Deleting the GPU box lets the tray lower it to
+// 12GiB, so after eviction only 6GiB is free: no large box, though 14-6
+// would say one fits.
+func TestStatusRoomAfterEvictionUsesTheCapTheTrayWouldSet(t *testing.T) {
+	f := &fakePC{t: t, mode: "shared", project: map[string]string{
+		"limits.instances": "10", "limits.cpu": "24", "limits.memory": "14GiB",
+	}, insts: []instance{
+		{Name: "a", Status: "Running", Config: map[string]string{"limits.memory": "4GiB"}},
+		{Name: "b", Status: "Running", Config: map[string]string{mode.SizeKey: "small", "limits.memory": "2GiB"}},
+		{Name: "gpu-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")},
+	}}
+	a, _ := testApp(f)
+	if s := a.Status(context.Background(), ""); s.Room != "1 medium, or 3 small" {
+		t.Errorf("room = %q", s.Room)
+	}
+	// In Full the budget is 24GiB, so the eviction frees the GPU box's 8GiB
+	// under a cap that stays at 14GiB (the tray will raise it next tick).
+	f.mode = "full"
+	if s := a.Status(context.Background(), ""); s.Room != "1 large, or 2 medium, or 4 small" {
+		t.Errorf("full room = %q", s.Room)
+	}
+}
+
 // Between launch and its job's PID file a GPU box runs no job, and Incus
 // creates it stopped before starting it. A run in that window must not take
 // it for dead.

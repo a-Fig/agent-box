@@ -30,6 +30,18 @@ var Sizes = []Size{
 	{Name: GPUSize, SharedCPUs: 4, FullCPUs: 6, Memory: "8GiB", Disk: "40GiB", GPU: true},
 }
 
+// MemoryBudgets is the project's limits.memory in each mode: the RAM all
+// boxes together may be launched with. The WSL VM's ceiling is the PC's 32GB
+// minus 6GB for Windows (provision/install-pc.ps1); the distro itself (Incus,
+// Tailscale, lxcfs) takes 1-2GB of that, so Full gets 24GiB. In Shared Tyler
+// uses the PC, so boxes get the 12GiB they had before Full had its own budget;
+// My PC launches nothing new, so it keeps that too. The tray sets the cap
+// every tick, never below what existing boxes already hold (Manager.Tick).
+var MemoryBudgets = map[Mode]string{MyPC: "12GiB", Shared: "12GiB", Full: "24GiB"}
+
+// MemoryCapKey is the project key the tray sets from MemoryBudgets.
+const MemoryCapKey = "limits.memory"
+
 // GPUSize is the name of the GPU box size.
 const GPUSize = "gpu"
 
@@ -107,6 +119,18 @@ func (s Size) CPUs(m Mode) int {
 		return s.FullCPUs
 	}
 	return 0
+}
+
+// FormatBytes writes n the way Incus sizes are written: whole GiB or MiB
+// when it divides evenly, else plain bytes.
+func FormatBytes(n int64) string {
+	switch {
+	case n != 0 && n%(1<<30) == 0:
+		return strconv.FormatInt(n>>30, 10) + "GiB"
+	case n != 0 && n%(1<<20) == 0:
+		return strconv.FormatInt(n>>20, 10) + "MiB"
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 // ParseBytes reads an Incus size like "4GiB", "512MB" or "1073741824".

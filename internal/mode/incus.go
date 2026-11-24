@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Instance is one Incus instance in the agents project.
@@ -14,6 +15,16 @@ type Instance struct {
 	// `incus list --format json` reports it. The Manager compares it with
 	// what the mode wants, so a key an agent changed is put back.
 	Config map[string]string `json:"config"`
+	// ExpandedConfig adds what profiles give it; Incus counts limits.memory
+	// from here when it checks the project cap.
+	ExpandedConfig map[string]string `json:"expanded_config"`
+	// State is nil for a stopped instance. Pid is its init process on the host.
+	State *InstanceState `json:"state"`
+}
+
+// InstanceState is the part of `incus list --format json`'s state used here.
+type InstanceState struct {
+	Pid int64 `json:"pid"`
 }
 
 // Incus is everything the Manager needs from Incus.
@@ -26,8 +37,11 @@ type Incus interface {
 	Delete(ctx context.Context, name string) error
 	SetInstanceConfig(ctx context.Context, name, key, value string) error
 	UnsetInstanceConfig(ctx context.Context, name, key string) error
-	// SetProjectConfig is used only for the mode label; the tray never changes
-	// project limits (Incus refuses to lower them below what is in use).
+	// ProjectConfig reads one key of the project's config ("" when unset).
+	ProjectConfig(ctx context.Context, key string) (string, error)
+	// SetProjectConfig sets the mode label, the yield reason and the memory
+	// cap (MemoryCapKey). Incus refuses to lower a cap below what existing
+	// instances already hold, so the Manager never asks it to.
 	SetProjectConfig(ctx context.Context, key, value string) error
 }
 
@@ -83,6 +97,11 @@ func (c CLI) SetInstanceConfig(ctx context.Context, name, key, value string) err
 
 func (c CLI) UnsetInstanceConfig(ctx context.Context, name, key string) error {
 	return c.do(ctx, "config", "unset", name, key, "--project", Project)
+}
+
+func (c CLI) ProjectConfig(ctx context.Context, key string) (string, error) {
+	out, err := c.Run(ctx, "project", "get", Project, key)
+	return strings.TrimSpace(string(out)), err
 }
 
 func (c CLI) SetProjectConfig(ctx context.Context, key, value string) error {
