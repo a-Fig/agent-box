@@ -42,8 +42,8 @@ type Status struct {
 // every step is idempotent, so a failed call is retried on the next tick.
 type Manager struct {
 	Incus Incus
-	// Reclaim, if set, pushes each box frozen in My PC out to swap, in the
-	// background (reclaim.go).
+	// Reclaim, if set, lets every box swap up to its memory limit and pushes
+	// each box frozen in My PC out to swap, in the background (reclaim.go).
 	Reclaim Reclaimer
 
 	mu     sync.Mutex // guards chosen
@@ -135,8 +135,10 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		}
 		if m.Reclaim != nil {
 			errs = append(errs, m.rc.harvest(now)...)
-			if err := m.sweepSwap(ctx, ins); err != nil {
-				errs = append(errs, err)
+			if !m.rc.releasing.Load() {
+				if err := m.ensureSwap(ctx, ins); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 		st.Running, errs = m.applyInstances(ctx, now, st.Effective, why, ins, errs)
@@ -404,11 +406,8 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 			}
 		}
 	}
-	if err := m.closeSwapBeforeRun(ctx, in.Name); err != nil {
-		errs = append(errs, err)
-	}
 	if err := errors.Join(errs...); err != nil {
-		return state, err // stay frozen until the limits and swap are right
+		return state, err // stay frozen until the limits are right
 	}
 	if state == "frozen" {
 		if err := m.Incus.Resume(ctx, in.Name); err != nil {

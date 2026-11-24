@@ -69,7 +69,14 @@ func main() {
 		},
 		release: func() {
 			go func() {
-				hidden(exec.Command("wsl.exe", "--terminate", distro)).Run()
+				// No reclaim may start a wsl.exe while the distro goes down.
+				mgr.BeginRelease()
+				defer mgr.EndRelease()
+				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
+				defer cancel()
+				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
+					lg.Printf("release memory: wsl --terminate: %v", err)
+				}
 				poke()
 			}()
 		},

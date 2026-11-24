@@ -236,12 +236,13 @@ pick My PC), and watch Windows get the RAM back:
 ```powershell
 "{0:N2} GB free, vmmem {1:N2} GB" -f ((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB), ((Get-Process vmmemWSL).WorkingSet64/1GB)
 wsl -d agents -u root -- cat /sys/fs/cgroup/lxc.payload.agents_<box>/memory.swap.current   # about 3GiB
-wsl -d agents -u root -- cat /sys/fs/cgroup/lxc.payload.agents_<box>/memory.swap.max       # 0 again
+wsl -d agents -u root -- cat /sys/fs/cgroup/lxc.payload.agents_<box>/memory.swap.max       # the box's limits.memory in bytes
 ```
 
 On 2026-11-24 a 3.26GB box went to swap in 3.2s, and within 35s vmmem fell by 3.1 GB and Windows'
 free memory rose by 3.2 GB. Over SSH the tray reads the notification state as busy and yields, so
-`.scratch/traytest.ps1` exercises this path without a game.
+`.scratch/traytest.ps1` exercises this path without a game. Set one box's `memory.swap.max` to 0 by hand: the tray
+puts it back within a tick.
 
 ### GPU box
 
