@@ -252,20 +252,24 @@ func TestReclaimIsBestEffortAndOnlyFrozenStopStops(t *testing.T) {
 func TestReclaimIsResetWhenABoxIsPausedAgainOrRecreated(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running")
 	m.SetChosen(MyPC)
-	rtick(m, 0, false)
-	equal(t, r.take(), []string{"a/1000"})
+	rtick(m, 0, false) // paused; its swap.max is set at the end of this tick
+	equal(t, r.take(), nil)
 	rtick(m, time.Second, false)
+	equal(t, r.take(), []string{"a/1000"})
 	f.state["a"] = "Running" // an agent resumes it
 	rtick(m, 2*time.Second, false)
 	equal(t, r.take(), []string{"a/1000"})
 
-	// Deleted and recreated under the same name, still frozen: a new PID.
+	// Deleted and recreated under the same name, still frozen: a new PID,
+	// so it waits for its own swap.max first.
 	f.Delete(context.Background(), "a")
 	f.add("x", "Running")
 	f.add("a", "Frozen")
 	f.setCfg("x", MemoryCapKey, "4GiB")
 	f.setCfg("a", MemoryCapKey, "4GiB")
 	rtick(m, 3*time.Second, false)
+	equal(t, r.take(), nil)
+	rtick(m, 4*time.Second, false)
 	equal(t, r.take(), []string{"a/1001", "x/1000"})
 }
 
@@ -338,8 +342,10 @@ func TestReleaseDropsReclaimsAndStartsNone(t *testing.T) {
 		t.Fatalf("reclaims during release: %q", calls)
 	}
 	m.EndRelease()
-	rtick(m, 4*time.Second, true)
-	equal(t, r.take(), []string{"a/1000", "b/1001"})
+	rtick(m, 4*time.Second, true) // a's swap was confirmed before; b's is now
+	equal(t, r.take(), []string{"a/1000"})
+	rtick(m, 5*time.Second, true)
+	equal(t, r.take(), []string{"b/1001"})
 }
 
 func TestCgroupReclaimArgs(t *testing.T) {
@@ -387,4 +393,71 @@ func TestCgroupReclaimArgs(t *testing.T) {
 	if res["a"] != nil || res["b"] == nil || !strings.Contains(res["b"].Error(), "cgroup") || res["c"] == nil {
 		t.Fatalf("results %v", res)
 	}
+}
+
+// A box whose reclaim ran and left ReclaimLeft or less may stay frozen for
+// FrozenSwappedStop; every other frozen box keeps FrozenStop.
+func TestSwappedBoxesStayFrozenLonger(t *testing.T) {
+	f, m, r := newReclaimFake("ok", "Running", "full", "Running", "never", "Running")
+	r.left["ok"] = 10 << 20
+	r.left["full"] = ReclaimLeft + 1 // no swap to go to, or swap ran out
+	r.notRan["never"] = true
+	rtick(m, 0, false)
+	rtick(m, time.Second, true) // a game: all three paused, reclaims start
+	rtick(m, 2*time.Second, true)
+	f.take()
+	rtick(m, time.Second+FrozenStop, true)
+	equal(t, only(f.take(), "stop "), []string{"stop full", "stop never"})
+	rtick(m, time.Hour, true)
+	equal(t, only(f.take(), "stop "), nil)
+	rtick(m, time.Second+FrozenSwappedStop, true)
+	equal(t, only(f.take(), "stop "), []string{"stop ok"})
+}
+
+// The long limit belongs to one instance: a box recreated under the same
+// name while frozen starts a new 15-minute timer until its own reclaim ran.
+func TestFrozenLimitFollowsTheInstance(t *testing.T) {
+	f, m, r := newReclaimFake("a", "Running")
+	r.left["a"] = 10 << 20
+	rtick(m, 0, false)
+	rtick(m, time.Second, true)
+	rtick(m, 2*time.Second, true)
+	if got := m.frozenLimit("a", 1000); got != FrozenSwappedStop {
+		t.Fatalf("limit %v", got)
+	}
+	f.Delete(context.Background(), "a")
+	f.add("x", "Stopped") // shifts the fake's PIDs: the new a is 1000+1
+	f.add("a", "Frozen")
+	f.setCfg("a", MemoryCapKey, "4GiB")
+	r.notRan["a"] = true // its reclaim doesn't get to run
+	rtick(m, time.Minute, true)
+	if got := m.frozenLimit("a", 1001); got != FrozenStop {
+		t.Fatalf("new instance limit %v", got)
+	}
+	f.take()
+	rtick(m, time.Minute+FrozenStop, true)
+	equal(t, only(f.take(), "stop "), []string{"stop a"})
+}
+
+// Incus writes memory.swap.max=0 when it starts a box, so a reclaim before
+// the tray has set it would move nothing and give the box the short limit
+// (seen live on 2026-11-24: 2092MiB left, stopped at 15 minutes). A box is
+// reclaimed only once its swap.max is confirmed for this instance, and a box
+// stopped this tick isn't sent to the swap batch.
+func TestReclaimWaitsForSwapAndStoppedBoxesSkipTheBatch(t *testing.T) {
+	f, m, r := newReclaimFake("a", "Frozen", "g", "Running")
+	f.config["g"][SizeKey] = GPUSize
+	m.SetChosen(MyPC)
+	r.swapFail["a"] = true
+	rtick(m, 0, false)
+	if len(r.swaps) != 1 || len(r.swaps[0]) != 1 || r.swaps[0][0].Name != "a" {
+		t.Fatalf("swaps %v (the GPU box was stopped this tick)", r.swaps)
+	}
+	rtick(m, time.Second, false) // the batch failed for a: no reclaim yet
+	equal(t, r.take(), nil)
+	r.swapFail["a"] = false
+	rtick(m, 2*time.Second, false) // confirmed at the end of this tick
+	equal(t, r.take(), nil)
+	rtick(m, 3*time.Second, false)
+	equal(t, r.take(), []string{"a/1000"})
 }

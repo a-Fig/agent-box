@@ -1021,8 +1021,12 @@ func (e *exitFilter) exit() (string, bool) {
 // pausedMidRun says what is true of a job whose box was frozen: it resumes
 // only if the PC's owner switches back before the tray stops the box.
 func pausedMidRun(job string) string {
-	return fmt.Sprintf("box: job %s is paused (the PC's owner is using it). It resumes if they switch back within %d minutes; after that the box is stopped and the job lost. Reattach later with: box job %s, or run it locally", job, int(mode.FrozenStop.Minutes()), job)
+	return fmt.Sprintf("box: job %s is paused (the PC's owner is using it). It resumes if they switch back within %s; after that the box is stopped and the job lost. Reattach later with: box job %s, or run it locally", job, frozenWindow, job)
 }
+
+// frozenWindow is how long a paused job can still resume, in words.
+var frozenWindow = fmt.Sprintf("%d minutes (%d hours once its memory is moved to swap)",
+	int(mode.FrozenStop.Minutes()), int(mode.FrozenSwappedStop.Hours()))
 
 // pausedGPU is the same for a GPU box, which the tray normally stops, not freezes.
 func pausedGPU(job string) string {
