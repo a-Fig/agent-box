@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 func TestRunNewNeverAdoptsABox(t *testing.T) {
@@ -325,43 +330,193 @@ func (p *pausesOnFollow) Run(ctx context.Context, c Cmd) (Result, error) {
 	return p.fakePC.Run(ctx, c)
 }
 
-func TestAttachReportsBoxFrozenMidRun(t *testing.T) {
-	for name, pause := range map[string]func(f *fakePC){
-		"frozen": func(f *fakePC) { f.insts[0].Status = "Frozen" },
-		"mypc":   func(f *fakePC) { f.mode = "mypc" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
-			a, out := testApp(f)
-			a.PausePoll = 5 * time.Millisecond
-			a.R = &pausesOnFollow{fakePC: f, pause: pause}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			start := time.Now()
-			r, err := a.Run(ctx, RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
-			if err != nil || r.State != statePaused || r.Code != exitPaused {
-				t.Fatalf("Run = %+v, %v\n%s", r, err, out)
-			}
-			if d := time.Since(start); d > 5*time.Second {
-				t.Errorf("took %v, want a prompt return", d)
-			}
-			want := "box: job " + r.Job + " is paused (the PC's owner is using it); it resumes when they switch back. Wait with: box job " + r.Job + ", or run it locally"
-			if !strings.Contains(out.String(), want) {
-				t.Errorf("output lacks %q:\n%s", want, out)
-			}
-			if strings.Contains(out.String(), "still running") {
-				t.Errorf("reported detached:\n%s", out)
-			}
-		})
+const pauseTestJob = "my-repo.20261123-120000-0001"
+
+func freezeFirst(f *fakePC) { f.insts[0].Status = "Frozen" }
+
+// hangsAfterFollow lets the job's follow finish, then freezes the box: every
+// later exec waits for its context to end.
+type hangsAfterFollow struct {
+	*fakePC
+	frozen bool
+	// followErr is what a follow that was cancelled while it drained returns.
+	followErr error
+}
+
+func (h *hangsAfterFollow) Run(ctx context.Context, c Cmd) (Result, error) {
+	h.mu.Lock()
+	hang := h.frozen && c.Name == "incus" && len(c.Args) > 2 && c.Args[2] == "exec"
+	h.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return Result{}, ctx.Err()
+	}
+	res, err := h.fakePC.Run(ctx, c)
+	if c.Name == "incus" && isScript(c, "# follow") {
+		h.mu.Lock()
+		h.frozen = true
+		h.mu.Unlock()
+		if h.followErr != nil {
+			return res, h.followErr
+		}
+	}
+	return res, err
+}
+
+// stallsFirstList makes the first list call wait for its context to end.
+type stallsFirstList struct {
+	Runner
+	stalled atomic.Bool
+}
+
+func (s *stallsFirstList) Run(ctx context.Context, c Cmd) (Result, error) {
+	if c.Name == "incus" && len(c.Args) > 2 && c.Args[2] == "list" && s.stalled.CompareAndSwap(false, true) {
+		<-ctx.Done()
+		return Result{}, ctx.Err()
+	}
+	return s.Runner.Run(ctx, c)
+}
+
+func TestAttachMyPCAloneIsNotAPause(t *testing.T) {
+	// The tray writes My PC before it freezes, and a freeze can fail.
+	f := &fakePC{t: t, block: true, mode: "mypc", insts: []instance{{Name: "my-repo", Status: "Running"}}}
+	a, out := testApp(f)
+	a.PausePoll = time.Millisecond
+	r, err := a.Job(context.Background(), pauseTestJob, 60*time.Millisecond)
+	if err != nil || r.State != stateDetached || r.Code != exitDetached {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
 	}
 }
 
-func TestAttachFollowsAHealthyBoxPastPolls(t *testing.T) {
+func TestAttachReportsBoxFrozenMidRun(t *testing.T) {
 	f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
 	a, out := testApp(f)
-	a.PausePoll = time.Millisecond
-	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Wait: 50 * time.Millisecond})
-	if err != nil || r.State != stateDetached || r.Code != exitDetached {
+	a.PausePoll = 5 * time.Millisecond
+	a.R = &pausesOnFollow{fakePC: f, pause: freezeFirst}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	r, err := a.Job(ctx, pauseTestJob, 0)
+	if err != nil || r.State != statePaused || r.Code != exitPaused {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("took %v, want a prompt return", d)
+	}
+	want := "box: job " + pauseTestJob + " is paused (the PC's owner is using it). It resumes if they switch back within 15 minutes; after that the box is stopped and the job lost. Reattach later with: box job " + pauseTestJob + ", or run it locally"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if strings.Contains(out.String(), "still running") {
+		t.Errorf("reported detached:\n%s", out)
+	}
+}
+
+func TestRunReportsBoxFrozenMidRun(t *testing.T) {
+	f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
+	a, out := testApp(f)
+	a.PausePoll = 5 * time.Millisecond
+	a.R = &pausesOnFollow{fakePC: f, pause: freezeFirst}
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
+	if err != nil || r.State != statePaused || r.Code != exitPaused || r.Job == "" {
 		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if !strings.Contains(out.String(), "box: job "+r.Job+" is paused (the PC's owner") {
+		t.Errorf("message lacks the job ID:\n%s", out)
+	}
+}
+
+func TestAttachReportsFrozenGPUBox(t *testing.T) {
+	f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{mode.SizeKey: mode.GPUSize}}}}
+	a, out := testApp(f)
+	a.PausePoll = 5 * time.Millisecond
+	a.R = &pausesOnFollow{fakePC: f, pause: freezeFirst}
+	r, err := a.Job(context.Background(), pauseTestJob, 0)
+	if err != nil || r.State != statePaused || r.Code != exitPaused {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
+	}
+	if !strings.Contains(out.String(), "The tray may still stop it, which loses the job") {
+		t.Errorf("output lacks the GPU wording:\n%s", out)
+	}
+}
+
+func TestAttachConfirmedStopOfGPUBoxKeepsItsMessage(t *testing.T) {
+	f := &fakePC{t: t, stopFor: string(mode.MyPC), insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{mode.SizeKey: mode.GPUSize}}}}
+	a, out := testApp(f)
+	r, err := a.Job(context.Background(), pauseTestJob, 0)
+	if err != nil || r.State != statePaused || !strings.Contains(out.String(), "the GPU box was stopped because the PC's owner switched it to My PC") {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
+	}
+}
+
+func TestAttachRetriesAStalledPoll(t *testing.T) {
+	f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
+	a, out := testApp(f)
+	a.PausePoll = 5 * time.Millisecond
+	a.PollTimeout = 20 * time.Millisecond
+	s := &stallsFirstList{Runner: &pausesOnFollow{fakePC: f, pause: freezeFirst}}
+	a.R = s
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	r, err := a.Job(ctx, pauseTestJob, 0)
+	if err != nil || r.State != statePaused {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
+	}
+	if !s.stalled.Load() {
+		t.Error("the first poll never stalled")
+	}
+}
+
+func TestAttachExitCodeSurvivesAFreezeAfterCompletion(t *testing.T) {
+	f := &fakePC{t: t, exit: "42\n", insts: []instance{{Name: "my-repo", Status: "Running"}}}
+	a, out := testApp(f)
+	a.ProbeTimeout = 30 * time.Millisecond
+	a.R = &hangsAfterFollow{fakePC: f}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	r, err := a.Job(ctx, pauseTestJob, 0)
+	if err != nil || r.State != stateDone || r.Code != 42 {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("a freeze after completion held the result back for %v", d)
+	}
+	if strings.Contains(out.String(), "paused") || strings.Contains(out.String(), "box-exit") {
+		t.Errorf("unexpected output:\n%q", out)
+	}
+}
+
+func TestAttachCompletionBeatsCancellation(t *testing.T) {
+	// The follow reported the exit code, then its output drain was cut off.
+	f := &fakePC{t: t, exit: "7\n", insts: []instance{{Name: "my-repo", Status: "Frozen"}}}
+	a, out := testApp(f)
+	a.ProbeTimeout = 30 * time.Millisecond
+	a.R = &hangsAfterFollow{fakePC: f, followErr: context.Canceled}
+	r, err := a.Job(context.Background(), pauseTestJob, 0)
+	if err != nil || r.State != stateDone || r.Code != 7 {
+		t.Fatalf("Job = %+v, %v\n%s", r, err, out)
+	}
+}
+
+func TestFollowScriptPrintsTheExitCode(t *testing.T) {
+	bash := gitBash(t)
+	old := workRoot
+	workRoot = filepath.ToSlash(t.TempDir())
+	defer func() { workRoot = old }()
+	if err := os.Mkdir(filepath.Join(workRoot, ".box"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := workRoot + "/.box/" + pauseTestJob
+	write(t, file+".log", "hi\n")
+	write(t, file+".exit", "42\n")
+	ef := &exitFilter{w: io.Discard}
+	var out bytes.Buffer
+	res, err := (execRunner{}).Run(context.Background(), Cmd{Name: bash, Args: []string{"-c", followScript(pauseTestJob)}, Stdout: &out, Stderr: ef})
+	if err != nil || res.Code != 0 || out.String() != "hi\n" {
+		t.Fatalf("follow = %+v, %v, %q", res, err, out.String())
+	}
+	if code, ok := ef.exit(); !ok || code != "42" {
+		t.Errorf("exit = %q, %v", code, ok)
 	}
 }
