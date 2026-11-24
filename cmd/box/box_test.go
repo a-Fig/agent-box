@@ -316,7 +316,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file config exec config exec exec exec config" {
+	if got := f.callList(); got != "list project start file config exec config exec exec exec config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -334,7 +334,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file config exec config exec exec exec config exec delete" {
+	if got := f.callList(); got != "list project launch file config exec config exec exec exec config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
