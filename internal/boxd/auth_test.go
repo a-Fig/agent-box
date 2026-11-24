@@ -19,10 +19,10 @@ func TestOwnersLetsOnlyListedLoginsInOverLoopback(t *testing.T) {
 	}{
 		{"owner", "127.0.0.1:5000", "owner@example.com", 200, ""},
 		{"owner, other case", "[::1]:5000", "OWNER@example.com", 200, ""},
-		{"no header: a tagged device or Funnel", "127.0.0.1:5000", "", 403, "not-owner"},
-		{"a shared-in user from another tailnet", "127.0.0.1:5000", "someone@else.com", 403, "not-owner"},
-		{"tagged devices' pseudo-login", "127.0.0.1:5000", "tagged-devices", 403, "not-owner"},
-		{"not through tailscale serve", "10.22.127.5:5000", "owner@example.com", 403, "not-loopback"},
+		{"no header: a tagged device or Funnel", "127.0.0.1:5000", "", 403, "forbidden"},
+		{"a shared-in user from another tailnet", "127.0.0.1:5000", "someone@else.com", 403, "forbidden"},
+		{"tagged devices' pseudo-login", "127.0.0.1:5000", "tagged-devices", 403, "forbidden"},
+		{"not through tailscale serve", "10.22.127.5:5000", "owner@example.com", 403, "forbidden"},
 	} {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.RemoteAddr = c.remote

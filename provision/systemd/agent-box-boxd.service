@@ -5,6 +5,9 @@ Wants=incus.socket
 
 [Service]
 ExecStart=/opt/agent-box/bin/boxd -config /etc/agent-box/boxd.json
+# boxd runs `incus exec` to read job files; ProtectHome hides /root, so the
+# incus client keeps its config in boxd's state directory.
+Environment=INCUS_CONF=/var/lib/agent-box/incus-client
 Restart=always
 RestartSec=5
 StateDirectory=agent-box
