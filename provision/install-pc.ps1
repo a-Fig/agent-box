@@ -44,6 +44,7 @@ $RootfsSums = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/SHA256
 $StageDir = '/opt/agent-box-provision'
 $KeepAliveTask = 'agent-box-wsl-keepalive'
 $TrayTask = 'agent-box-tray'
+$EnforcerTask = 'agent-box-enforcer'
 
 function Step([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Note([string]$m) { Write-Host "    $m" }
@@ -334,6 +335,22 @@ if ($BoxtrayPath) {
     Register-ScheduledTask -TaskName $TrayTask -Action $tAction -Trigger $tTrig -Principal $tPrinc -Settings $tSett -Force `
         -Description 'agent-box tray' | Out-Null
     Note "registered: $full"
+
+    # The tray only runs while Tyler is logged on. After an unattended reboot
+    # nothing would enforce the mode (found 2026-11-24: the memory cap stayed
+    # at 12GiB for 20 hours). This second task runs `boxtray --headless` from
+    # startup, logged on or not, as S4U like the keep-alive (no stored
+    # password; WSL needs only the user's token). It runs Full and stands
+    # aside whenever the interactive tray runs.
+    Step "Scheduled Task '$EnforcerTask' (boxtray --headless at startup)"
+    $eAction = New-ScheduledTaskAction -Execute $full -Argument '--headless' -WorkingDirectory (Split-Path $full)
+    $ePrinc = New-ScheduledTaskPrincipal -UserId $me -LogonType S4U -RunLevel Limited
+    $eSett = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $EnforcerTask -Action $eAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Principal $ePrinc -Settings $eSett -Force `
+        -Description 'agent-box: enforce the mode (Full) while nobody is logged on; the tray takes over at logon' | Out-Null
+    Note "registered for $me (at startup)"
+    Start-ScheduledTask -TaskName $EnforcerTask -ErrorAction SilentlyContinue
 } else {
     Step 'boxtray'
     Note 'no -BoxtrayPath given; not registering the tray'

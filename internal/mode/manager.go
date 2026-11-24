@@ -26,6 +26,11 @@ const (
 	// YieldDebounce is how long the game signal must stay clear before the
 	// chosen mode comes back, so alt-tab doesn't freeze and thaw the boxes.
 	YieldDebounce = 20 * time.Second
+	// ProjectRecheck is how often the mode label and the yield reason are
+	// read back (and rewritten if they differ) even though nothing changed here. Two enforcers
+	// can overlap for a tick when Tyler logs in or out (the headless one
+	// and the tray); whichever ran last may have left its own values.
+	ProjectRecheck = time.Minute
 	// GPUStoppedTTL is how long a GPU box the tray stopped is kept (by
 	// shortening its user.expires), so `box job` can still say what happened
 	// and `box pull` can fetch partial output. Its job is gone either way.
@@ -61,10 +66,11 @@ type Manager struct {
 	yielding    bool
 	clearSince  time.Time
 	reason      string
-	applied     Mode   // effective mode the fields below belong to
-	projectDone bool   // mode label set for applied
-	pubReason   string // user.agent-box.reason as last read or written
-	reasonRead  bool   // pubReason was read from the project once
+	applied     Mode      // effective mode the fields below belong to
+	projectDone bool      // mode label set for applied
+	projectAt   time.Time // when the label was last written or read back
+	pubReason   string    // user.agent-box.reason as last read or written
+	reasonRead  bool      // pubReason was read from the project once
 	frozenSince map[string]frozenAt
 	rc          reclaims
 	swapSet     map[string]int64  // box -> init PID whose memory.swap.max was confirmed last tick
@@ -129,11 +135,19 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	m.rc.init()
 
 	var errs []error
+	if m.projectDone && now.Sub(m.projectAt) >= ProjectRecheck {
+		// Read the label and the reason back once a minute; write only what
+		// differs, so a quiet minute costs one read and no write.
+		m.projectAt, m.reasonRead = now, false
+		if cur, err := m.Incus.ProjectConfig(ctx, ProjectModeKey); err == nil && cur != string(st.Effective) {
+			m.projectDone = false
+		}
+	}
 	if !m.projectDone {
 		if err := m.applyProject(ctx, st.Effective); err != nil {
 			errs = append(errs, err)
 		} else {
-			m.projectDone = true
+			m.projectDone, m.projectAt = true, now
 		}
 	}
 	// Why the PC is yielding, for `box status`. Written only on change, so the

@@ -2,11 +2,14 @@
 
 // Command boxtray is the Windows tray app: it picks how much of the PC agents
 // get (My PC / Shared / Full), pauses agents while a game runs, and keeps the
-// PC awake while agent instances run. Build it with -ldflags "-H=windowsgui".
+// PC awake while agent instances run. With --headless it is instead the
+// enforcer for when nobody is logged on (headless_windows.go). Build it with
+// -ldflags "-H=windowsgui".
 package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"runtime"
@@ -24,6 +27,11 @@ var lg *fileLog
 func main() {
 	runtime.LockOSThread() // the tray window must be created and pumped on one thread
 
+	if headlessRequested(os.Args[1:]) {
+		runHeadless()
+		return
+	}
+
 	lg = openLog(logPath(), maxLogBytes)
 	lg.Printf("boxtray starting (pid %d)", os.Getpid())
 	defer func() {
@@ -38,6 +46,19 @@ func main() {
 	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
 		lg.Printf("exit: another boxtray is already running in this session")
 		return
+	}
+
+	// The interactive tray is the enforcer while it runs; the headless one
+	// sees this and stands aside. Taken first so the gap at logon is short.
+	// Held until the process ends, which is also what frees it at logoff.
+	switch _, err := holdTrayActive(); {
+	case err == nil:
+	case errors.Is(err, windows.ERROR_ALREADY_EXISTS), errors.Is(err, windows.ERROR_ACCESS_DENIED):
+		lg.Printf("exit: another interactive boxtray holds %s (%v)", trayActiveMutex, err)
+		return
+	default:
+		// Not fatal: without it the headless enforcer would run beside us.
+		lg.Printf("could not create %s (%v): the headless enforcer will not see this tray", trayActiveMutex, err)
 	}
 
 	// A missing config folder costs only the saved mode, never the tray.
@@ -101,7 +122,9 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go supervise(ctx, func() { run(ctx, mgr, &winSensors{}, 5*time.Second, wake, report) })
+	hb := newHeartbeat(mgr.Incus, mode.EnforcerTray, lg.Printf)
+	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat}
+	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
 	lg.Printf("mode and yield loop started")
 
 	if t == nil {

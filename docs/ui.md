@@ -130,8 +130,11 @@ The same set everywhere, since everywhere is the same page.
     pending.
 - **The last choice wins**, whether it was a tray click or a page request. The tray compares the
   request's `at` with the time of its own last click.
-- **The tray writes `user.agent-box.tray-seen`** (a time) every 30s. That is the dashboard's "tray
-  alive" signal, and it explains a request that isn't being picked up.
+- **The tray writes `user.agent-box.tray-seen`** (RFC3339 UTC) every 30s, plus `user.agent-box.enforcer`
+  (`tray`, or `headless` while nobody is logged on). That is the dashboard's "tray alive" signal, and it
+  explains a request that isn't being picked up. The headless enforcer runs Full and does not read
+  `mode-request`, so a request made while nobody is logged on waits for the tray; the page can say so
+  when `enforcer` is `headless`.
 
 ## Data
 
