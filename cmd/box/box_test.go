@@ -34,6 +34,8 @@ type fakePC struct {
 	pushHang  bool            // file push waits until its context ends
 	freeze    bool            // follow freezes the box and fails
 	launchErr bool            // the connection drops after creating an instance
+	refuse    string          // launch fails with this Incus error, creating nothing
+	launches  [][]string      // arguments of each launch
 	startErr  bool            // the connection drops while starting the job
 	calls     []string
 	pushed    int
@@ -76,6 +78,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		b, _ := json.Marshal(f.insts)
 		return Result{Stdout: string(b)}, nil
 	case "project":
+		if args[1] == "info" {
+			return Result{Stdout: f.project["info"]}, nil
+		}
 		if key := args[len(args)-1]; key != "user.agent-box.mode" {
 			return Result{Stdout: f.project[key] + "\n"}, nil
 		}
@@ -83,6 +88,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 	case "profile":
 		return Result{Stdout: f.memory + "\n"}, nil
 	case "launch":
+		f.launches = append(f.launches, args)
+		if f.refuse != "" {
+			return Result{Stderr: f.refuse, Code: 1}, nil
+		}
 		name := strings.TrimPrefix(args[2], "pc:")
 		if f.race[name] {
 			f.insts = append(f.insts, instance{Name: name, Status: "Running"})
@@ -368,14 +377,14 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 func TestNewSetsExpiry(t *testing.T) {
 	f := &fakePC{t: t}
 	a, _ := testApp(f)
-	name, err := a.New(context.Background(), "", 8*time.Hour)
+	name, err := a.New(context.Background(), "", 8*time.Hour, "")
 	if err != nil || name != "box-0001" {
 		t.Fatalf("New = %q, %v", name, err)
 	}
 	if exp := f.insts[0].Config["user.expires"]; exp != "2026-11-23T20:00:00Z" {
 		t.Errorf("user.expires = %q", exp)
 	}
-	if _, err := a.New(context.Background(), "Bad;name", 0); err == nil {
+	if _, err := a.New(context.Background(), "Bad;name", 0, ""); err == nil {
 		t.Error("bad name accepted")
 	}
 	if code := run(context.Background(), a, []string{"new", "idle"}, nil); code != 0 {

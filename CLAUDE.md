@@ -21,7 +21,9 @@ this file loads into every session, so it stays short and points into `docs/` fo
   tailnet as `agent-box` (100.88.172.93). The Incus project the boxes live in is also `agents`.
 - **pc (remote).** The laptop's Incus remote for the PC, with a restricted cert.
 - **box.** One Incus container in project `agents`: throwaway compute, never storage. Also the CLI.
-- **mode, yield.** The tray's choice: My PC (boxes frozen), Shared (2 CPUs a box), Full (4).
+- **size.** small, medium (default) or large, in `user.box.size`; the table is
+  `internal/mode/size.go`, explained in `docs/DESIGN.md`.
+- **mode, yield.** The tray's choice: My PC (boxes frozen), Shared, Full (twice Shared's CPUs).
   Yield is My PC forced while a game runs. The tray writes `user.agent-box.mode` and
   `user.agent-box.reason` on the project; `box` only reads them.
 

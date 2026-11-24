@@ -4,15 +4,13 @@
 // fakes and builds everywhere.
 package mode
 
-import "strconv"
-
 // Mode is how much of the PC agents get.
 type Mode string
 
 const (
 	MyPC   Mode = "mypc"   // every instance paused; long-frozen ones stopped
-	Shared Mode = "shared" // each instance may use 2 CPUs, normal priority
-	Full   Mode = "full"   // each instance may use 4 CPUs, higher priority
+	Shared Mode = "shared" // each box may use its size's Shared CPUs, normal priority
+	Full   Mode = "full"   // each box may use its size's Full CPUs, higher priority
 )
 
 // All lists the modes in menu order.
@@ -47,33 +45,18 @@ func (m Mode) Label() string {
 	return string(m)
 }
 
-// BoxCPUs is how many CPUs each box may use in this mode: 0 when boxes are
-// paused (My PC) or the mode is unknown.
-func (m Mode) BoxCPUs() int {
-	switch m {
-	case Shared, Full:
-		n, _ := strconv.Atoi(m.limits().cpu)
-		return n
-	}
-	return 0
-}
-
-// limits are the per-instance Incus settings a running mode (Shared, Full)
-// enforces. limits.cpu=N is a real cap (N CPUs), unlike limits.cpu.allowance,
-// which is only a weight between Linux processes and does nothing against
-// Windows. Memory stays as the profile set it. Project limits are fixed at
+// priority is the limits.cpu.priority a running mode (Shared, Full) sets on
+// every box. The CPU count comes from the box's size (Size.CPUs):
+// limits.cpu=N is a real cap (N CPUs), unlike limits.cpu.allowance, which is
+// only a weight between Linux processes and does nothing against Windows.
+// Memory stays as the box was launched with. Project limits are fixed at
 // provisioning, because Incus refuses to lower them below what is in use.
-type limits struct {
-	cpu      string // limits.cpu
-	priority string // limits.cpu.priority
+func (m Mode) priority() string {
+	if m == Full {
+		return "10"
+	}
+	return "0"
 }
 
 // legacyKeys are instance keys earlier versions set; they are removed if found.
 var legacyKeys = []string{"limits.cpu.allowance"}
-
-func (m Mode) limits() limits {
-	if m == Full {
-		return limits{cpu: "4", priority: "10"}
-	}
-	return limits{cpu: "2", priority: "0"}
-}

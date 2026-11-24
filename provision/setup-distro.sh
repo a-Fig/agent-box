@@ -8,9 +8,9 @@
 # Environment:
 #   TS_AUTHKEY        Tailscale auth key. Read from the environment only; never written to disk or logs.
 #                     Without it Tailscale is installed but not joined.
-#   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 12)
+#   AGENTS_CPU_CAP    project cap on the sum of limits.cpu     (default 24)
 #   AGENTS_MEM_CAP    project cap on the sum of limits.memory  (default 12GiB)
-#   AGENTS_MAX_BOXES  project limits.instances                 (default 3)
+#   AGENTS_MAX_BOXES  project limits.instances                 (default 6)
 #   AGENTS_DISK_CAP   project limits.disk, all boxes + volumes (default 150GiB)
 # Flags:
 #   --build-base      build the `agent-base` image if it does not exist
@@ -23,9 +23,9 @@ exec </dev/null
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ZABBLY_FPR="4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
 PROJECT=agents
-CPU_CAP=${AGENTS_CPU_CAP:-12}
+CPU_CAP=${AGENTS_CPU_CAP:-24}
 MEM_CAP=${AGENTS_MEM_CAP:-12GiB}
-MAX_BOXES=${AGENTS_MAX_BOXES:-3}
+MAX_BOXES=${AGENTS_MAX_BOXES:-6}
 DISK_CAP=${AGENTS_DISK_CAP:-150GiB}
 CACHE_SIZE=50GiB
 BUILD_BASE=0
@@ -153,7 +153,11 @@ else
   note "created (own profiles; images shared with the default project)"
 fi
 # Hard caps, fixed here and never changed by the tray (Incus refuses to lower a project limit
-# below what existing instances use). Defaults: 3 boxes x 4 CPUs x 4GiB, the Full mode size.
+# below what existing instances use). Box sizes (internal/mode/size.go) set each box's memory and
+# root disk at launch and its limits.cpu per mode. Memory is the cap that binds: 12GiB is 6 small,
+# 3 medium, or 1 large + 2 small. 6 instances let six small boxes fit. limits.cpu=24 counts each
+# box at its Full CPUs (3 Full medium = 12, 1 Full large + 2 small = 12) with room to spare: it is
+# an allocation cap, and the tray's per-box limits.cpu is what protects the PC.
 incus project set "$PROJECT" limits.instances="$MAX_BOXES"
 incus project set "$PROJECT" limits.cpu="$CPU_CAP"
 incus project set "$PROJECT" limits.memory="$MEM_CAP"
@@ -192,7 +196,7 @@ note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
 
 step "Default profile of the '$PROJECT' project"
 incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
-note "applied default-profile.yaml (limits.cpu=2, limits.memory=4GiB, 30GiB root, nesting, /cache, cloud-init)"
+note "applied default-profile.yaml (medium-size defaults: limits.cpu=2, limits.memory=4GiB, 30GiB root; nesting, /cache, cloud-init)"
 
 # ---------------------------------------------------------------- Tailscale
 step "Tailscale"

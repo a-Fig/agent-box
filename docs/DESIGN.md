@@ -24,13 +24,28 @@ On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq
 | Caches | Custom storage volume `cache` mounted at `/cache` (Go, npm, Gradle, uv caches) |
 | Keeping WSL up | Scheduled Task at boot: `wsl -d agents --exec sleep infinity` |
 
-The `agents` project's `default` profile sets `limits.cpu=2`/`limits.memory=4GiB` per box, `security.nesting=true`, the cache volume and cloud-init. The Linux kernel must be 6.12+ for Incus 7.x (`install-pc.ps1` runs `wsl --update`; `setup-distro.sh` checks).
+The `agents` project's `default` profile sets `security.nesting=true`, the cache volume, cloud-init and medium-size limits for boxes launched without `box`. The Linux kernel must be 6.12+ for Incus 7.x (`install-pc.ps1` runs `wsl --update`; `setup-distro.sh` checks).
 
 ## Isolation
 
-Project `agents` has its own profiles (`features.profiles=true`): Incus refuses `restricted=true` on a project without them. Agents' certs can edit those profiles, but `restricted=true` still validates what goes in them, the project caps bound the totals, and the tray resets each box's own CPU limits every tick. `features.images=false` shares images. Neither can change after creation, so `setup-distro.sh` only checks an existing project and says how to recreate it if they are wrong. The project is `restricted=true` with `restricted.containers.privilege=unprivileged`, `restricted.containers.nesting=allow`, `restricted.devices.disk=managed` (the `cache` volume and root) and `restricted.devices.nic=managed` (`incusbr0`). Project caps are fixed at setup: `limits.instances=3`, `limits.cpu=12`, `limits.memory=12GiB` (3 boxes x 4 CPUs x 4GiB, the Full size). They are allocation caps, not usage caps, and the tray never changes them, because Incus refuses to lower them below what existing instances (stopped ones too) already use.
+Project `agents` has its own profiles (`features.profiles=true`): Incus refuses `restricted=true` on a project without them. Agents' certs can edit those profiles, but `restricted=true` still validates what goes in them, the project caps bound the totals, and the tray resets each box's own CPU limits every tick. `features.images=false` shares images. Neither can change after creation, so `setup-distro.sh` only checks an existing project and says how to recreate it if they are wrong. The project is `restricted=true` with `restricted.containers.privilege=unprivileged`, `restricted.containers.nesting=allow`, `restricted.devices.disk=managed` (the `cache` volume and root) and `restricted.devices.nic=managed` (`incusbr0`). Project caps are fixed at setup: `limits.instances=6`, `limits.cpu=24`, `limits.memory=12GiB`, `limits.disk=150GiB` (see Box sizes). They are allocation caps, not usage caps, and the tray never changes them, because Incus refuses to lower them below what existing instances (stopped ones too) already use.
 
 A restricted cert can still resume an instance and edit its own `limits.cpu`. So the modes are enforced by the tray's admin cert on every tick, not by permissions (see the tray below).
+
+## Box sizes
+
+The table lives in `internal/mode/size.go`; `box`, the tray and `box help` read it there.
+
+| size | CPUs Shared / Full | RAM | root disk |
+|---|---|---|---|
+| small | 1 / 2 | 2GiB | 20GiB |
+| medium (default) | 2 / 4 | 4GiB | 30GiB |
+| large | 4 / 8 | 8GiB | 40GiB |
+
+- `box` launches every box with `user.box.size`, `limits.memory`, a root disk `size` and the Shared `limits.cpu` on the instance, so no extra profiles are needed. A box without the key (one launched before sizes, or by hand) is medium. Boxes are never resized: memory and disk are fixed at launch.
+- The tray sets each box's `limits.cpu` from its size and the mode on every tick. An agent could rewrite `user.box.size` on its own box to get more CPUs; memory stays as launched, and the project caps still bound the total.
+- Incus counts the caps against configured limits, stopped boxes included. Memory binds first: 12GiB is 6 small, 3 medium, or 1 large and 2 small. `limits.cpu=24` counts every box at its Full CPUs with room to spare; the tray's per-box limits are what protect the PC. Disk can bind too: the 50GiB `cache` volume and images count against the 150GiB, so 150GiB holds at most 4 small boxes' root disks next to them (2026-11-23).
+- `box status` works out what fits now from the caps minus the existing boxes' Full CPUs, memory and count, and the disk Incus reports in `incus project info`. A launch Incus refuses for project limits exits 75, like a paused PC.
 
 ## Glue we write
 
@@ -38,37 +53,37 @@ A restricted cert can still resume an instance and edit its own `limits.cpu`. So
 It shells out to the `incus` CLI, using the `pc` remote and the `agents` project. Each command is also an MCP tool with the same behaviour.
 
 ```
-box status                       # box_status: advice line, reachability, mode + yield reason, free slots, CPUs/RAM per box, this repo's box and running jobs
-box run [--box name|--new] [--env K=V] [--timeout d] -- <cmd...>   # box_run
+box status                       # box_status: advice line, reachability, mode + yield reason, free slots, room per size, this repo's box (and size) and running jobs
+box run [--box name|--new] [--size S] [--env K=V] [--timeout d] -- <cmd...>   # box_run
 box job <id> [--offset N --limit N]   # box_job: follow a job, or page through its log
 box jobs [--box name]            # box_jobs: jobs from /work/.box (*.pid, *.exit, *.log), newest first
 box cancel <id>                  # box_cancel: kill the job's session (setsid), write .exit 130
 box pull <id|box> <path> <dir>   # box_pull: incus file pull -r into a staging dir inside <dir>
-box new [name] [--ttl 8h]        # box_new: incus launch agent-base pc:<name> --project agents, with a user.expires label
+box new [name] [--ttl 8h] [--size S]  # box_new: incus launch agent-base pc:<name> --project agents, with user.expires and the size
 box rm <name>                    # box_rm
 box ls                           # box_ls
 box mcp                          # serve the tools on stdio
 box join [--leave]               # register box mcp with claude/codex (user scope) and install skills/box/SKILL.md
 ```
 
-`box status` reads `user.agent-box.mode` and `user.agent-box.reason` (set by the tray while it yields to a game) from the project, `limits.instances` from the project and `limits.memory` from the `default` profile, and counts slots as `limits.instances` minus existing boxes. `box join` uses the agents' own CLIs and never edits their config files. Env names that look like secrets are refused, since boxes are shared.
+`box status` reads `user.agent-box.mode` and `user.agent-box.reason` (set by the tray while it yields to a game) and the caps from the project, counts slots as `limits.instances` minus existing boxes, and says how many of each size fit (see Box sizes). `box join` uses the agents' own CLIs and never edits their config files. Env names that look like secrets are refused, since boxes are shared.
 
 `box run`:
 1. Snapshots the worktree as a git commit without touching the user's index: a temporary `GIT_INDEX_FILE`, add everything not ignored, then `write-tree` and `commit-tree`. It sends a `git bundle` with `incus file push` and checks the commit out in `/work/<repo>`.
 2. Runs the command with `incus exec ... -- bash -lc`, under `nohup` with output going to `/work/.box/<job>.log`, so a dropped connection loses nothing. `box job <id>` reattaches with `tail -f`.
 3. Exits with the remote exit code, or 75 when the PC is paused, so callers can fall back to running locally.
 
-By default it reuses one box per repo, which keeps caches and `node_modules` warm. `--new` creates a throwaway box.
+By default it reuses one box per repo, which keeps caches and `node_modules` warm. `--new` creates a throwaway box. `--size` sets the size of a box the run launches (medium by default); when the repo's box exists in another size, the run uses a throwaway of the requested size and says so.
 
 ### 2. Tray app (Windows): mode switch + gaming yield
 
 | Mode | Per box | Notes |
 |---|---|---|
 | My PC | paused | Boxes still frozen after 15 minutes are stopped to free RAM. A "Release memory" item runs `wsl --terminate agents`. |
-| Shared | `limits.cpu=2`, `limits.cpu.priority=0` | Resumes paused boxes. |
-| Full | `limits.cpu=4`, `limits.cpu.priority=10` | Resumes paused boxes. |
+| Shared | `limits.cpu` = the size's Shared CPUs (1/2/4), `limits.cpu.priority=0` | Resumes paused boxes. |
+| Full | `limits.cpu` = the size's Full CPUs (2/4/8), `limits.cpu.priority=10` | Resumes paused boxes. |
 
-- `limits.cpu=N` is the real cap: the box can use at most N CPUs. `limits.cpu.allowance` is only a weight between Linux processes, so it does nothing against Windows or games; the tray removes it if it finds one. Memory stays at the profile's 4GiB in every mode.
+- `limits.cpu=N` is the real cap: the box can use at most N CPUs. `limits.cpu.allowance` is only a weight between Linux processes, so it does nothing against Windows or games; the tray removes it if it finds one. Memory stays as the box was launched in every mode.
 - **Every tick** the tray reads each instance's config from `incus list --format json` and sets only the keys that differ, so a limit an agent changed is put back, with no extra calls when nothing changed. In My PC it pauses any running instance on every tick, which also catches an agent resuming one.
 - **Gaming yield:** Steam `RunningAppID` != 0, or `SHQueryUserNotificationState` full-screen/busy, behaves like My PC until the game ends.
 - It uses an admin client cert, which agents don't have. The mode is stored in the `agents` project config as `user.agent-box.mode`, so `box` can read it. A mode check in `box` is advisory: an agent can ignore it. The tray's per-tick enforcement is what makes games win.
@@ -89,5 +104,5 @@ Boxes are throwaway compute. Push work to git before a box goes.
 
 - **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
 - **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
-- **Disk caps.** Root disk `size: 30GiB` per box (profile). Project `limits.disk=150GiB` over all boxes, volumes and images. Volume `cache` is `size=50GiB`.
+- **Disk caps.** Root disk 20/30/40GiB per box by size, set at launch. Project `limits.disk=150GiB` over all boxes, volumes and images. Volume `cache` is `size=50GiB`.
 - **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle and uv rebuild it).

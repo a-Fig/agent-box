@@ -19,4 +19,6 @@ Boxes are throwaway compute, never storage: idle boxes are deleted after 2 hours
 
 Boxes are shared. **Never put secrets in `env`**; box refuses names like `*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*`.
 
-Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS (npm), uv, JDK 17, gh, git, build-essential. Each box gets 2 CPUs (Shared) or 4 (Full) and 4 GiB RAM.
+**Sizes** (`size` on `box_run`/`box_new`): small 1-2 CPUs/2 GiB for quick unit tests, medium 2-4/4 GiB (default), large 4-8/8 GiB for big Gradle/Android builds and memory-hungry suites. `box_status` says what fits now. Exit 75 also means no room: try smaller or run locally.
+
+Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS (npm), uv, JDK 17, gh, git, build-essential.
