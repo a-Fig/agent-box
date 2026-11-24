@@ -126,6 +126,7 @@ type instance struct {
 	Status         string            `json:"status"` // Running, Stopped, Frozen, ...
 	Config         map[string]string `json:"config"`
 	ExpandedConfig map[string]string `json:"expanded_config"`
+	CreatedAt      time.Time         `json:"created_at"`
 }
 
 func (a *App) list(ctx context.Context) ([]instance, error) {
@@ -270,11 +271,23 @@ func (a *App) gpuHolder(ctx context.Context, in instance) (holder string, idle b
 	return "box " + in.Name, err == nil
 }
 
+// gpuStartGrace is how long a new GPU box counts as starting up. Between
+// launch and its job's PID file, a box runs no job (and Incus creates it
+// stopped before starting it), so until then no other run may take it for
+// dead and delete it.
+const gpuStartGrace = 15 * time.Minute
+
+// starting says whether in is younger than gpuStartGrace.
+func (a *App) starting(in instance) bool {
+	return !in.CreatedAt.IsZero() && a.Now().Sub(in.CreatedAt) < gpuStartGrace
+}
+
 // claimGPU checks that no box but except holds the GPU, so only one GPU box
-// runs at a time. Throwaway GPU boxes that are stopped (the tray stops GPU
-// boxes for games) or run no job any more are deleted on the way: they hold
-// 8GiB of the project's memory and would block the next one. Otherwise a
-// running or paused GPU box makes it return errGPUBusy.
+// runs at a time. Throwaway GPU boxes that are done are deleted on the way,
+// since they hold 8GiB of the project's memory and would block the next one:
+// stopped ones the tray marked (reclaimable) or that are past startup, and
+// running ones past startup that run no job. Otherwise a running, paused or
+// starting GPU box makes it return errGPUBusy.
 func (a *App) claimGPU(ctx context.Context, insts []instance, except string) error {
 	for _, in := range insts {
 		if in.Name == except || !mode.IsGPU(in.Config) {
@@ -282,13 +295,16 @@ func (a *App) claimGPU(ctx context.Context, insts []instance, except string) err
 		}
 		throwaway := in.Config[throwawayKey] == "true"
 		if in.Status == "Stopped" {
-			if throwaway {
+			switch {
+			case throwaway && (reclaimable(in) || !a.starting(in)):
 				a.removeQuietly(ctx, in.Name)
+			case throwaway:
+				return &errGPUBusy{holder: "box " + in.Name + ", starting"}
 			}
 			continue
 		}
 		holder, idle := a.gpuHolder(ctx, in)
-		if idle && throwaway {
+		if idle && throwaway && !a.starting(in) {
 			a.removeQuietly(ctx, in.Name)
 			continue
 		}
@@ -309,8 +325,15 @@ func (a *App) confirmGPU(ctx context.Context, name string, sz mode.Size) error {
 	if err != nil {
 		return nil // the launch worked; the next claim sees both boxes
 	}
+	if find(insts, name) == nil { // another run took ours for dead
+		return &errGPUBusy{holder: "a box that replaced " + name}
+	}
 	for _, in := range insts {
-		if in.Name != name && mode.IsGPU(in.Config) && in.Status != "Stopped" {
+		if in.Name == name || !mode.IsGPU(in.Config) {
+			continue
+		}
+		// A stopped box still being created counts: it is about to run.
+		if in.Status != "Stopped" || (!reclaimable(in) && a.starting(in)) {
 			a.removeQuietly(ctx, name)
 			return &errGPUBusy{holder: "box " + in.Name}
 		}
@@ -363,8 +386,10 @@ var projectLimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:agg
 // game or My PC. It is kept for GPUStoppedTTL so box job can say why its job
 // died, but it still holds a GPU box's memory and disk against the project's
 // caps, so any launch that would not fit deletes it first.
+// Only the tray's mark counts: Incus creates a box stopped before starting
+// it, so an unmarked stopped box may be one a run is launching.
 func reclaimable(in instance) bool {
-	return in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true"
+	return in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true" && in.Config[mode.StoppedKey] != ""
 }
 
 // reclaim deletes every reclaimable box and says whether there was one.
@@ -677,6 +702,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	started = true
 	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
+		if msg := a.gpuStopped(ctx, box); msg != "" { // the tray stopped it for a game
+			fmt.Fprintf(a.Err, "box: %s\n", msg)
+			r.State, r.Code = statePaused, exitPaused
+			return r, nil
+		}
 		if o.New {
 			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
 		}

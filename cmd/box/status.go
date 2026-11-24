@@ -71,7 +71,13 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s.Reason = a.projectKey(ctx, mode.ProjectReasonKey)
 	s.Yielding = s.Reason != ""
 	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
-		s.MaxBoxes, s.SlotsFree = n, max(n-len(insts), 0)
+		free := n - len(insts)
+		for _, in := range insts {
+			if reclaimable(in) { // the next launch deletes it first
+				free++
+			}
+		}
+		s.MaxBoxes, s.SlotsFree = n, max(free, 0)
 	}
 	now := mode.Mode(s.Mode)
 	switch {

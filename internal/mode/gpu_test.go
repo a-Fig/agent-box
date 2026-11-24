@@ -1,6 +1,7 @@
 package mode
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func TestMyPCStopsGPUBoxInsteadOfPausing(t *testing.T) {
 	tick(m, 0, false)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=mypc",
-		"set g user.box.stopped=mypc", "set g user.expires=2026-01-01T12:30:00Z", "stop g",
+		"set g user.box.stopped=mypc", "stop g", "set g user.expires=2026-01-01T12:30:00Z",
 		"pause a",
 	})
 	tick(m, time.Minute, false)
@@ -44,7 +45,7 @@ func TestGamingStopsGPUBoxWithReason(t *testing.T) {
 	tick(m, 0, true)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=mypc", "project user.agent-box.reason=gaming: steam:570",
-		"set g user.box.stopped=gaming: steam:570", "set g user.expires=2026-01-01T12:30:00Z", "stop g",
+		"set g user.box.stopped=gaming: steam:570", "stop g", "set g user.expires=2026-01-01T12:30:00Z",
 		"pause a",
 	})
 	// The reaper deletes it once the short expiry passes, still yielding.
@@ -68,10 +69,15 @@ func TestGPUStopFailurePausesAndRetries(t *testing.T) {
 	if st.Err == nil || f.state["g"] != "Frozen" {
 		t.Fatalf("err %v, state %s", st.Err, f.state["g"])
 	}
-	f.take()
+	// No shortened expiry for a box that may resume: the reaper would delete it.
+	for _, c := range f.take() {
+		if strings.Contains(c, ExpiresKey) {
+			t.Errorf("expiry changed before the stop worked: %s", c)
+		}
+	}
 	f.failOn = ""
 	tick(m, time.Second, false)
-	equal(t, f.take(), []string{"stop g"})
+	equal(t, f.take(), []string{"stop g", "set g user.expires=2026-01-01T12:30:01Z"})
 }
 
 func TestGPUBoxCPUs(t *testing.T) {

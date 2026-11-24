@@ -262,23 +262,31 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name, state string)
 
 // stopGPU is the My PC step for a GPU box: stop, not pause, because a frozen
 // CUDA process keeps its VRAM and a game needs it back. Before stopping it
-// records why (StoppedKey) and shortens the box's expiry to GPUStoppedTTL,
-// since its job dies with it. If the stop fails the box is paused, so it at
-// least stops computing, and the stop is retried next tick.
+// records why (StoppedKey); once the stop worked it shortens the box's expiry
+// to GPUStoppedTTL, since its job died with it. Shortening it earlier would
+// let the reaper delete a box whose stop failed and that later resumed. If
+// the stop fails the box is paused, so it at least stops computing, and the
+// stop is retried next tick; so is a failed expiry write, for a stopped box
+// that carries the mark.
 func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state, why string) (string, error) {
-	if state != "running" && state != "frozen" {
-		delete(m.frozenSince, in.Name)
-		return state, nil
-	}
 	var errs []error
-	if in.Config[StoppedKey] != why {
-		if err := m.Incus.SetInstanceConfig(ctx, in.Name, StoppedKey, why); err != nil {
-			errs = append(errs, err)
+	shorten := func() {
+		soon := now.Add(GPUStoppedTTL)
+		if exp, err := time.Parse(time.RFC3339, in.Config[ExpiresKey]); err != nil || exp.After(soon) {
+			if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, soon.UTC().Format(time.RFC3339)); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
-	soon := now.Add(GPUStoppedTTL)
-	if exp, err := time.Parse(time.RFC3339, in.Config[ExpiresKey]); err != nil || exp.After(soon) {
-		if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, soon.UTC().Format(time.RFC3339)); err != nil {
+	if state != "running" && state != "frozen" {
+		delete(m.frozenSince, in.Name)
+		if state == "stopped" && in.Config[StoppedKey] != "" {
+			shorten()
+		}
+		return state, errors.Join(errs...)
+	}
+	if in.Config[StoppedKey] != why {
+		if err := m.Incus.SetInstanceConfig(ctx, in.Name, StoppedKey, why); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -294,6 +302,7 @@ func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state
 		return state, errors.Join(errs...)
 	}
 	delete(m.frozenSince, in.Name)
+	shorten()
 	return "stopped", errors.Join(errs...)
 }
 

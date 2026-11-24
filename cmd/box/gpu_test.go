@@ -309,7 +309,34 @@ func TestStatusDoesntCountStoppedGPUThrowaways(t *testing.T) {
 		{Name: "gpu-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")},
 	}}
 	a, _ := testApp(f)
-	if s := a.Status(context.Background(), ""); s.Room != "1 large, or 1 medium, or 1 small" || s.GPU != "free" {
-		t.Errorf("room = %q, gpu = %q", s.Room, s.GPU)
+	if s := a.Status(context.Background(), ""); s.Room != "1 large, or 1 medium, or 1 small" || s.GPU != "free" || s.SlotsFree != 1 || !s.Available {
+		t.Errorf("room = %q, gpu = %q, slots %d, available %v", s.Room, s.GPU, s.SlotsFree, s.Available)
+	}
+}
+
+// Between launch and its job's PID file a GPU box runs no job, and Incus
+// creates it stopped before starting it. A run in that window must not take
+// it for dead.
+func TestGPUClaimSparesStartingBoxes(t *testing.T) {
+	for name, status := range map[string]string{"created, not started": "Stopped", "started, no job yet": "Running"} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakePC{t: t, mode: "shared", exit: "0"}
+			a, out := testApp(f)
+			f.insts = []instance{{Name: "new-1234", Status: status, Config: gpuConfig(throwawayKey, "true"), CreatedAt: a.Now().Add(-time.Minute)}}
+			r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Size: "gpu"})
+			if err != nil || r.Code != exitPaused || f.names() != "new-1234" || len(f.launches) != 0 {
+				t.Errorf("Run = %+v, %v, boxes %q, launches %q\n%s", r, err, f.names(), f.launches, out)
+			}
+		})
+	}
+}
+
+// If another run deleted our new GPU box, we back off rather than run in it.
+func TestGPUConfirmNoticesOwnBoxGone(t *testing.T) {
+	f := &fakePC{t: t, mode: "shared", exit: "0"}
+	f.launched = func(f *fakePC) { f.insts = nil }
+	a, out := testApp(f)
+	if r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Size: "gpu"}); err != nil || r.Code != exitPaused {
+		t.Errorf("Run = %+v, %v\n%s", r, err, out)
 	}
 }
