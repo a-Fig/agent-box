@@ -119,6 +119,9 @@ func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) s
 		return "unavailable: the PC is in My PC mode"
 	}
 	for _, in := range insts {
+		if mode.IsGPU(in.Config) && a.beingCreated(in) {
+			return "in use: box " + in.Name + ", starting"
+		}
 		if mode.IsGPU(in.Config) && in.Status != "Stopped" {
 			holder, _ := a.gpuHolder(ctx, in)
 			return "in use: " + holder

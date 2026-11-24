@@ -93,3 +93,21 @@ func TestGPUBoxCPUs(t *testing.T) {
 		t.Error("IsGPU")
 	}
 }
+
+// A stopped GPU box the tray marked keeps getting its short expiry in any
+// mode, in case the write failed in My PC; it is not started again.
+func TestStoppedGPUExpiryRetriedInShared(t *testing.T) {
+	f := gpuFake(later)
+	f.state["g"] = "Stopped"
+	f.config["g"][StoppedKey] = "gaming: steam:570"
+	m := New(f, Shared)
+	tick(m, 0, false)
+	calls := strings.Join(f.take(), " | ")
+	if !strings.Contains(calls, "set g user.expires=2026-01-01T12:30:00Z") || strings.Contains(calls, "start g") {
+		t.Errorf("calls: %s", calls)
+	}
+	tick(m, time.Second, false) // done once; nothing more for g
+	if calls := strings.Join(f.take(), " | "); strings.Contains(calls, " g ") || strings.Contains(calls, "set g") {
+		t.Errorf("second tick: %s", calls)
+	}
+}

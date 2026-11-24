@@ -216,6 +216,9 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 			state, err = m.stopGPU(ctx, now, in, state, why)
 		case eff == MyPC:
 			state, err = m.freeze(ctx, now, in.Name, state)
+		case IsGPU(in.Config) && state == "stopped" && in.Config[StoppedKey] != "":
+			// Stays stopped; stopGPU retries a failed expiry write.
+			state, err = m.stopGPU(ctx, now, in, state, why)
 		default:
 			state, err = m.thaw(ctx, eff, in, state)
 		}
@@ -285,10 +288,10 @@ func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state
 		}
 		return state, errors.Join(errs...)
 	}
+	mark := func() error { return m.Incus.SetInstanceConfig(ctx, in.Name, StoppedKey, why) }
+	markErr := error(nil)
 	if in.Config[StoppedKey] != why {
-		if err := m.Incus.SetInstanceConfig(ctx, in.Name, StoppedKey, why); err != nil {
-			errs = append(errs, err)
-		}
+		markErr = mark()
 	}
 	if err := m.Incus.Stop(ctx, in.Name); err != nil {
 		errs = append(errs, err)
@@ -302,6 +305,11 @@ func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state
 		return state, errors.Join(errs...)
 	}
 	delete(m.frozenSince, in.Name)
+	if markErr != nil { // once more: unmarked, box can't reclaim the stopped box
+		if err := mark(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	shorten()
 	return "stopped", errors.Join(errs...)
 }

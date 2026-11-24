@@ -282,6 +282,12 @@ func (a *App) starting(in instance) bool {
 	return !in.CreatedAt.IsZero() && a.Now().Sub(in.CreatedAt) < gpuStartGrace
 }
 
+// beingCreated says whether stopped GPU box in may be one a run is launching
+// right now: young, and not marked by the tray. It holds the GPU.
+func (a *App) beingCreated(in instance) bool {
+	return in.Status == "Stopped" && in.Config[mode.StoppedKey] == "" && a.starting(in)
+}
+
 // claimGPU checks that no box but except holds the GPU, so only one GPU box
 // runs at a time. Throwaway GPU boxes that are done are deleted on the way,
 // since they hold 8GiB of the project's memory and would block the next one:
@@ -296,10 +302,10 @@ func (a *App) claimGPU(ctx context.Context, insts []instance, except string) err
 		throwaway := in.Config[throwawayKey] == "true"
 		if in.Status == "Stopped" {
 			switch {
-			case throwaway && (reclaimable(in) || !a.starting(in)):
-				a.removeQuietly(ctx, in.Name)
-			case throwaway:
+			case a.beingCreated(in):
 				return &errGPUBusy{holder: "box " + in.Name + ", starting"}
+			case throwaway:
+				a.removeQuietly(ctx, in.Name)
 			}
 			continue
 		}
@@ -333,7 +339,7 @@ func (a *App) confirmGPU(ctx context.Context, name string, sz mode.Size) error {
 			continue
 		}
 		// A stopped box still being created counts: it is about to run.
-		if in.Status != "Stopped" || (!reclaimable(in) && a.starting(in)) {
+		if in.Status != "Stopped" || a.beingCreated(in) {
 			a.removeQuietly(ctx, name)
 			return &errGPUBusy{holder: "box " + in.Name}
 		}
@@ -702,10 +708,17 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	started = true
 	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
-		if msg := a.gpuStopped(ctx, box); msg != "" { // the tray stopped it for a game
-			fmt.Fprintf(a.Err, "box: %s\n", msg)
-			r.State, r.Code = statePaused, exitPaused
-			return r, nil
+		// The tray stops GPU boxes for games, and another run may then
+		// delete one. Only then does the job surely not run: a frozen box's
+		// job may resume, so it keeps its job ID below.
+		if sz.GPU {
+			if insts, lerr := a.list(ctx); lerr == nil {
+				if in := find(insts, box); in == nil || in.Status == "Stopped" {
+					fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
+					r.State, r.Code = statePaused, exitPaused
+					return r, nil
+				}
+			}
 		}
 		if o.New {
 			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
