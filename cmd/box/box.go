@@ -16,6 +16,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 // exitPaused tells callers the box or the PC is paused (or out of reach),
@@ -120,9 +122,10 @@ func (a *App) incusOK(ctx context.Context, args ...string) (string, error) {
 func (a *App) target(box string) string { return a.Remote + ":" + box }
 
 type instance struct {
-	Name   string            `json:"name"`
-	Status string            `json:"status"` // Running, Stopped, Frozen, ...
-	Config map[string]string `json:"config"`
+	Name           string            `json:"name"`
+	Status         string            `json:"status"` // Running, Stopped, Frozen, ...
+	Config         map[string]string `json:"config"`
+	ExpandedConfig map[string]string `json:"expanded_config"`
 }
 
 func (a *App) list(ctx context.Context) ([]instance, error) {
@@ -186,15 +189,67 @@ var validBox = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 // deletes it once that job has finished.
 const throwawayKey = "user.box.throwaway"
 
-// New launches a box with a TTL. An empty name gets a random one.
-func (a *App) New(ctx context.Context, name string, ttl time.Duration) (string, error) {
+// New launches a box of the given size ("" is medium) with a TTL. An empty
+// name gets a random one.
+func (a *App) New(ctx context.Context, name string, ttl time.Duration, size string) (string, error) {
+	sz, err := lookupSize(size)
+	if err != nil {
+		return "", err
+	}
 	if name == "" {
 		name = "box-" + a.Rand()
 	}
-	return name, a.launch(ctx, name, ttl, false)
+	return name, a.launch(ctx, name, ttl, false, sz)
 }
 
-func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool) error {
+// lookupSize resolves a --size value; "" is the default size.
+func lookupSize(name string) (mode.Size, error) {
+	if name == "" {
+		name = mode.DefaultSize
+	}
+	sz, ok := mode.LookupSize(name)
+	if !ok {
+		return sz, fmt.Errorf("unknown size %q: use %s", name, mode.SizeNames())
+	}
+	return sz, nil
+}
+
+// errNoRoom is a launch that Incus refused for the project's limits. Callers
+// treat it like a paused PC: run locally (exit 75).
+type errNoRoom struct {
+	size   string
+	reason string
+}
+
+func (e *errNoRoom) Error() string {
+	return fmt.Sprintf("no room on the PC for a %s box (%s); run it locally, or ask for a smaller size", e.size, e.reason)
+}
+
+func isNoRoom(err error) bool {
+	var e *errNoRoom
+	return errors.As(err, &e)
+}
+
+type existingBoxSize string
+
+func (s existingBoxSize) Error() string { return "existing box has size " + string(s) }
+
+func reusableBox(in *instance, requestedSize string) error {
+	if in.Config[throwawayKey] == "true" {
+		return fmt.Errorf("box %s is a throwaway and cannot be reused", in.Name)
+	}
+	if have := mode.SizeOf(in.Config).Name; requestedSize != "" && have != requestedSize {
+		return existingBoxSize(have)
+	}
+	return nil
+}
+
+// projectLimitRefusal matches Incus's refusals for project limits, like
+// `Reached maximum aggregate value "12GiB" for "limits.memory" in project
+// "agents"` or `Reached maximum number of instances in project "agents"`.
+var projectLimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
+
+func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
 	}
@@ -202,11 +257,20 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 		return errors.New("box TTL must be positive")
 	}
 	// Unqualified, the image would be looked up on the local (laptop) remote.
-	args := []string{"launch", a.target(a.Image), a.target(name), "-c", a.expiryConfig(ttl)}
+	// The size's memory and root disk are set here, once; the tray sets
+	// limits.cpu from the size and the mode, so the Shared value is only a start.
+	args := []string{"launch", a.target(a.Image), a.target(name), "-c", a.expiryConfig(ttl),
+		"-c", mode.SizeKey + "=" + sz.Name,
+		"-c", "limits.cpu=" + strconv.Itoa(sz.SharedCPUs),
+		"-c", "limits.memory=" + sz.Memory,
+		"-d", "root,size=" + sz.Disk}
 	if throwaway {
 		args = append(args, "-c", throwawayKey+"=true")
 	}
 	_, err := a.incusOK(ctx, args...)
+	if err != nil && projectLimitRefusal.MatchString(err.Error()) {
+		return &errNoRoom{size: sz.Name, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
+	}
 	return err
 }
 
@@ -250,10 +314,13 @@ func (a *App) Ls(ctx context.Context) error {
 
 // RunOpts says what box run does.
 type RunOpts struct {
-	Dir  string   // local git worktree
-	Cmd  []string // one shell string, or argv to quote
-	Box  string   // box to use; "" is the repo's own box
-	New  bool     // use a throwaway box, deleted afterwards
+	Dir string   // local git worktree
+	Cmd []string // one shell string, or argv to quote
+	Box string   // box to use; "" is the repo's own box
+	New bool     // use a throwaway box, deleted afterwards
+	// Size of a box launched for this run: "" is medium for a new box and
+	// any size for an existing one.
+	Size string
 	TTL  time.Duration
 	Wait time.Duration     // stop following after this long; 0 waits for the end
 	Env  map[string]string // passed to the command; no secrets (see checkEnv)
@@ -320,6 +387,10 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if err := checkEnv(o.Env); err != nil {
 		return JobResult{Code: 2}, err
 	}
+	sz, err := lookupSize(o.Size)
+	if err != nil {
+		return JobResult{Code: 2}, err
+	}
 	if o.Timeout < 0 {
 		return JobResult{Code: 2}, errors.New("timeout must be positive")
 	}
@@ -340,11 +411,16 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	var inst *instance
 	if paused == "" && !o.New {
 		if inst = find(insts, box); inst != nil {
-			if inst.Config[throwawayKey] == "true" {
-				return JobResult{Box: box, Code: 1}, fmt.Errorf("box %s is a throwaway and cannot be reused", box)
-			}
-			if inst.Status == "Frozen" {
-				paused = box + " is paused"
+			switch err := reusableBox(inst, o.Size); have := err.(type) {
+			case existingBoxSize:
+				fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
+				o.New = true
+			case nil:
+				if inst.Status == "Frozen" {
+					paused = box + " is paused"
+				}
+			default:
+				return JobResult{Box: box, Code: 1}, err
 			}
 		}
 	}
@@ -361,12 +437,33 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	defer os.RemoveAll(filepath.Dir(bundle))
 
 	started := false // from here on the remote job may be running
+	if !o.New {
+		paused, err := a.ensureBox(ctx, box, inst, sz, o.Size)
+		var have existingBoxSize
+		switch {
+		case errors.As(err, &have):
+			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
+			o.New = true
+		case isNoRoom(err):
+			fmt.Fprintf(a.Err, "box: %v\n", err)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		case err != nil:
+			return JobResult{Code: 1}, err
+		case paused != "":
+			fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+			return JobResult{State: statePaused, Code: exitPaused}, nil
+		}
+	}
 	if o.New {
 		ttl := o.TTL
 		if ttl == 0 {
 			ttl = idleTTL
 		}
-		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl); err != nil {
+		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
+			if isNoRoom(err) {
+				fmt.Fprintf(a.Err, "box: %v\n", err)
+				return JobResult{State: statePaused, Code: exitPaused}, nil
+			}
 			return JobResult{Box: box, Code: 1}, err
 		}
 		// Until its job starts, a failed run takes its own box with it.
@@ -375,11 +472,6 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 				a.removeQuietly(ctx, box)
 			}
 		}()
-	} else if paused, err := a.ensureBox(ctx, box, inst); err != nil {
-		return JobResult{Code: 1}, err
-	} else if paused != "" {
-		fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
-		return JobResult{State: statePaused, Code: exitPaused}, nil
 	}
 
 	job := box + "." + id
@@ -423,7 +515,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
 // existing box: a taken name means another try with a new suffix.
-func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration) (string, error) {
+func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
 	for try := 0; try < 8; try++ {
 		name := base + "-" + a.Rand()
 		if find(insts, name) != nil {
@@ -431,7 +523,7 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		}
 		fmt.Fprintf(a.Err, "box: launching %s\n", name)
 		a.notify(jobNotice{Event: "launching_box", Box: name})
-		err := a.launch(ctx, name, ttl, true)
+		err := a.launch(ctx, name, ttl, true, sz)
 		if !isConflict(err) {
 			return name, err
 		}
@@ -442,13 +534,13 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 
 // ensureBox launches or starts a reused box. When a concurrent run launches
 // or starts it first, it carries on with that one.
-func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused string, err error) {
+func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size, requestedSize string) (paused string, err error) {
 	if inst != nil && inst.Status == "Running" {
 		return "", nil
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
-		err = a.launch(ctx, box, idleTTL, false)
+		err = a.launch(ctx, box, idleTTL, false, sz)
 	} else {
 		_, err = a.incusOK(ctx, "start", a.target(box))
 	}
@@ -456,19 +548,24 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance) (paused
 		return "", nil
 	}
 	now, paused := a.check(ctx, box)
-	switch {
-	case paused != "":
+	if paused != "" {
 		return paused, nil
-	case now == nil:
+	}
+	if now == nil {
 		return "", err
-	case now.Config[throwawayKey] == "true":
-		return "", fmt.Errorf("box %s is a throwaway and cannot be reused", box)
+	}
+	if err := reusableBox(now, requestedSize); err != nil {
+		return "", err
+	}
+	switch {
 	case now.Status == "Running":
 		return "", nil
 	case inst == nil: // someone else launched it but it isn't running yet
 		if _, err := a.incusOK(ctx, "start", a.target(box)); err != nil {
-			if now, _ := a.check(ctx, box); now != nil && now.Status == "Running" && now.Config[throwawayKey] != "true" {
-				return "", nil
+			if now, paused := a.check(ctx, box); paused != "" {
+				return paused, nil
+			} else if now != nil && now.Status == "Running" {
+				return "", reusableBox(now, requestedSize)
 			}
 			return "", err
 		}

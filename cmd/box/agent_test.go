@@ -86,7 +86,11 @@ func TestPayloadPreservesExitCodeOnHardTimeout(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
-	limits := map[string]string{"limits.instances": "3"}
+	limits := map[string]string{"limits.instances": "6", "limits.cpu": "24", "limits.memory": "12GiB"}
+	three := map[string]string{"limits.instances": "3"}
+	diskFull := map[string]string{"limits.instances": "6", "limits.cpu": "24", "limits.memory": "12GiB",
+		"info": `{"resources":{"disk":{"Limit":161061273600,"Usage":118111600640},"cpu":{"Limit":24,"Usage":0}}}`} // 40GiB free
+	large := map[string]string{"user.box.size": "large", "limits.memory": "8GiB"}
 	for name, tc := range map[string]struct {
 		f      *fakePC
 		advice string
@@ -98,15 +102,21 @@ func TestStatus(t *testing.T) {
 			"unavailable: this repo's box my-repo is frozen: run locally", false},
 		"yielding": {&fakePC{mode: "shared", project: map[string]string{"limits.instances": "3", "user.agent-box.reason": "Steam game running"}},
 			"unavailable: PC is yielding to a game (Steam game running): run locally", false},
-		"free slots": {&fakePC{mode: "shared", project: limits, memory: "4GiB", insts: []instance{{Name: "other", Status: "Running"}}},
-			"available: 2 slot(s) free, 2 CPUs/4GiB per box", true},
-		"full slots": {&fakePC{mode: "full", project: limits, insts: []instance{{Name: "a"}, {Name: "b"}, {Name: "c"}}},
+		"room": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "other", Status: "Running"}}},
+			"available: room for 1 large, or 2 medium, or 4 small", true},
+		"disk binds": {&fakePC{mode: "shared", project: diskFull},
+			"available: room for 1 large, or 1 medium, or 2 small", true},
+		"memory full": {&fakePC{mode: "full", project: limits, insts: []instance{{Name: "a", Config: large}, {Name: "b"}}},
+			"busy: no room for another box (CPU, memory or disk caps): run locally, or reuse a box with box_run box", false},
+		"full slots": {&fakePC{mode: "full", project: three, insts: []instance{{Name: "a"}, {Name: "b"}, {Name: "c"}}},
 			"busy: all 3 box slots are taken: run locally, or reuse a box with box_run box", false},
-		"repo box": {&fakePC{mode: "full", project: limits, memory: "4GiB",
+		"repo box": {&fakePC{mode: "full", project: three,
 			insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{expiresKey: "2026-11-23T14:00:00Z"}}, {Name: "b"}, {Name: "c"}},
 			jobs:  map[string]string{"my-repo": "my-repo.20261123-110000-beef running - 10\nmy-repo.20261123-100000-0001 done 0 5\n"}},
-			"available: this repo's box my-repo is running, 1 job(s) running there (runs take turns); 4 CPUs/4GiB per box", true},
-		"no mode": {&fakePC{project: map[string]string{}}, "available: 2 CPUs/4GiB per box (mode unknown: the tray hasn't set it)", true},
+			"available: this repo's box my-repo (medium: 4 CPUs/4GiB) is running, 1 job(s) running there (runs take turns); no room for more boxes", true},
+		"large repo box": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "my-repo", Status: "Stopped", Config: large}}},
+			"available: this repo's box my-repo (large: 4 CPUs/8GiB) is stopped; room for 1 medium, or 2 small more", true},
+		"no mode": {&fakePC{project: map[string]string{}}, "available: medium: 2 CPUs/4GiB (mode unknown: the tray hasn't set it)", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tc.f.t = t
@@ -116,12 +126,15 @@ func TestStatus(t *testing.T) {
 				t.Errorf("advice = %q, %v\nwant %q, %v", s.Advice, s.Available, tc.advice, tc.ok)
 			}
 			if name == "repo box" {
-				if s.RepoBox == nil || len(s.RepoBox.Running) != 1 || s.RepoBox.Running[0].Job != "my-repo.20261123-110000-beef" || s.SlotsFree != 0 || s.BoxCPUs != 4 {
+				if s.RepoBox == nil || s.RepoBox.Size != "medium" || len(s.RepoBox.Running) != 1 || s.RepoBox.Running[0].Job != "my-repo.20261123-110000-beef" || s.SlotsFree != 0 || s.Sizes[2].CPUs != 8 || s.Sizes[2].Fits != 0 {
 					t.Errorf("report = %+v, repo box %+v", s, s.RepoBox)
 				}
 				var b bytes.Buffer
 				writeStatus(&b, s)
-				if !strings.Contains(b.String(), "mode: full\nboxes: 3 of 3 (0 free)\nper box: 4 CPUs, 4GiB RAM\nrepo box: my-repo, Running") {
+				want := "mode: full\nboxes: 3 of 3 (0 free)\nroom for: none\n" +
+					"sizes now: small 2 CPUs/2GiB/18GiB disk, medium 4 CPUs/4GiB/30GiB disk, large 8 CPUs/8GiB/40GiB disk (default medium)\n" +
+					"repo box: my-repo, medium, Running"
+				if !strings.Contains(b.String(), want) {
 					t.Errorf("text =\n%s", b.String())
 				}
 			}
@@ -561,10 +574,10 @@ func TestMCPAgentTools(t *testing.T) {
 		got[r.ID] = r
 	}
 	first := func(id int) string { l, _, _ := strings.Cut(got[id].Result.Content[0].Text, "\n"); return l }
-	if l := first(1); l != "available: this repo's box my-repo is running, 1 job(s) running there (runs take turns); 2 CPUs/4GiB per box" {
+	if l := first(1); l != "available: this repo's box my-repo (medium: 2 CPUs/4GiB) is running, 1 job(s) running there (runs take turns); room for 2 large, or 2 medium, or 2 small more" {
 		t.Errorf("box_status first line = %q", l)
 	}
-	if s := got[1].Result.Structured; s["slotsFree"] != 2.0 || s["mode"] != "shared" {
+	if s := got[1].Result.Structured; s["slotsFree"] != 2.0 || s["mode"] != "shared" || s["room"] != "2 large, or 2 medium, or 2 small" {
 		t.Errorf("box_status structured = %v", s)
 	}
 	if l := first(2); l != "1 job(s), 1 running" {

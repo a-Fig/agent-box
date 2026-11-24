@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -247,13 +248,13 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name, state string)
 }
 
 // thaw is the Shared/Full step for one instance. Every tick it compares the
-// instance's own config with what the mode wants and fixes only the keys that
-// differ, so a limit an agent changed is put back, and nothing is called when
-// nothing changed. Limits go on before the resume so a thawed box is never
+// instance's own config with what its size (user.box.size, medium if unset)
+// and the mode want and fixes only the keys that differ, so a limit an agent
+// changed is put back, and nothing is called when nothing changed. Limits go on before the resume so a thawed box is never
 // briefly uncapped.
 func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string) (string, error) {
-	lim := eff.limits()
-	want := [...][2]string{{"limits.cpu", lim.cpu}, {"limits.cpu.priority", lim.priority}}
+	cpus := strconv.Itoa(SizeOf(in.Config).CPUs(eff))
+	want := [...][2]string{{"limits.cpu", cpus}, {"limits.cpu.priority", eff.priority()}}
 	var errs []error
 	for _, kv := range want {
 		if cur, ok := in.Config[kv[0]]; !ok || cur != kv[1] {

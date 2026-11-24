@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 // A hand-written MCP server: JSON-RPC 2.0, one message per line on stdio.
@@ -58,18 +60,20 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: 2 slot(s) free, 2 CPUs/4GiB per box" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, free box slots, CPUs and RAM per box, and this repo's box with its running jobs.`, obj(map[string]any{
+	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, box slots, CPUs and RAM per size, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
 	{"box_new", "Launch a Linux box on the PC. Returns its name.", obj(map[string]any{
 		"name": str("Box name (lowercase letters, digits, hyphens). Omit for a random one."),
 		"ttl":  str(`How long the box is meant to live, like "2h". Default 2h.`),
+		"size": sizeArg,
 	}), nil},
 	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"box":     str("Reusable box to use. Default: the repo's own box."),
 		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, deleted after the run."},
+		"size":    sizeArg,
 		"wait":    str(`Stop waiting after this long, like "10m" (the job keeps running; use box_job). Default 10m.`),
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
@@ -94,6 +98,18 @@ var tools = []tool{
 	}, "from", "remotePath", "localDir"), nil},
 	{"box_rm", "Delete a box.", obj(map[string]any{"name": str("Box name.")}, "name"), nil},
 	{"box_ls", "List boxes with their status and expiry.", obj(map[string]any{}), nil},
+}
+
+// sizeArg is the size property of box_new and box_run.
+var sizeArg = map[string]any{"type": "string", "enum": sizeEnum(),
+	"description": "Box size: small (quick unit tests), medium (default), large (big Gradle/Android builds, memory-hungry suites). An existing repo box of another size isn't resized; the run gets a throwaway of this size."}
+
+func sizeEnum() []string {
+	var n []string
+	for _, s := range mode.Sizes {
+		n = append(n, s.Name)
+	}
+	return n
 }
 
 // jobOutput is the structuredContent of box_run and box_job (a JobResult).
@@ -235,6 +251,7 @@ type toolArgs struct {
 	Command string            `json:"command"`
 	Box     string            `json:"box"`
 	New     bool              `json:"new"`
+	Size    string            `json:"size"`
 	ID      string            `json:"id"`
 	Wait    string            `json:"wait"`
 	Timeout string            `json:"timeout"`
@@ -382,7 +399,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		name, err := a.New(ctx, args.Name, ttl)
+		name, err := a.New(ctx, args.Name, ttl, args.Size)
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
@@ -399,7 +416,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, Box: args.Box, New: args.New, Wait: wait, Env: args.Env, Timeout: timeout})
+		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, Box: args.Box, New: args.New, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout})
 		return jobResult(r, err, out.String(), warnings)
 	case "box_job":
 		if args.Offset != nil || args.Limit != nil {

@@ -43,7 +43,7 @@ $name = 'smoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
 if ($LASTEXITCODE -ne 0) { throw "Creating $name failed" }
 ```
 
-`box ls` shows names, status and expiry. Leave other boxes alone; the project allows 3.
+`box ls` shows names, status and expiry. Leave other boxes alone; the project allows 6 (`limits.instances`).
 
 ### Run the repository tests and check the idle expiry
 
@@ -105,7 +105,7 @@ The command should return `75` without printing `THIS_SHOULD_NOT_RUN` in its out
 
 ```powershell
 $original = incus --project agents project get pc:agents limits.cpu
-if ($LASTEXITCODE -ne 0 -or $original -ne '12') { throw 'Unexpected project CPU limit. Stop and verify the target.' }
+if ($LASTEXITCODE -ne 0 -or $original -ne '24') { throw 'Unexpected project CPU limit. Stop and verify the target.' }
 $denial = incus --project agents project set pc:agents limits.cpu=99 2>&1
 $code = $LASTEXITCODE
 if ($code -eq 0) {
@@ -192,3 +192,28 @@ The jobs list shows the job running before cancellation. The page prints `cdef` 
 next offset `6`. The same job ID and offsets can be tested with MCP `box_job`, which returns
 `nextOffset` in `structuredContent`. Cancellation should report exit `130`, and `ps` should
 show no live child. The two pulls should print `file-ok` and `dir-ok`.
+
+### Box sizes
+
+Not yet run on the PC (2026-11-23); it needs `setup-distro.sh` re-run first, for the new caps.
+
+```powershell
+incus --project agents project get pc:agents limits.instances   # 6
+incus --project agents project get pc:agents limits.cpu         # 24
+$small = 'sizesmoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+& $box new $small --size small
+if ($LASTEXITCODE -ne 0) { throw "Creating $small failed" }
+incus --project agents config get "pc:$small" user.box.size     # small
+incus --project agents config get "pc:$small" limits.memory     # 2GiB
+incus --project agents config device get "pc:$small" root size  # 18GiB
+Start-Sleep 10
+incus --project agents config get "pc:$small" limits.cpu        # 1 in Shared, 2 in Full
+& $box status   # "room for:" counts the small box: 1 large, or 2 medium, or 5 small at most
+& $box new --size large
+& $box new --size large   # with 2GiB + 8GiB used, the second large is refused: exit 75, "no room"
+if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a launch over the memory cap' }
+```
+
+Remove the boxes it made with `box rm` (check `box ls` for the large one's name). Then, in a repo
+whose box exists as medium, `box run --size small -- true` should say it uses a throwaway small
+box, and leave the medium box as it was.

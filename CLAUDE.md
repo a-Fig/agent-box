@@ -22,7 +22,9 @@ this file loads into every session, so it stays short and points into `docs/` fo
 - **pc (remote).** The laptop's Incus remote for the PC, `https://agent-box.tail051d13.ts.net:8443`,
   with a restricted cert. Incus there serves a Let's Encrypt cert for that name (renewed weekly).
 - **box.** One Incus container in project `agents`: throwaway compute, never storage. Also the CLI.
-- **mode, yield.** The tray's choice: My PC (boxes frozen), Shared (2 CPUs a box), Full (4).
+- **size.** small, medium (default) or large, in `user.box.size`; the table is
+  `internal/mode/size.go`, explained in `docs/DESIGN.md`.
+- **mode, yield.** The tray's choice: My PC (boxes frozen), Shared, Full (twice Shared's CPUs).
   Yield is My PC forced while a game runs. The tray writes `user.agent-box.mode` and
   `user.agent-box.reason` on the project; `box` only reads them.
 
