@@ -9,10 +9,6 @@
         "reachable": true,
         "mode": "shared",
         "modeRequested": null,
-        "chosen": {
-          "mode": "shared",
-          "at": "2026-11-24T15:30:00Z"
-        },
         "trayLastSeen": "2026-11-24T17:29:48Z",
         "enforcer": "tray",
         "caps": {

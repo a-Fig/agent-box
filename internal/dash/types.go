@@ -37,13 +37,6 @@ const (
 	EnforcerHeadless = "headless"
 )
 
-// ChosenMode is the mode the enforcers act on, the project key user.agent-box.chosen
-// ({mode, at} JSON): the last pick, a tray click or an adopted request, and At when it was made.
-type ChosenMode struct {
-	Mode string    `json:"mode"`
-	At   time.Time `json:"at"`
-}
-
 // ModeRequest is a mode someone asked for from the page, waiting for the tray
 // to apply it (user.agent-box.mode-request). By is the asking device.
 type ModeRequest struct {
@@ -77,7 +70,6 @@ type Machine struct {
 	Reachable     bool         `json:"reachable"`
 	Mode          string       `json:"mode"`
 	ModeRequested *ModeRequest `json:"modeRequested"`
-	Chosen        *ChosenMode  `json:"chosen"`       // null until a pick is stored
 	TrayLastSeen  *time.Time   `json:"trayLastSeen"` // the active enforcer's heartbeat; null: never seen
 	Enforcer      string       `json:"enforcer"`     // who wrote it: EnforcerTray, EnforcerHeadless, or "" if unknown
 	Caps          Resources    `json:"caps"`
@@ -485,11 +477,6 @@ type QueueReply struct {
 	Key      string `json:"key"`
 	Position int    `json:"position"`
 	Why      string `json:"why"`
-}
-
-// QueuePage is GET /api/queue: the waiting jobs in the order they start.
-type QueuePage struct {
-	Jobs []Job `json:"jobs"`
 }
 
 // The queue's limits (docs/queue.md).

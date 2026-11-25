@@ -51,7 +51,6 @@ func (s *server) step() {
 	// The mode: a request the tray picks up.
 	if m.ModeRequested != nil && !s.applyAt.IsZero() && now.After(s.applyAt) {
 		m.Mode, m.ModeRequested, s.applyAt = m.ModeRequested.Mode, nil, time.Time{}
-		m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: now.UTC().Truncate(time.Second)}
 		s.setFrozen(m.Mode == dash.ModeMyPC)
 		s.reallot()
 	}

@@ -97,7 +97,6 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
     `.meta` box would write.
   - It returns 201 with `{job, key, position, why}`.
   - A GPU run while the PC is in My PC gets 409 (`frozen`).
-- **`GET /api/queue`:** `{jobs}`, the waiting jobs in the order they start.
 - **`GET /api/queue/{job}`:** one job by its name, whether it is waiting, running or finished. This
   is so `box watch` can follow it through its start.
 - **`POST /api/queue/{job}/cancel`** (204) and **`/front`** (200, the `Job`): controls. Both get 409

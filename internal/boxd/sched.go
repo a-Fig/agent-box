@@ -100,7 +100,7 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	var out []Instance
 	for _, in := range ins {
 		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
-		if in.Config[keyThrowaway] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
+		if in.Config[jobrun.ThrowawayKey] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
 			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
 			continue
 		}
@@ -421,7 +421,7 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 	box := it.Box
 	if !reuse {
 		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New)
-		args := append([]string{"launch", w.image(), box}, flags...)
+		args := append([]string{"launch", "agent-base", box}, flags...)
 		if _, err := w.Incus.CLI(ctx, devices, args...); err != nil {
 			if jobrun.LimitRefusal.MatchString(err.Error()) {
 				return fmt.Errorf("%w: %v", errNoRoom, err)
@@ -475,13 +475,6 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 		return fmt.Errorf("start: %w", err)
 	}
 	return nil
-}
-
-func (w *Watcher) image() string {
-	if w.Image != "" {
-		return w.Image
-	}
-	return "agent-base"
 }
 
 // reapEnded gives a box whose job has ended, with nothing else running
@@ -572,7 +565,7 @@ func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 		return time.Time{}, false // not this job's expiry: a later job's, or set by hand
 	}
 	ttl := idleTTL
-	if in.Config[keyThrowaway] == "true" {
+	if in.Config[jobrun.ThrowawayKey] == "true" {
 		ttl = jobrun.EndedKeep // its result is in boxd's history too
 	}
 	until := now.Add(ttl).Truncate(time.Second)
