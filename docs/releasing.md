@@ -85,7 +85,7 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
   3. starts the new one and exits.
 
   The mutex hand-over that already exists between the tray and the headless enforcer covers the
-  gap. Not while a game runs: yield wins.
+  gap.
 - **boxd.** An `agent-box-update.timer` in the distro runs `update-boxd.sh` hourly. It fetches the
   release's `boxd`, unit and `install-boxd.sh`, checks them and probes the new boxd, and runs that
   `install-boxd.sh`, which health-checks the new boxd and rolls back. A boxd that isn't a release

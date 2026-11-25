@@ -226,14 +226,14 @@ Needs the tray from the change under test. The cap follows the mode, and never d
 boxes hold:
 
 ```powershell
-incus project get pc:agents limits.memory   # 24GiB in Full, 12GiB in Shared, My PC or a game
+incus project get pc:agents limits.memory   # 24GiB in Full, 12GiB in Shared or My PC
 ```
 
 With a large and a small box (10GiB) plus a medium (4GiB), switching Full to Shared leaves it at
 14GiB; removing the large one takes it to 12GiB within a tick.
 
-Reclaim, on the PC: fill a medium box with about 3GiB that stays resident, then start a game (or
-pick My PC), and watch Windows get the RAM back:
+Reclaim, on the PC: fill a medium box with about 3GiB that stays resident, then pick My PC,
+and watch Windows get the RAM back:
 
 ```powershell
 "{0:N2} GB free, vmmem {1:N2} GB" -f ((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB), ((Get-Process vmmemWSL).WorkingSet64/1GB)
@@ -242,15 +242,13 @@ wsl -d agents -u root -- cat /sys/fs/cgroup/lxc.payload.agents_<box>/memory.swap
 ```
 
 On 2026-11-24 a 3.26GB box went to swap in 3.2s, and within 35s vmmem fell by 3.1 GB and Windows'
-free memory rose by 3.2 GB. Over SSH the tray reads the notification state as busy and yields, so
-`.scratch/traytest.ps1` exercises this path without a game. Set one box's `memory.swap.max` to 0 by hand: the tray
+free memory rose by 3.2 GB. Set one box's `memory.swap.max` to 0 by hand: the tray
 puts it back within a tick.
 
 ### GPU box
 
 Not yet run on the PC (2026-11-24). It needs `setup-distro.sh` re-run first, for the GPU
-restriction keys, and the tray rebuilt, so it stops GPU boxes. Start in Shared or Full, with no
-game running.
+restriction keys, and the tray rebuilt, so it stops GPU boxes. Start in Shared or Full.
 
 ```powershell
 incus --project agents project get pc:agents restricted.devices.unix-char   # allow
@@ -282,7 +280,7 @@ try {
 ```
 
 `nvidia-smi` lists the RTX 3070 and the check prints `cuda ok: 1 device(s), ...`; the throwaway
-is gone afterwards (`box ls`). Then check one-at-a-time and the stop for games:
+is gone afterwards (`box ls`). Then check one-at-a-time and the stop in My PC:
 
 ```powershell
 Push-Location -LiteralPath $repo
@@ -293,16 +291,16 @@ if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a second GPU box' }
 Pop-Location
 ```
 
-Start a game (or pick My PC in the tray). Within a tick the GPU box shows `STOPPED` in `box ls`,
+Pick My PC in the tray. Within a tick the GPU box shows `STOPPED` in `box ls`,
 and `nvidia-smi` on Windows no longer lists its process. Then:
 
 ```powershell
-& $box job '<job ID>'   # exit 75: the GPU box was stopped because the PC's owner started a game
-incus --project agents config get 'pc:<gpu box>' user.box.stopped   # gaming: ...
+& $box job '<job ID>'   # exit 75: the GPU box was stopped because the PC's owner switched it to My PC
+incus --project agents config get 'pc:<gpu box>' user.box.stopped   # mypc
 incus --project agents config get 'pc:<gpu box>' user.expires       # about 30 minutes from the stop
 ```
 
-After the game ends and the tray is back in Shared, the box stays stopped, and the next
+Back in Shared, the box stays stopped, and the next
 `box run --gpu` deletes it and launches a fresh one.
 
 ## Live checks for pushes, the hook, the queue, the dashboard and deploys

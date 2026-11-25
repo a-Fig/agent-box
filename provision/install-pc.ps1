@@ -22,7 +22,7 @@
   WSL VM memory ceiling written to .wslconfig. Default: installed RAM minus 6 GB for Windows (26 on the 32 GB PC).
 .PARAMETER SwapGB
   WSL swap written to .wslconfig. Default 24, enough to hold every box's memory: the tray pushes frozen boxes
-  out to swap while a game runs, so the RAM goes back to Windows.
+  out to swap in My PC, so the RAM goes back to Windows.
 #>
 [CmdletBinding()]
 param(
