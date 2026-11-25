@@ -3,6 +3,7 @@ package boxd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -115,6 +116,34 @@ func TestControls(t *testing.T) {
 		t.Fatalf("controls recorded: %v", acts)
 	}
 	_ = context.Background
+}
+
+// A mode request that loses its ETag race with the tray's project writes is
+// written again, not answered 502.
+func TestModeRequestRetriesETagRace(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full"})
+	lost := 2
+	r.f.set(func() {
+		r.f.cliErr = func(args []string) error {
+			if args[0] == "project" && lost > 0 {
+				lost--
+				return errors.New("incus project: exit status 1: Error: ETag doesn't match: 1 vs 2")
+			}
+			return nil
+		}
+	})
+	if code, b := r.post("/api/mode", `{"mode":"shared"}`); code != 202 {
+		t.Fatalf("mode: %d %s", code, b)
+	}
+	sets := 0
+	for _, c := range r.f.cli {
+		if strings.HasPrefix(c, "project set") {
+			sets++
+		}
+	}
+	if sets != 3 {
+		t.Errorf("project sets = %d, want 2 lost and 1 written", sets)
+	}
 }
 
 // Machine says which enforcer runs and the mode it acts on, from boxtray's

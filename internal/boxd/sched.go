@@ -431,7 +431,12 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", tmp, box+remote+".meta"); err != nil {
 		return fmt.Errorf("push the .meta: %w", err)
 	}
-	if _, err := w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+now.Add(jobTTL).Format(time.RFC3339)); err != nil {
+	// The tray sets a new box's CPU limits within a tick of its launch, just
+	// now (jobrun.RetryETag).
+	if err := jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+now.Add(jobTTL).Format(time.RFC3339))
+		return err
+	}); err != nil {
 		return fmt.Errorf("set the expiry: %w", err)
 	}
 	payload := jobrun.Payload(it.Env, it.Command, time.Duration(it.Timeout)*time.Second)
@@ -489,7 +494,10 @@ func (w *Watcher) reapQueuedThrowaway(j *dash.Job) {
 			if in.Config[keyThrowaway] == "true" {
 				ttl = jobrun.EndedKeep
 			}
-			_, err = w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+w.Now().UTC().Add(ttl).Format(time.RFC3339))
+			err = jobrun.RetryETag(ctx, func() error {
+				_, err := w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+w.Now().UTC().Add(ttl).Format(time.RFC3339))
+				return err
+			})
 			if err != nil {
 				w.logf("boxd: queue: after %s's job: %v", box, err)
 			}

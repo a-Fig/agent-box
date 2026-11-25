@@ -164,7 +164,11 @@ func (w *Watcher) RequestMode(ctx context.Context, req dash.ModeRequest) (dash.M
 	b, _ := json.Marshal(req)
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
-	if _, err := w.Incus.CLI(ctx, "", "project", "set", w.project(), keyModeRequest+"="+string(b)); err != nil {
+	// The tray writes the project's keys every few seconds (jobrun.RetryETag).
+	if err := jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", "project", "set", w.project(), keyModeRequest+"="+string(b))
+		return err
+	}); err != nil {
 		return dash.Machine{}, err
 	}
 	w.mu.Lock()
@@ -311,7 +315,10 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 		from = t.UTC()
 	}
 	until := from.Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
-	if _, err := w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+until.Format(time.RFC3339)); err != nil {
+	if err := jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+until.Format(time.RFC3339))
+		return err
+	}); err != nil {
 		return b, err
 	}
 	w.mu.Lock()
