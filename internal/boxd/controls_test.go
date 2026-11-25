@@ -116,3 +116,24 @@ func TestControls(t *testing.T) {
 	}
 	_ = context.Background
 }
+
+// Machine says which enforcer runs and the mode it acts on, from boxtray's
+// project keys; a value boxtray doesn't write is left out.
+func TestMachineEnforcerAndChosen(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "user.agent-box.reason": "gaming: steam:570",
+		"user.agent-box.enforcer": "headless", "user.agent-box.tray-seen": "2026-11-24T17:59:30Z",
+		"user.agent-box.chosen": `{"mode":"full","at":"2026-11-24T09:00:00+01:00"}`})
+	m := r.w.Machine()
+	if m.Enforcer != dash.EnforcerHeadless || m.Chosen == nil || m.Chosen.Mode != "full" ||
+		!m.Chosen.At.Equal(time.Date(2026, 11, 24, 8, 0, 0, 0, time.UTC)) || m.Chosen.At.Location() != time.UTC || m.TrayLastSeen == nil {
+		t.Fatalf("machine: %+v %+v", m, m.Chosen)
+	}
+	r.f.set(func() {
+		r.f.cfg["user.agent-box.enforcer"] = "someone"
+		r.f.cfg["user.agent-box.chosen"] = `{"mode":"turbo","at":"2026-11-24T09:00:00Z"}`
+	})
+	r.poll()
+	if m := r.w.Machine(); m.Enforcer != "" || m.Chosen != nil {
+		t.Fatalf("unknown values: %+v", m)
+	}
+}
