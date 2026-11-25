@@ -67,8 +67,8 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 }
 
 // spareThrowaways lists the throwaway boxes kept after their job ended
-// (jobrun.EndedKeep once box read the exit, idleTTL when nobody did, see
-// reapEnded) with nothing running in them, the first to expire
+// (jobrun.EndedKeep: box once it read the exit, or boxd after a queued job;
+// not idleTTL, a result nobody has read, see reapEnded) with nothing running in them, the first to expire
 // first. A kept box is there for box pull and the full log; a queued job
 // that needs its room comes first, as box's own claimGPU deletes an idle GPU
 // throwaway. A box launched for a job that hasn't started yet isn't one of
@@ -83,7 +83,7 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	for _, in := range ins {
 		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		if in.Config[keyThrowaway] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
-			exp.After(now.Add(idleTTL+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
 			continue
 		}
 		out = append(out, in)
@@ -466,9 +466,13 @@ func (w *Watcher) image() string {
 // there, box new's idle expiry, idleTTL. box shortens the expiry only when it
 // reads a job's exit (markIdle), so a job nobody read (push false and no
 // box_job, a watcher gone, a box run left detached) kept its 24h job expiry
-// (#53). Unread, the box keeps idleTTL rather than box's jobrun.EndedKeep
-// even when it is a throwaway: whoever reads it later (a watcher restarted
-// after a laptop sleep, a late box_job) finds the result there, not "lost".
+// (#53). Unread, a box run throwaway keeps idleTTL rather than box's
+// jobrun.EndedKeep, and launches short of room don't take it
+// (spareThrowaways, box's keptThrowaways): its result is only in the box, so
+// whoever reads it later (a watcher restarted after a laptop sleep, a late
+// box_job) finds it there, not "lost". A throwaway boxd launched for a queued
+// job gets EndedKeep, as before #53: its result is in boxd's history, and
+// back-to-back queued jobs need its room.
 // With w.mu held.
 //
 // Each try of the write (SetExpiryIf) reads the box, then checks, as
@@ -477,7 +481,7 @@ func (w *Watcher) image() string {
 // PID file exists: before the check, the check sees it; after it, the write
 // fails on its ETag and is decided again, or comes after ours and wins.
 func (w *Watcher) reapEnded(j *dash.Job) {
-	box, started, own := j.Box, j.StartedAt, j.Box+"."+j.ID
+	box, started, own, queued := j.Box, j.StartedAt, j.Box+"."+j.ID, j.QueuedAt != nil
 	if w.boxBusy(box, own) {
 		return
 	}
@@ -485,7 +489,7 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-			until, ok := endedExpiry(in, started, w.Now().UTC())
+			until, ok := endedExpiry(in, started, queued, w.Now().UTC())
 			if !ok || in.Status != "Running" {
 				return time.Time{}, false // a frozen box can't run the check: leave it
 			}
@@ -540,7 +544,7 @@ const jobExpirySlack = 10 * time.Minute
 // has ended, and whether to write it: only to shorten an expiry no later
 // than that job's own (a later job's 24h, or an extend, is left alone), on
 // the job's box.
-func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
+func endedExpiry(in Instance, started time.Time, queued bool, now time.Time) (time.Time, bool) {
 	if !holds(in.CreatedAt, started) {
 		return time.Time{}, false
 	}
@@ -548,7 +552,11 @@ func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 	if err != nil || cur.After(started.Add(jobTTL+jobExpirySlack)) {
 		return time.Time{}, false // not this job's expiry: a later job's, or set by hand
 	}
-	until := now.Add(idleTTL).Truncate(time.Second)
+	ttl := idleTTL
+	if queued && in.Config[keyThrowaway] == "true" {
+		ttl = jobrun.EndedKeep // boxd's own: its result is in boxd's history
+	}
+	until := now.Add(ttl).Truncate(time.Second)
 	if !cur.After(until) {
 		return time.Time{}, false // already as short: box read the exit, or an extend
 	}

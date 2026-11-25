@@ -18,24 +18,27 @@ func TestEndedExpiry(t *testing.T) {
 		return in
 	}
 	for name, tc := range map[string]struct {
-		in   Instance
-		want time.Time // zero: no write
+		in     Instance
+		queued bool
+		want   time.Time // zero: no write
 	}{
-		"throwaway, its job's 24h":    {box(true, own, started), now.Add(2 * time.Hour)},
-		"repo box, its job's 24h":     {box(false, own, started.Add(-24*time.Hour)), now.Add(2 * time.Hour)},
-		"a later job's 24h":           {box(true, now.Add(jobTTL), started), time.Time{}},
-		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), time.Time{}},
-		"extended from the page":      {box(true, own.Add(4*time.Hour), started), time.Time{}},
-		"another box of that name":    {box(true, own, started.Add(time.Hour)), time.Time{}},
+		"throwaway, its job's 24h":    {box(true, own, started), false, now.Add(2 * time.Hour)},
+		"boxd's queued throwaway":     {box(true, own, started), true, now.Add(30 * time.Minute)},
+		"queued, on a repo box":       {box(false, own, started), true, now.Add(2 * time.Hour)},
+		"repo box, its job's 24h":     {box(false, own, started.Add(-24*time.Hour)), false, now.Add(2 * time.Hour)},
+		"a later job's 24h":           {box(true, now.Add(jobTTL), started), false, time.Time{}},
+		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), false, time.Time{}},
+		"extended from the page":      {box(true, own.Add(4*time.Hour), started), false, time.Time{}},
+		"another box of that name":    {box(true, own, started.Add(time.Hour)), false, time.Time{}},
 	} {
-		got, ok := endedExpiry(tc.in, started, now)
+		got, ok := endedExpiry(tc.in, started, tc.queued, now)
 		if ok != !tc.want.IsZero() || (ok && !got.Equal(tc.want)) {
 			t.Errorf("%s: %v %v, want %v", name, got, ok, tc.want)
 		}
 	}
 	bad := box(true, own, started)
 	bad.Config["user.expires"] = "soon"
-	if _, ok := endedExpiry(bad, started, now); ok {
+	if _, ok := endedExpiry(bad, started, false, now); ok {
 		t.Error("wrote over an expiry it can't read")
 	}
 }

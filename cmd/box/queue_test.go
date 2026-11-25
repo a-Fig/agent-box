@@ -286,7 +286,7 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 		insts: []instance{
 			{Name: "old-0001", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: soon}},
 			{Name: "fresh-0002", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: soon}},
-			{Name: "far-0003", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: "2026-11-23T14:30:00Z"}}, // past the 2h an unread one gets
+			{Name: "far-0003", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: "2026-11-23T14:00:00Z"}},
 		}}
 	f.refuseOnce = true
 	a, out := testApp(f)

@@ -483,8 +483,9 @@ exit 0
 
 // keptThrowaways lists the throwaway boxes kept after their job ended
 // (endedKeep: box run and boxd move a throwaway's expiry to then, for box
-// pull and the full log; boxd gives one whose exit nobody read idleTTL), the
-// first to expire first. They hold their room
+// pull and the full log), the first to expire first. A throwaway whose exit
+// nobody read has idleTTL from boxd and isn't one of these: its result is
+// only in the box until box reads it. They hold their room
 // until the reaper deletes them, so a launch short of room deletes them, as
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
 // kept box is a running throwaway whose expiry is within the keep window,
@@ -495,7 +496,7 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 	for _, in := range insts {
 		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
 		if in.Config[throwawayKey] != "true" || in.Status != "Running" || err != nil ||
-			exp.After(a.Now().Add(idleTTL+time.Minute)) {
+			exp.After(a.Now().Add(endedKeep+time.Minute)) {
 			continue
 		}
 		look, cancel := a.probeCtx(ctx) // a box frozen since the list would hold the exec
@@ -844,7 +845,8 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		return r, err
 	}
 	// Again now that the job runs: another job finishing in between may have
-	// shortened the expiry before this one was visible to its running check.
+	// shortened the expiry before this one was visible to its running check,
+	// from box's markIdle or boxd's reapEnded.
 	if err := a.setExpiry(context.WithoutCancel(ctx), box, jobTTL); err != nil {
 		a.warn(fmt.Sprintf("box: warning: setting job expiry on %s: %v", box, err))
 	}
