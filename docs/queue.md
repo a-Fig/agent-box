@@ -70,7 +70,9 @@ laptop and agent reaches.
 - **Throwaways.** No `box run` follows a queued job, so once that job ends and nothing else runs
   there, `boxd` gives a throwaway it launched 30 minutes to live, as `box run` does since #23, so
   `box pull` and the full log still work; the reaper deletes it then. Its exit code and tail are in
-  boxd by then.
+  boxd by then. A queued job that needs the room of kept throwaways (its own, or `box run`'s) gets
+  it: boxd deletes them first, soonest to expire first, as `box`'s claimGPU deletes an idle GPU
+  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each.
 - `boxd` has no T3 access, so it doesn't push. The laptop's `box watch <job>` process (from the push
   design) follows the job while it is queued too, and sends the turn when it ends, or the nudge at 20
   minutes.

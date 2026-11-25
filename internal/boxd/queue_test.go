@@ -330,3 +330,48 @@ func TestQueueNoMetaAndInstanceCap(t *testing.T) {
 		t.Fatalf("GET /api/queue/{job} right after the start: %+v %v", j, ok)
 	}
 }
+
+// A throwaway kept after its job ended gives way to a queued job that needs
+// its room; one whose job hasn't ended, or that isn't kept, doesn't.
+func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		repo := inst("widget", "Running", "small", t0)
+		fresh := inst("fresh-0001", "Running", "small", t0)
+		fresh.Config["user.box.throwaway"] = "true" // box run's, with its 2h launch expiry
+		r.f.ins = append(r.f.ins, repo, fresh)
+		r.f.jobs["fresh-0001"] = []fakeJob{{name: "fresh-0001.20261124-180000-bbbb", state: "running", log: "ok\n", meta: metaJSON}}
+	})
+	r.poll()
+	code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B")
+	if code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a box not kept: %v", r.f.cli)
+	}
+
+	// A short expiry alone isn't enough: its job still runs.
+	r.f.set(func() {
+		r.f.ins[1].Config["user.expires"] = r.c.now().Add(30 * time.Minute).Format(time.RFC3339)
+	})
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a box with a job running: %v", r.f.cli)
+	}
+
+	// fresh's job ended: box run keeps it for 30 minutes.
+	r.f.set(func() { r.f.jobs["fresh-0001"][0].state, r.f.jobs["fresh-0001"][0].exit = "done", "0" })
+	r.c.add(3 * time.Second)
+	r.poll()
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) < 2 || r.f.cli[0] != "delete fresh-0001 --force" || !strings.HasPrefix(r.f.cli[1], "launch agent-base job-") {
+		t.Fatalf("cli: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 0 {
+		t.Fatalf("still queued: %+v", q)
+	}
+}

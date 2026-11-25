@@ -44,6 +44,7 @@ type queued struct {
 
 	view     dash.Job // the job as the page sees it, from Meta
 	starting bool
+	evict    []string // kept throwaways to delete for its room (spareThrowaways)
 }
 
 // Queue is the store. Its methods are safe to call at once.

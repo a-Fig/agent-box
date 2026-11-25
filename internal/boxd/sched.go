@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
@@ -38,8 +39,63 @@ func (it *queued) sizeOf() mode.Size {
 	return sz
 }
 
-// waitsFor says what a job waits for now, or "" when it can start.
+// waitsFor says what a job waits for now, or "" when it can start. A job
+// that can start only once kept throwaways are deleted gets their names in
+// it.evict; the starter deletes them first.
 func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
+	it.evict = nil
+	why := w.roomFor(it, byName, w.machine.Room)
+	if why != dash.RefusedFull && why != dash.RefusedGPUBusy {
+		return why
+	}
+	spare := w.spareThrowaways(w.lastIns, w.Now().UTC())
+	for k := 1; k <= len(spare); k++ {
+		gone := spare[:k]
+		rest := slices.DeleteFunc(slices.Clone(w.lastIns), func(in Instance) bool {
+			return slices.ContainsFunc(gone, func(g Instance) bool { return g.Name == in.Name })
+		})
+		_, _, room := allot(w.lastProj.Config, w.lastProj, rest)
+		if w.roomFor(it, byName, room) == "" {
+			for _, g := range gone {
+				it.evict = append(it.evict, g.Name)
+			}
+			return ""
+		}
+	}
+	return why
+}
+
+// spareThrowaways lists the throwaway boxes kept after their job ended
+// (jobrun.EndedKeep) with nothing running in them, the first to expire
+// first. A kept box is there for box pull and the full log; a queued job
+// that needs its room comes first, as box's own claimGPU deletes an idle GPU
+// throwaway. A box launched for a job that hasn't started yet isn't one of
+// these: no job has ended there, and its launch expiry is 2h unless box run
+// was given a shorter --ttl.
+func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
+	busy := map[string]bool{}
+	for _, j := range w.live {
+		busy[j.Box] = true
+	}
+	var out []Instance
+	for _, in := range ins {
+		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+		if in.Config[keyThrowaway] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
+			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			continue
+		}
+		out = append(out, in)
+	}
+	slices.SortFunc(out, func(a, b Instance) int {
+		ta, _ := time.Parse(time.RFC3339, a.Config[jobrun.ExpiresKey])
+		tb, _ := time.Parse(time.RFC3339, b.Config[jobrun.ExpiresKey])
+		return ta.Compare(tb)
+	})
+	return out
+}
+
+// roomFor says what a job waits for with the given room, or "" when it can start.
+func (w *Watcher) roomFor(it *queued, byName map[string]Instance, room dash.Room) string {
 	m := w.machine
 	switch {
 	case m.Yielding:
@@ -63,13 +119,13 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 	var fits int
 	switch sz.Name {
 	case "small":
-		fits = m.Room.Small
+		fits = room.Small
 	case "medium":
-		fits = m.Room.Medium
+		fits = room.Medium
 	case "large":
-		fits = m.Room.Large
+		fits = room.Large
 	case mode.GPUSize:
-		if m.Room.GPU < 1 {
+		if room.GPU < 1 {
 			return dash.RefusedGPUBusy
 		}
 		fits = 1
@@ -128,7 +184,7 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	_, exists := byName[pick.Box]
 	w.starting = pick.Job
 	w.Queue.setStarting(pick, true)
-	go w.startQueued(pick, exists && !pick.New)
+	go w.startQueued(pick, exists && !pick.New, slices.Clone(pick.evict))
 }
 
 // QueuedView is a waiting job with its place and wait, if it is waiting.
@@ -243,11 +299,21 @@ func (w *Watcher) dropQueued(it *queued, now time.Time, why string) {
 }
 
 // startQueued starts a job and settles the queue after.
-func (w *Watcher) startQueued(it *queued, reuse bool) {
+func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
 	defer cancel()
+	var err error
+	for _, box := range evict {
+		if _, err = w.Incus.CLI(ctx, "", "delete", box, "--force"); err != nil {
+			err = fmt.Errorf("%w: deleting kept %s for room: %v", errNoRoom, box, err)
+			break
+		}
+		w.logf("boxd: queue: deleted kept throwaway %s for %s's room", box, it.Job)
+	}
 	started := w.Now().UTC()
-	err := w.startJob(ctx, it, reuse, started)
+	if err == nil {
+		err = w.startJob(ctx, it, reuse, started)
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.starting = ""
