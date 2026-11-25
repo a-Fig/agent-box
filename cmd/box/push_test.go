@@ -308,6 +308,22 @@ func TestBoxJobFirstMakesTheWatcherQuiet(t *testing.T) {
 	}
 }
 
+// The CLI's box job, which agents run from a shell, counts as the agent
+// reading the end too: no push follows it (#76).
+func TestCLIBoxJobMakesTheWatcherQuiet(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	e := newPushEnv(t, f, "thread-1")
+	_, st := e.run(t, "sleep 60")
+	job := st["job"].(string)
+	f.finish("0", "tail\n")
+	if c := run(context.Background(), e.a, []string{"job", job}, nil); c != 0 || !e.a.exists(job, ".notified") {
+		t.Fatalf("box job: exit %d, notified %v", c, e.a.exists(job, ".notified"))
+	}
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 {
+		t.Errorf("watch pushed after box job printed the result: %v, %d", err, e.push.count())
+	}
+}
+
 // Whatever the interleaving, the end reaches the agent at least once.
 func TestBoxJobAndWatcherRaceNeverLoseTheEnd(t *testing.T) {
 	f := &fakePC{t: t, block: true}

@@ -188,7 +188,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		paged := false
 		fs.Visit(func(f *flag.Flag) { paged = paged || f.Name == "offset" || f.Name == "limit" })
 		if !paged {
-			return code(a.Job(ctx, fs.Arg(0), 0))
+			r, err := a.Job(ctx, fs.Arg(0), 0)
+			a.markRead(fs.Arg(0), r, err, "box job")
+			return code(r, err)
 		}
 		p, err := a.LogPage(ctx, fs.Arg(0), *offset, *limit)
 		if err != nil {
