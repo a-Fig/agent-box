@@ -324,3 +324,24 @@ func TestJoinKeepsABOMAndAnInstalledHook(t *testing.T) {
 		t.Fatalf("moved: %q, %v", did, err)
 	}
 }
+
+// An event it can't read, such as one cut short, leaves the end owed: the
+// hook can't tell whose tool call it follows.
+func TestHookIsSilentOnAnUnreadableEvent(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t}, "thread-a")
+	job := "widget.20261123-115000-aaaa"
+	hookJob(t, e.a, job, "thread-a", &jobEnd{Code: 0, Took: 9}, false)
+	big := `{"agent_id":"sub-1","tool_response":"` + strings.Repeat("x", 2<<20) + `"}`
+	for _, ev := range []string{big[:1<<20], ""} {
+		var out bytes.Buffer
+		e.a.Hook(strings.NewReader(ev), &out)
+		if out.Len() != 0 || e.a.exists(job, ".notified") {
+			t.Fatalf("event of %d bytes: said %q", len(ev), out.String())
+		}
+	}
+	var out bytes.Buffer
+	e.a.Hook(strings.NewReader(big), &out) // whole: a subagent's, so still nothing
+	if out.Len() != 0 || e.a.exists(job, ".notified") {
+		t.Fatalf("a large subagent event: said %q", out.String())
+	}
+}

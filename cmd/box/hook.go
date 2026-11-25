@@ -33,8 +33,9 @@ import (
 // the job notified, and the hook stays quiet.
 
 const (
-	hookGrace = 8 * time.Second  // how long the watcher leaves the job to the hook
-	hookFresh = 10 * time.Minute // a hook seen this recently is taken to be installed
+	hookGrace  = 8 * time.Second  // how long the watcher leaves the job to the hook
+	hookFresh  = 10 * time.Minute // a hook seen this recently is taken to be installed
+	hookBudget = 3 * time.Second  // past this the hook stays quiet: join gives it 5s
 )
 
 var validThread = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -64,9 +65,14 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		SessionID string `json:"session_id"`
 		AgentID   string `json:"agent_id"`
 	}
+	began := time.Now()
 	if stdin != nil {
-		b, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
-		json.Unmarshal(b, &ev)
+		// The whole event, however large (a tool's output can be megabytes):
+		// one cut short would read as no agent_id. An event it can't read
+		// leaves the end to the watcher.
+		if json.NewDecoder(stdin).Decode(&ev) != nil {
+			return
+		}
 		io.Copy(io.Discard, stdin)
 	}
 	thread := a.thread()
@@ -102,7 +108,9 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		}
 		msgs, jobs = append(msgs, endMessage(rec, end)), append(jobs, job)
 	}
-	if len(msgs) == 0 {
+	// Claude Code drops a hook's output at its timeout (5s, set by join). A
+	// hook this slow says nothing, so it can't mark an end it may not deliver.
+	if len(msgs) == 0 || time.Since(began) > hookBudget {
 		return
 	}
 	b, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
