@@ -2,7 +2,8 @@
 
 ## On the laptop
 
-Go isn't on PATH and the laptop starves when two Go runs overlap, so run Go through the lock
+Tests, vet and builds run on a box (`box run`, CLAUDE.md). Go isn't on the laptop's PATH, and
+the laptop starves when two Go runs overlap, so when box refuses (exit 75), run Go through the lock
 wrapper, one run at a time, and never with `-race`:
 
 ```sh
@@ -96,12 +97,13 @@ Use the tray to select My PC and wait until the project reports `mypc`.
 incus --project agents project get pc:agents user.agent-box.mode
 Push-Location -LiteralPath $repo
 try {
-    & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name -- 'echo THIS_SHOULD_NOT_RUN'
+    & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name --no-queue -- 'echo THIS_SHOULD_NOT_RUN'
     if ($LASTEXITCODE -ne 75) { throw 'Expected dry fallback exit 75 in My PC mode' }
 } finally { Pop-Location }
 ```
 
-The command should return `75` without printing `THIS_SHOULD_NOT_RUN` in its output. Restore the prior tray mode. With the restricted `pc` remote confirmed, check that Incus refuses the project update. The fallback restores the original limit if the check reveals an unexpectedly privileged client.
+The command should return `75` without printing `THIS_SHOULD_NOT_RUN` in its output. Without
+`--no-queue` it would wait in the PC's queue and run once the mode is back. Restore the prior tray mode. With the restricted `pc` remote confirmed, check that Incus refuses the project update. The fallback restores the original limit if the check reveals an unexpectedly privileged client.
 
 ```powershell
 $original = incus --project agents project get pc:agents limits.cpu
@@ -251,8 +253,9 @@ puts it back within a tick.
 
 ### GPU box
 
-Not yet run on the PC (2026-11-24). It needs `setup-distro.sh` re-run first, for the GPU
-restriction keys, and the tray rebuilt, so it stops GPU boxes. Start in Shared or Full.
+Its parts passed on the PC on 2026-11-25 (nvidia-smi, PyTorch CUDA, one at a time, the stop in
+My PC, `box pull` from the stopped box), though not this checklist end to end. Start in Shared
+or Full.
 
 ```powershell
 incus --project agents project get pc:agents restricted.devices.unix-char   # allow
@@ -284,13 +287,14 @@ try {
 ```
 
 `nvidia-smi` lists the RTX 3070 and the check prints `cuda ok: 1 device(s), ...`; the throwaway
-is gone afterwards (`box ls`). Then check one-at-a-time and the stop in My PC:
+is kept 30 minutes for `box pull` (`box ls`), and holds the GPU: `box rm` it first. Then check
+one-at-a-time and the stop in My PC:
 
 ```powershell
 Push-Location -LiteralPath $repo
 & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --gpu -- 'nvidia-smi -l 5'   # press Ctrl-C after the first table; record the job ID
 & $box status                           # gpu: in use: job <id>
-& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --gpu -- true                # exit 75: the GPU box is in use (job <id>); run on CPU or wait
+& $box run --reason "Live smoke test of agent-box (docs/testing.md)." --gpu --no-queue -- true     # exit 75: the GPU box is in use (job <id>); run on CPU or wait
 if ($LASTEXITCODE -ne 75) { throw 'Expected exit 75 for a second GPU box' }
 Pop-Location
 ```
@@ -429,7 +433,7 @@ in `/cache`. One SDK XML version warning is expected. `| tail` would hide Gradle
 ### deploy-boxd.sh
 
 ```sh
-bash .scratch/golock.sh bash provision/deploy-boxd.sh user@pc-host
+bash provision/deploy-boxd.sh user@pc-host   # builds boxd on a box (#80)
 curl -s -o /dev/null -w "%{http_code}\n" "$U/api/state"   # 200
 ```
 

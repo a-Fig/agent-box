@@ -25,7 +25,8 @@ to sit and wait. So it can hand the run to a queue and keep working.
 - **`box run` on the CLI queues too** (#93, 2026-11-25). It prints `queued job X, 2nd in line
   (waiting for room)` and follows the job through the queue and then in its box, since that
   process is there to hear when the job starts. Ctrl-C leaves the job queued: `box job X` follows
-  it again, and `box cancel X` takes it off. No watcher or push is started for it.
+  it again, and `box cancel X` takes it off. No watcher or push is started for it. A run turned away by My PC (not a GPU run) is queued for a new
+  throwaway box, not for the repo's or a named box.
 - **The code is snapshotted when the job is queued.** The agent keeps editing after it hands the run
   off, so `box` sends the worktree as it is now. That covers uncommitted and untracked files, as a
   sync does: the snapshot is the git bundle `box run` already makes and pushes, with the commit at
