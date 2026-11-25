@@ -105,7 +105,7 @@ func (w *Watcher) roomFor(it *queued, byName map[string]Instance, room dash.Room
 	}
 	// A box of a job whose start was cut short is the job's own, even a
 	// throwaway: startQueued looks in it before starting again.
-	if in, ok := byName[it.Box]; ok && (!it.New || it.Starting != nil) {
+	if in, ok := byName[it.Box]; ok && (!it.New || w.Queue.startMark(it) != nil) {
 		switch in.Status {
 		case "Running":
 			return ""
@@ -161,7 +161,7 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	var pick *queued
 	pos := 0
 	for _, it := range w.Queue.list() {
-		if now.Sub(it.QueuedAt) > dash.QueueMaxAge && !w.Queue.isStarting(it) {
+		if now.Sub(it.QueuedAt) > dash.QueueMaxAge && !w.Queue.isStarting(it) && !w.mayHaveStarted(it, byName) {
 			w.dropQueued(it, now, "waited over 24 hours")
 			continue
 		}
@@ -186,7 +186,16 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	_, exists := byName[pick.Box]
 	w.starting = pick.Job
 	w.Queue.setStarting(pick, true)
-	go w.startQueued(pick, exists && (!pick.New || pick.Starting != nil), slices.Clone(pick.evict))
+	go w.startQueued(pick, exists && (!pick.New || w.Queue.startMark(pick) != nil), slices.Clone(pick.evict))
+}
+
+// mayHaveStarted says whether a start cut short by a restart may have
+// started the job: the mark is set and its box is there. Until a start looks
+// in the box, the job isn't cancelled or dropped as if it were only waiting.
+// A box that never runs again is reaped at its expiry, which ends this.
+func (w *Watcher) mayHaveStarted(it *queued, byName map[string]Instance) bool {
+	_, ok := byName[it.Box]
+	return ok && w.Queue.startMark(it) != nil
 }
 
 // QueuedView is a waiting job with its place and wait, if it is waiting.
@@ -255,12 +264,19 @@ func (w *Watcher) Enqueued(it *queued) dash.QueueReply {
 }
 
 // CancelQueued drops a waiting job; false when it isn't waiting (or is
-// being started right now).
+// being started right now, or may have started before a restart).
 func (w *Watcher) CancelQueued(job, by string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	it, ok := w.Queue.get(job)
 	if !ok || w.Queue.isStarting(it) {
+		return false
+	}
+	byName := map[string]Instance{}
+	for _, in := range w.lastIns {
+		byName[in.Name] = in
+	}
+	if w.mayHaveStarted(it, byName) {
 		return false
 	}
 	w.Queue.Remove(job)
@@ -313,12 +329,13 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 		w.logf("boxd: queue: deleted kept throwaway %s for %s's room", box, it.Job)
 	}
 	started := w.Now().UTC()
+	mark := w.Queue.startMark(it)
 	switch {
 	case err != nil:
-	case it.Starting != nil && reuse && w.startedInBox(ctx, it):
+	case mark != nil && reuse && w.startedInBox(ctx, it):
 		// A boxd before this one started it and stopped before it could
 		// say so: the job runs, or ran, already.
-		started = *it.Starting
+		started = *mark
 		w.logf("boxd: queue: %s had started before boxd restarted", it.Job)
 	default:
 		if err = w.Queue.markStarting(it, started); err == nil {

@@ -416,3 +416,55 @@ func TestQueueStartCutShortIsNotRepeated(t *testing.T) {
 		}
 	}
 }
+
+// A second attempt at a start moves the mark to its own time, the start
+// time its .meta holds, so a third boxd that finds the job in the box gives
+// it the key the scan does.
+func TestQueueStartMarkIsTheLatestAttempt(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	it, _ := r.w.Queue.get(rep.Job)
+	first, second := t0, t0.Add(time.Minute)
+	r.w.Queue.markStarting(it, first)
+	r.w.Queue.markStarting(it, second)
+	if m := r.w.Queue.startMark(it); m == nil || !m.Equal(second) {
+		t.Fatalf("mark %v, want %v", m, second)
+	}
+}
+
+// A job whose start a restart cut short, with its box there, may be running:
+// it isn't cancelled or dropped as if it only waited. Without its box it is.
+func TestQueueMarkedJobWithBoxIsNotCancelled(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	box, _, _ := strings.Cut(rep.Job, ".")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	r.f.set(func() { r.f.ins = append(r.f.ins, inst(box, "Frozen", "small", r.c.now())) })
+	r.poll()
+	if r.w.CancelQueued(rep.Job, "tyler") {
+		t.Fatal("cancelled a job that may run in its box")
+	}
+	r.c.add(dash.QueueMaxAge + time.Minute)
+	r.poll()
+	if q := r.w.Queued(); len(q) != 1 {
+		t.Fatalf("dropped while its box is there: %+v", q)
+	}
+	r.f.set(func() { r.f.ins = nil }) // the box reaped at its expiry
+	r.poll()
+	if q := r.w.Queued(); len(q) != 0 {
+		t.Fatalf("still queued with its box gone: %+v", q)
+	}
+}
+
+// Without its box, a marked job is only waiting, and cancels.
+func TestQueueMarkedJobWithoutBoxCancels(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	r.poll()
+	if !r.w.CancelQueued(rep.Job, "tyler") {
+		t.Fatal("a marked job with no box didn't cancel")
+	}
+}
