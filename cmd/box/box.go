@@ -991,11 +991,11 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 	var err error
 	r.State, r.Code, err = a.attach(ctx, job, wait)
 	if err != nil {
-		// A job whose end was read once ended: when its box has gone since
-		// (a throwaway's 30 minutes ran out, or a launch short of room took
-		// it), its recorded end is the result, not "lost".
+		// A job whose exit was read once has ended: when its box has gone
+		// since (a throwaway's 30 minutes ran out, or a launch short of room
+		// took it), its recorded end is the result, not "lost".
 		if end, ok := a.recordedEnd(job); ok {
-			fmt.Fprintf(a.Err, "box: %s is gone; this is the result recorded when the job ended (box_pull and the full log went with the box)\n", box)
+			fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
 			fmt.Fprint(a.Out, end.Tail)
 			return JobResult{Job: job, Box: box, State: stateDone, Code: end.Code}, nil
 		}

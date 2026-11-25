@@ -41,8 +41,8 @@ import (
 //	                 box_cancel. Until it exists the end is still owed.
 //	<job>.paused     the watcher already pushed the paused message
 //
-// <job>.ended is also written whenever box reads a job's exit, pushed or not
-// (recordEnd), so box_job can give the result after the box has gone.
+//	<job>.result     the exit code and output tail box read, pushed or not
+//	                 (recordEnd), so box_job can give them after the box has gone
 
 // inlineWait is how long box_run follows a job, counted from the command's
 // start, before it returns "running".
@@ -360,13 +360,6 @@ func (a *App) safetyNet(skip string) string {
 			}
 			continue
 		}
-		if job, ok := strings.CutSuffix(name, ".ended"); ok && !a.exists(job, ".json") {
-			// A run that ended inline has a recorded end and no record.
-			if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-				os.Remove(filepath.Join(a.StateDir, name))
-			}
-			continue
-		}
 		job, ok := strings.CutSuffix(name, ".json")
 		if !ok {
 			continue
@@ -376,7 +369,7 @@ func (a *App) safetyNet(skip string) string {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog"} {
+			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog", ".result"} {
 				os.Remove(a.statePath(job, ext))
 			}
 			continue
@@ -425,31 +418,40 @@ func keepTail(s string) string {
 	return s
 }
 
-// lastLinesOf is the last n lines of s.
-func lastLinesOf(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\r\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
-}
-
-// recordEnd keeps the end of a job whose exit box has read. The real exit
-// replaces a lost guess. A failure only costs the record, so it is dropped.
+// recordEnd keeps, in <job>.result, the end of a job whose exit box has
+// read. It is its own file because .ended is the watcher's decision that an
+// end is owed to the agent, which a cancelled job's exit is not. Writing one
+// also prunes results past recordKeep, since the safety net runs only in T3.
+// A failure only costs the record, so it is dropped.
 func (a *App) recordEnd(job string, end jobEnd) {
 	if a.StateDir == "" || os.MkdirAll(a.StateDir, 0o755) != nil {
 		return
 	}
-	writeJSON(a.statePath(job, ".ended"), end)
+	writeJSON(a.statePath(job, ".result"), end)
+	ents, _ := os.ReadDir(a.StateDir)
+	for _, e := range ents {
+		if !strings.HasSuffix(e.Name(), ".result") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
+			os.Remove(filepath.Join(a.StateDir, e.Name()))
+		}
+	}
 }
 
-// recordedEnd is a job's recorded end, if it ran to an exit code.
+// recordedEnd is a job's recorded end: the exit box read, else the end the
+// watcher recorded if it ran to an exit code.
 func (a *App) recordedEnd(job string) (jobEnd, bool) {
-	var end jobEnd
-	if a.StateDir == "" || readJSON(a.statePath(job, ".ended"), &end) != nil || end.Lost || end.Dropped {
+	if a.StateDir == "" || !validJob.MatchString(job) {
 		return jobEnd{}, false
 	}
-	return end, true
+	for _, ext := range []string{".result", ".ended"} {
+		var end jobEnd
+		if readJSON(a.statePath(job, ext), &end) == nil && !end.Lost && !end.Dropped {
+			return end, true
+		}
+	}
+	return jobEnd{}, false
 }
 
 // lineTail keeps the end of what it is written, for the last lines of a log.
@@ -509,7 +511,7 @@ func (r jobRecord) context() string {
 }
 
 func endedMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s ended, exit %d, after %s. %s\n%s\n%s\n", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second), fromBox, r.context(), mask.Mask(lastLinesOf(e.Tail, tailLines)))
+	msg := fmt.Sprintf("box: job %s ended, exit %d, after %s. %s\n%s\n%s\n", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second), fromBox, r.context(), mask.Mask(e.Tail))
 	if e.Code == exitPaused {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
@@ -666,9 +668,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
-			// The end as recorded (recordEnd), so a later box_job gives the
-			// same tail; the message itself takes its last tailLines.
-			return jobEnd{Code: res.Code, Took: took(), Tail: keepTail(tail.lastLines(1 << 20))}, true
+			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines)}, true
 		case err == nil && res.State == statePaused && rec.GPU:
 			return lost() // a GPU box is stopped for a game, not frozen
 		case err == nil && res.State == statePaused:

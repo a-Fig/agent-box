@@ -116,7 +116,7 @@ func TestRunInlineResultWithinWindow(t *testing.T) {
 		t.Errorf("spawned a watcher for a finished run: %v", *e.spawns)
 	}
 	// Only the recorded end, for a box_job after the box has gone.
-	if ents, _ := os.ReadDir(e.a.StateDir); len(ents) != 1 || !strings.HasSuffix(ents[0].Name(), ".ended") {
+	if ents, _ := os.ReadDir(e.a.StateDir); len(ents) != 1 || !strings.HasSuffix(ents[0].Name(), ".result") {
 		t.Errorf("state files for an inline result: %v", ents)
 	}
 }
@@ -134,11 +134,22 @@ func TestJobAfterBoxGoneGivesRecordedEnd(t *testing.T) {
 	e.f.insts, e.f.log, e.f.exit = nil, "", ""
 	e.f.mu.Unlock()
 	text, st := e.call(t, "box_job", map[string]any{"id": job})
-	if st["state"] != "done" || st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") || !strings.Contains(text, "is gone") {
+	if st["state"] != "done" || st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") || !strings.Contains(text, "recorded when it ended") {
 		t.Errorf("box_job after the box went = %v\n%s", st, text)
 	}
 	if _, st := e.call(t, "box_job", map[string]any{"id": job, "offset": 0}); st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") {
 		t.Errorf("box_job page after the box went = %v", st)
+	}
+	if text, _ := e.call(t, "box_job", map[string]any{"id": job, "offset": -1}); !strings.Contains(text, "can't be negative") {
+		t.Errorf("a bad offset after the box went = %q", text)
+	}
+	// A lost guess from a watcher that lost the race doesn't hide the real end.
+	writeJSON(e.a.statePath(job, ".ended"), jobEnd{Code: exitPaused, Lost: true})
+	if end, ok := e.a.recordedEnd(job); !ok || end.Code != 3 {
+		t.Errorf("recorded end under a lost .ended = %+v, %v", end, ok)
+	}
+	if _, ok := e.a.recordedEnd("../" + job); ok {
+		t.Error("recordedEnd read a path outside the state directory")
 	}
 }
 
@@ -325,7 +336,7 @@ func TestJobCancelledElsewhereIsNotPushed(t *testing.T) {
 	job := st["job"].(string)
 	f.finish("130", "")
 	f.cancelled = true // the box has the .cancelled mark box cancel writes
-	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 || !e.a.exists(job, ".notified") {
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 || e.a.exists(job, ".ended") {
 		t.Errorf("watch pushed a job cancelled on the box: %v, %d", err, e.push.count())
 	}
 	if text, _ := e.call(t, "box_pull", pullArgs); strings.Contains(text, "finished since") {

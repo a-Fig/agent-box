@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -558,9 +559,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 			pg, err := a.LogPage(ctx, args.ID, off, lim)
 			if err != nil {
-				if end, ok := a.recordedEnd(args.ID); ok { // the box went: its recorded end is all there is
+				// The box can't be read (gone, most likely): its recorded end
+				// is all there is. A bad offset or limit is still an error.
+				if end, ok := a.recordedEnd(args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
 					box, _, _ := strings.Cut(args.ID, ".")
-					a.warn("box: " + box + " is gone, and its full log with it; this is the tail recorded when the job ended")
+					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
 					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code}, nil, end.Tail, warnings)
 				}
 				return textResult(err.Error(), true)
