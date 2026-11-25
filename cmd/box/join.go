@@ -319,7 +319,7 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			setUp = append(setUp, a.name+" (skill only)")
 			if !leave {
 				fmt.Fprintf(c.Out, "%s: %s isn't on PATH, so the MCP server isn't registered; with it on PATH, run box join again or %s %s\n",
-					a.name, a.name, a.name, strings.Join(a.add, " "))
+					a.name, a.name, a.name, quoteArgs(a.add))
 			}
 			continue
 		}
@@ -440,4 +440,17 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 		fmt.Fprintln(c.Out)
 	}
 	return errors.Join(errs...)
+}
+
+// quoteArgs joins args for a line a person copies into a shell, quoting the ones with spaces
+// (a box.exe under a Windows user name like "Jane Doe").
+func quoteArgs(args []string) string {
+	q := make([]string, len(args))
+	for i, a := range args {
+		if strings.ContainsAny(a, " \t") {
+			a = `"` + a + `"`
+		}
+		q[i] = a
+	}
+	return strings.Join(q, " ")
 }
