@@ -205,6 +205,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 		for _, in := range f.insts {
 			if "pc:"+in.Name == args[1] && in.Status == "Stopped" {
+				if c.Stderr != nil { // incus streams it there, as the real runner does
+					io.WriteString(c.Stderr, "Error: Instance is not running\n")
+					return Result{Code: 1}, nil
+				}
 				return Result{Stderr: "Error: Instance is not running", Code: 1}, nil
 			}
 		}

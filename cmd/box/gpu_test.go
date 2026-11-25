@@ -250,8 +250,14 @@ func TestGPUBoxStoppedByTrayTellsTheAgent(t *testing.T) {
 		insts: []instance{{Name: "my-repo-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")}}}
 	a, out := testApp(f)
 	r, err := a.Job(context.Background(), "my-repo-1234.20261123-110000-beef", time.Minute)
-	if err != nil || r.Code != exitPaused || !strings.Contains(out.String(), "switched it to My PC") {
+	if err != nil || r.Code != exitPaused || !strings.Contains(out.String(), "switched it to My PC") || strings.Contains(out.String(), "Instance is not running") {
 		t.Errorf("Job = %+v, %v\n%s", r, err, out)
+	}
+	// A stopped box that isn't a GPU box keeps incus's own reason.
+	f = &fakePC{t: t, mode: "shared", insts: []instance{{Name: "my-repo", Status: "Stopped", Config: map[string]string{}}}}
+	a, out = testApp(f)
+	if _, err := a.Job(context.Background(), "my-repo.20261123-110000-beef", time.Minute); err == nil || !strings.Contains(out.String(), "Error: Instance is not running") {
+		t.Errorf("non-GPU stopped box: %v\n%s", err, out)
 	}
 }
 

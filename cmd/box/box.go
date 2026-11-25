@@ -915,8 +915,8 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case !o.New:
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true)
-	case sz.GPU && r.State == statePaused:
-		// attach said what happened to the GPU box and what to do (#118).
+	case sz.GPU && r.State == statePaused && a.gpuStopped(ctx, box) != "":
+		// attach said the GPU box was stopped: there is nothing to reattach (#118).
 	default:
 		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 	}
