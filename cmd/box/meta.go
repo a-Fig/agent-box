@@ -210,12 +210,6 @@ func (a *App) pushMeta(ctx context.Context, box, remote, tmp string, m jobMeta) 
 // refusalTimeout bounds posting a refusal, finding the host included.
 const refusalTimeout = 2 * time.Second
 
-// refuseErr reports a run turned away (exit 75) for err: no room or the GPU
-// taken.
-func (a *App) refuseErr(ctx context.Context, err error, m jobMeta) {
-	a.refuse(ctx, err.Error(), m, errCause(err))
-}
-
 // errCause is the refusal cause of err: no room or the GPU taken.
 func errCause(err error) func(context.Context) string {
 	return func(context.Context) string {
@@ -230,14 +224,9 @@ func errCause(err error) func(context.Context) string {
 	}
 }
 
-// refusePaused reports a run turned away because of paused, a reach or
-// check result. Only My PC has a cause boxd counts. An unreachable PC or a
-// frozen box in another mode sends nothing.
-func (a *App) refusePaused(ctx context.Context, paused string, m jobMeta) {
-	a.refuse(ctx, paused+"; run it locally", m, a.pausedCause(paused))
-}
-
-// pausedCause is the refusal cause of paused (see refusePaused).
+// pausedCause is the refusal cause of paused, a reach or check result. Only
+// My PC has a cause boxd counts. An unreachable PC or a frozen box in another
+// mode sends nothing.
 func (a *App) pausedCause(paused string) func(context.Context) string {
 	return func(ctx context.Context) string {
 		if !strings.HasSuffix(paused, " is in My PC mode") {

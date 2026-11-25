@@ -1451,6 +1451,4 @@ func startScript(job, ref, repo, payload string) string {
 	return jobrun.StartScript(workRoot, job, ref, repo, payload)
 }
 
-func shellCommand(args []string) string { return jobrun.ShellCommand(args) }
-
 func shq(s string) string { return jobrun.Shq(s) }
