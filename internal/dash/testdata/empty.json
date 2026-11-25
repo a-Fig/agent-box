@@ -62,7 +62,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T19:00:00Z",
@@ -82,7 +86,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T20:00:00Z",
@@ -102,7 +110,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T21:00:00Z",
@@ -122,7 +134,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T22:00:00Z",
@@ -142,7 +158,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T23:00:00Z",
@@ -162,7 +182,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T00:00:00Z",
@@ -182,7 +206,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T01:00:00Z",
@@ -202,7 +230,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T02:00:00Z",
@@ -222,7 +254,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T03:00:00Z",
@@ -242,7 +278,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T04:00:00Z",
@@ -262,7 +302,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T05:00:00Z",
@@ -282,7 +326,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T06:00:00Z",
@@ -302,7 +350,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T07:00:00Z",
@@ -322,7 +374,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T08:00:00Z",
@@ -342,7 +398,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T09:00:00Z",
@@ -362,7 +422,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T10:00:00Z",
@@ -382,7 +446,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T11:00:00Z",
@@ -402,7 +470,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T12:00:00Z",
@@ -422,7 +494,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T13:00:00Z",
@@ -442,7 +518,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T14:00:00Z",
@@ -462,7 +542,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T15:00:00Z",
@@ -482,7 +566,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T16:00:00Z",
@@ -502,7 +590,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T17:00:00Z",
@@ -522,7 +614,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       }
     ],
     "segments": [
@@ -555,7 +651,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-19T00:00:00Z",
@@ -575,7 +675,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-20T00:00:00Z",
@@ -595,7 +699,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-21T00:00:00Z",
@@ -615,7 +723,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-22T00:00:00Z",
@@ -635,7 +747,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T00:00:00Z",
@@ -655,7 +771,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T00:00:00Z",
@@ -675,7 +795,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       }
     ],
     "segments": [

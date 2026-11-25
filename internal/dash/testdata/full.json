@@ -89,7 +89,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n  CC   build/lantern/obj15.o\n  CC   build/lantern/obj16.o\n  CC   build/lantern/obj17.o\n  CC   build/lantern/obj18.o\n  CC   build/lantern/obj19.o\n  CC   build/lantern/obj20.o\n  CC   build/lantern/obj21.o\n  CC   build/lantern/obj22.o\n  CC   build/lantern/obj23.o\n  CC   build/lantern/obj24.o\n  CC   build/lantern/obj25.o\n  CC   build/lantern/obj26.o\n  CC   build/lantern/obj27.o\n  CC   build/lantern/obj28.o\n  CC   build/lantern/obj29.o\n  CC   build/lantern/obj30.o\n  CC   build/lantern/obj31.o\n  CC   build/lantern/obj32.o\n  CC   build/lantern/obj33.o\n  CC   build/lantern/obj34.o\n  CC   build/lantern/obj35.o\n  CC   build/lantern/obj36.o\n  CC   build/lantern/obj37.o\n  CC   build/lantern/obj38.o\n  CC   build/lantern/obj39.o\n  CC   build/lantern/obj40.o\n  CC   build/lantern/obj41.o\n  CC   build/lantern/obj42.o\n  CC   build/lantern/obj43.o\n  CC   build/lantern/obj44.o\n  CC   build/lantern/obj45.o\n  CC   build/lantern/obj46.o\n  CC   build/lantern/obj47.o\n  CC   build/lantern/obj48.o\n  CC   build/lantern/obj49.o\n  CC   build/lantern/obj50.o\n  CC   build/lantern/obj51.o\n  CC   build/lantern/obj52.o\n  CC   build/lantern/obj53.o\n  CC   build/lantern/obj54.o\n  CC   build/lantern/obj55.o\n  CC   build/lantern/obj56.o\n  CC   build/lantern/obj57.o\n  CC   build/lantern/obj58.o\n  CC   build/lantern/obj59.o\n  CC   build/lantern/obj60.o\n  CC   build/lantern/obj61.o\n  CC   build/lantern/obj62.o\n  CC   build/lantern/obj63.o\n  CC   build/lantern/obj64.o\n  CC   build/lantern/obj65.o\n  CC   build/lantern/obj66.o\n  CC   build/lantern/obj67.o\n  CC   build/lantern/obj68.o\n  CC   build/lantern/obj69.o\n"
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n  CC   build/lantern/obj15.o\n  CC   build/lantern/obj16.o\n  CC   build/lantern/obj17.o\n  CC   build/lantern/obj18.o\n  CC   build/lantern/obj19.o\n  CC   build/lantern/obj20.o\n  CC   build/lantern/obj21.o\n  CC   build/lantern/obj22.o\n  CC   build/lantern/obj23.o\n  CC   build/lantern/obj24.o\n  CC   build/lantern/obj25.o\n  CC   build/lantern/obj26.o\n  CC   build/lantern/obj27.o\n  CC   build/lantern/obj28.o\n  CC   build/lantern/obj29.o\n  CC   build/lantern/obj30.o\n  CC   build/lantern/obj31.o\n  CC   build/lantern/obj32.o\n  CC   build/lantern/obj33.o\n  CC   build/lantern/obj34.o\n  CC   build/lantern/obj35.o\n  CC   build/lantern/obj36.o\n  CC   build/lantern/obj37.o\n  CC   build/lantern/obj38.o\n  CC   build/lantern/obj39.o\n  CC   build/lantern/obj40.o\n  CC   build/lantern/obj41.o\n  CC   build/lantern/obj42.o\n  CC   build/lantern/obj43.o\n  CC   build/lantern/obj44.o\n  CC   build/lantern/obj45.o\n  CC   build/lantern/obj46.o\n  CC   build/lantern/obj47.o\n  CC   build/lantern/obj48.o\n  CC   build/lantern/obj49.o\n  CC   build/lantern/obj50.o\n  CC   build/lantern/obj51.o\n  CC   build/lantern/obj52.o\n  CC   build/lantern/obj53.o\n  CC   build/lantern/obj54.o\n  CC   build/lantern/obj55.o\n  CC   build/lantern/obj56.o\n  CC   build/lantern/obj57.o\n  CC   build/lantern/obj58.o\n  CC   build/lantern/obj59.o\n  CC   build/lantern/obj60.o\n  CC   build/lantern/obj61.o\n  CC   build/lantern/obj62.o\n  CC   build/lantern/obj63.o\n  CC   build/lantern/obj64.o\n  CC   build/lantern/obj65.o\n  CC   build/lantern/obj66.o\n  CC   build/lantern/obj67.o\n  CC   build/lantern/obj68.o\n  CC   build/lantern/obj69.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-9d04/20261124-170500-0c2c/2026-11-24T17:05:00Z",
@@ -114,7 +117,10 @@
         },
         "size": "gpu",
         "gpu": true,
-        "tail": "step   44/200  loss 0.3965  lr 2.0e-4  3.6 it/s  gpu mem 6.0 GiB\nstep   45/200  loss 0.3286  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   46/200  loss 0.3019  lr 2.0e-4  3.9 it/s  gpu mem 6.8 GiB\nstep   47/200  loss 0.2837  lr 2.0e-4  4.0 it/s  gpu mem 6.4 GiB\nstep   47/200  loss 0.2001  lr 2.0e-4  3.8 it/s  gpu mem 6.8 GiB\nstep   48/200  loss 0.1662  lr 2.0e-4  3.5 it/s  gpu mem 6.4 GiB\nstep   49/200  loss 0.1301  lr 2.0e-4  3.9 it/s  gpu mem 6.3 GiB\nstep   50/200  loss 0.0821  lr 2.0e-4  3.5 it/s  gpu mem 6.8 GiB\nstep   50/200  loss 0.0809  lr 2.0e-4  3.6 it/s  gpu mem 6.8 GiB\nstep   51/200  loss 0.0113  lr 2.0e-4  3.3 it/s  gpu mem 6.6 GiB\nstep   52/200  loss -0.0240  lr 2.0e-4  3.1 it/s  gpu mem 6.5 GiB\nstep   52/200  loss -0.0557  lr 2.0e-4  3.9 it/s  gpu mem 6.5 GiB\nstep   53/200  loss -0.1030  lr 2.0e-4  3.3 it/s  gpu mem 6.3 GiB\nstep   54/200  loss -0.1425  lr 2.0e-4  3.0 it/s  gpu mem 6.8 GiB\nstep   55/200  loss -0.1949  lr 2.0e-4  3.2 it/s  gpu mem 6.6 GiB\nstep   55/200  loss -0.2024  lr 2.0e-4  3.5 it/s  gpu mem 6.1 GiB\nstep   56/200  loss -0.2305  lr 2.0e-4  3.0 it/s  gpu mem 6.1 GiB\nstep   57/200  loss -0.2736  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   57/200  loss -0.3250  lr 2.0e-4  3.9 it/s  gpu mem 6.6 GiB\nstep   58/200  loss -0.3619  lr 2.0e-4  3.8 it/s  gpu mem 6.1 GiB\nstep   59/200  loss -0.4098  lr 2.0e-4  4.0 it/s  gpu mem 6.0 GiB\nstep   60/200  loss -0.4704  lr 2.0e-4  3.5 it/s  gpu mem 6.0 GiB\nstep   60/200  loss -0.4782  lr 2.0e-4  3.0 it/s  gpu mem 6.3 GiB\nstep   61/200  loss -0.5231  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   62/200  loss -0.5532  lr 2.0e-4  3.1 it/s  gpu mem 6.3 GiB\nstep   63/200  loss -0.5993  lr 2.0e-4  3.8 it/s  gpu mem 6.3 GiB\nstep   63/200  loss -0.6306  lr 2.0e-4  3.2 it/s  gpu mem 6.2 GiB\nstep   64/200  loss -0.6983  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   65/200  loss -0.7326  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   65/200  loss -0.7666  lr 2.0e-4  3.7 it/s  gpu mem 6.2 GiB\nstep   66/200  loss -0.8193  lr 2.0e-4  3.8 it/s  gpu mem 6.0 GiB\n"
+        "tail": "step   44/200  loss 0.3965  lr 2.0e-4  3.6 it/s  gpu mem 6.0 GiB\nstep   45/200  loss 0.3286  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   46/200  loss 0.3019  lr 2.0e-4  3.9 it/s  gpu mem 6.8 GiB\nstep   47/200  loss 0.2837  lr 2.0e-4  4.0 it/s  gpu mem 6.4 GiB\nstep   47/200  loss 0.2001  lr 2.0e-4  3.8 it/s  gpu mem 6.8 GiB\nstep   48/200  loss 0.1662  lr 2.0e-4  3.5 it/s  gpu mem 6.4 GiB\nstep   49/200  loss 0.1301  lr 2.0e-4  3.9 it/s  gpu mem 6.3 GiB\nstep   50/200  loss 0.0821  lr 2.0e-4  3.5 it/s  gpu mem 6.8 GiB\nstep   50/200  loss 0.0809  lr 2.0e-4  3.6 it/s  gpu mem 6.8 GiB\nstep   51/200  loss 0.0113  lr 2.0e-4  3.3 it/s  gpu mem 6.6 GiB\nstep   52/200  loss -0.0240  lr 2.0e-4  3.1 it/s  gpu mem 6.5 GiB\nstep   52/200  loss -0.0557  lr 2.0e-4  3.9 it/s  gpu mem 6.5 GiB\nstep   53/200  loss -0.1030  lr 2.0e-4  3.3 it/s  gpu mem 6.3 GiB\nstep   54/200  loss -0.1425  lr 2.0e-4  3.0 it/s  gpu mem 6.8 GiB\nstep   55/200  loss -0.1949  lr 2.0e-4  3.2 it/s  gpu mem 6.6 GiB\nstep   55/200  loss -0.2024  lr 2.0e-4  3.5 it/s  gpu mem 6.1 GiB\nstep   56/200  loss -0.2305  lr 2.0e-4  3.0 it/s  gpu mem 6.1 GiB\nstep   57/200  loss -0.2736  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   57/200  loss -0.3250  lr 2.0e-4  3.9 it/s  gpu mem 6.6 GiB\nstep   58/200  loss -0.3619  lr 2.0e-4  3.8 it/s  gpu mem 6.1 GiB\nstep   59/200  loss -0.4098  lr 2.0e-4  4.0 it/s  gpu mem 6.0 GiB\nstep   60/200  loss -0.4704  lr 2.0e-4  3.5 it/s  gpu mem 6.0 GiB\nstep   60/200  loss -0.4782  lr 2.0e-4  3.0 it/s  gpu mem 6.3 GiB\nstep   61/200  loss -0.5231  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   62/200  loss -0.5532  lr 2.0e-4  3.1 it/s  gpu mem 6.3 GiB\nstep   63/200  loss -0.5993  lr 2.0e-4  3.8 it/s  gpu mem 6.3 GiB\nstep   63/200  loss -0.6306  lr 2.0e-4  3.2 it/s  gpu mem 6.2 GiB\nstep   64/200  loss -0.6983  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   65/200  loss -0.7326  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   65/200  loss -0.7666  lr 2.0e-4  3.7 it/s  gpu mem 6.2 GiB\nstep   66/200  loss -0.8193  lr 2.0e-4  3.8 it/s  gpu mem 6.0 GiB\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android/20261124-171011-f1ac/2026-11-24T17:10:11Z",
@@ -139,7 +145,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-a5f9/20261124-080815-437e/2026-11-24T08:08:15Z",
@@ -164,7 +173,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ........................ [  8%]\ntests/test_data.py ................. [ 16%]\ntests/test_model.py ................................ [ 25%]\ntests/test_schedule.py ............................. [ 33%]\ntests/test_tokenizer.py ............ [ 41%]\ntests/test_data.py .............. [ 50%]\ntests/test_model.py ......... [ 58%]\ntests/test_schedule.py ..................... [ 66%]\ntests/test_tokenizer.py ................................ [ 75%]\ntests/test_data.py .................... [ 83%]\ntests/test_model.py ......................... [ 91%]\ntests/test_schedule.py ..................... [100%]\n======== 318 passed in 412.80s ========\n"
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ........................ [  8%]\ntests/test_data.py ................. [ 16%]\ntests/test_model.py ................................ [ 25%]\ntests/test_schedule.py ............................. [ 33%]\ntests/test_tokenizer.py ............ [ 41%]\ntests/test_data.py .............. [ 50%]\ntests/test_model.py ......... [ 58%]\ntests/test_schedule.py ..................... [ 66%]\ntests/test_tokenizer.py ................................ [ 75%]\ntests/test_data.py .................... [ 83%]\ntests/test_model.py ......................... [ 91%]\ntests/test_schedule.py ..................... [100%]\n======== 318 passed in 412.80s ========\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-075252-c2c0/2026-11-24T07:52:52Z",
@@ -189,7 +201,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.083s\nok  \tgithub.com/acme/lantern/internal/sync\t7.998s\nok  \tgithub.com/acme/lantern/internal/api\t4.089s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.476s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.998s\nok  \tgithub.com/acme/lantern/internal/wire\t8.095s\nok  \tgithub.com/acme/lantern/internal/cache\t6.907s\nok  \tgithub.com/acme/lantern/internal/store\t7.357s\nok  \tgithub.com/acme/lantern/internal/sync\t0.780s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t4.162s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.512s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.946s\nok  \tgithub.com/acme/lantern/internal/wire\t3.069s\nok  \tgithub.com/acme/lantern/internal/cache\t5.620s\nok  \tgithub.com/acme/lantern/internal/store\t4.886s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t6.785s\nok  \tgithub.com/acme/lantern/internal/config\t3.344s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.860s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.888s\nok  \tgithub.com/acme/lantern/internal/wire\t9.288s\nok  \tgithub.com/acme/lantern/internal/cache\t1.459s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t4.289s\nok  \tgithub.com/acme/lantern/internal/api\t2.220s\nok  \tgithub.com/acme/lantern/internal/config\t6.598s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.403s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.551s\n"
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.083s\nok  \tgithub.com/acme/lantern/internal/sync\t7.998s\nok  \tgithub.com/acme/lantern/internal/api\t4.089s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.476s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.998s\nok  \tgithub.com/acme/lantern/internal/wire\t8.095s\nok  \tgithub.com/acme/lantern/internal/cache\t6.907s\nok  \tgithub.com/acme/lantern/internal/store\t7.357s\nok  \tgithub.com/acme/lantern/internal/sync\t0.780s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t4.162s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.512s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.946s\nok  \tgithub.com/acme/lantern/internal/wire\t3.069s\nok  \tgithub.com/acme/lantern/internal/cache\t5.620s\nok  \tgithub.com/acme/lantern/internal/store\t4.886s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t6.785s\nok  \tgithub.com/acme/lantern/internal/config\t3.344s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.860s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.888s\nok  \tgithub.com/acme/lantern/internal/wire\t9.288s\nok  \tgithub.com/acme/lantern/internal/cache\t1.459s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t4.289s\nok  \tgithub.com/acme/lantern/internal/api\t2.220s\nok  \tgithub.com/acme/lantern/internal/config\t6.598s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.403s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.551s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-072533-c07e/2026-11-24T07:25:33Z",
@@ -214,7 +229,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.636s\nok  \tgithub.com/acme/lantern/internal/sync\t3.951s\nok  \tgithub.com/acme/lantern/internal/api\t4.718s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.118s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.726s\nok  \tgithub.com/acme/lantern/internal/wire\t2.198s\nok  \tgithub.com/acme/lantern/internal/cache\t8.988s\nok  \tgithub.com/acme/lantern/internal/store\t9.365s\nok  \tgithub.com/acme/lantern/internal/sync\t9.100s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.782s\nok  \tgithub.com/acme/lantern/internal/metrics\t9.361s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.473s\nok  \tgithub.com/acme/lantern/internal/wire\t8.783s\nok  \tgithub.com/acme/lantern/internal/cache\t5.123s\nok  \tgithub.com/acme/lantern/internal/store\t5.076s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t1.700s\nok  \tgithub.com/acme/lantern/internal/config\t8.300s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.902s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.578s\nok  \tgithub.com/acme/lantern/internal/wire\t6.601s\nok  \tgithub.com/acme/lantern/internal/cache\t8.578s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.807s\nok  \tgithub.com/acme/lantern/internal/api\t8.782s\nok  \tgithub.com/acme/lantern/internal/config\t4.502s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.111s\n"
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.636s\nok  \tgithub.com/acme/lantern/internal/sync\t3.951s\nok  \tgithub.com/acme/lantern/internal/api\t4.718s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.118s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.726s\nok  \tgithub.com/acme/lantern/internal/wire\t2.198s\nok  \tgithub.com/acme/lantern/internal/cache\t8.988s\nok  \tgithub.com/acme/lantern/internal/store\t9.365s\nok  \tgithub.com/acme/lantern/internal/sync\t9.100s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.782s\nok  \tgithub.com/acme/lantern/internal/metrics\t9.361s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.473s\nok  \tgithub.com/acme/lantern/internal/wire\t8.783s\nok  \tgithub.com/acme/lantern/internal/cache\t5.123s\nok  \tgithub.com/acme/lantern/internal/store\t5.076s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t1.700s\nok  \tgithub.com/acme/lantern/internal/config\t8.300s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.902s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.578s\nok  \tgithub.com/acme/lantern/internal/wire\t6.601s\nok  \tgithub.com/acme/lantern/internal/cache\t8.578s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.807s\nok  \tgithub.com/acme/lantern/internal/api\t8.782s\nok  \tgithub.com/acme/lantern/internal/config\t4.502s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.111s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android/20261124-071734-5c20/2026-11-24T07:17:34Z",
@@ -239,7 +257,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-063517-4557/2026-11-24T06:35:17Z",
@@ -264,7 +285,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t3.381s\nok  \tgithub.com/acme/lantern/internal/sync\t2.398s\nok  \tgithub.com/acme/lantern/internal/api\t2.113s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.854s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.341s\nok  \tgithub.com/acme/lantern/internal/wire\t6.659s\nok  \tgithub.com/acme/lantern/internal/cache\t5.001s\nok  \tgithub.com/acme/lantern/internal/store\t6.266s\nok  \tgithub.com/acme/lantern/internal/sync\t2.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.954s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.607s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.682s\nok  \tgithub.com/acme/lantern/internal/wire\t5.894s\nok  \tgithub.com/acme/lantern/internal/cache\t8.684s\nok  \tgithub.com/acme/lantern/internal/store\t8.065s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t0.524s\nok  \tgithub.com/acme/lantern/internal/config\t5.832s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.437s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.598s\nok  \tgithub.com/acme/lantern/internal/wire\t2.284s\nok  \tgithub.com/acme/lantern/internal/cache\t5.002s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.700s\nok  \tgithub.com/acme/lantern/internal/api\t9.121s\nok  \tgithub.com/acme/lantern/internal/config\t2.166s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.961s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.330s\n"
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t3.381s\nok  \tgithub.com/acme/lantern/internal/sync\t2.398s\nok  \tgithub.com/acme/lantern/internal/api\t2.113s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.854s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.341s\nok  \tgithub.com/acme/lantern/internal/wire\t6.659s\nok  \tgithub.com/acme/lantern/internal/cache\t5.001s\nok  \tgithub.com/acme/lantern/internal/store\t6.266s\nok  \tgithub.com/acme/lantern/internal/sync\t2.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.954s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.607s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.682s\nok  \tgithub.com/acme/lantern/internal/wire\t5.894s\nok  \tgithub.com/acme/lantern/internal/cache\t8.684s\nok  \tgithub.com/acme/lantern/internal/store\t8.065s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t0.524s\nok  \tgithub.com/acme/lantern/internal/config\t5.832s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.437s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.598s\nok  \tgithub.com/acme/lantern/internal/wire\t2.284s\nok  \tgithub.com/acme/lantern/internal/cache\t5.002s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.700s\nok  \tgithub.com/acme/lantern/internal/api\t9.121s\nok  \tgithub.com/acme/lantern/internal/config\t2.166s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.961s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.330s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-2f4b/20261124-061331-4600/2026-11-24T06:13:31Z",
@@ -289,7 +313,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n"
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-044800-4411/2026-11-24T04:48:00Z",
@@ -314,7 +341,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-044415-48f3/2026-11-24T04:44:15Z",
@@ -339,7 +369,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android-da15/20261124-041123-f6c2/2026-11-24T04:11:23Z",
@@ -364,7 +397,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-1b05/20261124-021530-d572/2026-11-24T02:15:30Z",
@@ -389,7 +425,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (21 tests) 775ms\n ✓ src/store/session.test.ts (11 tests) 906ms\n ✓ src/ui/Button.test.tsx (3 tests) 850ms\n ✓ src/api/client.test.ts (9 tests) 810ms\n ✓ src/hydrate.test.ts (5 tests) 416ms\n ✓ src/router/cache.test.ts (20 tests) 733ms\n ✓ src/store/session.test.ts (10 tests) 117ms\n ✓ src/ui/Button.test.tsx (10 tests) 215ms\n ✓ src/api/client.test.ts (26 tests) 870ms\n ✓ src/hydrate.test.ts (32 tests) 421ms\n ✓ src/router/cache.test.ts (18 tests) 506ms\n ✓ src/store/session.test.ts (30 tests) 560ms\n ✓ src/ui/Button.test.tsx (14 tests) 895ms\n ✓ src/api/client.test.ts (16 tests) 778ms\n ✓ src/hydrate.test.ts (17 tests) 788ms\n ✓ src/router/cache.test.ts (31 tests) 901ms\n ✓ src/store/session.test.ts (28 tests) 685ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n"
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (21 tests) 775ms\n ✓ src/store/session.test.ts (11 tests) 906ms\n ✓ src/ui/Button.test.tsx (3 tests) 850ms\n ✓ src/api/client.test.ts (9 tests) 810ms\n ✓ src/hydrate.test.ts (5 tests) 416ms\n ✓ src/router/cache.test.ts (20 tests) 733ms\n ✓ src/store/session.test.ts (10 tests) 117ms\n ✓ src/ui/Button.test.tsx (10 tests) 215ms\n ✓ src/api/client.test.ts (26 tests) 870ms\n ✓ src/hydrate.test.ts (32 tests) 421ms\n ✓ src/router/cache.test.ts (18 tests) 506ms\n ✓ src/store/session.test.ts (30 tests) 560ms\n ✓ src/ui/Button.test.tsx (14 tests) 895ms\n ✓ src/api/client.test.ts (16 tests) 778ms\n ✓ src/hydrate.test.ts (17 tests) 788ms\n ✓ src/router/cache.test.ts (31 tests) 901ms\n ✓ src/store/session.test.ts (28 tests) 685ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-003135-bcd2/2026-11-24T00:31:35Z",
@@ -414,7 +453,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.327s\nok  \tgithub.com/acme/lantern/internal/sync\t4.811s\nok  \tgithub.com/acme/lantern/internal/api\t1.597s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.893s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.583s\nok  \tgithub.com/acme/lantern/internal/wire\t8.085s\nok  \tgithub.com/acme/lantern/internal/cache\t4.578s\nok  \tgithub.com/acme/lantern/internal/store\t5.615s\nok  \tgithub.com/acme/lantern/internal/sync\t1.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t0.904s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.645s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.030s\nok  \tgithub.com/acme/lantern/internal/wire\t5.369s\nok  \tgithub.com/acme/lantern/internal/cache\t1.456s\nok  \tgithub.com/acme/lantern/internal/store\t5.524s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.763s\nok  \tgithub.com/acme/lantern/internal/config\t7.084s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.767s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.114s\nok  \tgithub.com/acme/lantern/internal/wire\t0.857s\nok  \tgithub.com/acme/lantern/internal/cache\t5.086s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t7.519s\nok  \tgithub.com/acme/lantern/internal/api\t0.840s\nok  \tgithub.com/acme/lantern/internal/config\t3.094s\nok  \tgithub.com/acme/lantern/internal/metrics\t0.541s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.960s\n"
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.327s\nok  \tgithub.com/acme/lantern/internal/sync\t4.811s\nok  \tgithub.com/acme/lantern/internal/api\t1.597s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.893s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.583s\nok  \tgithub.com/acme/lantern/internal/wire\t8.085s\nok  \tgithub.com/acme/lantern/internal/cache\t4.578s\nok  \tgithub.com/acme/lantern/internal/store\t5.615s\nok  \tgithub.com/acme/lantern/internal/sync\t1.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t0.904s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.645s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.030s\nok  \tgithub.com/acme/lantern/internal/wire\t5.369s\nok  \tgithub.com/acme/lantern/internal/cache\t1.456s\nok  \tgithub.com/acme/lantern/internal/store\t5.524s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.763s\nok  \tgithub.com/acme/lantern/internal/config\t7.084s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.767s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.114s\nok  \tgithub.com/acme/lantern/internal/wire\t0.857s\nok  \tgithub.com/acme/lantern/internal/cache\t5.086s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t7.519s\nok  \tgithub.com/acme/lantern/internal/api\t0.840s\nok  \tgithub.com/acme/lantern/internal/config\t3.094s\nok  \tgithub.com/acme/lantern/internal/metrics\t0.541s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.960s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-80c9/20261124-001936-4a77/2026-11-24T00:19:36Z",
@@ -439,7 +481,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ..................... [  7%]\ntests/test_data.py ........ [ 15%]\ntests/test_model.py .................. [ 23%]\ntests/test_schedule.py ............................. [ 30%]\ntests/test_tokenizer.py ................. [ 38%]\ntests/test_data.py ..................................... [ 46%]\ntests/test_model.py .................. [ 53%]\ntests/test_schedule.py ............................. [ 61%]\ntests/test_tokenizer.py ................................. [ 69%]\ntests/test_data.py .................................... [ 76%]\ntests/test_model.py ................................ [ 84%]\ntests/test_schedule.py .......... [ 92%]\ntests/test_tokenizer.py ........................ [100%]\n^C\nbox: cancelled\n"
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ..................... [  7%]\ntests/test_data.py ........ [ 15%]\ntests/test_model.py .................. [ 23%]\ntests/test_schedule.py ............................. [ 30%]\ntests/test_tokenizer.py ................. [ 38%]\ntests/test_data.py ..................................... [ 46%]\ntests/test_model.py .................. [ 53%]\ntests/test_schedule.py ............................. [ 61%]\ntests/test_tokenizer.py ................................. [ 69%]\ntests/test_data.py .................................... [ 76%]\ntests/test_model.py ................................ [ 84%]\ntests/test_schedule.py .......... [ 92%]\ntests/test_tokenizer.py ........................ [100%]\n^C\nbox: cancelled\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-0725/20261124-001510-fe8c/2026-11-24T00:15:10Z",
@@ -464,7 +509,10 @@
         },
         "size": "gpu",
         "gpu": true,
-        "tail": "$ uv run python train.py --smoke --steps 200\nstep    3/200  loss 2.8140  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep    7/200  loss 2.7745  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep   11/200  loss 2.7241  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\nstep   15/200  loss 2.6883  lr 2.0e-4  3.8 it/s  gpu mem 6.1 GiB\nstep   19/200  loss 2.6436  lr 2.0e-4  4.0 it/s  gpu mem 6.5 GiB\nstep   23/200  loss 2.6131  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   27/200  loss 2.5974  lr 2.0e-4  3.0 it/s  gpu mem 6.0 GiB\nstep   31/200  loss 2.5394  lr 2.0e-4  3.4 it/s  gpu mem 6.8 GiB\nstep   35/200  loss 2.5079  lr 2.0e-4  3.6 it/s  gpu mem 6.0 GiB\nstep   39/200  loss 2.4861  lr 2.0e-4  3.6 it/s  gpu mem 6.5 GiB\nstep   43/200  loss 2.4497  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep   47/200  loss 2.3995  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   50/200  loss 2.3256  lr 2.0e-4  3.6 it/s  gpu mem 6.8 GiB\nstep   54/200  loss 2.3033  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   58/200  loss 2.2845  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   62/200  loss 2.2445  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   66/200  loss 2.1666  lr 2.0e-4  3.0 it/s  gpu mem 6.1 GiB\n"
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    3/200  loss 2.8140  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep    7/200  loss 2.7745  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep   11/200  loss 2.7241  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\nstep   15/200  loss 2.6883  lr 2.0e-4  3.8 it/s  gpu mem 6.1 GiB\nstep   19/200  loss 2.6436  lr 2.0e-4  4.0 it/s  gpu mem 6.5 GiB\nstep   23/200  loss 2.6131  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   27/200  loss 2.5974  lr 2.0e-4  3.0 it/s  gpu mem 6.0 GiB\nstep   31/200  loss 2.5394  lr 2.0e-4  3.4 it/s  gpu mem 6.8 GiB\nstep   35/200  loss 2.5079  lr 2.0e-4  3.6 it/s  gpu mem 6.0 GiB\nstep   39/200  loss 2.4861  lr 2.0e-4  3.6 it/s  gpu mem 6.5 GiB\nstep   43/200  loss 2.4497  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep   47/200  loss 2.3995  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   50/200  loss 2.3256  lr 2.0e-4  3.6 it/s  gpu mem 6.8 GiB\nstep   54/200  loss 2.3033  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   58/200  loss 2.2845  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   62/200  loss 2.2445  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   66/200  loss 2.1666  lr 2.0e-4  3.0 it/s  gpu mem 6.1 GiB\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-ed8a/20261123-234949-280f/2026-11-23T23:49:49Z",
@@ -489,7 +537,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.939s\nok  \tgithub.com/acme/lantern/internal/sync\t2.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.160s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.143s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.859s\nok  \tgithub.com/acme/lantern/internal/wire\t5.346s\nok  \tgithub.com/acme/lantern/internal/cache\t1.720s\nok  \tgithub.com/acme/lantern/internal/store\t2.651s\nok  \tgithub.com/acme/lantern/internal/sync\t3.099s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.497s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.581s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.797s\n"
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.939s\nok  \tgithub.com/acme/lantern/internal/sync\t2.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.160s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.143s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.859s\nok  \tgithub.com/acme/lantern/internal/wire\t5.346s\nok  \tgithub.com/acme/lantern/internal/cache\t1.720s\nok  \tgithub.com/acme/lantern/internal/store\t2.651s\nok  \tgithub.com/acme/lantern/internal/sync\t3.099s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.497s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.581s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.797s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-ef6e/20261123-234504-753c/2026-11-23T23:45:04Z",
@@ -514,7 +565,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (29 tests) 351ms\n ✓ src/store/session.test.ts (5 tests) 577ms\n ✓ src/ui/Button.test.tsx (30 tests) 163ms\n ✓ src/api/client.test.ts (9 tests) 627ms\n ✓ src/hydrate.test.ts (9 tests) 641ms\n ✓ src/router/cache.test.ts (3 tests) 411ms\n ✓ src/store/session.test.ts (24 tests) 406ms\n ✓ src/ui/Button.test.tsx (16 tests) 337ms\n ✓ src/api/client.test.ts (20 tests) 774ms\n ✓ src/hydrate.test.ts (5 tests) 672ms\n ✓ src/router/cache.test.ts (27 tests) 284ms\n ✓ src/store/session.test.ts (16 tests) 637ms\n ✓ src/ui/Button.test.tsx (25 tests) 555ms\n^C\nbox: cancelled\n"
+        "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (29 tests) 351ms\n ✓ src/store/session.test.ts (5 tests) 577ms\n ✓ src/ui/Button.test.tsx (30 tests) 163ms\n ✓ src/api/client.test.ts (9 tests) 627ms\n ✓ src/hydrate.test.ts (9 tests) 641ms\n ✓ src/router/cache.test.ts (3 tests) 411ms\n ✓ src/store/session.test.ts (24 tests) 406ms\n ✓ src/ui/Button.test.tsx (16 tests) 337ms\n ✓ src/api/client.test.ts (20 tests) 774ms\n ✓ src/hydrate.test.ts (5 tests) 672ms\n ✓ src/router/cache.test.ts (27 tests) 284ms\n ✓ src/store/session.test.ts (16 tests) 637ms\n ✓ src/ui/Button.test.tsx (25 tests) 555ms\n^C\nbox: cancelled\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261123-230922-cc81/2026-11-23T23:09:22Z",
@@ -539,7 +593,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.779s\nok  \tgithub.com/acme/lantern/internal/sync\t4.133s\nok  \tgithub.com/acme/lantern/internal/api\t6.631s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.999s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.639s\nok  \tgithub.com/acme/lantern/internal/wire\t2.719s\nok  \tgithub.com/acme/lantern/internal/cache\t6.276s\nok  \tgithub.com/acme/lantern/internal/store\t7.109s\nok  \tgithub.com/acme/lantern/internal/sync\t8.930s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.168s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.237s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.581s\nok  \tgithub.com/acme/lantern/internal/wire\t5.543s\nok  \tgithub.com/acme/lantern/internal/cache\t4.796s\nok  \tgithub.com/acme/lantern/internal/store\t4.949s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.297s\nok  \tgithub.com/acme/lantern/internal/config\t7.389s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.489s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.684s\nok  \tgithub.com/acme/lantern/internal/wire\t2.488s\nok  \tgithub.com/acme/lantern/internal/cache\t5.784s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.822s\nok  \tgithub.com/acme/lantern/internal/api\t7.742s\nok  \tgithub.com/acme/lantern/internal/config\t1.217s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.739s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.500s\n--- FAIL: TestResumeAfterPartialChunk (0.42s)\n    sync_test.go:88: got 3 chunks, want 4\nFAIL\nFAIL\tgithub.com/acme/lantern/internal/sync\t2.104s\nFAIL\n"
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.779s\nok  \tgithub.com/acme/lantern/internal/sync\t4.133s\nok  \tgithub.com/acme/lantern/internal/api\t6.631s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.999s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.639s\nok  \tgithub.com/acme/lantern/internal/wire\t2.719s\nok  \tgithub.com/acme/lantern/internal/cache\t6.276s\nok  \tgithub.com/acme/lantern/internal/store\t7.109s\nok  \tgithub.com/acme/lantern/internal/sync\t8.930s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.168s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.237s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.581s\nok  \tgithub.com/acme/lantern/internal/wire\t5.543s\nok  \tgithub.com/acme/lantern/internal/cache\t4.796s\nok  \tgithub.com/acme/lantern/internal/store\t4.949s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.297s\nok  \tgithub.com/acme/lantern/internal/config\t7.389s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.489s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.684s\nok  \tgithub.com/acme/lantern/internal/wire\t2.488s\nok  \tgithub.com/acme/lantern/internal/cache\t5.784s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.822s\nok  \tgithub.com/acme/lantern/internal/api\t7.742s\nok  \tgithub.com/acme/lantern/internal/config\t1.217s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.739s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.500s\n--- FAIL: TestResumeAfterPartialChunk (0.42s)\n    sync_test.go:88: got 3 chunks, want 4\nFAIL\nFAIL\tgithub.com/acme/lantern/internal/sync\t2.104s\nFAIL\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android-5095/20261123-222851-74b5/2026-11-23T22:28:51Z",
@@ -564,7 +621,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android/20261123-201240-0748/2026-11-23T20:12:40Z",
@@ -589,7 +649,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-a769/20261123-194454-082a/2026-11-23T19:44:54Z",
@@ -614,7 +677,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (13 tests) 212ms\n ✓ src/store/session.test.ts (30 tests) 369ms\n ✓ src/ui/Button.test.tsx (16 tests) 782ms\n ✓ src/api/client.test.ts (16 tests) 336ms\n ✓ src/hydrate.test.ts (32 tests) 938ms\n ✓ src/router/cache.test.ts (10 tests) 243ms\n ✓ src/store/session.test.ts (12 tests) 69ms\n ✓ src/ui/Button.test.tsx (13 tests) 510ms\n ✓ src/api/client.test.ts (13 tests) 381ms\n ✓ src/hydrate.test.ts (26 tests) 71ms\n ✓ src/router/cache.test.ts (11 tests) 272ms\n ✓ src/store/session.test.ts (19 tests) 653ms\n ✓ src/ui/Button.test.tsx (11 tests) 615ms\n ✓ src/api/client.test.ts (17 tests) 561ms\n ✓ src/hydrate.test.ts (26 tests) 664ms\n ✓ src/router/cache.test.ts (10 tests) 599ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n"
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (13 tests) 212ms\n ✓ src/store/session.test.ts (30 tests) 369ms\n ✓ src/ui/Button.test.tsx (16 tests) 782ms\n ✓ src/api/client.test.ts (16 tests) 336ms\n ✓ src/hydrate.test.ts (32 tests) 938ms\n ✓ src/router/cache.test.ts (10 tests) 243ms\n ✓ src/store/session.test.ts (12 tests) 69ms\n ✓ src/ui/Button.test.tsx (13 tests) 510ms\n ✓ src/api/client.test.ts (13 tests) 381ms\n ✓ src/hydrate.test.ts (26 tests) 71ms\n ✓ src/router/cache.test.ts (11 tests) 272ms\n ✓ src/store/session.test.ts (19 tests) 653ms\n ✓ src/ui/Button.test.tsx (11 tests) 615ms\n ✓ src/api/client.test.ts (17 tests) 561ms\n ✓ src/hydrate.test.ts (26 tests) 664ms\n ✓ src/router/cache.test.ts (10 tests) 599ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-758c/20261123-190524-eac3/2026-11-23T19:05:24Z",
@@ -639,7 +705,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n"
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-6745/20261123-184352-4c4a/2026-11-23T18:43:52Z",
@@ -664,7 +733,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\nerror: process exited with status 1\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-4f36/20261123-182325-3a9f/2026-11-23T18:23:25Z",
@@ -689,7 +761,10 @@
         },
         "size": "small",
         "gpu": false,
-        "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n"
+        "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-8ec0/20261123-180904-0a66/2026-11-23T18:09:04Z",
@@ -714,7 +789,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       }
     ],
     "now": "2026-11-24T17:30:00Z"
@@ -744,7 +822,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-a5f9/20261124-080815-437e/2026-11-24T08:08:15Z",
@@ -769,7 +850,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ........................ [  8%]\ntests/test_data.py ................. [ 16%]\ntests/test_model.py ................................ [ 25%]\ntests/test_schedule.py ............................. [ 33%]\ntests/test_tokenizer.py ............ [ 41%]\ntests/test_data.py .............. [ 50%]\ntests/test_model.py ......... [ 58%]\ntests/test_schedule.py ..................... [ 66%]\ntests/test_tokenizer.py ................................ [ 75%]\ntests/test_data.py .................... [ 83%]\ntests/test_model.py ......................... [ 91%]\ntests/test_schedule.py ..................... [100%]\n======== 318 passed in 412.80s ========\n"
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ........................ [  8%]\ntests/test_data.py ................. [ 16%]\ntests/test_model.py ................................ [ 25%]\ntests/test_schedule.py ............................. [ 33%]\ntests/test_tokenizer.py ............ [ 41%]\ntests/test_data.py .............. [ 50%]\ntests/test_model.py ......... [ 58%]\ntests/test_schedule.py ..................... [ 66%]\ntests/test_tokenizer.py ................................ [ 75%]\ntests/test_data.py .................... [ 83%]\ntests/test_model.py ......................... [ 91%]\ntests/test_schedule.py ..................... [100%]\n======== 318 passed in 412.80s ========\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-075252-c2c0/2026-11-24T07:52:52Z",
@@ -794,7 +878,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.083s\nok  \tgithub.com/acme/lantern/internal/sync\t7.998s\nok  \tgithub.com/acme/lantern/internal/api\t4.089s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.476s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.998s\nok  \tgithub.com/acme/lantern/internal/wire\t8.095s\nok  \tgithub.com/acme/lantern/internal/cache\t6.907s\nok  \tgithub.com/acme/lantern/internal/store\t7.357s\nok  \tgithub.com/acme/lantern/internal/sync\t0.780s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t4.162s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.512s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.946s\nok  \tgithub.com/acme/lantern/internal/wire\t3.069s\nok  \tgithub.com/acme/lantern/internal/cache\t5.620s\nok  \tgithub.com/acme/lantern/internal/store\t4.886s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t6.785s\nok  \tgithub.com/acme/lantern/internal/config\t3.344s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.860s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.888s\nok  \tgithub.com/acme/lantern/internal/wire\t9.288s\nok  \tgithub.com/acme/lantern/internal/cache\t1.459s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t4.289s\nok  \tgithub.com/acme/lantern/internal/api\t2.220s\nok  \tgithub.com/acme/lantern/internal/config\t6.598s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.403s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.551s\n"
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.083s\nok  \tgithub.com/acme/lantern/internal/sync\t7.998s\nok  \tgithub.com/acme/lantern/internal/api\t4.089s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.476s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.998s\nok  \tgithub.com/acme/lantern/internal/wire\t8.095s\nok  \tgithub.com/acme/lantern/internal/cache\t6.907s\nok  \tgithub.com/acme/lantern/internal/store\t7.357s\nok  \tgithub.com/acme/lantern/internal/sync\t0.780s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t4.162s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.512s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.946s\nok  \tgithub.com/acme/lantern/internal/wire\t3.069s\nok  \tgithub.com/acme/lantern/internal/cache\t5.620s\nok  \tgithub.com/acme/lantern/internal/store\t4.886s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t6.785s\nok  \tgithub.com/acme/lantern/internal/config\t3.344s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.860s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.888s\nok  \tgithub.com/acme/lantern/internal/wire\t9.288s\nok  \tgithub.com/acme/lantern/internal/cache\t1.459s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t4.289s\nok  \tgithub.com/acme/lantern/internal/api\t2.220s\nok  \tgithub.com/acme/lantern/internal/config\t6.598s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.403s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.551s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-072533-c07e/2026-11-24T07:25:33Z",
@@ -819,7 +906,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.636s\nok  \tgithub.com/acme/lantern/internal/sync\t3.951s\nok  \tgithub.com/acme/lantern/internal/api\t4.718s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.118s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.726s\nok  \tgithub.com/acme/lantern/internal/wire\t2.198s\nok  \tgithub.com/acme/lantern/internal/cache\t8.988s\nok  \tgithub.com/acme/lantern/internal/store\t9.365s\nok  \tgithub.com/acme/lantern/internal/sync\t9.100s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.782s\nok  \tgithub.com/acme/lantern/internal/metrics\t9.361s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.473s\nok  \tgithub.com/acme/lantern/internal/wire\t8.783s\nok  \tgithub.com/acme/lantern/internal/cache\t5.123s\nok  \tgithub.com/acme/lantern/internal/store\t5.076s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t1.700s\nok  \tgithub.com/acme/lantern/internal/config\t8.300s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.902s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.578s\nok  \tgithub.com/acme/lantern/internal/wire\t6.601s\nok  \tgithub.com/acme/lantern/internal/cache\t8.578s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.807s\nok  \tgithub.com/acme/lantern/internal/api\t8.782s\nok  \tgithub.com/acme/lantern/internal/config\t4.502s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.111s\n"
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.636s\nok  \tgithub.com/acme/lantern/internal/sync\t3.951s\nok  \tgithub.com/acme/lantern/internal/api\t4.718s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.118s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.726s\nok  \tgithub.com/acme/lantern/internal/wire\t2.198s\nok  \tgithub.com/acme/lantern/internal/cache\t8.988s\nok  \tgithub.com/acme/lantern/internal/store\t9.365s\nok  \tgithub.com/acme/lantern/internal/sync\t9.100s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.782s\nok  \tgithub.com/acme/lantern/internal/metrics\t9.361s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.473s\nok  \tgithub.com/acme/lantern/internal/wire\t8.783s\nok  \tgithub.com/acme/lantern/internal/cache\t5.123s\nok  \tgithub.com/acme/lantern/internal/store\t5.076s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t1.700s\nok  \tgithub.com/acme/lantern/internal/config\t8.300s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.902s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.578s\nok  \tgithub.com/acme/lantern/internal/wire\t6.601s\nok  \tgithub.com/acme/lantern/internal/cache\t8.578s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.807s\nok  \tgithub.com/acme/lantern/internal/api\t8.782s\nok  \tgithub.com/acme/lantern/internal/config\t4.502s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.111s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android/20261124-071734-5c20/2026-11-24T07:17:34Z",
@@ -844,7 +934,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-063517-4557/2026-11-24T06:35:17Z",
@@ -869,7 +962,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t3.381s\nok  \tgithub.com/acme/lantern/internal/sync\t2.398s\nok  \tgithub.com/acme/lantern/internal/api\t2.113s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.854s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.341s\nok  \tgithub.com/acme/lantern/internal/wire\t6.659s\nok  \tgithub.com/acme/lantern/internal/cache\t5.001s\nok  \tgithub.com/acme/lantern/internal/store\t6.266s\nok  \tgithub.com/acme/lantern/internal/sync\t2.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.954s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.607s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.682s\nok  \tgithub.com/acme/lantern/internal/wire\t5.894s\nok  \tgithub.com/acme/lantern/internal/cache\t8.684s\nok  \tgithub.com/acme/lantern/internal/store\t8.065s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t0.524s\nok  \tgithub.com/acme/lantern/internal/config\t5.832s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.437s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.598s\nok  \tgithub.com/acme/lantern/internal/wire\t2.284s\nok  \tgithub.com/acme/lantern/internal/cache\t5.002s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.700s\nok  \tgithub.com/acme/lantern/internal/api\t9.121s\nok  \tgithub.com/acme/lantern/internal/config\t2.166s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.961s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.330s\n"
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t3.381s\nok  \tgithub.com/acme/lantern/internal/sync\t2.398s\nok  \tgithub.com/acme/lantern/internal/api\t2.113s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.854s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.341s\nok  \tgithub.com/acme/lantern/internal/wire\t6.659s\nok  \tgithub.com/acme/lantern/internal/cache\t5.001s\nok  \tgithub.com/acme/lantern/internal/store\t6.266s\nok  \tgithub.com/acme/lantern/internal/sync\t2.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.954s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.607s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.682s\nok  \tgithub.com/acme/lantern/internal/wire\t5.894s\nok  \tgithub.com/acme/lantern/internal/cache\t8.684s\nok  \tgithub.com/acme/lantern/internal/store\t8.065s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t0.524s\nok  \tgithub.com/acme/lantern/internal/config\t5.832s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.437s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.598s\nok  \tgithub.com/acme/lantern/internal/wire\t2.284s\nok  \tgithub.com/acme/lantern/internal/cache\t5.002s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.700s\nok  \tgithub.com/acme/lantern/internal/api\t9.121s\nok  \tgithub.com/acme/lantern/internal/config\t2.166s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.961s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.330s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-2f4b/20261124-061331-4600/2026-11-24T06:13:31Z",
@@ -894,7 +990,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n"
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-044800-4411/2026-11-24T04:48:00Z",
@@ -919,7 +1018,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-044415-48f3/2026-11-24T04:44:15Z",
@@ -944,7 +1046,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android-da15/20261124-041123-f6c2/2026-11-24T04:11:23Z",
@@ -969,7 +1074,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-1b05/20261124-021530-d572/2026-11-24T02:15:30Z",
@@ -994,7 +1102,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (21 tests) 775ms\n ✓ src/store/session.test.ts (11 tests) 906ms\n ✓ src/ui/Button.test.tsx (3 tests) 850ms\n ✓ src/api/client.test.ts (9 tests) 810ms\n ✓ src/hydrate.test.ts (5 tests) 416ms\n ✓ src/router/cache.test.ts (20 tests) 733ms\n ✓ src/store/session.test.ts (10 tests) 117ms\n ✓ src/ui/Button.test.tsx (10 tests) 215ms\n ✓ src/api/client.test.ts (26 tests) 870ms\n ✓ src/hydrate.test.ts (32 tests) 421ms\n ✓ src/router/cache.test.ts (18 tests) 506ms\n ✓ src/store/session.test.ts (30 tests) 560ms\n ✓ src/ui/Button.test.tsx (14 tests) 895ms\n ✓ src/api/client.test.ts (16 tests) 778ms\n ✓ src/hydrate.test.ts (17 tests) 788ms\n ✓ src/router/cache.test.ts (31 tests) 901ms\n ✓ src/store/session.test.ts (28 tests) 685ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n"
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (21 tests) 775ms\n ✓ src/store/session.test.ts (11 tests) 906ms\n ✓ src/ui/Button.test.tsx (3 tests) 850ms\n ✓ src/api/client.test.ts (9 tests) 810ms\n ✓ src/hydrate.test.ts (5 tests) 416ms\n ✓ src/router/cache.test.ts (20 tests) 733ms\n ✓ src/store/session.test.ts (10 tests) 117ms\n ✓ src/ui/Button.test.tsx (10 tests) 215ms\n ✓ src/api/client.test.ts (26 tests) 870ms\n ✓ src/hydrate.test.ts (32 tests) 421ms\n ✓ src/router/cache.test.ts (18 tests) 506ms\n ✓ src/store/session.test.ts (30 tests) 560ms\n ✓ src/ui/Button.test.tsx (14 tests) 895ms\n ✓ src/api/client.test.ts (16 tests) 778ms\n ✓ src/hydrate.test.ts (17 tests) 788ms\n ✓ src/router/cache.test.ts (31 tests) 901ms\n ✓ src/store/session.test.ts (28 tests) 685ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261124-003135-bcd2/2026-11-24T00:31:35Z",
@@ -1019,7 +1130,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.327s\nok  \tgithub.com/acme/lantern/internal/sync\t4.811s\nok  \tgithub.com/acme/lantern/internal/api\t1.597s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.893s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.583s\nok  \tgithub.com/acme/lantern/internal/wire\t8.085s\nok  \tgithub.com/acme/lantern/internal/cache\t4.578s\nok  \tgithub.com/acme/lantern/internal/store\t5.615s\nok  \tgithub.com/acme/lantern/internal/sync\t1.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t0.904s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.645s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.030s\nok  \tgithub.com/acme/lantern/internal/wire\t5.369s\nok  \tgithub.com/acme/lantern/internal/cache\t1.456s\nok  \tgithub.com/acme/lantern/internal/store\t5.524s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.763s\nok  \tgithub.com/acme/lantern/internal/config\t7.084s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.767s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.114s\nok  \tgithub.com/acme/lantern/internal/wire\t0.857s\nok  \tgithub.com/acme/lantern/internal/cache\t5.086s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t7.519s\nok  \tgithub.com/acme/lantern/internal/api\t0.840s\nok  \tgithub.com/acme/lantern/internal/config\t3.094s\nok  \tgithub.com/acme/lantern/internal/metrics\t0.541s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.960s\n"
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.327s\nok  \tgithub.com/acme/lantern/internal/sync\t4.811s\nok  \tgithub.com/acme/lantern/internal/api\t1.597s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.893s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.583s\nok  \tgithub.com/acme/lantern/internal/wire\t8.085s\nok  \tgithub.com/acme/lantern/internal/cache\t4.578s\nok  \tgithub.com/acme/lantern/internal/store\t5.615s\nok  \tgithub.com/acme/lantern/internal/sync\t1.636s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t0.904s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.645s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.030s\nok  \tgithub.com/acme/lantern/internal/wire\t5.369s\nok  \tgithub.com/acme/lantern/internal/cache\t1.456s\nok  \tgithub.com/acme/lantern/internal/store\t5.524s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.763s\nok  \tgithub.com/acme/lantern/internal/config\t7.084s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.767s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.114s\nok  \tgithub.com/acme/lantern/internal/wire\t0.857s\nok  \tgithub.com/acme/lantern/internal/cache\t5.086s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t7.519s\nok  \tgithub.com/acme/lantern/internal/api\t0.840s\nok  \tgithub.com/acme/lantern/internal/config\t3.094s\nok  \tgithub.com/acme/lantern/internal/metrics\t0.541s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.960s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-80c9/20261124-001936-4a77/2026-11-24T00:19:36Z",
@@ -1044,7 +1158,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ..................... [  7%]\ntests/test_data.py ........ [ 15%]\ntests/test_model.py .................. [ 23%]\ntests/test_schedule.py ............................. [ 30%]\ntests/test_tokenizer.py ................. [ 38%]\ntests/test_data.py ..................................... [ 46%]\ntests/test_model.py .................. [ 53%]\ntests/test_schedule.py ............................. [ 61%]\ntests/test_tokenizer.py ................................. [ 69%]\ntests/test_data.py .................................... [ 76%]\ntests/test_model.py ................................ [ 84%]\ntests/test_schedule.py .......... [ 92%]\ntests/test_tokenizer.py ........................ [100%]\n^C\nbox: cancelled\n"
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ..................... [  7%]\ntests/test_data.py ........ [ 15%]\ntests/test_model.py .................. [ 23%]\ntests/test_schedule.py ............................. [ 30%]\ntests/test_tokenizer.py ................. [ 38%]\ntests/test_data.py ..................................... [ 46%]\ntests/test_model.py .................. [ 53%]\ntests/test_schedule.py ............................. [ 61%]\ntests/test_tokenizer.py ................................. [ 69%]\ntests/test_data.py .................................... [ 76%]\ntests/test_model.py ................................ [ 84%]\ntests/test_schedule.py .......... [ 92%]\ntests/test_tokenizer.py ........................ [100%]\n^C\nbox: cancelled\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "sparrow-ml-0725/20261124-001510-fe8c/2026-11-24T00:15:10Z",
@@ -1069,7 +1186,10 @@
         },
         "size": "gpu",
         "gpu": true,
-        "tail": "$ uv run python train.py --smoke --steps 200\nstep    3/200  loss 2.8140  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep    7/200  loss 2.7745  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep   11/200  loss 2.7241  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\nstep   15/200  loss 2.6883  lr 2.0e-4  3.8 it/s  gpu mem 6.1 GiB\nstep   19/200  loss 2.6436  lr 2.0e-4  4.0 it/s  gpu mem 6.5 GiB\nstep   23/200  loss 2.6131  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   27/200  loss 2.5974  lr 2.0e-4  3.0 it/s  gpu mem 6.0 GiB\nstep   31/200  loss 2.5394  lr 2.0e-4  3.4 it/s  gpu mem 6.8 GiB\nstep   35/200  loss 2.5079  lr 2.0e-4  3.6 it/s  gpu mem 6.0 GiB\nstep   39/200  loss 2.4861  lr 2.0e-4  3.6 it/s  gpu mem 6.5 GiB\nstep   43/200  loss 2.4497  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep   47/200  loss 2.3995  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   50/200  loss 2.3256  lr 2.0e-4  3.6 it/s  gpu mem 6.8 GiB\nstep   54/200  loss 2.3033  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   58/200  loss 2.2845  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   62/200  loss 2.2445  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   66/200  loss 2.1666  lr 2.0e-4  3.0 it/s  gpu mem 6.1 GiB\n"
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    3/200  loss 2.8140  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep    7/200  loss 2.7745  lr 2.0e-4  3.2 it/s  gpu mem 6.1 GiB\nstep   11/200  loss 2.7241  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\nstep   15/200  loss 2.6883  lr 2.0e-4  3.8 it/s  gpu mem 6.1 GiB\nstep   19/200  loss 2.6436  lr 2.0e-4  4.0 it/s  gpu mem 6.5 GiB\nstep   23/200  loss 2.6131  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   27/200  loss 2.5974  lr 2.0e-4  3.0 it/s  gpu mem 6.0 GiB\nstep   31/200  loss 2.5394  lr 2.0e-4  3.4 it/s  gpu mem 6.8 GiB\nstep   35/200  loss 2.5079  lr 2.0e-4  3.6 it/s  gpu mem 6.0 GiB\nstep   39/200  loss 2.4861  lr 2.0e-4  3.6 it/s  gpu mem 6.5 GiB\nstep   43/200  loss 2.4497  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep   47/200  loss 2.3995  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   50/200  loss 2.3256  lr 2.0e-4  3.6 it/s  gpu mem 6.8 GiB\nstep   54/200  loss 2.3033  lr 2.0e-4  3.4 it/s  gpu mem 6.2 GiB\nstep   58/200  loss 2.2845  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   62/200  loss 2.2445  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   66/200  loss 2.1666  lr 2.0e-4  3.0 it/s  gpu mem 6.1 GiB\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-ed8a/20261123-234949-280f/2026-11-23T23:49:49Z",
@@ -1094,7 +1214,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.939s\nok  \tgithub.com/acme/lantern/internal/sync\t2.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.160s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.143s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.859s\nok  \tgithub.com/acme/lantern/internal/wire\t5.346s\nok  \tgithub.com/acme/lantern/internal/cache\t1.720s\nok  \tgithub.com/acme/lantern/internal/store\t2.651s\nok  \tgithub.com/acme/lantern/internal/sync\t3.099s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.497s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.581s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.797s\n"
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.939s\nok  \tgithub.com/acme/lantern/internal/sync\t2.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.160s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.143s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.859s\nok  \tgithub.com/acme/lantern/internal/wire\t5.346s\nok  \tgithub.com/acme/lantern/internal/cache\t1.720s\nok  \tgithub.com/acme/lantern/internal/store\t2.651s\nok  \tgithub.com/acme/lantern/internal/sync\t3.099s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.497s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.581s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.797s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-ef6e/20261123-234504-753c/2026-11-23T23:45:04Z",
@@ -1119,7 +1242,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (29 tests) 351ms\n ✓ src/store/session.test.ts (5 tests) 577ms\n ✓ src/ui/Button.test.tsx (30 tests) 163ms\n ✓ src/api/client.test.ts (9 tests) 627ms\n ✓ src/hydrate.test.ts (9 tests) 641ms\n ✓ src/router/cache.test.ts (3 tests) 411ms\n ✓ src/store/session.test.ts (24 tests) 406ms\n ✓ src/ui/Button.test.tsx (16 tests) 337ms\n ✓ src/api/client.test.ts (20 tests) 774ms\n ✓ src/hydrate.test.ts (5 tests) 672ms\n ✓ src/router/cache.test.ts (27 tests) 284ms\n ✓ src/store/session.test.ts (16 tests) 637ms\n ✓ src/ui/Button.test.tsx (25 tests) 555ms\n^C\nbox: cancelled\n"
+        "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (29 tests) 351ms\n ✓ src/store/session.test.ts (5 tests) 577ms\n ✓ src/ui/Button.test.tsx (30 tests) 163ms\n ✓ src/api/client.test.ts (9 tests) 627ms\n ✓ src/hydrate.test.ts (9 tests) 641ms\n ✓ src/router/cache.test.ts (3 tests) 411ms\n ✓ src/store/session.test.ts (24 tests) 406ms\n ✓ src/ui/Button.test.tsx (16 tests) 337ms\n ✓ src/api/client.test.ts (20 tests) 774ms\n ✓ src/hydrate.test.ts (5 tests) 672ms\n ✓ src/router/cache.test.ts (27 tests) 284ms\n ✓ src/store/session.test.ts (16 tests) 637ms\n ✓ src/ui/Button.test.tsx (25 tests) 555ms\n^C\nbox: cancelled\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern/20261123-230922-cc81/2026-11-23T23:09:22Z",
@@ -1144,7 +1270,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.779s\nok  \tgithub.com/acme/lantern/internal/sync\t4.133s\nok  \tgithub.com/acme/lantern/internal/api\t6.631s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.999s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.639s\nok  \tgithub.com/acme/lantern/internal/wire\t2.719s\nok  \tgithub.com/acme/lantern/internal/cache\t6.276s\nok  \tgithub.com/acme/lantern/internal/store\t7.109s\nok  \tgithub.com/acme/lantern/internal/sync\t8.930s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.168s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.237s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.581s\nok  \tgithub.com/acme/lantern/internal/wire\t5.543s\nok  \tgithub.com/acme/lantern/internal/cache\t4.796s\nok  \tgithub.com/acme/lantern/internal/store\t4.949s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.297s\nok  \tgithub.com/acme/lantern/internal/config\t7.389s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.489s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.684s\nok  \tgithub.com/acme/lantern/internal/wire\t2.488s\nok  \tgithub.com/acme/lantern/internal/cache\t5.784s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.822s\nok  \tgithub.com/acme/lantern/internal/api\t7.742s\nok  \tgithub.com/acme/lantern/internal/config\t1.217s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.739s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.500s\n--- FAIL: TestResumeAfterPartialChunk (0.42s)\n    sync_test.go:88: got 3 chunks, want 4\nFAIL\nFAIL\tgithub.com/acme/lantern/internal/sync\t2.104s\nFAIL\n"
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.779s\nok  \tgithub.com/acme/lantern/internal/sync\t4.133s\nok  \tgithub.com/acme/lantern/internal/api\t6.631s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.999s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.639s\nok  \tgithub.com/acme/lantern/internal/wire\t2.719s\nok  \tgithub.com/acme/lantern/internal/cache\t6.276s\nok  \tgithub.com/acme/lantern/internal/store\t7.109s\nok  \tgithub.com/acme/lantern/internal/sync\t8.930s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.168s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.237s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.581s\nok  \tgithub.com/acme/lantern/internal/wire\t5.543s\nok  \tgithub.com/acme/lantern/internal/cache\t4.796s\nok  \tgithub.com/acme/lantern/internal/store\t4.949s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.297s\nok  \tgithub.com/acme/lantern/internal/config\t7.389s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.489s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.684s\nok  \tgithub.com/acme/lantern/internal/wire\t2.488s\nok  \tgithub.com/acme/lantern/internal/cache\t5.784s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.822s\nok  \tgithub.com/acme/lantern/internal/api\t7.742s\nok  \tgithub.com/acme/lantern/internal/config\t1.217s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.739s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.500s\n--- FAIL: TestResumeAfterPartialChunk (0.42s)\n    sync_test.go:88: got 3 chunks, want 4\nFAIL\nFAIL\tgithub.com/acme/lantern/internal/sync\t2.104s\nFAIL\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android-5095/20261123-222851-74b5/2026-11-23T22:28:51Z",
@@ -1169,7 +1298,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "orbit-android/20261123-201240-0748/2026-11-23T20:12:40Z",
@@ -1194,7 +1326,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n"
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-a769/20261123-194454-082a/2026-11-23T19:44:54Z",
@@ -1219,7 +1354,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (13 tests) 212ms\n ✓ src/store/session.test.ts (30 tests) 369ms\n ✓ src/ui/Button.test.tsx (16 tests) 782ms\n ✓ src/api/client.test.ts (16 tests) 336ms\n ✓ src/hydrate.test.ts (32 tests) 938ms\n ✓ src/router/cache.test.ts (10 tests) 243ms\n ✓ src/store/session.test.ts (12 tests) 69ms\n ✓ src/ui/Button.test.tsx (13 tests) 510ms\n ✓ src/api/client.test.ts (13 tests) 381ms\n ✓ src/hydrate.test.ts (26 tests) 71ms\n ✓ src/router/cache.test.ts (11 tests) 272ms\n ✓ src/store/session.test.ts (19 tests) 653ms\n ✓ src/ui/Button.test.tsx (11 tests) 615ms\n ✓ src/api/client.test.ts (17 tests) 561ms\n ✓ src/hydrate.test.ts (26 tests) 664ms\n ✓ src/router/cache.test.ts (10 tests) 599ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n"
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (13 tests) 212ms\n ✓ src/store/session.test.ts (30 tests) 369ms\n ✓ src/ui/Button.test.tsx (16 tests) 782ms\n ✓ src/api/client.test.ts (16 tests) 336ms\n ✓ src/hydrate.test.ts (32 tests) 938ms\n ✓ src/router/cache.test.ts (10 tests) 243ms\n ✓ src/store/session.test.ts (12 tests) 69ms\n ✓ src/ui/Button.test.tsx (13 tests) 510ms\n ✓ src/api/client.test.ts (13 tests) 381ms\n ✓ src/hydrate.test.ts (26 tests) 71ms\n ✓ src/router/cache.test.ts (11 tests) 272ms\n ✓ src/store/session.test.ts (19 tests) 653ms\n ✓ src/ui/Button.test.tsx (11 tests) 615ms\n ✓ src/api/client.test.ts (17 tests) 561ms\n ✓ src/hydrate.test.ts (26 tests) 664ms\n ✓ src/router/cache.test.ts (10 tests) 599ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-758c/20261123-190524-eac3/2026-11-23T19:05:24Z",
@@ -1244,7 +1382,10 @@
         },
         "size": "large",
         "gpu": false,
-        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n"
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-6745/20261123-184352-4c4a/2026-11-23T18:43:52Z",
@@ -1269,7 +1410,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\nerror: process exited with status 1\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "tidepool-4f36/20261123-182325-3a9f/2026-11-23T18:23:25Z",
@@ -1294,7 +1438,10 @@
         },
         "size": "small",
         "gpu": false,
-        "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n"
+        "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       },
       {
         "key": "lantern-8ec0/20261123-180904-0a66/2026-11-23T18:09:04Z",
@@ -1319,7 +1466,10 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\n"
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
       }
     ],
     "more": false
@@ -1363,7 +1513,11 @@
           }
         },
         "memUsed": 289357304,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T19:00:00Z",
@@ -1400,7 +1554,11 @@
           }
         },
         "memUsed": 1042068774,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T20:00:00Z",
@@ -1432,7 +1590,11 @@
           }
         },
         "memUsed": 1861590402,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T21:00:00Z",
@@ -1454,7 +1616,11 @@
           "byRepo": {}
         },
         "memUsed": 2310939810,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T22:00:00Z",
@@ -1487,7 +1653,11 @@
           }
         },
         "memUsed": 1434096786,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T23:00:00Z",
@@ -1526,7 +1696,11 @@
           }
         },
         "memUsed": 2792404627,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T00:00:00Z",
@@ -1566,7 +1740,11 @@
           }
         },
         "memUsed": 4302633348,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T01:00:00Z",
@@ -1588,7 +1766,11 @@
           "byRepo": {}
         },
         "memUsed": 1505274685,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T02:00:00Z",
@@ -1620,7 +1802,11 @@
           }
         },
         "memUsed": 1057349667,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T03:00:00Z",
@@ -1640,7 +1826,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T04:00:00Z",
@@ -1677,7 +1867,11 @@
           }
         },
         "memUsed": 1378160279,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T05:00:00Z",
@@ -1699,7 +1893,11 @@
           "byRepo": {}
         },
         "memUsed": 2122184023,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T06:00:00Z",
@@ -1733,7 +1931,11 @@
           }
         },
         "memUsed": 3715811608,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T07:00:00Z",
@@ -1769,7 +1971,11 @@
           }
         },
         "memUsed": 4225096156,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T08:00:00Z",
@@ -1801,7 +2007,11 @@
           }
         },
         "memUsed": 4315457531,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T09:00:00Z",
@@ -1823,7 +2033,11 @@
           "byRepo": {}
         },
         "memUsed": 2700514656,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T10:00:00Z",
@@ -1843,7 +2057,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T11:00:00Z",
@@ -1863,7 +2081,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T12:00:00Z",
@@ -1883,7 +2105,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T13:00:00Z",
@@ -1903,7 +2129,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T14:00:00Z",
@@ -1927,7 +2157,11 @@
           "byRepo": {}
         },
         "memUsed": 1374389534,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T15:00:00Z",
@@ -1951,7 +2185,11 @@
           "byRepo": {}
         },
         "memUsed": 2748779069,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T16:00:00Z",
@@ -1975,7 +2213,11 @@
           "byRepo": {}
         },
         "memUsed": 2748779069,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T17:00:00Z",
@@ -2011,7 +2253,11 @@
           }
         },
         "memUsed": 6332547689,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       }
     ],
     "segments": [
@@ -2050,7 +2296,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-19T00:00:00Z",
@@ -2070,7 +2320,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-20T00:00:00Z",
@@ -2090,7 +2344,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-21T00:00:00Z",
@@ -2110,7 +2368,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-22T00:00:00Z",
@@ -2130,7 +2392,11 @@
           "byRepo": {}
         },
         "memUsed": 0,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-23T00:00:00Z",
@@ -2176,7 +2442,11 @@
           }
         },
         "memUsed": 324348033,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       },
       {
         "start": "2026-11-24T00:00:00Z",
@@ -2230,7 +2500,11 @@
           }
         },
         "memUsed": 1796175155,
-        "memCap": 12884901888
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "medianWaitSeconds": 0
+        }
       }
     ],
     "segments": [

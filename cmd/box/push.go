@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mask"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
@@ -52,9 +53,7 @@ const (
 	recordKeep = 7 * 24 * time.Hour
 	tempKeep   = time.Hour
 	tailLines  = 20
-	// endedKeep is how long a throwaway box and its log outlive a job that
-	// ended, so box_pull and the full log still work after the push.
-	endedKeep = 30 * time.Minute
+	endedKeep  = jobrun.EndedKeep
 )
 
 // Pusher sends a message into a T3 thread as its next turn.

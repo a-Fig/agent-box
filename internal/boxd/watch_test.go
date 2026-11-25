@@ -20,12 +20,14 @@ import (
 
 // fakeIncus is a project whose boxes and job files a test sets.
 type fakeIncus struct {
-	mu    sync.Mutex
-	ins   []Instance
-	cfg   map[string]string
-	jobs  map[string][]fakeJob // box -> its job files
-	err   error
-	execs int
+	mu     sync.Mutex
+	ins    []Instance
+	cfg    map[string]string
+	jobs   map[string][]fakeJob // box -> its job files
+	err    error
+	execs  int
+	cli    []string
+	cliErr func(args []string) error
 }
 
 type fakeJob struct {
@@ -95,6 +97,36 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 	}
 	return nil, &ExitError{Code: 3}
+}
+
+// CLI records the commands a queued job's start runs; a launch adds the box.
+func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cli = append(f.cli, strings.Join(args, " "))
+	if f.cliErr != nil {
+		return nil, f.cliErr(args)
+	}
+	switch args[0] {
+	case "launch":
+		size := "medium"
+		for i, a := range args {
+			if strings.HasPrefix(a, "user.box.size=") && i > 0 {
+				size = strings.TrimPrefix(a, "user.box.size=")
+			}
+		}
+		in := inst(args[2], "Running", size, t0)
+		in.CreatedAt = time.Now().UTC()
+		f.ins = append(f.ins, in)
+	case "delete":
+		for i, in := range f.ins {
+			if in.Name == args[1] {
+				f.ins = append(f.ins[:i], f.ins[i+1:]...)
+				break
+			}
+		}
+	}
+	return nil, nil
 }
 
 func (f *fakeIncus) set(fn func()) {

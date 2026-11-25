@@ -41,20 +41,30 @@ type Watcher struct {
 	MachineName string
 	WSLMemory   func() int64 // bytes the distro's VM holds; nil reads 0
 	Logf        func(format string, args ...any)
+	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
+	Queue *Queue
+	Image string // the image a queued job's new box is launched from: agent-base
 
-	mu       sync.Mutex
-	polled   bool
-	machine  dash.Machine
-	boxes    map[string]dash.Box
-	known    map[string]boxRec // box id -> what was recorded as created
-	live     map[string]*dash.Job
-	repoOf   map[string]string    // box -> the repo of its latest job
-	died     map[string]time.Time // job key -> when a scan first saw it died
-	cpu      map[string]cpuMark
-	lastMode *modeRec
-	lastReq  string
-	sampled  time.Time
-	subs     map[chan dash.Event]struct{}
+	mu        sync.Mutex
+	polled    bool
+	machine   dash.Machine
+	boxes     map[string]dash.Box
+	known     map[string]boxRec // box id -> what was recorded as created
+	live      map[string]*dash.Job
+	repoOf    map[string]string    // box -> the repo of its latest job
+	died      map[string]time.Time // job key -> when a scan first saw it died
+	qview     map[string]dash.Job  // queued job -> as last announced
+	starting  string               // the queued job being started, one at a time
+	startDone time.Time            // when the last start finished
+	noRoom    map[string]time.Time // queued job -> not before, after Incus refused its launch
+	started   map[string]dash.Job  // queued jobs started, until a scan sees them
+	lastIns   []Instance
+	lastProj  Project
+	cpu       map[string]cpuMark
+	lastMode  *modeRec
+	lastReq   string
+	sampled   time.Time
+	subs      map[chan dash.Event]struct{}
 }
 
 type cpuMark struct {
@@ -68,7 +78,8 @@ func (w *Watcher) init() {
 	}
 	w.boxes, w.known, w.live = map[string]dash.Box{}, map[string]boxRec{}, map[string]*dash.Job{}
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
-	w.died = map[string]time.Time{}
+	w.died, w.qview = map[string]time.Time{}, map[string]dash.Job{}
+	w.noRoom, w.started = map[string]time.Time{}, map[string]dash.Job{}
 	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
@@ -152,6 +163,8 @@ func (w *Watcher) Poll(ctx context.Context) {
 		w.sampled = now
 		w.sample(now, ins, boxes)
 	}
+	w.lastIns, w.lastProj = ins, proj
+	w.schedule(now, ins)
 }
 
 // scanAll scans the running boxes' job files, in parallel. A box missing from
@@ -271,6 +284,13 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 		in := byName[box]
 		for _, s := range jobs {
 			name, id, started := jobStart(s.Job)
+			if s.Meta != nil && s.Meta.QueuedAt != "" {
+				// A job from the queue is named when it is queued and starts
+				// later: its start is the .meta's.
+				if t, err := time.Parse(time.RFC3339, s.Meta.StartedAt); err == nil {
+					started = t.UTC()
+				}
+			}
 			if name != box || started.IsZero() || !holds(in.CreatedAt, started) {
 				continue
 			}
@@ -286,6 +306,7 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 				}
 				j = w.newJob(key, id, box, started, in, s.Meta)
 				w.live[key] = j
+				delete(w.started, s.Job)
 				w.record(record{Type: recJobStart, At: started, Job: j})
 			} else if s.Meta != nil && j.Command == "" && j.Reason == "" {
 				fillMeta(j, s.Meta)
@@ -354,6 +375,7 @@ func (w *Watcher) settle(key string, j *dash.Job, before dash.Job) {
 		}
 		w.record(r)
 		delete(w.live, key)
+		w.reapQueuedThrowaway(j)
 	}
 	if ended || !reflect.DeepEqual(before, *j) {
 		w.emit(dash.Event{Name: dash.EventJob, Data: *j})
@@ -366,6 +388,10 @@ func (w *Watcher) newJob(key, id, box string, started time.Time, in Instance, m 
 		Size: sz.Name, GPU: sz.GPU}
 	if m != nil {
 		fillMeta(j, m)
+		if t, err := time.Parse(time.RFC3339, m.QueuedAt); err == nil {
+			t = t.UTC()
+			j.QueuedAt = &t
+		}
 	}
 	j.Kind = dash.Classify(j.Command, j.GPU)
 	return j
@@ -579,6 +605,7 @@ func (w *Watcher) state() dash.State {
 		s.Jobs = append(s.Jobs, *j)
 	}
 	slices.SortFunc(s.Jobs, func(a, b dash.Job) int { return b.StartedAt.Compare(a.StartedAt) })
+	s.Jobs = append(s.Jobs, w.queuedJobs()...)
 	s.Jobs = append(s.Jobs, w.Hist.Finished(Filter{Limit: dash.FinishedInState}).Jobs...)
 	return s
 }
@@ -638,4 +665,24 @@ func (w *Watcher) emit(e dash.Event) {
 			close(ch)
 		}
 	}
+}
+
+// Machine is the PC as last polled.
+func (w *Watcher) Machine() dash.Machine {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.machine
+}
+
+// JobByID finds the newest job of a box name and ID, live or recorded.
+func (w *Watcher) JobByID(box, id string) (dash.Job, bool) {
+	w.mu.Lock()
+	for _, j := range w.live {
+		if j.Box == box && j.ID == id {
+			w.mu.Unlock()
+			return *j, true
+		}
+	}
+	w.mu.Unlock()
+	return w.Hist.JobByID(box, id)
 }
