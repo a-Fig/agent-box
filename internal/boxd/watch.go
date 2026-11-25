@@ -63,6 +63,7 @@ type Watcher struct {
 	started   map[string]dash.Job  // queued jobs started, until a scan sees them
 	lastIns   []Instance
 	lastProj  Project
+	listed    bool // lastIns is from a poll that listed the boxes
 	cpu       map[string]cpuMark
 	lastMode  *modeRec
 	lastReq   string
@@ -166,7 +167,7 @@ func (w *Watcher) Poll(ctx context.Context) {
 		w.sampled = now
 		w.sample(now, ins, boxes)
 	}
-	w.lastIns, w.lastProj = ins, proj
+	w.lastIns, w.lastProj, w.listed = ins, proj, true
 	w.schedule(now, ins)
 }
 

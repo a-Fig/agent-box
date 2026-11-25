@@ -416,3 +416,127 @@ func TestQueueStartCutShortIsNotRepeated(t *testing.T) {
 		}
 	}
 }
+
+// A second attempt at a start moves the mark to its own time, the start
+// time its .meta holds, on disk too: a third boxd that finds the job in the
+// box gives it the key the scan does.
+func TestQueueStartMarkIsTheLatestAttempt(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	it, _ := r.w.Queue.get(rep.Job)
+	first, second := t0, t0.Add(time.Minute)
+	r.w.Queue.markStarting(it, first)
+	r.w.Queue.markStarting(it, second)
+	q, err := OpenQueue(filepath.Join(r.dir, "queue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	re, ok := q.get(rep.Job)
+	if !ok || re.Starting == nil || !re.Starting.Equal(second) || !q.wasRestored(re) {
+		t.Fatalf("reloaded: %+v", re)
+	}
+}
+
+// restart is a boxd started again on the same queue, history and Incus. It
+// hasn't polled yet.
+func (r *queueRig) restart() *Watcher {
+	r.t.Helper()
+	q, err := OpenQueue(filepath.Join(r.dir, "queue"))
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	w := newWatcher(r.t, filepath.Join(r.dir, "history"), r.f, r.c)
+	w.Queue = q
+	return w
+}
+
+// A job whose start a restart cut short may be running in its box: until a
+// start looks there, it isn't cancelled or dropped as if it only waited, nor
+// before boxd has listed the boxes. Once its box is gone it is only waiting.
+func TestQueueRestoredJobWithBoxIsNotCancelled(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	box, _, _ := strings.Cut(rep.Job, ".")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	r.f.set(func() { r.f.ins = append(r.f.ins, inst(box, "Frozen", "small", r.c.now())) })
+	w := r.restart()
+	if w.CancelQueued(rep.Job, "tyler") {
+		t.Fatal("cancelled before boxd listed the boxes")
+	}
+	w.Poll(context.Background())
+	if w.CancelQueued(rep.Job, "tyler") {
+		t.Fatal("cancelled a job that may run in its box")
+	}
+	r.c.add(dash.QueueMaxAge + time.Minute)
+	w.Poll(context.Background())
+	if q := w.Queued(); len(q) != 1 {
+		t.Fatalf("dropped while its box is there: %+v", q)
+	}
+	r.f.set(func() { r.f.ins = nil }) // the box reaped at its expiry
+	w.Poll(context.Background())
+	if q := w.Queued(); len(q) != 0 {
+		t.Fatalf("still queued with its box gone: %+v", q)
+	}
+}
+
+// Restored without its box, a job is only waiting, and cancels.
+func TestQueueRestoredJobWithoutBoxCancels(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	w := r.restart()
+	w.Poll(context.Background())
+	if !w.CancelQueued(rep.Job, "tyler") {
+		t.Fatal("a restored job with no box didn't cancel")
+	}
+}
+
+// A start that failed within one boxd (paused by My PC, its repo box still
+// there) leaves the mark, but the job is waiting and cancels, as before.
+func TestQueuePausedStartStillCancels(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	box, _, _ := strings.Cut(rep.Job, ".")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	r.f.set(func() { r.f.ins = append(r.f.ins, inst(box, "Frozen", "small", r.c.now())) })
+	r.poll()
+	if !r.w.CancelQueued(rep.Job, "tyler") {
+		t.Fatal("a paused start's job didn't cancel")
+	}
+}
+
+// A start that looks in a restored job's box clears restored, however it
+// ends: a later pause leaves the job cancellable again.
+func TestQueueStartClearsRestored(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	box, _, _ := strings.Cut(rep.Job, ".")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	r.f.set(func() {
+		r.f.ins = append(r.f.ins, inst(box, "Running", "small", r.c.now()))
+		r.f.cfg["user.agent-box.mode"] = "full"
+		r.f.cliErr = func(args []string) error {
+			if args[0] == "file" {
+				return errors.New("push failed")
+			}
+			return nil
+		}
+	})
+	w := r.restart()
+	re, _ := w.Queue.get(rep.Job)
+	w.Poll(context.Background())
+	for i := 0; i < 200; i++ {
+		w.mu.Lock()
+		busy := w.starting != ""
+		w.mu.Unlock()
+		if !busy && !w.Queue.wasRestored(re) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("a start that looked left the job restored")
+}
