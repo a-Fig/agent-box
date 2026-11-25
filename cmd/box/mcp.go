@@ -155,6 +155,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 	calls := map[string]context.CancelCauseFunc{} // by request id
 	var suppressInfo atomic.Bool
 	var client clientInfo // from initialize; read and written only in this loop
+	call := mcpCaller(a, a.MCPExe)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -218,7 +219,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			}
 			send(rpcMsg{ID: req.ID, Result: map[string]any{}})
 		case "tools/list":
-			send(rpcMsg{ID: req.ID, Result: map[string]any{"tools": tools}})
+			send(rpcMsg{ID: req.ID, Result: call(ctx, mcpCall{Method: req.Method}, func(jobNotice) {})})
 		case "tools/call":
 			// Registered before the goroutine starts, so a cancel that
 			// follows the call on the wire always finds it.
@@ -227,15 +228,14 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			callsMu.Lock()
 			calls[key] = cancel
 			callsMu.Unlock()
-			ca := *a // with the client, for the job's .meta
-			ca.Client = client
-			if ca.Client.Name == "" {
-				ca.Client.Name = "mcp"
+			cl := client // for the job's .meta
+			if cl.Name == "" {
+				cl.Name = "mcp"
 			}
 			wg.Add(1)
 			go func(req rpcMsg) {
 				defer wg.Done()
-				res := callTool(callCtx, &ca, req.Params, func(note jobNotice) {
+				res := call(callCtx, mcpCall{Method: req.Method, Params: req.Params, Client: cl}, func(note jobNotice) {
 					if suppressInfo.Load() || callCtx.Err() != nil {
 						return
 					}

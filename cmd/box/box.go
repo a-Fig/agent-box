@@ -90,6 +90,9 @@ type App struct {
 	// deletes it) instead of deleting it, so box_pull and the full log still
 	// work after the result was pushed.
 	KeepEnded time.Duration
+	// MCPExe, when set, is the box.exe that box mcp hands each tools/list and tools/call to,
+	// so a long-lived server runs the newest code (mcpexe.go). Empty answers in process.
+	MCPExe string
 }
 
 func newApp() *App {
