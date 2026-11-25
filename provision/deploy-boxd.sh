@@ -28,13 +28,17 @@ DISTRO=${AGENT_BOX_DISTRO:-agents}
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$ROOT"
 commit=$(git rev-parse --short HEAD)
-dirty=""
-git diff --quiet HEAD -- cmd internal provision go.mod go.sum || dirty=" (with uncommitted changes)"
+dirty="" modified=false
+git diff --quiet HEAD -- cmd internal provision go.mod go.sum || { dirty=" (with uncommitted changes)"; modified=true; }
+# The page shows boxd's commit (internal/version). Go stamps it from git too,
+# but counts any untracked file as a change; this says what was built.
+v=github.com/a-Fig/agent-box/internal/version
+ldflags="-X $v.Commit=$(git rev-parse HEAD) -X $v.Time=$(git log -1 --format=%cI HEAD) -X $v.Modified=$modified"
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/boxd-deploy.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 echo "== building boxd at $commit$dirty"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$STAGE/boxd" ./cmd/boxd
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$STAGE/boxd" ./cmd/boxd
 # The scripts and unit go as LF, whatever the checkout did to them.
 tr -d '\r' < provision/systemd/agent-box-boxd.service > "$STAGE/agent-box-boxd.service"
 tr -d '\r' < provision/install-boxd.sh > "$STAGE/install-boxd.sh"

@@ -3,7 +3,7 @@
 // untrusted text and reaches the page only as text nodes, under a Content-Security-Policy of
 // default-src 'self'. Widths and colors are set through the CSSOM, never a style attribute.
 
-import { h, icon, tickTimes } from "./dom.js";
+import { h, icon, tickTimes, dur, stamp } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
 import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog } from "./views.js";
 import { history } from "./history.js";
@@ -105,7 +105,27 @@ function sidebar(r) {
         ),
       ),
     ),
-    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", { class: "conn" }, h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…")),
+    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", { class: "conn" }, h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…"), [...S.machines.values()].map((m) => versions(m, S.machines.size > 1))),
+  );
+}
+
+// The commits boxd and the tray were built from (dash.Version), and a quiet note when they
+// differ: twice on 2026-11-25 the PC ran builds hours behind the repo and nothing showed it.
+function versions(m, named) {
+  const b = m.boxd, t = m.tray;
+  if (!b && !t) return null;
+  const short = (v) => (v && v.commit ? v.commit.slice(0, 7) + (v.modified ? "+" : "") : "unknown");
+  const tip = (who, v) => who + " " + (v && v.commit ? v.commit + (v.time ? ", committed " + stamp(v.time) : "") + (v.modified ? ", with uncommitted changes" : "") : "unknown");
+  let drift = null;
+  if (b && t && b.commit && t.commit && b.commit !== t.commit) {
+    const d = b.time && t.time ? Date.parse(b.time) - Date.parse(t.time) : 0;
+    drift = d ? (d > 0 ? "boxd " + short(b) : "tray " + short(t)) + " (" + dur(Math.abs(d) / 1000).split(" ")[0] + " newer than " + (d > 0 ? "tray" : "boxd") + ")" : "boxd and tray are from different commits";
+  }
+  return h(
+    "div",
+    { class: "versions", title: tip("boxd", b) + "\n" + tip("tray", t) },
+    h("span", null, (named ? m.name + ": " : "") + "boxd " + short(b) + " · tray " + short(t)),
+    drift ? h("span", { class: "versions-drift" }, drift) : null,
   );
 }
 

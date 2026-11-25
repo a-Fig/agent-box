@@ -11,7 +11,9 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 func cancelText(job string, cancelled bool, code int) string {
@@ -43,6 +45,7 @@ const usage = `usage:
                                             and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
+  box --version                             the commit this box was built from
 
 --reason (required for run): one or two sentences, 10 to 300 characters, on
 why this needs a box. The PC's owner sees it on the dashboard.
@@ -62,6 +65,14 @@ reattaches. A relative remote path in box pull starts at the job's checkout.
 The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
+
+// versionText is box --version: "box 1378501 (2026-11-24 22:42 UTC)", "+" for a modified build.
+func versionText(v dash.Version) string {
+	if v.Time == nil {
+		return "box " + v.String()
+	}
+	return "box " + v.String() + " (" + v.Time.Format("2006-01-02 15:04 MST") + ")"
+}
 
 // usageText is usage with the size table filled in.
 func usageText() string {
@@ -96,6 +107,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	if len(args) == 0 {
 		fmt.Fprint(a.Err, usageText())
 		return 2
+	}
+	if args[0] == "--version" || args[0] == "version" {
+		fmt.Fprintln(a.Out, versionText(version.Get()))
+		return 0
 	}
 	fs := flag.NewFlagSet("box "+args[0], flag.ContinueOnError)
 	fs.SetOutput(a.Err)

@@ -20,7 +20,7 @@ Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here to
 
 ## Updating boxd
 
-`deploy-boxd.sh`, run from the laptop, builds boxd from the checkout and installs it with `systemd/agent-box-boxd.service` in one go, so the PC's binary and unit come from one commit:
+`deploy-boxd.sh`, run from the laptop, builds boxd from the checkout and installs it with `systemd/agent-box-boxd.service` in one go, so the PC's binary and unit come from one commit, and stamps boxd with it (the dashboard's foot shows boxd's and the tray's commits):
 
 ```bash
 provision/deploy-boxd.sh user@pc-host      # or AGENT_BOX_PC=user@pc-host; on this laptop, through .scratch/golock.sh

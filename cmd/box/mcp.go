@@ -19,6 +19,7 @@ import (
 
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 // A hand-written MCP server: JSON-RPC 2.0, one message per line on stdio.
@@ -199,7 +200,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			send(rpcMsg{ID: req.ID, Result: map[string]any{
 				"protocolVersion": p.ProtocolVersion,
 				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}, "logging": map[string]any{}},
-				"serverInfo":      map[string]any{"name": "box", "version": "0.1.0"},
+				"serverInfo":      map[string]any{"name": "box", "version": version.Get().String()},
 			}})
 		case "ping":
 			send(rpcMsg{ID: req.ID, Result: map[string]any{}})

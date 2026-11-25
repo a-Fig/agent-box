@@ -35,7 +35,17 @@
           "large": 1,
           "gpu": 1
         },
-        "wslMemory": 3606598123
+        "wslMemory": 3606598123,
+        "boxd": {
+          "commit": "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e",
+          "time": "2026-11-23T15:30:00Z",
+          "modified": false
+        },
+        "tray": {
+          "commit": "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e",
+          "time": "2026-11-23T15:30:00Z",
+          "modified": false
+        }
       }
     ],
     "boxes": [

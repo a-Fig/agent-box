@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -658,5 +659,16 @@ func TestRunKeepsJobExpiryWhileAnotherJobRuns(t *testing.T) {
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
 		t.Errorf("expiry = %q, want the 24h job expiry kept", got)
+	}
+}
+
+func TestVersion(t *testing.T) {
+	a, out := testApp(&fakePC{})
+	if c := run(context.Background(), a, []string{"--version"}, nil); c != 0 || !strings.HasPrefix(out.String(), "box ") {
+		t.Fatalf("--version: %d %q", c, out)
+	}
+	at := time.Date(2026, 11, 24, 22, 42, 59, 0, time.UTC)
+	if s := versionText(dash.Version{Commit: "1378501abcdef", Time: &at, Modified: true}); s != "box 1378501+ (2026-11-24 22:42 UTC)" {
+		t.Errorf("versionText = %q", s)
 	}
 }

@@ -39,7 +39,8 @@ type Watcher struct {
 	Now         func() time.Time
 	MachineID   string
 	MachineName string
-	WSLMemory   func() int64 // bytes the distro's VM holds; nil reads 0
+	WSLMemory   func() int64  // bytes the distro's VM holds; nil reads 0
+	Version     *dash.Version // this boxd's build, shown as Machine.Boxd; nil if unknown
 	Logf        func(format string, args ...any)
 	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
 	Queue *Queue
@@ -84,7 +85,7 @@ func (w *Watcher) init() {
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
 	w.died, w.qview = map[string]time.Time{}, map[string]dash.Job{}
 	w.noRoom, w.started = map[string]time.Time{}, map[string]dash.Job{}
-	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName}
+	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName, Boxd: w.Version}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
 		w.live[j.Key] = &j
@@ -483,7 +484,17 @@ func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]das
 func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxes map[string]dash.Box) {
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
-		ModeReason: cfg[mode.ProjectReasonKey]}
+		ModeReason: cfg[mode.ProjectReasonKey], Boxd: w.Version}
+	if v := cfg[mode.ProjectTrayVersionKey]; v != "" {
+		var tv dash.Version
+		if json.Unmarshal([]byte(v), &tv) == nil {
+			if tv.Time != nil {
+				t := tv.Time.UTC()
+				tv.Time = &t
+			}
+			m.Tray = &tv
+		}
+	}
 	m.Yielding = m.ModeReason != ""
 	if v := cfg[keyModeRequest]; v != "" {
 		var r dash.ModeRequest
