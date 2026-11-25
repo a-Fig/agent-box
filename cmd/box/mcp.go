@@ -56,26 +56,26 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var pausedHint = "state refused (exit 75) means nothing started because the PC is busy or paused and the run wasn't queued: run the command locally. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
+var pausedHint = "state refused (exit 75) means box couldn't run it now and nothing started: the PC is busy, paused or out of reach, and the run wasn't queued. Retry later, or with a smaller size if it said no room. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
 
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue; run locally if you need it now (a GPU run doesn't wait)"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
+	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue (a GPU run doesn't wait)"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
 	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
-		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
+		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
 		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept up to 30 minutes after the run for box_pull, then deleted; a queued job or another launch that needs the room deletes it sooner. Use it for parallel runs on one repo, which otherwise take turns."},
 		"size":    sizeArg,
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
 		"push":    map[string]any{"type": "boolean", "description": "Default true: a job still running after 30 seconds is pushed into your thread when it ends. Pass false if you are a subagent (the push would wake your parent) and call box_job instead."},
-		"queue":   map[string]any{"type": "boolean", "description": "Default true: with push, a run that can't start now waits in the PC's queue. Pass false when you need the answer now and would rather run locally: you get exit 75 at once."},
+		"queue":   map[string]any{"type": "boolean", "description": "Default true: with push, a run that can't start now waits in the PC's queue. Pass false to get exit 75 at once instead of waiting."},
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
 	}, "dir", "command", "reason"), jobOutput},
@@ -101,7 +101,7 @@ var sizeArg = map[string]any{"type": "string", "enum": sizeEnum(),
 
 // gpuArg is the gpu property of box_new and box_run.
 var gpuArg = map[string]any{"type": "boolean",
-	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; while it's taken, a run with push waits for it in the queue, otherwise exit 75. It is stopped in My PC, and a GPU run doesn't wait out My PC (exit 75)."}
+	"description": "Same as size gpu: the PC's GPU (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; while it's taken, a run with push waits for it in the queue, otherwise exit 75. It is stopped in My PC, and a GPU run doesn't wait out My PC (exit 75)."}
 
 func sizeEnum() []string {
 	var n []string
@@ -511,7 +511,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 				if cerr := a.cancelQueued(ctx, r.Job); cerr == nil {
 					job := r.Job
 					r = JobResult{State: stateRefused, Code: exitPaused}
-					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; run it locally\n", job)
+					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; nothing ran\n", job)
 					break
 				}
 				push = false

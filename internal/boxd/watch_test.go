@@ -245,7 +245,7 @@ func inst(name, status, size string, created time.Time) Instance {
 	return in
 }
 
-const metaJSON = `{"v":1,"reason":"Full race suite; too heavy for the laptop.","command":"go test -race ./...",
+const metaJSON = `{"v":1,"reason":"Full race suite; it takes minutes on every core.","command":"go test -race ./...",
 "repo":"https://github.com/acme/widget.git","branch":"feat/x","commit":"abc","agent":{"client":"claude-code",
 "session":"t3-thread","display":"quiet-otter","host":"laptop","worktree":"C:\\src\\widget"},"size":"medium","gpu":false}`
 

@@ -40,7 +40,7 @@ func checkReason(s string, required bool, what string) (string, error) {
 		return "", nil
 	}
 	help := fmt.Sprintf("give %s one or two sentences (%d to %d characters) on why this needs a box, like %q", what, reasonMin, reasonMax,
-		"Full go test -race suite for the scheduler change; too heavy for the laptop.")
+		"Full go test -race suite for the scheduler change; it takes about 10 minutes on every core.")
 	if s == "" {
 		return "", errors.New(what + " is required: " + help)
 	}

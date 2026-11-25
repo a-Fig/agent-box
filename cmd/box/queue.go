@@ -259,14 +259,14 @@ func (a *App) wasQueued(job string) bool {
 
 // nudgeMessage is the one push a job gets once it has waited dash.QueueNudge.
 func nudgeMessage(r jobRecord, waited time.Duration, why string) string {
-	return fmt.Sprintf("box: job %s still queued after %s (%s). Can't wait? Run it locally and box_cancel this job. %s\n%s",
+	return fmt.Sprintf("box: job %s still queued after %s (%s). It runs when there is room; box_cancel takes it off the queue. %s\n%s",
 		r.Job, elapsed(waited), waitText(why), fromBox, r.context())
 }
 
 // droppedMessage is the push for a queued job that never ran: boxd dropped
 // it after dash.QueueMaxAge, or couldn't start it.
 func droppedMessage(r jobRecord) string {
-	return fmt.Sprintf("box: job %s left the queue without running (it waited %s at most, or couldn't start), exit 75: run it locally. %s\n%s",
+	return fmt.Sprintf("box: job %s left the queue without running (it waited %s at most, or couldn't start), exit 75. %s\n%s",
 		r.Job, elapsed(dash.QueueMaxAge), fromBox, r.context())
 }
 
@@ -383,11 +383,11 @@ func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
 		return JobResult{Job: job, Box: box, State: stateDone, Code: exitDetached}, nil
 	case !ok:
 		// Interrupted: 130 as for a detach from a running job, not 75, which
-		// says "run it locally" though the job will still run on the PC.
+		// says nothing started, though the job will still run on the PC.
 		fmt.Fprintf(a.Err, "box: job %s is still queued; box job %s follows it, box cancel %s takes it off\n", job, job, job)
 		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitDetached}, nil
 	case out.end != nil && out.end.Dropped:
-		fmt.Fprintf(a.Err, "box: job %s left the queue without running (it waited %s at most, or couldn't start): run it locally\n", job, elapsed(dash.QueueMaxAge))
+		fmt.Fprintf(a.Err, "box: job %s left the queue without running (it waited %s at most, or couldn't start)\n", job, elapsed(dash.QueueMaxAge))
 		return JobResult{Job: job, Box: box, State: stateDone, Code: exitPaused}, nil
 	case out.end != nil:
 		// It ran and ended between two looks: its kept box has the full log

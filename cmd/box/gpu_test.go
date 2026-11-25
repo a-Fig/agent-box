@@ -242,7 +242,7 @@ func TestGPUBoxStoppedByTrayTellsTheAgent(t *testing.T) {
 	if code := run(context.Background(), a0, []string{"run", "--reason", "a GPU job the tray stops mid-run", "--gpu", "--", "true"}, nil); code != exitPaused {
 		t.Fatalf("box run --gpu = %d\n%s", code, out0)
 	}
-	if s := out0.String(); !strings.Contains(s, "switched it to My PC") || strings.Contains(s, "run it locally") || strings.Contains(s, "keeping") || strings.Contains(s, "Instance is not running") {
+	if s := out0.String(); !strings.Contains(s, "switched it to My PC") || strings.Contains(s, "nothing started") || strings.Contains(s, "keeping") || strings.Contains(s, "Instance is not running") {
 		t.Errorf("box run --gpu said:\n%s", s)
 	}
 	// Back in Shared, the stopped box still explains itself.

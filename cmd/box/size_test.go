@@ -48,7 +48,7 @@ func TestNewWithoutRoomExits75(t *testing.T) {
 	if code := run(context.Background(), a, []string{"new", "--size", "large"}, nil); code != exitPaused {
 		t.Fatalf("box new = %d\n%s", code, out)
 	}
-	if !strings.Contains(out.String(), "no room on the PC for a large box (Error: Failed checking") || !strings.Contains(out.String(), "run it locally") {
+	if !strings.Contains(out.String(), "no room on the PC for a large box (Error: Failed checking") || !strings.Contains(out.String(), "nothing started, and a smaller size may fit") {
 		t.Errorf("output = %s", out)
 	}
 	if code := run(context.Background(), &App{R: &fakePC{t: t, refuse: "Error: boom"}, Remote: "pc", Project: "agents", Out: out, Err: out, Now: a.Now, Rand: a.Rand}, []string{"new"}, nil); code != 1 {
