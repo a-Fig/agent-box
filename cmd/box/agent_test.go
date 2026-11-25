@@ -398,7 +398,7 @@ func (f *fakeAgents) Run(_ context.Context, c Cmd) (Result, error) {
 // nothing in the test can touch the real ones.
 func isolateHome(t *testing.T) string {
 	home := t.TempDir()
-	for _, k := range []string{"HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
+	for _, k := range []string{"HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GEMINI_HOME", "T3CODE_HOME"} {
 		t.Setenv(k, filepath.Join(home, "unused-"+strings.ToLower(k)))
 	}
 	return home
@@ -445,7 +445,9 @@ func TestJoinAndLeave(t *testing.T) {
 			t.Errorf("skill at %s: %v", p, err)
 		}
 	}
-	if s := out.String(); !strings.Contains(s, "codex: not installed, skipped") || !strings.Contains(s, "claude: registered MCP server box (user scope)") {
+	if s := out.String(); !strings.Contains(s, "codex: not installed, skipped") ||
+		!strings.Contains(s, "antigravity: not installed, skipped") ||
+		!strings.Contains(s, "claude: registered MCP server box (user scope)") {
 		t.Errorf("report =\n%s", s)
 	}
 
@@ -532,6 +534,189 @@ func TestJoinReportsFailedAdd(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "box", "SKILL.md")); err != nil {
 		t.Errorf("skill not installed after a failed add: %v", err)
+	}
+}
+
+func TestJoinAndLeaveAntigravity(t *testing.T) {
+	home := isolateHome(t)
+	standalone := filepath.Join(home, ".gemini")
+	t3Inst1 := filepath.Join(home, ".t3", "userdata", "providers", "antigravity", "aaaa1111")
+	t3Inst2 := filepath.Join(home, ".t3", "userdata", "providers", "antigravity", "bbbb2222")
+	for _, d := range []string{standalone, t3Inst1, t3Inst2} {
+		if err := os.MkdirAll(filepath.Join(d, "config"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Pre-populate standalone with another server (murmur) and a UTF-8 BOM to
+	// verify key order, other servers and BOM are preserved.
+	orig := string(utf8BOM) + "{\n  \"mcpServers\": {\n    \"murmur\": {\n      \"command\": \"/bin/mur\",\n      \"args\": [\n        \"mcp\",\n        \"--agent\",\n        \"antigravity\"\n      ]\n    }\n  },\n  \"other\": true\n}\n"
+	standaloneMCP := filepath.Join(standalone, "config", "mcp_config.json")
+	write(t, standaloneMCP, orig)
+
+	exe := filepath.Join(home, "bin", "box.exe")
+	var out bytes.Buffer
+	// GeminiHome duplicates t3Inst1; antigravityHomes must deduplicate it.
+	c := joinConfig{
+		Home: home, GeminiHome: t3Inst1, Exe: exe, Out: &out,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	ctx := context.Background()
+	if err := join(ctx, c, false); err != nil {
+		t.Fatalf("join: %v\n%s", err, out.String())
+	}
+	// Verify all three homes got MCP config and skill, and standalone kept murmur + BOM + key order.
+	for _, d := range []string{standalone, t3Inst1, t3Inst2} {
+		mcpPath := filepath.Join(d, "config", "mcp_config.json")
+		b, err := os.ReadFile(mcpPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", mcpPath, err)
+		}
+		var parsed struct {
+			MCPServers map[string]struct {
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(bytes.TrimPrefix(b, utf8BOM), &parsed); err != nil {
+			t.Fatalf("parse %s: %v\n%s", mcpPath, err, b)
+		}
+		got := parsed.MCPServers["box"]
+		if got.Command != exe || len(got.Args) != 1 || got.Args[0] != "mcp" {
+			t.Errorf("%s box entry = %+v, want command=%q args=[mcp]", mcpPath, got, exe)
+		}
+		skillPath := filepath.Join(d, "config", "skills", "box", "SKILL.md")
+		if sb, err := os.ReadFile(skillPath); err != nil || string(sb) != skills.Box {
+			t.Errorf("skill at %s: %v", skillPath, err)
+		}
+	}
+	b, _ := os.ReadFile(standaloneMCP)
+	if !bytes.HasPrefix(b, utf8BOM) {
+		t.Error("standalone mcp_config.json lost UTF-8 BOM")
+	}
+	s := string(bytes.TrimPrefix(b, utf8BOM))
+	if !strings.Contains(s, `"murmur"`) || !strings.Contains(s, `"other": true`) {
+		t.Errorf("standalone mcp_config.json dropped existing keys:\n%s", s)
+	}
+	if strings.Index(s, `"murmur"`) > strings.Index(s, `"box"`) || strings.Index(s, `"mcpServers"`) > strings.Index(s, `"other"`) {
+		t.Errorf("standalone mcp_config.json changed key order:\n%s", s)
+	}
+	// t3Inst1 appeared once in output despite also being GeminiHome.
+	if n := strings.Count(out.String(), filepath.Join(t3Inst1, "config", "mcp_config.json")); n != 1 {
+		t.Errorf("t3Inst1 registered %d times, want 1:\n%s", n, out.String())
+	}
+
+	// Second join is a no-op ("already registered") and doesn't rewrite.
+	out.Reset()
+	if err := join(ctx, c, false); err != nil {
+		t.Fatalf("second join: %v", err)
+	}
+	if !strings.Contains(out.String(), "MCP server box already registered") {
+		t.Errorf("second join output =\n%s", out.String())
+	}
+
+	// Moving the binary updates the command in place, preserving user-added keys
+	// on the box entry (e.g. disabled).
+	t3Inst2MCP := filepath.Join(t3Inst2, "config", "mcp_config.json")
+	write(t, t3Inst2MCP, "{\n  \"mcpServers\": {\n    \"box\": {\n      \"command\": \""+filepath.ToSlash(exe)+"\",\n      \"args\": [\"mcp\"],\n      \"disabled\": true\n    }\n  }\n}\n")
+	exe2 := filepath.Join(home, "bin2", "box.exe")
+	c.Exe = exe2
+	if err := join(ctx, c, false); err != nil {
+		t.Fatalf("re-join with moved exe: %v", err)
+	}
+	b, _ = os.ReadFile(t3Inst2MCP)
+	if !strings.Contains(string(b), "bin2") || !strings.Contains(string(b), `"disabled": true`) {
+		t.Errorf("moved exe did not preserve extra keys:\n%s", b)
+	}
+
+	// Leave removes box from every Antigravity config and removes skills,
+	// keeping murmur and other keys intact.
+	out.Reset()
+	if err := join(ctx, c, true); err != nil {
+		t.Fatalf("leave: %v\n%s", err, out.String())
+	}
+	b, _ = os.ReadFile(standaloneMCP)
+	if !bytes.HasPrefix(b, utf8BOM) || strings.Contains(string(b), `"box"`) || !strings.Contains(string(b), `"murmur"`) || !strings.Contains(string(b), `"other": true`) {
+		t.Errorf("standalone after leave:\n%s", b)
+	}
+	for _, d := range []string{t3Inst1, t3Inst2} {
+		b, _ := os.ReadFile(filepath.Join(d, "config", "mcp_config.json"))
+		if strings.TrimSpace(string(b)) != "{}" {
+			t.Errorf("%s after leave = %q, want {}", d, b)
+		}
+		if _, err := os.Stat(filepath.Join(d, "config", "skills", "box")); !os.IsNotExist(err) {
+			t.Errorf("skill dir still present in %s: %v", d, err)
+		}
+	}
+
+	// Second leave reports wasn't registered without error.
+	out.Reset()
+	if err := join(ctx, c, true); err != nil {
+		t.Fatalf("second leave: %v", err)
+	}
+	if !strings.Contains(out.String(), "MCP server box wasn't registered") {
+		t.Errorf("second leave output =\n%s", out.String())
+	}
+}
+
+func TestJoinAntigravityBadConfigLeftAlone(t *testing.T) {
+	home := isolateHome(t)
+	mcpPath := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, mcpPath, "{not json")
+	c := joinConfig{
+		Home: home, Exe: filepath.Join(home, "box.exe"), Out: io.Discard,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	if err := join(context.Background(), c, false); err == nil || !strings.Contains(err.Error(), "antigravity:") {
+		t.Fatalf("err = %v, want antigravity JSON error", err)
+	}
+	if got, _ := os.ReadFile(mcpPath); string(got) != "{not json" {
+		t.Errorf("corrupted bad config: %q", got)
+	}
+}
+
+func TestJoinAntigravityViaAgyOnPath(t *testing.T) {
+	home := isolateHome(t)
+	c := joinConfig{
+		Home: home, Exe: filepath.Join(home, "box.exe"), Out: io.Discard,
+		LookPath: func(name string) (string, error) {
+			if name == "agy" {
+				return filepath.Join(home, "bin", "agy"), nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	if err := join(context.Background(), c, false); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".gemini", "config", "mcp_config.json")); err != nil {
+		t.Errorf("expected standalone ~/.gemini mcp_config.json when agy is on PATH: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".gemini", "config", "skills", "box", "SKILL.md")); err != nil {
+		t.Errorf("expected standalone ~/.gemini skill when agy is on PATH: %v", err)
+	}
+}
+
+func TestJoinSkipsBareGeminiDirWithoutAntigravity(t *testing.T) {
+	home := isolateHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	c := joinConfig{
+		Home: home, Exe: filepath.Join(home, "box.exe"), Out: &out,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	if err := join(context.Background(), c, false); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if !strings.Contains(out.String(), "antigravity: not installed, skipped") {
+		t.Errorf("expected skip on bare ~/.gemini:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".gemini", "config")); !os.IsNotExist(err) {
+		t.Errorf("created config dir in bare ~/.gemini: %v", err)
 	}
 }
 

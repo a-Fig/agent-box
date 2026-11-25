@@ -87,12 +87,12 @@ box rm <name>                    # CLI only
 box ls                           # CLI only
 box mcp                          # serve the tools on stdio: box_status, box_run, box_job (also lists jobs), box_cancel, box_pull
 box watch [--state dir] <job>    # follow a job and push its end into the session's T3 thread (box_run starts it detached)
-box join [--leave]               # register box mcp with claude/codex (user scope) and install skills/box/SKILL.md
+box join [--leave]               # register box mcp with claude/codex/antigravity (user scope) and install skills/box/SKILL.md
 box ui [--url U]                 # the dashboard (docs/ui.md) in the browser: https://<host>/ of the pc remote
 box app [--url U] [--wait]       # the same page in a window of its own (internal/desktop); for people, so not an MCP tool
 ```
 
-`box status` reads `user.agent-box.mode` and the caps from the project, counts slots as `limits.instances` minus existing boxes, and says how many of each size fit (see Box sizes). `box join` uses the agents' own CLIs and never edits their config files. Env names that look like secrets are refused, since boxes are shared.
+`box status` reads `user.agent-box.mode` and the caps from the project, counts slots as `limits.instances` minus existing boxes, and says how many of each size fit (see Box sizes). `box join` uses `claude` and `codex`'s own CLIs to register the MCP server, and edits JSON files in place (preserving key order, other entries and BOMs, via `cmd/box/hook.go`'s ordered JSON helpers) only where there is no CLI: Claude Code's `settings.json` for `box hook`, and Antigravity's `config/mcp_config.json` (in `$GEMINI_HOME`, standalone `~/.gemini` and T3 Code's provider homes under `~/.t3/userdata/providers/antigravity/*`). Env names that look like secrets are refused, since boxes are shared.
 
 `box run`:
 1. Snapshots the worktree as a git commit without touching the user's index: a temporary `GIT_INDEX_FILE`, add everything not ignored, then `write-tree` and `commit-tree`. It sends a `git bundle` with `incus file push` and checks the commit out in `/work/<repo>`.
