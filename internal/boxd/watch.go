@@ -44,6 +44,9 @@ type Watcher struct {
 	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
 	Queue *Queue
 	Image string // the image a queued job's new box is launched from: agent-base
+	// Whois names the device at a tailnet address, for the history; nil uses
+	// the login.
+	Whois func(ctx context.Context, ip string) string
 
 	mu        sync.Mutex
 	polled    bool

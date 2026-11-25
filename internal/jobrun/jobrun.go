@@ -107,3 +107,44 @@ func ShellCommand(args []string) string {
 
 // Shq quotes s for the shell.
 func Shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// CancelScript stops a job's whole session (the wrapper leads one, from
+// setsid): TERM, then KILL after 5 seconds. It writes code (box uses 130) to the job's
+// .exit if the wrapper didn't, so followers stop. It prints "cancelled" or
+// "finished", then the exit code, and exits 3 for an unknown job.
+//
+// by is empty for box cancel, the agent's own: the script then leaves a
+// .cancelled file before the kill, and box's watchers stay quiet about the
+// job. From the page, by names the device that asked: the script leaves no
+// mark, so the agent hears that its job ended, and it adds a line saying who
+// cancelled it to the log, so the agent can see it was on purpose.
+func CancelScript(root, job string, code int, by string) string {
+	before := `: > "$j.cancelled"`
+	if by != "" {
+		before = "echo " + Shq("box: cancelled from the dashboard by "+by) + ` >> "$j.log"`
+	}
+	return "# cancel\n" + AliveFn + JobPIDFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
+j=%s
+test -f "$j.log" || exit 3
+pid=$(jobpid "$j")
+if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+case "$pid" in ''|*[!0-9]*) echo "job $j has no wrapper PID" >&2; exit 4 ;; esac
+if ! alive "$pid" "$j" || [ "$(ps -o sid= -p "$pid" | tr -d ' ')" != "$pid" ]; then
+  if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+  echo "cannot identify the session for job $j" >&2
+  exit 4
+fi
+# Before the exit file can be there: the agent's .cancelled mark, which its
+# watcher reads to stay quiet, or the page's line in the log.
+%s
+if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
+for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
+if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
+if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
+verdict=finished
+if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then verdict=cancelled; fi
+rm -f "$j.cancel.$$"
+test -f "$j.exit" || exit 4
+echo "$verdict $(cat "$j.exit")"
+`, root, Shq(job), before, code)
+}

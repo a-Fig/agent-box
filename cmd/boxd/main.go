@@ -41,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("boxd: queue: %v", err)
 	}
-	w := &boxd.Watcher{Queue: queue,
+	w := &boxd.Watcher{Queue: queue, Whois: boxd.TailscaleWhois,
 		Incus: boxd.NewSocket(*socket, mode.Project), Hist: hist, Now: time.Now,
 		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, Logf: log.Printf,
 	}

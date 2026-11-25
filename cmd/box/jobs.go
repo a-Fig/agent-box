@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"io/fs"
 	"math"
 	"os"
@@ -70,36 +71,10 @@ tail -c +%[3]d %[2]s.log | head -c %[4]d
 `, workRoot, job, offset+1, limit)
 }
 
-// cancelScript stops a job's whole session (the wrapper leads one, from
-// setsid): TERM, then KILL after 5 seconds. It writes 130 to the job's
-// .exit if the wrapper didn't, so followers stop. It prints "cancelled" or
-// "finished", then the exit code, and exits 3 for an unknown job.
-func cancelScript(job string) string {
-	return "# cancel\n" + aliveFn + jobPIDFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
-j=%s
-test -f "$j.log" || exit 3
-pid=$(jobpid "$j")
-if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
-case "$pid" in ''|*[!0-9]*) echo "job $j has no wrapper PID" >&2; exit 4 ;; esac
-if ! alive "$pid" "$j" || [ "$(ps -o sid= -p "$pid" | tr -d ' ')" != "$pid" ]; then
-  if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
-  echo "cannot identify the session for job $j" >&2
-  exit 4
-fi
-# Watchers read this to stay quiet about a job the agent cancelled; it is
-# there before the exit file can be.
-: > "$j.cancelled"
-if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
-for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
-if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
-if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
-verdict=finished
-if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then verdict=cancelled; fi
-rm -f "$j.cancel.$$"
-test -f "$j.exit" || exit 4
-echo "$verdict $(cat "$j.exit")"
-`, workRoot, job, exitDetached)
-}
+// cancelScript stops a job's session and writes 130 to its .exit if the
+// wrapper didn't (jobrun.CancelScript). It marks the job .cancelled: the agent
+// asked, so its watcher stays quiet.
+func cancelScript(job string) string { return jobrun.CancelScript(workRoot, job, exitDetached, "") }
 
 // jobStart reads the start time from a job ID (box.YYYYMMDD-HHMMSS-xxxx, UTC).
 func jobStart(job string) time.Time {

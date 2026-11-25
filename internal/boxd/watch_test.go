@@ -28,6 +28,7 @@ type fakeIncus struct {
 	execs  int
 	cli    []string
 	cliErr func(args []string) error
+	cancel string // the last cancel script
 }
 
 type fakeJob struct {
@@ -62,6 +63,16 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 	skip := map[string]bool{}
 	for _, a := range args {
 		skip[a] = true
+	}
+	if strings.HasPrefix(script, "# cancel") {
+		f.cancel = script
+		for i, j := range f.jobs[box] {
+			if strings.Contains(script, "\nj='"+j.name+"'\n") {
+				f.jobs[box][i].state, f.jobs[box][i].exit = "done", "130"
+				return []byte("cancelled 130\n"), nil
+			}
+		}
+		return nil, &ExitError{Code: 3}
 	}
 	if strings.HasPrefix(script, "# boxd scan") {
 		var b strings.Builder
