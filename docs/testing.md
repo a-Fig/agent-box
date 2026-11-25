@@ -287,7 +287,8 @@ try {
 ```
 
 `nvidia-smi` lists the RTX 3070 and the check prints `cuda ok: 1 device(s), ...`; the throwaway
-is kept 30 minutes for `box pull` (`box ls`). Then check one-at-a-time and the stop in My PC:
+is kept 30 minutes for `box pull` (`box ls`), and holds the GPU: `box rm` it first. Then check
+one-at-a-time and the stop in My PC:
 
 ```powershell
 Push-Location -LiteralPath $repo
