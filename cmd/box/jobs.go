@@ -329,6 +329,16 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	}
 	if !path.IsAbs(remote) {
 		base, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", checkoutScript(job))
+		if err != nil && job != "" && strings.Contains(err.Error(), "Instance is not running") {
+			// A GPU box My PC stopped is kept for its files, and file pull
+			// reads a stopped box: the job's .repo names its checkout (#117).
+			var repo string
+			repo, err = a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+job+".repo", "-")
+			if repo = strings.TrimSpace(repo); err == nil && (repo == "" || strings.ContainsAny(repo, "/\x00\n") || repo == "." || repo == "..") {
+				err = fmt.Errorf("job %s names no checkout; give an absolute path", job)
+			}
+			base = workRoot + "/" + repo
+		}
 		if err != nil {
 			return "", err
 		}

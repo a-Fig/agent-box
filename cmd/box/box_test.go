@@ -173,6 +173,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			}
 		}
 	case "file":
+		if args[1] == "pull" && args[3] == "-" { // one file to stdout
+			f.pulls = append(f.pulls, args[2])
+			if s, ok := f.files[args[2]]; ok {
+				return Result{Stdout: s}, nil
+			}
+			return Result{Code: 1, Stderr: "Error: not found"}, nil
+		}
 		if args[1] == "pull" {
 			f.pulls = append(f.pulls, args[3])
 			if f.pull != nil {
