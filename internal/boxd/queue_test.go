@@ -377,6 +377,9 @@ func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
 		if n > 0 {
 			break
 		}
+		if i == 49 {
+			t.Fatal("boxd didn't shorten the unread throwaway's expiry")
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	r.c.add(3 * time.Second)

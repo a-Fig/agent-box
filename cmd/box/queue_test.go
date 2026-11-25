@@ -339,6 +339,9 @@ func TestJobAfterBoxGoneAsksBoxd(t *testing.T) {
 	if err != nil || r.State != stateDone || r.Code != 3 || out.String() != "boxd's tail" {
 		t.Fatalf("Job = %+v, %v, out %q", r, err, out.String())
 	}
+	if _, st := e.call(t, "box_job", map[string]any{"id": queuedJobName, "offset": 0}); st["exitCode"] != 3.0 || st["tail"] != "boxd's tail" {
+		t.Errorf("box_job page after the box went = %v", st)
+	}
 	b.gone = true
 	if _, err := e.a.Job(context.Background(), queuedJobName, 0); err == nil {
 		t.Error("a job neither the box nor boxd knows wasn't an error")
