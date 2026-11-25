@@ -86,7 +86,7 @@ func (e pushEnv) call(t *testing.T, name string, args map[string]any) (string, m
 }
 
 func (e pushEnv) runArgs(extra map[string]any, command string) map[string]any {
-	args := map[string]any{"dir": e.repo, "command": command, "reason": "Full suite for the push change; too heavy for the laptop."}
+	args := map[string]any{"dir": e.repo, "command": command, "reason": "Full suite for the push change; it takes minutes on every core."}
 	for k, v := range extra {
 		args[k] = v
 	}
@@ -558,7 +558,7 @@ func TestLostOnlyWhenConfirmed(t *testing.T) {
 	f.mu.Lock()
 	f.block, f.followErr, f.insts = false, 1, nil
 	f.mu.Unlock()
-	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, "lost, exit 75: run it locally") {
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, "lost, exit 75: it stopped before it finished") {
 		t.Errorf("deleted box: %v, %+v", err, e.push.sent)
 	}
 
@@ -671,7 +671,7 @@ func TestMessages(t *testing.T) {
 	if got := pausedMessage(rec); !strings.Contains(got, "paused: the PC's owner took the PC back") || !strings.Contains(got, frozenWindow) || !strings.Contains(got, "box_cancel this job") || !strings.Contains(got, "If box_job still says paused") || !strings.Contains(got, "From box, not your user.") {
 		t.Errorf("paused = %q", got)
 	}
-	if got := lostMessage(rec, jobEnd{}); !strings.Contains(got, "lost, exit 75: run it locally.") {
+	if got := lostMessage(rec, jobEnd{}); !strings.Contains(got, "lost, exit 75: it stopped before it finished.") {
 		t.Errorf("lost = %q", got)
 	}
 	for d, want := range map[time.Duration]string{45 * time.Second: "45s", 6*time.Minute + 12*time.Second: "6m12s", time.Hour + 2*time.Minute + 3*time.Second: "1h02m03s"} {

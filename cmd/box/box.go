@@ -28,8 +28,8 @@ import (
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
-// exitPaused tells callers the box or the PC is paused (or out of reach),
-// so they should run the command locally instead. 75 is EX_TEMPFAIL.
+// exitPaused means box couldn't run the command now and nothing started: the
+// box or the PC is paused, out of reach or full. 75 is EX_TEMPFAIL.
 const exitPaused = 75
 
 // exitDetached is returned when box stops following a job that keeps running.
@@ -289,14 +289,14 @@ func lookupSize(name string) (mode.Size, error) {
 }
 
 // errNoRoom is a launch that Incus refused for the project's limits. Callers
-// treat it like a paused PC: run locally (exit 75).
+// treat it like a paused PC: nothing starts (exit 75).
 type errNoRoom struct {
 	size   string
 	reason string
 }
 
 func (e *errNoRoom) Error() string {
-	return fmt.Sprintf("no room on the PC for a %s box (%s); run it locally, or ask for a smaller size", e.size, e.reason)
+	return fmt.Sprintf("no room on the PC for a %s box (%s); nothing started, and a smaller size may fit", e.size, e.reason)
 }
 
 func isNoRoom(err error) bool {
@@ -695,7 +695,7 @@ func checkEnv(env map[string]string) error {
 			return fmt.Errorf("bad env name %q", k)
 		}
 		if secretName.MatchString(strings.ToUpper(k)) {
-			return fmt.Errorf("env %s looks like a secret; boxes are shared, so box won't pass it. Use a non-secret value or run locally", k)
+			return fmt.Errorf("env %s looks like a secret; boxes are shared, so box won't pass it. Use a non-secret value", k)
 		}
 		if strings.ContainsRune(value, 0) {
 			return fmt.Errorf("env %s contains NUL", k)
@@ -821,7 +821,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 	if paused != "" {
-		return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
+		return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
 	}
 
 	id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
@@ -844,7 +844,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		case err != nil:
 			return JobResult{Code: 1}, err
 		case paused != "":
-			return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
+			return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
 		default:
 			sz = actual
 			info.Size, info.GPU = sz.Name, sz.GPU
@@ -1260,7 +1260,7 @@ func (e *exitFilter) exit() (string, bool) {
 // pausedMidRun says what is true of a job whose box was frozen: it resumes
 // only if the PC's owner switches back before the tray stops the box.
 func pausedMidRun(job string) string {
-	return fmt.Sprintf("box: job %s is paused (the PC's owner is using it). It resumes if they switch back within %s; after that the box is stopped and the job lost. Reattach later with: box job %s, or run it locally", job, frozenWindow, job)
+	return fmt.Sprintf("box: job %s is paused (the PC's owner is using it). It resumes if they switch back within %s; after that the box is stopped and the job lost. Reattach later with: box job %s", job, frozenWindow, job)
 }
 
 // frozenWindow is how long a paused job can still resume, in words.
@@ -1398,7 +1398,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 			if strings.HasSuffix(paused, " is paused") {
 				fmt.Fprintln(a.Err, pausedMidRun(job))
 			} else {
-				fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+				fmt.Fprintf(a.Err, "box: %s; stopped following job %s, reattach with: box job %s\n", paused, job, job)
 			}
 			return statePaused, exitPaused, "", nil
 		}

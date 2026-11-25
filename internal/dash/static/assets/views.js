@@ -215,7 +215,7 @@ const WHY = {
   "gpu-busy": () => "the GPU is in use",
   mypc: () => "the PC is in My PC",
 };
-// After dash.QueueNudge in line the agent is told once that it can run the job locally instead.
+// After dash.QueueNudge in line the agent is told once that the job still waits.
 const NUDGE_MS = 20 * 60 * 1000;
 
 function jobName(j) {
@@ -225,7 +225,7 @@ function jobName(j) {
 // The nudged badge, shown by the 1s ticker once its time comes (dom.js tickTimes).
 function nudgedBadge(j) {
   const at = new Date(Date.parse(j.queuedAt) + NUDGE_MS).toISOString();
-  return h("span", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at), title: "The agent was told it can run this locally and cancel it here" }, "nudged");
+  return h("span", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at), title: "The agent was told it still waits and that box_cancel takes it off" }, "nudged");
 }
 
 function whyText(j) {

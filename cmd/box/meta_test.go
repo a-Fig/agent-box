@@ -268,7 +268,7 @@ func TestRefusalPosted(t *testing.T) {
 	if err != nil || r.Code != exitPaused {
 		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
 	}
-	if !strings.Contains(out.String(), "box: pc is in My PC mode; run it locally\n") {
+	if !strings.Contains(out.String(), "box: pc is in My PC mode; nothing started\n") {
 		t.Errorf("output = %q", out)
 	}
 	if len(p.urls) != 1 || p.urls[0] != "https://agent-box.example.ts.net/api/refusals" {

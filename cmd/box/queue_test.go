@@ -237,7 +237,7 @@ func TestWatchFollowsAQueuedJob(t *testing.T) {
 		t.Fatalf("pushed %d: %+v", e.push.count(), e.push.sent)
 	}
 	nudge, end := e.push.sent[0].msg, e.push.sent[1].msg
-	if !strings.Contains(nudge, "box: job "+queuedJobName+" still queued after 30m00s (waiting for room). Can't wait? Run it locally and box_cancel this job.") {
+	if !strings.Contains(nudge, "box: job "+queuedJobName+" still queued after 30m00s (waiting for room). It runs when there is room; box_cancel takes it off the queue.") {
 		t.Errorf("nudge = %q", nudge)
 	}
 	if !strings.Contains(end, "box: job "+queuedJobName+" ended, exit 0") {
