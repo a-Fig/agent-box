@@ -58,11 +58,13 @@ func (u *trayUpdater) maintain(ctx context.Context, active bool) {
 		return
 	}
 	u.seen = fi
+	if ask {
+		u.next = u.Now().Add(trayCheckEvery) // before the probe: a dev build on disk probes "" every time
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	disk := u.onDisk(ctx)
 	if ask && disk != "" {
-		u.next = u.Now().Add(trayCheckEvery)
 		if rel, err := u.GitHub.Latest(ctx); err != nil {
 			u.Logf("update: no latest release (%v)", err)
 		} else if update.After(rel.Tag, disk) && rel.Tag != u.skip() {
@@ -75,15 +77,17 @@ func (u *trayUpdater) maintain(ctx context.Context, active bool) {
 			}
 		}
 	}
-	if update.After(disk, u.Tag) {
-		u.Logf("update: %s is %s, newer than this process's %s: restarting into it", u.Exe, disk, u.Tag)
+	// Any other release on disk, older too: --update <older tag> is the rollback, and it rolls back
+	// the running processes. It can't loop: the pin keeps the hourly check off the skipped release.
+	if disk != "" && disk != u.Tag {
+		u.Logf("update: %s is %s, not this process's %s: restarting into it", u.Exe, disk, u.Tag)
 		u.Restart()
 	}
 }
 
 // Install is `boxtray.exe --update <tag>`: that release, a nightly, a test prerelease or an older
-// one, put in place by hand. The running tray and headless enforcer restart into it within a tick
-// if it is newer than they are. One older than the latest stable release pins: the hourly check
+// one, put in place by hand. The running tray and headless enforcer restart into it within a tick.
+// One older than the latest stable release pins: the hourly check
 // skips that stable release until a newer one comes out, as box update --rollback does.
 func (u *trayUpdater) Install(ctx context.Context, tag string) error {
 	rel, err := u.GitHub.ByTag(ctx, tag)

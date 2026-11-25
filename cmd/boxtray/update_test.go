@@ -161,15 +161,38 @@ func TestTrayUpdateByHandToAnOlderReleaseStays(t *testing.T) {
 	if b, _ := os.ReadFile(u.Exe); !strings.HasPrefix(string(b), "boxtray v0.3.0") {
 		t.Fatalf("boxtray.exe = %q", b)
 	}
+	u.maintain(context.Background(), true) // the running v0.4.0 rolls back too
+	if *restarts != 1 {
+		t.Fatalf("the running process didn't restart into the rollback: restarts %d", *restarts)
+	}
 	u.Tag = "v0.3.0" // the restarted process
+	u.next = time.Time{}
 	u.maintain(context.Background(), true)
-	if b, _ := os.ReadFile(u.Exe); !strings.HasPrefix(string(b), "boxtray v0.3.0") || *restarts != 0 {
+	if b, _ := os.ReadFile(u.Exe); !strings.HasPrefix(string(b), "boxtray v0.3.0") || *restarts != 1 {
 		t.Fatalf("the hourly check undid it: %q, restarts %d", b, *restarts)
 	}
 	gh.latest = "v0.4.1"
 	u.next = time.Time{}
 	u.maintain(context.Background(), true)
-	if b, _ := os.ReadFile(u.Exe); !strings.HasPrefix(string(b), "boxtray v0.4.1") || *restarts != 1 {
+	if b, _ := os.ReadFile(u.Exe); !strings.HasPrefix(string(b), "boxtray v0.4.1") || *restarts != 2 {
 		t.Fatalf("a newer release wasn't installed: %q, restarts %d", b, *restarts)
+	}
+}
+
+// A dev build on disk (its --version names no tag) is probed once an hour, not every tick.
+func TestTrayDevBuildOnDiskIsProbedHourly(t *testing.T) {
+	gh := &trayReleases{latest: "v0.4.0"}
+	u, restarts, _ := newTestTrayUpdater(t, "v0.4.0", "v0.4.0", gh)
+	os.WriteFile(u.Exe, []byte("boxtray (e823842)\n"), 0o755)
+	probes := 0
+	u.Run = func(ctx context.Context, exe string, args ...string) (string, error) {
+		probes++
+		return readVersion(ctx, exe, args...)
+	}
+	for range 3 {
+		u.maintain(context.Background(), true)
+	}
+	if probes != 1 || *restarts != 0 {
+		t.Fatalf("probes %d restarts %d", probes, *restarts)
 	}
 }

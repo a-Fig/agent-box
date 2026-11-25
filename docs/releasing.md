@@ -91,7 +91,8 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
 - **boxtray.exe** (`cmd/boxtray/update.go`). The active enforcer, tray or headless, checks hourly
   and installs a newer release with the same steps, keeping `boxtray.old.exe`.
   - Every boxtray process stats `boxtray.exe` each tick (5 s). When the file has changed and is
-    a newer release than itself, the process starts the new one with `--after-update` and exits.
+    another release than its own, older too (a rollback), the process starts the new one with
+    `--after-update` and exits. Restarted processes run outside their scheduled tasks.
     That holds for the active one and the headless one standing aside alike, so both run the new
     code within seconds of a swap. The new process waits up to 20 s for the old one's mutexes.
   - The tray restarts itself, not through its scheduled task: Task Scheduler's restart-on-failure

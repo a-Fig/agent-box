@@ -35,7 +35,10 @@ func main() {
 		fmt.Println(version.Text("boxtray", version.Get()))
 		return
 	}
-	if len(os.Args) > 2 && os.Args[1] == "--update" {
+	if len(os.Args) > 1 && os.Args[1] == "--update" {
+		if len(os.Args) != 3 {
+			os.Exit(2) // usage: boxtray --update <tag>; without one this would start a tray
+		}
 		os.Exit(installByHand(os.Args[2]))
 	}
 	if headlessRequested(os.Args[1:]) {
