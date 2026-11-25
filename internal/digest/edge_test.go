@@ -142,3 +142,55 @@ func TestGoCutShortAndNoRoom(t *testing.T) {
 		t.Fatalf("%d bytes:\n%s", len(got), got)
 	}
 }
+
+// racetimeout.json is go test -json -race -timeout 5s from a box (Go 1.27)
+// on three packages of module example.com/dd: a data race, a test that hangs
+// until the timeout, and an assertion (#110).
+func TestGoRaceTimeoutAndPaths(t *testing.T) {
+	report := read(t, "racetimeout.json")
+	got := Parse(goHead + "\n" + report + `{"Action":"box-module","Package":"example.com/dd"}` + "\n")
+	for _, want := range []string{
+		"FAIL: 3 of 4 tests failed (go test)",
+		"TestRace  r/r_test.go:8: data race",
+		"TestHangs  h/h_test.go:10: panic: test timed out after 5s",
+		"TestAdd  a/a_test.go:5: 1+1 = 2, want 3",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("digest lacks %q:\n%s", want, got)
+		}
+	}
+	// Without the module, an assertion keeps go test's own path.
+	if got := Go(report); !strings.Contains(got, "TestAdd  a_test.go:5:") {
+		t.Errorf("without box-module:\n%s", got)
+	}
+	if inPackage("x_test.go:3", "other.org/p", "example.com/dd") != "x_test.go:3" || inPackage("x_test.go:3", "example.com/ddx/p", "example.com/dd") != "x_test.go:3" {
+		t.Error("inPackage moved a file outside the module")
+	}
+}
+
+// Script names the checkout's module after the go report, from the repo the
+// job's .repo file names (#110).
+func TestScriptNamesTheModule(t *testing.T) {
+	needs(t, "jq", "bash")
+	root := t.TempDir()
+	for name, body := range map[string]string{
+		".box/j.gotest.json": `{"Action":"fail","Package":"example.com/dd/a","Test":"TestA"}` + "\n",
+		".box/j.repo":        "dd\n",
+		"dd/go.mod":          "module example.com/dd\n\ngo 1.22\n",
+	} {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := exec.Command("bash", "-c", Script(root+"/.box/j")).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `{"Action":"box-module","Package":"example.com/dd"}`) {
+		t.Errorf("Script's output:\n%s", out)
+	}
+}

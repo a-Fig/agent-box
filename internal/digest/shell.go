@@ -13,6 +13,7 @@ package digest
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -118,14 +119,20 @@ npm() {
 
 // goReduce is jq that cuts a go test -json report down to what Parse uses,
 // smallest and most important first, so a cut loses only output lines:
-// box-start, each failed test, package and build ends, pass and skip counts
+// box-start, each failed test and each test still running when its package
+// failed (a timeout: its run event), package and build ends, pass and skip counts
 // per package, then the first lines of output of what failed, then box-end,
 // which says nothing was cut.
 const goReduce = `[inputs | fromjson? | objects] as $e
 | ([$e[] | select(.Test != null and .Action == "fail") | (.Package // "") + " " + .Test] | INDEX(.)) as $f
 | ([$e[] | select(.Test == null and .Action == "fail") | .Package // ""] | INDEX(.)) as $fp
+| ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "skip" or .Action == "fail")) | (.Package // "") + " " + .Test] | INDEX(.)) as $ended
+| ([$e[] | select(.Test != null and .Action == "run" and $fp[.Package // ""] != null and $ended[(.Package // "") + " " + .Test] == null)
+    | (.Package // "") + " " + .Test] | INDEX(.)) as $hung
+| ($f + $hung) as $f
 | {Action: "box-start"},
   ($e[] | select(.Test != null and .Action == "fail") | {Action, Package, Test}),
+  ($e[] | select(.Test != null and .Action == "run" and $hung[(.Package // "") + " " + .Test] != null) | {Action, Package, Test}),
   ($e[] | select(.Test == null and (.Action == "pass" or .Action == "skip" or .Action == "fail" or .Action == "build-fail")) | {Action, Package, ImportPath, FailedBuild}),
   ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "skip"))] | group_by(.Package // "") | .[]
     | {Action: "box-count", Package: .[0].Package, Pass: (map(select(.Action == "pass")) | length), Skip: (map(select(.Action == "skip")) | length)}),
@@ -155,15 +162,23 @@ const (
 const maxReport = 1 << 20
 
 // Script is bash for the job's box that prints the job's reports, cut down,
-// each under its section head. It prints nothing when there are none.
+// each under its section head. It prints nothing when there are none. The go
+// report ends with a box-module event naming the module in the checkout's
+// go.mod (<root>/<repo>, the repo from <prefix>.repo), so Parse can make an
+// assertion's package-relative file:line relative to the checkout.
 func Script(prefix string) string {
 	p := shq(prefix)
+	root := shq(path.Dir(path.Dir(prefix))) // <root>/.box/<job>
 	return fmt.Sprintf(`# digest
 command -v jq >/dev/null 2>&1 || exit 0
-if [ -s %[1]s.gotest.json ]; then echo %[2]s; jq -nRc %[4]s %[1]s.gotest.json | head -c %[6]d; echo; fi
+if [ -s %[1]s.gotest.json ]; then
+  echo %[2]s; jq -nRc %[4]s %[1]s.gotest.json | head -c %[6]d; echo
+  m=$(sed -n 's/^module[[:space:]]\{1,\}//p' %[7]s/"$(cat %[1]s.repo 2>/dev/null)"/go.mod 2>/dev/null | head -n1 | tr -d '\r"')
+  [ -n "$m" ] && jq -nc --arg m "$m" '{Action: "box-module", Package: $m}'
+fi
 if [ -s %[1]s.vitest.json ]; then echo %[3]s; jq -c %[5]s %[1]s.vitest.json | head -c %[6]d; echo; fi
 exit 0
-`, p, shq(goHead), shq(vitestHead), shq(goReduce), shq(vitestReduce), maxReport)
+`, p, shq(goHead), shq(vitestHead), shq(goReduce), shq(vitestReduce), maxReport, root)
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
