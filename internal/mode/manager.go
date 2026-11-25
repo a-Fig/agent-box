@@ -106,9 +106,6 @@ func (m *Manager) Chosen() Mode { m.mu.Lock(); defer m.mu.Unlock(); return m.cho
 // SetChosen records a new pick; the next Tick applies it.
 func (m *Manager) SetChosen(c Mode) { m.SetChosenAt(c, time.Now()) }
 
-// Last returns the result of the most recent Tick.
-func (m *Manager) Last() Status { m.tickMu.Lock(); defer m.tickMu.Unlock(); return m.last }
-
 // Tick brings Incus in line with the chosen mode.
 func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 	m.tickMu.Lock()
