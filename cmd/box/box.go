@@ -104,7 +104,10 @@ func newApp() *App {
 		Out:     os.Stdout,
 		Err:     os.Stderr,
 		Now:     time.Now,
-		Rand:    randHex,
+		// The CLI keeps a throwaway as box mcp does, so box pull can fetch
+		// a build's output after the run (#78).
+		KeepEnded: endedKeep,
+		Rand:      randHex,
 
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
@@ -962,7 +965,9 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	if a.KeepEnded > 0 {
 		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
 			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+			return
 		}
+		fmt.Fprintf(a.Err, "box: kept %s for %d minutes, for box pull; box rm %s deletes it now\n", box, int(a.KeepEnded.Minutes()), box)
 		return
 	}
 	a.removeQuietly(ctx, box)

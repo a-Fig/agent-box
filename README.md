@@ -17,7 +17,7 @@ box status                            # worth offloading now? PC, mode, room per
 box run --reason "Full test suite for the parser change." -- go test ./...
                                       # sync this worktree to the repo's box and run there
                                       # (--reason is required; left out below)
-box run --new -- 'npm ci && npx vitest run'   # throwaway box, deleted afterwards
+box run --new -- 'npm ci && npx vitest run'   # throwaway box, kept 30 minutes for box pull
 box run --box big -- make test        # a box you name
 box run --size large -- ./gradlew test  # size of a box the run launches: small, medium (default), large
 box run --gpu -- python train.py      # throwaway box with the PC's RTX 3070 (CUDA); one at a time
@@ -45,7 +45,7 @@ Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4,
 
 `--gpu` (`--size gpu`: 4/6 CPUs, 8GiB, 40GiB) gives the box the RTX 3070 through WSL's `/dev/dxg`, for CUDA or PyTorch training and inference and GPU builds. GPU runs always use a throwaway box, and only one GPU box runs at a time: another GPU run exits 75 with `the GPU box is in use (job X)`. Because a frozen CUDA process keeps its VRAM, the tray stops a GPU box instead of pausing it when the PC's owner starts a game or picks My PC; its job is lost and `box job` exits 75 saying so. `box status` has a `gpu:` line: free, in use, or unavailable. [The GPU box](docs/DESIGN.md#the-gpu-box)
 
-`--new` launches a fresh box marked `user.box.throwaway=true` and removes it when the exit code is collected. Use `--box` with a reusable box. If the initial box launch loses its connection, look for the printed box name in `box ls` and remove it with `box rm` if it was created.
+`--new` launches a fresh box marked `user.box.throwaway=true`. Once the exit code is collected the box is kept 30 minutes, for `box pull`, then the reaper deletes it; `box rm` deletes it sooner. Use `--box` with a reusable box. If the initial box launch loses its connection, look for the printed box name in `box ls` and remove it with `box rm` if it was created.
 
 `box status` prints one advice line first, like `available: room for 1 large, or 2 medium, or 4 small` or `unavailable: PC is in My PC mode: run locally`, then the mode (and the game it yields to, from `user.agent-box.reason`), free box slots (`limits.instances` minus existing boxes), what fits (the project caps minus existing boxes' Full CPUs, memory and disk; the memory cap is 24GiB in Full and 12GiB otherwise), CPUs and RAM per size now, and this repo's box with its size and running jobs. It exits 75 when offloading isn't possible now.
 
