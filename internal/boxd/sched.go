@@ -103,7 +103,9 @@ func (w *Watcher) roomFor(it *queued, byName map[string]Instance, room dash.Room
 	case m.Mode == dash.ModeMyPC:
 		return dash.RefusedMyPC
 	}
-	if in, ok := byName[it.Box]; ok && !it.New {
+	// A box of a job whose start was cut short is the job's own, even a
+	// throwaway: startQueued looks in it before starting again.
+	if in, ok := byName[it.Box]; ok && (!it.New || it.Starting != nil) {
 		switch in.Status {
 		case "Running":
 			return ""
@@ -184,7 +186,7 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	_, exists := byName[pick.Box]
 	w.starting = pick.Job
 	w.Queue.setStarting(pick, true)
-	go w.startQueued(pick, exists && !pick.New, slices.Clone(pick.evict))
+	go w.startQueued(pick, exists && (!pick.New || pick.Starting != nil), slices.Clone(pick.evict))
 }
 
 // QueuedView is a waiting job with its place and wait, if it is waiting.
@@ -311,8 +313,17 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 		w.logf("boxd: queue: deleted kept throwaway %s for %s's room", box, it.Job)
 	}
 	started := w.Now().UTC()
-	if err == nil {
-		err = w.startJob(ctx, it, reuse, started)
+	switch {
+	case err != nil:
+	case it.Starting != nil && reuse && w.startedInBox(ctx, it):
+		// A boxd before this one started it and stopped before it could
+		// say so: the job runs, or ran, already.
+		started = *it.Starting
+		w.logf("boxd: queue: %s had started before boxd restarted", it.Job)
+	default:
+		if err = w.Queue.markStarting(it, started); err == nil {
+			err = w.startJob(ctx, it, reuse, started)
+		}
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -341,6 +352,17 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 		// scan announces it running.
 		w.emit(dash.Event{Name: dash.EventJobGone, Data: dash.JobGone{Key: it.view.Key}})
 	}
+}
+
+// startedInBox says whether the job's files are in its box: its start got
+// as far as the start script. Failing to look says no, as box run would
+// start it.
+func (w *Watcher) startedInBox(ctx context.Context, it *queued) bool {
+	look, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+	remote := workRoot + "/.box/" + it.Job
+	_, err := w.Incus.Exec(look, it.Box, "test -e "+remote+".log -o -e "+remote+".pid -o -e "+remote+".exit")
+	return err == nil
 }
 
 // startJob does what box run does once it has a box: launch one if needed,

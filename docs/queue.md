@@ -50,7 +50,9 @@ to sit and wait. So it can hand the run to a queue and keep working.
 laptop and agent reaches.
 - The queue is a JSON file per job in `/var/lib/agent-box/queue/`, plus its bundle. It is
   crash-safe: on start, `boxd` reloads it, and drops a job without its bundle or a bundle without its
-  job.
+  job. A job's file records when a start began, before anything is launched or run. A start cut
+  short by a restart is then retried in the same box, unless the job's files are already in it, in
+  which case it has started and is not run twice.
 - **Scheduling.** Each poll (3s), `boxd` works out what each job waits for: My PC, a game, the GPU,
   or room for its size. A job on an existing running box needs no room. `boxd` starts at most one
   job at a time; the caps are read again on the next poll.
