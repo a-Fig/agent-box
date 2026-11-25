@@ -21,6 +21,9 @@ SVC=agent-box-boxd.service
 say() { printf '  %s\n' "$*"; }
 fail() { printf 'install-boxd: %s\n' "$*" >&2; exit 1; }
 
+# A dropped SSH session closes our output: a write then fails rather than
+# killing the script before it can roll back.
+trap '' PIPE
 cd "$HERE"
 [ "$(id -u)" = 0 ] || fail "run as root"
 exec 9>/run/agent-box-deploy.lock
@@ -64,10 +67,11 @@ restart() { # restarts the service and prints when
   echo "$t"
 }
 
-# Keep the running build only if it is good; otherwise the .old already there
-# is the last good one.
+# Keep the running build if it is good, or if there is no .old yet (something
+# beats nothing: it may only be starting). Otherwise the .old already there is
+# the last good one.
 had_old=no had_old_unit=no
-if [ -f "$BIN/boxd" ] && [ "$(systemctl is-active "$SVC" || true)" = active ] && answering; then
+if [ -f "$BIN/boxd" ] && { [ ! -f "$BIN/boxd.old" ] || { [ "$(systemctl is-active "$SVC" || true)" = active ] && answering; }; }; then
   cp -p "$BIN/boxd" "$BIN/boxd.old"
   if [ -f "$UNIT" ]; then cp -p "$UNIT" "$UNIT.old"; else rm -f "$UNIT.old"; fi
   say "kept the running boxd as boxd.old"
