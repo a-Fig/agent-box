@@ -1,6 +1,6 @@
 # Releasing and updating (plan, 2026-11-25)
 
-Status: a plan, not built yet. Tyler asked for a release process "clean and auto-updating, like
+Status: decided, being built. Tyler asked for a release process "clean and auto-updating, like
 Murmur's" (2026-11-25). Murmur's is in a-Fig/murmur `docs/releasing.md` and `internal/update`.
 
 ## Why
@@ -43,13 +43,16 @@ A release is a pushed tag `vX.Y.Z` on `main`, as in Murmur.
 3. The version is the tag, built in with `-X` (the `internal/version` package from #52). A plain
    `go build` says `-dev` and never updates itself, as in Murmur.
 
-**Proposed: tag automatically.** A push to `main` that passes CI gets the next patch version,
-from `release.yml`. Merging the release PR then ships it, with no step to forget. Minor and major
-bumps are tagged by hand.
+**Nightlies are automatic, stable releases are by hand** (Tyler, 2026-11-25).
+- A push to `main` that passes CI is tagged `vX.Y.Z-nightly.YYYYMMDD.N` and published as a
+  prerelease. X.Y.Z is the latest stable release with its patch raised by one. Pruning keeps the
+  newest seven, as in Murmur.
+- A stable `vX.Y.Z` is tagged by hand, on a commit a nightly already ran.
 
-**Channels.** Murmur has stable and prerelease channels, because its releases reach other
-people. agent-box has one user. So there's one channel, and the guard is the dev→main PR plus a
-canary (below).
+**Channels.** Every part follows **stable** (Tyler, 2026-11-25): it takes GitHub's latest
+release, which is never a prerelease. A nightly installs only by hand, through
+`box update --version <tag>`. The guards are the dev→main PR, the hand-tagged stable release,
+and a canary (below).
 
 ## How each part updates
 
@@ -95,15 +98,14 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
 
 ## Order of work
 
-1. `release.yml` with auto-tagging, and versions from tags.
+1. `release.yml` and `nightly.yml` (tag on a green main), versions from tags, `box update --version`.
 2. boxd's update timer: the easiest part, since #46 did most of it.
 3. box.exe's self-update and the skill sync, with the canary.
 4. The tray's self-update, tried live with the tray running and with only the headless enforcer.
 5. Retire the manual steps in the `box-rollout` notes and in this doc.
 
-## Decisions for Tyler
+## Decided (Tyler, 2026-11-25)
 
-1. **Auto-tag every merge to main** (recommended), or tag by hand?
-2. **One channel** (recommended), or stable plus prerelease like Murmur?
-3. **Image rebuilds stay manual** (recommended), or are rebuilt automatically when the profile
-   changes?
+1. Merges to main are tagged automatically as nightlies. Stable releases are tagged by hand.
+2. Installed parts follow stable only.
+3. Image rebuilds stay manual.
