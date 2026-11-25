@@ -10,7 +10,7 @@ See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Quick start: a Linux server
 
-**Host** (Ubuntu or Debian, as root). Coming: `provision/setup-host.sh` isn't merged yet. It sets up Incus and the `agents` project, then prints the line a client adds the host with.
+**Host** (Ubuntu or Debian, kernel 6.12+, as root). `provision/setup-host.sh` sets up Incus and the `agents` project, then prints the line a client adds the host with.
 
 ```sh
 git clone https://github.com/a-Fig/agent-box && sudo agent-box/provision/setup-host.sh

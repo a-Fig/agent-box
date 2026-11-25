@@ -1,12 +1,12 @@
 # `default` profile of the `agents` project (features.profiles=true, so the project has its own).
-# Applied by setup-distro.sh with
+# Applied by setup-host.sh with
 #   incus profile edit default --project agents < default-profile.yaml
 #
 # Its limits are the medium size, for boxes launched without `box`. `box` launches every box with
 # its size (internal/mode/size.go): user.box.size, limits.memory and a root disk size on the
 # instance, which override the values here. The tray sets each box's limits.cpu from its size and
 # the mode on every tick. limits.cpu / limits.memory MUST be set per box: the project caps count them.
-# The `cache` volume is created by setup-distro.sh (project-scoped, shared by all boxes, 30GiB).
+# The `cache` volume is created by setup-host.sh (project-scoped, shared by all boxes, 30GiB).
 # Boxes are deleted by the tray's reaper after user.expires; only /cache outlives a box, and it
 # may be wiped at any time.
 #

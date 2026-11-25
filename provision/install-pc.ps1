@@ -12,7 +12,7 @@
 .PARAMETER BoxtrayPath
   Path to boxtray.exe. If given, a per-user Scheduled Task starts it at logon.
 .PARAMETER BoxdPath
-  Path to the Linux boxd binary (GOOS=linux go build ./cmd/boxd). If given, setup-distro.sh installs it as
+  Path to the Linux boxd binary (GOOS=linux go build ./cmd/boxd). If given, setup-host.sh installs it as
   agent-box-boxd.service and puts it on the tailnet with tailscale serve (docs/ui.md).
 .PARAMETER TailscaleAuthKey
   Auth key for `tailscale up`. Falls back to $env:TS_AUTHKEY. Passed to the distro via WSLENV; never written to disk.
@@ -75,7 +75,7 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Securit
     throw 'Run this from an elevated (Administrator) PowerShell.'
 }
 $ProvisionDir = $PSScriptRoot
-foreach ($f in 'setup-distro.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf', 'reaper.sh', 'systemd/agent-box-reaper.service', 'systemd/agent-box-reaper.timer', 'update-boxd.sh', 'systemd/agent-box-update.service', 'systemd/agent-box-update.timer', 'https-cert.sh', 'systemd/agent-box-https-cert.service', 'systemd/agent-box-https-cert.timer', 'systemd/agent-box-boxd.service') {
+foreach ($f in 'setup-host.sh', 'incus-preseed.yaml', 'default-profile.yaml', 'wsl.conf', 'reaper.sh', 'systemd/agent-box-reaper.service', 'systemd/agent-box-reaper.timer', 'update-boxd.sh', 'systemd/agent-box-update.service', 'systemd/agent-box-update.timer', 'https-cert.sh', 'systemd/agent-box-https-cert.service', 'systemd/agent-box-https-cert.timer', 'systemd/agent-box-boxd.service') {
     if (-not (Test-Path (Join-Path $ProvisionDir $f))) { throw "Missing $f next to install-pc.ps1." }
 }
 if ($BoxtrayPath -and -not (Test-Path -LiteralPath $BoxtrayPath)) { throw "BoxtrayPath not found: $BoxtrayPath" }
@@ -126,7 +126,7 @@ Invoke-Wsl @('--set-default-version', '2') -AllowFail | Out-Null
 # Incus 7.x needs Linux 6.12+; current WSL ships 6.18. A VM that is already running keeps its old kernel until wsl --shutdown.
 Step 'Updating WSL (wsl --update)'
 Invoke-Wsl @('--update') -AllowFail | Out-Null
-Note 'done (setup-distro.sh checks that the kernel is 6.12 or newer)'
+Note 'done (setup-host.sh checks that the kernel is 6.12 or newer)'
 
 # --- 2. .wslconfig (merge) -------------------------------------------------
 Step 'Merging %USERPROFILE%\.wslconfig'
@@ -267,7 +267,7 @@ Step "Copying provision files to $StageDir in the distro"
 Invoke-InDistro @('sh', '-c', "rm -rf $StageDir && mkdir -p $StageDir") | Out-Null
 $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path $tarExe)) { throw 'tar.exe not found (needs Windows 10 1803+).' }
-$cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-distro.sh incus-preseed.yaml default-profile.yaml wsl.conf reaper.sh update-boxd.sh https-cert.sh systemd | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
+$cmd = "`"$tarExe`" -cf - -C `"$ProvisionDir`" setup-host.sh incus-preseed.yaml default-profile.yaml wsl.conf reaper.sh update-boxd.sh https-cert.sh systemd | wsl.exe -d $Distro -u root --exec tar -xf - -C $StageDir"
 & cmd.exe /c $cmd
 if ($LASTEXITCODE -ne 0) { throw 'Copying provision files into the distro failed.' }
 if ($BoxdPath) {
@@ -278,7 +278,7 @@ if ($BoxdPath) {
     if ((Split-Path -Leaf $bd) -ne 'boxd') { Invoke-InDistro @('mv', "$StageDir/$(Split-Path -Leaf $bd)", "$StageDir/boxd") | Out-Null }
     Note 'boxd copied'
 }
-Invoke-InDistro @('sh', '-c', "sed -i 's/\r$//' $StageDir/*.sh $StageDir/*.yaml $StageDir/wsl.conf && chmod +x $StageDir/setup-distro.sh") | Out-Null
+Invoke-InDistro @('sh', '-c', "sed -i 's/\r$//' $StageDir/*.sh $StageDir/*.yaml $StageDir/wsl.conf && chmod +x $StageDir/setup-host.sh") | Out-Null
 Note 'copied'
 
 # --- 5. /etc/wsl.conf ------------------------------------------------------
@@ -361,9 +361,10 @@ if ($BoxtrayPath) {
     Note 'no -BoxtrayPath given; not registering the tray'
 }
 
-# --- 8. Run setup-distro.sh ------------------------------------------------
-Step 'Running setup-distro.sh inside the distro (Incus, project, profile, Tailscale)'
-$shArgs = @()
+# --- 8. Run setup-host.sh --------------------------------------------------
+Step 'Running setup-host.sh inside the distro (Incus, project, profile, Tailscale)'
+# Tailscale is opt-in in setup-host.sh; the PC is reached through it, so it always asks for it.
+$shArgs = @('--tailscale')
 if ($BuildBase) { $shArgs += '--build-base' }
 $oldWslenv = $env:WSLENV
 try {
@@ -374,8 +375,8 @@ try {
     } else {
         Note 'no auth key: Tailscale will be installed but not joined'
     }
-    & wsl.exe -d $Distro -u root --exec bash "$StageDir/setup-distro.sh" @shArgs
-    if ($LASTEXITCODE -ne 0) { throw "setup-distro.sh failed (exit $LASTEXITCODE). Fix the cause and re-run install-pc.ps1." }
+    & wsl.exe -d $Distro -u root --exec bash "$StageDir/setup-host.sh" @shArgs
+    if ($LASTEXITCODE -ne 0) { throw "setup-host.sh failed (exit $LASTEXITCODE). Fix the cause and re-run install-pc.ps1." }
 } finally {
     $env:WSLENV = $oldWslenv
     if ($TailscaleAuthKey -and $env:TS_AUTHKEY -eq $TailscaleAuthKey) { Remove-Item Env:\TS_AUTHKEY -ErrorAction SilentlyContinue }

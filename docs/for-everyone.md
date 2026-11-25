@@ -1,5 +1,7 @@
 # agent-box for everyone
 
+_A snapshot from before #149, which renamed `provision/setup-distro.sh` to `setup-host.sh` and did plan items 2 and 3; the file:line references point at the old script._
+
 What stands between a stranger and a working install, as of 2026-11-25 (dev at `c6224c3`). Today
 agent-box runs on one setup: Incus in a Windows PC's WSL2 distro, reached over Tailscale, used by
 agents on one laptop, mostly through T3 Code.
