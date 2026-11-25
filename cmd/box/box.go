@@ -417,11 +417,16 @@ func (a *App) gpuStopped(ctx context.Context, box string) string {
 		return ""
 	}
 	in := find(insts, box)
-	if in == nil || !mode.IsGPU(in.Config) || in.Status == "Running" {
+	if in == nil || !mode.IsGPU(in.Config) {
 		return ""
 	}
+	// The tray marks the box just before it stops it, so the mark can come
+	// while incus still lists the box Running (#118).
 	if in.Config[mode.StoppedKey] == string(mode.MyPC) {
 		return "the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU"
+	}
+	if in.Status == "Running" {
+		return ""
 	}
 	return "the GPU box " + box + " is " + strings.ToLower(in.Status) + "; rerun later or on CPU"
 }
@@ -910,6 +915,8 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case !o.New:
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true)
+	case sz.GPU && r.State == statePaused:
+		// attach said what happened to the GPU box and what to do (#118).
 	default:
 		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 	}
@@ -1182,7 +1189,13 @@ type exitFilter struct {
 	code   string
 	seen   bool
 	report string // digestMarker's base64, when there was one
+	// notRunning: incus said the box isn't running, a line held back
+	// because a stopped GPU box has a better explanation (#118).
+	notRunning bool
 }
+
+// notRunning is incus's error for an exec into a box that isn't running.
+const notRunning = "Error: Instance is not running"
 
 func (e *exitFilter) Write(p []byte) (int, error) {
 	e.mu.Lock()
@@ -1198,6 +1211,8 @@ func (e *exitFilter) Write(p []byte) (int, error) {
 			e.code, e.seen = strings.TrimSpace(string(rest)), true
 		} else if rest, ok := bytes.CutPrefix(line, []byte(digestMarker)); ok {
 			e.report = strings.TrimSpace(string(rest))
+		} else if string(line) == notRunning+"\n" {
+			e.notRunning = true // attach says why, or prints it
 		} else if _, err := e.w.Write(line); err != nil {
 			return len(p), err
 		}
@@ -1360,6 +1375,9 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 			fmt.Fprintf(a.Err, "box: %s\n", msg)
 			return statePaused, exitPaused, "", nil
 		}
+	}
+	if ef.notRunning {
+		fmt.Fprintln(a.Err, notRunning)
 	}
 	switch res.Code {
 	case 0:

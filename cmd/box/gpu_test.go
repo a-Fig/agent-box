@@ -228,10 +228,22 @@ func TestGPUBoxStoppedByTrayTellsTheAgent(t *testing.T) {
 			if code := run(context.Background(), a, []string{"job", "my-repo-1234.20261123-110000-beef"}, nil); code != exitPaused {
 				t.Fatalf("box job = %d\n%s", code, out)
 			}
-			if !strings.Contains(out.String(), want) {
+			if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "Instance is not running") {
 				t.Errorf("output = %s", out)
 			}
 		})
+	}
+	// box run --gpu: the follow can fail between the tray's mark and the stop
+	// showing in incus. The agent hears the GPU message and no reattach hint
+	// (#118).
+	f0 := &fakePC{t: t, mode: "full", stopFor: "mypc", stillRunning: true}
+	f0.launched = func(f *fakePC) { f.insts[len(f.insts)-1].Config = gpuConfig(throwawayKey, "true") }
+	a0, out0 := testApp(f0)
+	if code := run(context.Background(), a0, []string{"run", "--reason", "a GPU job the tray stops mid-run", "--gpu", "--", "true"}, nil); code != exitPaused {
+		t.Fatalf("box run --gpu = %d\n%s", code, out0)
+	}
+	if s := out0.String(); !strings.Contains(s, "switched it to My PC") || strings.Contains(s, "run it locally") || strings.Contains(s, "keeping") || strings.Contains(s, "Instance is not running") {
+		t.Errorf("box run --gpu said:\n%s", s)
 	}
 	// Back in Shared, the stopped box still explains itself.
 	f := &fakePC{t: t, mode: "shared",
