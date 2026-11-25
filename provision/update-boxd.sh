@@ -56,18 +56,24 @@ if [ -x "$BOXD" ]; then
 fi
 
 if [ -z "$TAG" ]; then
-  if [ -n "$cur" ] && ! is_tag "$cur"; then
+  if [ -z "$cur" ]; then
+    say "no boxd installed (setup installs one, with its config): not updating"
+    exit 0
+  fi
+  if ! is_tag "$cur"; then
     say "boxd is a dev build ($cur), not a release: not updating (update-boxd.sh TAG installs one)"
     exit 0
   fi
-  code=0
-  json=$(curl -fsL -m 30 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/releases/latest") || code=$?
-  if [ "$code" = 22 ]; then
-    say "no stable release yet: nothing to do"
-    exit 0
-  fi
-  [ "$code" = 0 ] || fail "reading the latest release failed (curl exit $code)"
-  TAG=$(printf '%s' "$json" | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+  latest=$(mktemp)
+  status=$(curl -sL -m 30 -o "$latest" -w '%{http_code}' -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$REPO/releases/latest") || status="curl failed"
+  TAG=$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$latest" | head -n1)
+  rm -f "$latest"
+  case "$status" in
+    200) ;;
+    404) say "no stable release yet: nothing to do"; exit 0 ;;
+    *) fail "reading the latest release: $status" ;;
+  esac
   [ -n "$TAG" ] || fail "the latest release has no tag_name"
   if [ "$cur" = "$TAG" ]; then
     exit 0 # the timer's usual hour: quiet
