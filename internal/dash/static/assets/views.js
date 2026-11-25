@@ -73,13 +73,17 @@ function jobBox(j) {
   return b && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + JOB_BOX_GRACE_MS ? b : null;
 }
 
+function sizeLabel(size, gpu, sep = " ") {
+  return size + (gpu && size !== "gpu" ? sep + "GPU" : "");
+}
+
 function jobMeta(j) {
   return h(
     "div",
     { class: "meta" },
     h("span", null, icon("user"), j.agent?.session || "unknown agent", j.agent?.client ? h("span", { class: "muted" }, "· " + j.agent.client) : null),
     h("span", null, icon("branch"), shortRepo(j.repo), j.branch ? "@" + j.branch : ""),
-    h("span", null, icon("box"), j.box, " · ", j.size + (j.gpu ? " GPU" : "")),
+    h("span", null, icon("box"), j.box, " · ", sizeLabel(j.size, j.gpu)),
     h("span", { title: stamp(j.startedAt) }, icon("clock"), j.state === "running" || j.state === "paused" ? elapsed(j) : [timeEl("ago", j.endedAt || j.startedAt), " · took " + elapsed(j)]),
   );
 }
@@ -270,7 +274,7 @@ function queueRow(j) {
           { class: "meta" },
           h("span", null, icon("user"), j.agent?.session || "unknown agent", j.agent?.client ? h("span", { class: "muted" }, "· " + j.agent.client) : null),
           h("span", null, icon("branch"), shortRepo(j.repo), j.branch ? "@" + j.branch : ""),
-          h("span", null, icon("box"), j.box + " · " + j.size + (j.gpu && j.size !== "gpu" ? " GPU" : "")),
+          h("span", null, icon("box"), j.box + " · " + sizeLabel(j.size, j.gpu)),
           h("span", { title: "Queued " + stamp(j.queuedAt) }, icon("hourglass"), timeEl("elapsed", j.queuedAt, "waiting "), h("span", { class: "muted" }, " · " + why)),
         ),
       ),
@@ -400,7 +404,7 @@ function boxRow(b, full) {
     h(
       "div",
       null,
-      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", { class: "badge badge-outline" }, b.size + (b.gpu ? " · GPU" : "")), b.throwaway ? h("span", { class: "badge" }, "throwaway") : null),
+      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", { class: "badge badge-outline" }, sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", { class: "badge" }, "throwaway") : null),
       h(
         "div",
         { class: "meta" },
@@ -538,7 +542,7 @@ function options(label, key, values) {
   const sig = values.join("|");
   if (sig !== f.seen) {
     f.seen = sig;
-    f.sel.replaceChildren(h("option", { value: "" }, label), values.map((v) => h("option", { value: v }, v)));
+    f.sel.replaceChildren(h("option", { value: "" }, label), ...values.map((v) => h("option", { value: v }, v)));
   }
   f.sel.value = F[key];
   return f.el;
@@ -566,7 +570,7 @@ const jobs = {
     const uniq = (f) => [...new Set(known.map(f).filter(Boolean))].sort();
     const fs = [
       this.search,
-      options("Repo", "repo", uniq((j) => shortRepo(j.repo))),
+      options("Repo", "repo", uniq((j) => (j.repo ? shortRepo(j.repo) : ""))),
       options("Agent", "agent", uniq((j) => j.agent?.session)),
       options("Kind", "kind", KINDS),
       S.machines.size > 1 ? options("Machine", "machine", [...S.machines.keys()]) : null,
@@ -689,7 +693,7 @@ function waitingPage(j) {
         kv("Agent", (now.agent?.session || "unknown") + (now.agent?.client ? " · " + now.agent.client : "")),
         kv("Repo", now.repo),
         kv("Branch", now.branch),
-        kv("Box", now.box + " · " + now.size + (now.gpu && now.size !== "gpu" ? " GPU" : "")),
+        kv("Box", now.box + " · " + sizeLabel(now.size, now.gpu)),
       ),
       h("div", { class: "row-control queue-actions" }, now.position > 1 ? control("front-" + now.key, { class: "btn btn-sm btn-outline", onclick: () => frontJob(now) }, icon("front"), "Move to front") : null, control("dequeue-" + now.key, { class: "btn btn-sm btn-danger-ghost", onclick: () => dequeueJob(now) }, "Cancel")),
     ),
@@ -784,7 +788,7 @@ const jobDetail = {
           kv("Branch", j.branch),
           kv("Commit", (j.commit || "").slice(0, 10)),
           kv("Kind", j.kind),
-          kv("Box", j.box + " · " + j.size + (j.gpu ? " GPU" : "")),
+          kv("Box", j.box + " · " + sizeLabel(j.size, j.gpu)),
           kv("Started", stamp(j.startedAt)),
           kv(live ? "Running for" : "Took", elapsed(j)),
           kv("Exit", j.exit == null ? (j.state === "lost" ? "never read" : "—") : String(j.exit)),

@@ -174,14 +174,17 @@ function timeline(d, range) {
 }
 
 // Totals as horizontal bars, biggest first, labelled with their value.
-function hbars(entries, color, fmt = String, limit = 6) {
+function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "") {
   entries = entries.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return h("p", { class: "row-empty" }, "Nothing in this range.");
   const max = entries[0][1];
   return h(
     "div",
     { class: "hbars" },
-    entries.slice(0, limit).map(([k, v], i) => h("div", { class: "hbar", title: k + ": " + fmt(v) }, h("span", { class: "truncate" }, k), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)))),
+    entries.slice(0, limit).map(([k, v], i) => {
+      const name = k || emptyLabel || "(none)";
+      return h("div", { class: "hbar", title: name + ": " + fmt(v) }, h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
+    }),
   );
 }
 
@@ -290,9 +293,9 @@ const history = {
         chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),
         chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), (k) => slot(KINDS.indexOf(k)))),
-        chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur)),
-        chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s1)")),
-        chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s3)")),
+        chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)")),
+        chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s1)", String, 6, "(no repo)")),
+        chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s3)", String, 6, "unknown agent")),
       ),
       h("p", { class: "muted", "data-now": clock.now() }, H.loading[range] ? "Refreshing…" : (range === "day" ? "Each bar is an hour. " : "Each bar is a day, midnight to midnight UTC. ") + (H.at[range] ? "Loaded " + new Date(H.at[range]).toLocaleTimeString() + "." : "")),
     ];

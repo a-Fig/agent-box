@@ -124,7 +124,7 @@ function pct(a, b) {
 }
 
 function shortRepo(url) {
-  return (url || "").replace(/\/+$/, "").split("/").pop() || "(no repo)";
+  return (url || "").replace(/\/+$/, "").replace(/\.git$/, "").split("/").pop() || "(no repo)";
 }
 
 function plural(n, word, many = word + "s") {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -90,5 +91,17 @@ func TestAssetRefusesAWrongSum(t *testing.T) {
 		if _, err := c.Asset(context.Background(), rel, "box-linux-amd64"); err == nil || !strings.Contains(err.Error(), "SHA256SUMS") {
 			t.Errorf("sums %q: err %v", sums, err)
 		}
+	}
+}
+
+// Before the first stable release GitHub answers latest with 404: Latest says so plainly.
+func TestLatestWithNoStableRelease(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	if _, err := (Client{API: srv.URL}).Latest(context.Background()); !errors.Is(err, ErrNoStable) || err.Error() != "no stable release yet" {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := (Client{API: srv.URL}).ByTag(context.Background(), "v0.3.0"); err == nil || errors.Is(err, ErrNoStable) {
+		t.Fatalf("ByTag err = %v", err)
 	}
 }

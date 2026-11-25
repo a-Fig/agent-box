@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/digest"
 	"github.com/a-Fig/agent-box/skills"
 )
 
@@ -59,7 +60,7 @@ func TestPayload(t *testing.T) {
 		!strings.Contains(got, "-k 10s 90.001s /bin/bash") || !strings.Contains(got, "go test ./...") {
 		t.Errorf("payload =\n%s", got)
 	}
-	if got := payload(RunOpts{Cmd: []string{"echo", "a b"}}); got != `'echo' 'a b'` {
+	if got := payload(RunOpts{Cmd: []string{"echo", "a b"}}); got != digest.Wrappers+`'echo' 'a b'` {
 		t.Errorf("plain payload = %q", got)
 	}
 }
@@ -279,6 +280,31 @@ func TestMCPLogPagePreservesSplitUTF8(t *testing.T) {
 	got := pageResult(p)["structuredContent"].(map[string]any)
 	if got["logBase64"] != "ww==" || got["nextOffset"] != int64(1) {
 		t.Errorf("structured page = %v", got)
+	}
+}
+
+// A GPU box that My PC stopped can't exec, but its files still pull: the
+// job's .repo names the checkout (#117).
+func TestPullFromStoppedBox(t *testing.T) {
+	job := "my-repo-725d.20261123-120000-0001"
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo-725d", Status: "Stopped"}},
+		files: map[string]string{"pc:my-repo-725d/work/.box/" + job + ".repo": "my-repo\n"}}
+	f.pull = func(src, dst string) { write(t, filepath.Join(dst, "result.txt"), "done\n") }
+	a, out := testApp(f)
+	if _, err := a.Pull(context.Background(), job, "result.txt", t.TempDir()); err != nil {
+		t.Fatalf("Pull: %v\n%s", err, out)
+	}
+	if got := f.pulls[len(f.pulls)-1]; got != "pc:my-repo-725d/work/my-repo/result.txt" {
+		t.Errorf("pulled %v", f.pulls)
+	}
+	// A box name alone has no .repo to read: incus's error stands.
+	if _, err := a.Pull(context.Background(), "my-repo-725d", "result.txt", t.TempDir()); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Errorf("box name on a stopped box: %v", err)
+	}
+	// A .repo that names no checkout is refused.
+	f.files["pc:my-repo-725d/work/.box/"+job+".repo"] = "../etc\n"
+	if _, err := a.Pull(context.Background(), job, "result.txt", t.TempDir()); err == nil || !strings.Contains(err.Error(), "names no checkout") {
+		t.Errorf("bad .repo: %v", err)
 	}
 }
 

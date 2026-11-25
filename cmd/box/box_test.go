@@ -23,44 +23,45 @@ import (
 // With bash set, "incus exec" runs the script locally in that bash, so the
 // shell scripts are tested end to end; otherwise exec answers from canned values.
 type fakePC struct {
-	t          *testing.T
-	mu         sync.Mutex
-	insts      []instance
-	mode       string
-	listErr    bool
-	bash       string
-	log        string          // canned follow output
-	exit       string          // canned exit file
-	running    string          // canned output of the running-jobs check
-	race       map[string]bool // names another run launches just before ours
-	block      bool            // follow waits until its context ends
-	pushHang   bool            // file push waits until its context ends
-	freeze     bool            // follow freezes the box and fails
-	launchErr  bool            // the connection drops after creating an instance
-	refuse     string          // launch fails with this Incus error, creating nothing
-	launches   [][]string      // arguments of each launch
-	startErr   bool            // the connection drops while starting the job
-	calls      []string
-	pushed     int
-	project    map[string]string // project config other than the mode
-	memory     string            // the default profile's limits.memory
-	jobs       map[string]string // canned "# jobs" output by box
-	script     string            // canned output of the page, cancel and checkout scripts
-	scriptRC   int
-	pull       func(src, dst string) // file pull -r src dst
-	pulls      []string
-	stdins     []string          // stdin of each launch ("" when none)
-	launched   func(f *fakePC)   // runs after each successful launch, under f.mu
-	stopFor    string            // follow stops the box with this user.box.stopped and fails
-	remotes    string            // output of incus remote list --format json
-	files      map[string]string // content of each pushed file, by its target
-	cancelled  bool              // the .cancelled probe finds the mark
-	followErr  int               // this many follows fail with a transport error
-	kept       map[string]bool   // boxes the kept-jobs check finds kept
-	refuseOnce bool              // refuse applies to the first launch only
-	digest     string            // canned digest.Script output the follow reports
-	etagFails  int               // this many config sets fail as if another write came first
-	gone       map[string]bool   // boxes exec can't find
+	t            *testing.T
+	mu           sync.Mutex
+	insts        []instance
+	mode         string
+	listErr      bool
+	bash         string
+	log          string          // canned follow output
+	exit         string          // canned exit file
+	running      string          // canned output of the running-jobs check
+	race         map[string]bool // names another run launches just before ours
+	block        bool            // follow waits until its context ends
+	pushHang     bool            // file push waits until its context ends
+	freeze       bool            // follow freezes the box and fails
+	launchErr    bool            // the connection drops after creating an instance
+	refuse       string          // launch fails with this Incus error, creating nothing
+	launches     [][]string      // arguments of each launch
+	startErr     bool            // the connection drops while starting the job
+	calls        []string
+	pushed       int
+	project      map[string]string // project config other than the mode
+	memory       string            // the default profile's limits.memory
+	jobs         map[string]string // canned "# jobs" output by box
+	script       string            // canned output of the page, cancel and checkout scripts
+	scriptRC     int
+	pull         func(src, dst string) // file pull -r src dst
+	pulls        []string
+	stdins       []string          // stdin of each launch ("" when none)
+	launched     func(f *fakePC)   // runs after each successful launch, under f.mu
+	stopFor      string            // follow stops the box with this user.box.stopped and fails
+	stillRunning bool              // with stopFor: incus still lists the box Running
+	remotes      string            // output of incus remote list --format json
+	files        map[string]string // content of each pushed file, by its target
+	cancelled    bool              // the .cancelled probe finds the mark
+	followErr    int               // this many follows fail with a transport error
+	kept         map[string]bool   // boxes the kept-jobs check finds kept
+	refuseOnce   bool              // refuse applies to the first launch only
+	digest       string            // canned digest.Script output the follow reports
+	etagFails    int               // this many config sets fail as if another write came first
+	gone         map[string]bool   // boxes exec can't find
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -173,6 +174,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			}
 		}
 	case "file":
+		if args[1] == "pull" && args[3] == "-" { // one file to stdout
+			f.pulls = append(f.pulls, args[2])
+			if s, ok := f.files[args[2]]; ok {
+				return Result{Stdout: s}, nil
+			}
+			return Result{Code: 1, Stderr: "Error: not found"}, nil
+		}
 		if args[1] == "pull" {
 			f.pulls = append(f.pulls, args[3])
 			if f.pull != nil {
@@ -204,6 +212,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 		for _, in := range f.insts {
 			if "pc:"+in.Name == args[1] && in.Status == "Stopped" {
+				if c.Stderr != nil { // incus streams it there, as the real runner does
+					io.WriteString(c.Stderr, "Error: Instance is not running\n")
+					return Result{Code: 1}, nil
+				}
 				return Result{Stderr: "Error: Instance is not running", Code: 1}, nil
 			}
 		}
@@ -219,7 +231,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 					in := f.inst(args[1])
 					in.Status = "Stopped"
 					in.Config[mode.StoppedKey] = f.stopFor
-					return Result{Stderr: "Error: Instance is not running", Code: 1}, nil
+					if f.stillRunning { // the mark, before incus lists the stop
+						in.Status = "Running"
+					}
+					if c.Stderr != nil {
+						io.WriteString(c.Stderr, "Error: Instance is not running\n") // incus writes it to the follow's stderr
+					}
+					return Result{Code: 1}, nil
 				}
 				if f.freeze {
 					f.inst(args[1]).Status = "Frozen"
