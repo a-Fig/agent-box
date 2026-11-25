@@ -95,9 +95,10 @@ type Machine struct {
 // Version is the commit a binary was built from, so the page can show when
 // boxd and the tray were built from different commits.
 type Version struct {
-	Commit   string     `json:"commit"`   // the full hash
-	Time     *time.Time `json:"time"`     // the commit's time; null if the build didn't record it
-	Modified bool       `json:"modified"` // built with uncommitted changes
+	Commit   string     `json:"commit"`        // the full hash
+	Time     *time.Time `json:"time"`          // the commit's time; null if the build didn't record it
+	Modified bool       `json:"modified"`      // built with uncommitted changes
+	Tag      string     `json:"tag,omitempty"` // the release, like v0.3.0; "" for a build that isn't one
 }
 
 // String is the short commit, with "+" for a modified build, or "unknown".

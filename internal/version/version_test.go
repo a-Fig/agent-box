@@ -1,6 +1,28 @@
 package version
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/a-Fig/agent-box/internal/dash"
+)
+
+func TestText(t *testing.T) {
+	at := time.Date(2026, 11, 25, 7, 12, 59, 0, time.UTC)
+	for _, tc := range []struct {
+		v    dash.Version
+		want string
+	}{
+		{dash.Version{Commit: "e823842abcdef", Time: &at, Tag: "v0.3.0"}, "box v0.3.0 (e823842, 2026-11-25 07:12 UTC)"},
+		{dash.Version{Commit: "e823842abcdef", Tag: "v0.3.1-nightly.20261125.2"}, "box v0.3.1-nightly.20261125.2 (e823842)"},
+		{dash.Version{Commit: "1378501abcdef", Time: &at, Modified: true}, "box 1378501+ (2026-11-25 07:12 UTC)"},
+		{dash.Version{}, "box unknown"},
+	} {
+		if got := Text("box", tc.v); got != tc.want {
+			t.Errorf("Text(%+v) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+}
 
 func TestFrom(t *testing.T) {
 	stamp := map[string]string{"vcs.revision": "1378501abcdef", "vcs.time": "2026-11-24T22:42:59Z", "vcs.modified": "true"}

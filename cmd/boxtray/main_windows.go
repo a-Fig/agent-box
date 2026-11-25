@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 	"golang.org/x/sys/windows"
 )
 
@@ -27,6 +29,12 @@ var lg *fileLog
 func main() {
 	runtime.LockOSThread() // the tray window must be created and pumped on one thread
 
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		// A windowsgui exe has no console: this reaches only a caller that
+		// captures stdout, as an updater's probe does.
+		fmt.Println(version.Text("boxtray", version.Get()))
+		return
+	}
 	if headlessRequested(os.Args[1:]) {
 		runHeadless()
 		return
