@@ -327,8 +327,9 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
   gpu}, wslMemory}`.
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
-  boxd from before the key. `chosen` is `user.agent-box.chosen`, the mode the enforcers act on: while
-  a game makes the PC yield, the mode that comes back afterwards ("Shared when the game ends").
+  key never written, or one holding a value boxtray doesn't write. `chosen` is
+  `user.agent-box.chosen`, the mode the enforcers act on (null if unset or not a mode): while a game
+  makes the PC yield, the mode that comes back afterwards ("Shared when the game ends").
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
   memLimit, cpus, cpuPct}`
 - **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,

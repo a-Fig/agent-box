@@ -502,7 +502,7 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 	}
 	if v := cfg[mode.ProjectChosenKey]; v != "" {
 		var c dash.ChosenMode
-		if json.Unmarshal([]byte(v), &c) == nil && c.Mode != "" {
+		if json.Unmarshal([]byte(v), &c) == nil && slices.Contains(dash.Modes, c.Mode) {
 			c.At = c.At.UTC()
 			m.Chosen = &c
 		}

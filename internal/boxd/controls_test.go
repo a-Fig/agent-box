@@ -130,7 +130,7 @@ func TestMachineEnforcerAndChosen(t *testing.T) {
 	}
 	r.f.set(func() {
 		r.f.cfg["user.agent-box.enforcer"] = "someone"
-		r.f.cfg["user.agent-box.chosen"] = "not json"
+		r.f.cfg["user.agent-box.chosen"] = `{"mode":"turbo","at":"2026-11-24T09:00:00Z"}`
 	})
 	r.poll()
 	if m := r.w.Machine(); m.Enforcer != "" || m.Chosen != nil {
