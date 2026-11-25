@@ -76,7 +76,7 @@ func TestGoCap(t *testing.T) {
 	if len(got) > MaxBytes {
 		t.Fatalf("digest is %d bytes", len(got))
 	}
-	if !strings.Contains(got, "more failed tests; the full log has them") {
+	if !strings.Contains(got, "more failures; the full log has them") {
 		t.Fatalf("no count of what was left out:\n%s", got)
 	}
 }

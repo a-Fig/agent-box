@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -58,7 +59,7 @@ type fakePC struct {
 	followErr  int               // this many follows fail with a transport error
 	kept       map[string]bool   // boxes the kept-jobs check finds kept
 	refuseOnce bool              // refuse applies to the first launch only
-	digest     string            // canned output of the digest script
+	digest     string            // canned digest.Script output the follow reports
 	etagFails  int               // this many config sets fail as if another write came first
 }
 
@@ -222,6 +223,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 					return Result{Code: 1}, nil
 				}
 				io.WriteString(c.Stdout, f.log)
+				if f.exit != "" && f.digest != "" {
+					io.WriteString(c.Stderr, digestMarker+base64.StdEncoding.EncodeToString([]byte(f.digest))+"\n")
+				}
 				if f.exit != "" {
 					io.WriteString(c.Stderr, exitMarker+strings.TrimSpace(f.exit)+"\n")
 				}
@@ -235,8 +239,6 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 					return Result{Stdout: "kept\n"}, nil
 				}
 				return Result{}, nil
-			case isScript(c, "# digest"):
-				return Result{Stdout: f.digest}, nil
 			case isScript(c, "# running jobs"):
 				return Result{Stdout: f.running}, nil
 			case isScript(c, "# jobs"):
@@ -420,7 +422,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file file config exec config exec exec config exec exec" {
+	if got := f.callList(); got != "list project start file file config exec config exec exec config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -452,7 +454,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config exec config exec exec config exec exec exec delete" {
+	if got := f.callList(); got != "list project launch file file config exec config exec exec config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {

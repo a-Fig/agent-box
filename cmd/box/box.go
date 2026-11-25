@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -1050,6 +1051,8 @@ while :; do
     off=$size
   fi
   if [ $fin = 1 ]; then
+    d=$( ( %[4]s ) 2>/dev/null | base64 -w0 )
+    [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
     exit 0
   fi
@@ -1060,7 +1063,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker))
+`, f, job, shq(exitMarker), digest.Script(f), shq(digestMarker))
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
@@ -1076,6 +1079,11 @@ const (
 // ended, followed by its exit code. attach reads it from that exec, so it
 // needs no second exec that a freeze could cut off.
 const exitMarker = "\x01box-exit "
+
+// digestMarker starts the line followScript prints on stderr before the exit
+// line when the job left a test report: the cut-down report (digest.Script),
+// base64. It rides on the follow, so the digest costs no exec of its own.
+const digestMarker = "\x01box-digest "
 
 // lockedWriter writes to w under mu.
 type lockedWriter struct {
@@ -1094,9 +1102,10 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 type exitFilter struct {
 	w    io.Writer
 	mu   sync.Mutex
-	buf  []byte
-	code string
-	seen bool
+	buf    []byte
+	code   string
+	seen   bool
+	report string // digestMarker's base64, when there was one
 }
 
 func (e *exitFilter) Write(p []byte) (int, error) {
@@ -1111,6 +1120,8 @@ func (e *exitFilter) Write(p []byte) (int, error) {
 		line := e.buf[:i+1]
 		if rest, ok := bytes.CutPrefix(line, []byte(exitMarker)); ok {
 			e.code, e.seen = strings.TrimSpace(string(rest)), true
+		} else if rest, ok := bytes.CutPrefix(line, []byte(digestMarker)); ok {
+			e.report = strings.TrimSpace(string(rest))
 		} else if _, err := e.w.Write(line); err != nil {
 			return len(p), err
 		}
@@ -1126,6 +1137,17 @@ func (e *exitFilter) flush() {
 		e.w.Write(e.buf)
 		e.buf = nil
 	}
+}
+
+// digest is the failure digest of the report the follow printed, or "".
+func (e *exitFilter) digest() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	b, err := base64.StdEncoding.DecodeString(e.report)
+	if err != nil {
+		return ""
+	}
+	return digest.Parse(string(b))
 }
 
 func (e *exitFilter) exit() (string, bool) {
@@ -1233,7 +1255,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		ended := a.Now()
 		a.markIdle(ctx, box)
 		a.reportEnded(ctx, job, code, ended, tail.String())
-		dg = a.digest(ctx, job)
+		dg = ef.digest()
 		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
 		return stateDone, code, dg, nil
 	}
@@ -1278,19 +1300,6 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		}
 		return "", 1, "", fmt.Errorf("lost job %s (reattach with: box job %s)", job, job)
 	}
-}
-
-// digest is the failure digest of an ended job (internal/digest), or "" when
-// the job left no test report or it can't be read: the result still stands.
-func (a *App) digest(ctx context.Context, job string) string {
-	box, _, _ := strings.Cut(job, ".")
-	ctx, cancel := a.probeCtx(ctx)
-	defer cancel()
-	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", digest.Script(workRoot+"/.box/"+job))
-	if err != nil {
-		return ""
-	}
-	return digest.Parse(out)
 }
 
 // probeCtx bounds the probes that follow a known result: a freeze there

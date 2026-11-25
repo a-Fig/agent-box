@@ -32,7 +32,9 @@ type vitestReport struct {
 }
 
 // Vitest digests vitest's JSON report, whole or cut down by vitestReduce.
-func Vitest(report string) string {
+func Vitest(report string) string { return vitestDigest(report, MaxBytes) }
+
+func vitestDigest(report string, max int) string {
 	var r vitestReport
 	if json.Unmarshal([]byte(strings.TrimSpace(report)), &r) != nil || r.NumTotalTests == nil {
 		return ""
@@ -56,7 +58,7 @@ func Vitest(report string) string {
 			broken++
 		}
 	}
-	var d writer
+	d := writer{max: max}
 	if r.NumFailedTests == 0 && broken == 0 {
 		d.head(fmt.Sprintf("PASS: %d tests passed%s (vitest)", r.NumPassedTests, skipped(skip)))
 		return d.String()
@@ -66,7 +68,7 @@ func Vitest(report string) string {
 		h += fmt.Sprintf(", %d test files failed outside their tests", broken)
 	}
 	d.head(h + " (vitest)")
-	left := r.NumFailedTests
+	listed := 0
 	for i, f := range r.TestResults {
 		file := rel(f.Name)
 		if failedIn(i) == 0 {
@@ -75,9 +77,7 @@ func Vitest(report string) string {
 			}
 			continue
 		}
-		if !d.line(file) {
-			break
-		}
+		d.line(file)
 		for _, a := range f.AssertionResults {
 			if a.Status != "failed" {
 				continue
@@ -92,17 +92,13 @@ func Vitest(report string) string {
 			} else if l := lineIn(msg, f.Name); l != "" {
 				s += file + ":" + l + ":"
 			}
-			if !d.item(s + " " + firstLine(msg)) {
-				break
-			}
-			left--
-		}
-		if d.full {
-			break
+			d.item(s + " " + firstLine(msg))
+			listed++
 		}
 	}
-	if left > 0 && d.full {
-		d.more(left, "failed tests")
+	// The report from the box keeps only the first failures.
+	if n := r.NumFailedTests - listed; n > 0 {
+		d.dropped += n
 	}
 	return d.String()
 }

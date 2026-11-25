@@ -16,24 +16,24 @@ const MaxBytes = 3 << 10
 // maxLine caps one line of a digest.
 const maxLine = 240
 
-// Parse writes the digest from Script's output: one block per report, or ""
-// when there was none.
+// Parse writes the digest from Script's output: one block per report, all
+// within MaxBytes, or "" when there was none.
 func Parse(out string) string {
-	var parts []string
+	var b strings.Builder
 	for _, sec := range strings.Split(out, "#box-digest ")[1:] {
 		kind, body, _ := strings.Cut(sec, "\n")
-		var d string
+		room := MaxBytes - b.Len()
+		if room < 2*reserve {
+			break
+		}
 		switch strings.TrimSpace(kind) {
 		case "go":
-			d = Go(body)
+			b.WriteString(goDigest(body, room))
 		case "vitest":
-			d = Vitest(body)
-		}
-		if d != "" {
-			parts = append(parts, d)
+			b.WriteString(vitestDigest(body, room))
 		}
 	}
-	return strings.Join(parts, "")
+	return b.String()
 }
 
 type goEvent struct {
@@ -47,7 +47,9 @@ type goEvent struct {
 }
 
 // Go digests a go test -json report, whole or cut down by goReduce.
-func Go(report string) string {
+func Go(report string) string { return goDigest(report, MaxBytes) }
+
+func goDigest(report string, max int) string {
 	type test struct{ pkg, name string }
 	var (
 		failed     []test
@@ -61,6 +63,8 @@ func Go(report string) string {
 		buildOut   = map[string][]string{}
 		pass, skip int
 		any        bool
+		counted    bool // the report is goReduce's, which counts per package
+		whole      bool // and it ends with box-end: nothing was cut off
 	)
 	sc := bufio.NewScanner(strings.NewReader(report))
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
@@ -72,6 +76,12 @@ func Go(report string) string {
 		any = true
 		t := test{e.Package, e.Test}
 		switch {
+		case e.Action == "box-count":
+			var c struct{ Pass, Skip int }
+			json.Unmarshal(sc.Bytes(), &c)
+			pass, skip, counted = pass+c.Pass, skip+c.Skip, true
+		case e.Action == "box-end":
+			whole = true
 		case e.Action == "build-output":
 			buildOut[e.ImportPath] = append(buildOut[e.ImportPath], e.Output)
 		case e.Action == "build-fail" && !buildSeen[e.ImportPath]:
@@ -105,7 +115,7 @@ func Go(report string) string {
 		return ""
 	}
 	// A test that failed only because a subtest did isn't a failure of its
-	// own: list and count the subtest.
+	// own: list and count the subtest. One with a message of its own is.
 	var leaves []test
 	for _, t := range failed {
 		parent := false
@@ -115,7 +125,7 @@ func Go(report string) string {
 				break
 			}
 		}
-		if !parent {
+		if !parent || hasOwn(out[t]) {
 			leaves = append(leaves, t)
 		}
 	}
@@ -126,15 +136,19 @@ func Go(report string) string {
 		failedIn[t.pkg] = true
 	}
 
-	var d writer
+	d := writer{max: max}
 	total := pass + skip + len(leaves)
+	cut := ""
+	if counted && !whole {
+		cut = ", counts cut short"
+	}
 	switch {
 	case len(leaves) > 0:
-		d.head(fmt.Sprintf("FAIL: %d of %d tests failed%s (go test)", len(leaves), total, skipped(skip)))
+		d.head(fmt.Sprintf("FAIL: %d of %d tests failed%s%s (go test)", len(leaves), total, skipped(skip), cut))
 	case len(buildFail) > 0 || len(pkgFailed) > 0:
-		d.head(fmt.Sprintf("FAIL: %d tests passed%s, but packages failed (go test)", pass, skipped(skip)))
+		d.head(fmt.Sprintf("FAIL: %d tests passed%s%s, but packages failed (go test)", pass, skipped(skip), cut))
 	default:
-		d.head(fmt.Sprintf("PASS: %d tests passed%s (go test)", pass, skipped(skip)))
+		d.head(fmt.Sprintf("PASS: %d tests passed%s%s (go test)", pass, skipped(skip), cut))
 		return d.String()
 	}
 	for _, p := range buildFail {
@@ -151,13 +165,10 @@ func Go(report string) string {
 		d.item("build failed: "+name, lines...)
 	}
 	pkg := ""
-	for i, t := range leaves {
+	for _, t := range leaves {
 		if t.pkg != pkg {
 			pkg = t.pkg
-			if !d.line(pkg) {
-				d.more(len(leaves)-i, "failed tests")
-				break
-			}
+			d.line(pkg)
 		}
 		loc, msg, more := goProblem(out[t])
 		s := "  " + t.name
@@ -167,10 +178,7 @@ func Go(report string) string {
 		if msg != "" {
 			s += " " + msg
 		}
-		if !d.item(s, more...) {
-			d.more(len(leaves)-i, "failed tests")
-			break
-		}
+		d.item(s, more...)
 	}
 	for _, p := range pkgFailed {
 		if failedIn[p] {
@@ -188,6 +196,17 @@ func Go(report string) string {
 		d.item("FAIL "+p, lines...)
 	}
 	return d.String()
+}
+
+// hasOwn says whether a test's output has a line of its own, not just the
+// "--- FAIL" frames of its subtests.
+func hasOwn(lines []string) bool {
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "--- ") && !strings.HasPrefix(l, "=== ") {
+			return true
+		}
+	}
+	return false
 }
 
 var (
@@ -268,11 +287,13 @@ func skipped(n int) string {
 	return ", " + strconv.Itoa(n) + " skipped"
 }
 
-// writer builds a digest within MaxBytes, always keeping room for the
-// line that says what didn't fit.
+// writer builds a digest within max bytes, always keeping room for the
+// line that says how many failures didn't fit.
 type writer struct {
-	b    strings.Builder
-	full bool
+	b       strings.Builder
+	max     int
+	full    bool
+	dropped int
 }
 
 const reserve = 120
@@ -282,7 +303,7 @@ func (w *writer) head(s string) { w.b.WriteString(clip(s) + "\n") }
 // line adds one line if it fits.
 func (w *writer) line(s string) bool {
 	s = clip(s) + "\n"
-	if w.full || w.b.Len()+len(s) > MaxBytes-reserve {
+	if w.full || w.b.Len()+len(s) > w.max-reserve {
 		w.full = true
 		return false
 	}
@@ -290,25 +311,28 @@ func (w *writer) line(s string) bool {
 	return true
 }
 
-// item adds a line and its continuation lines, all or none.
+// item adds one failure, a line and its continuation lines, all or none;
+// once the digest is full, it counts the failure instead.
 func (w *writer) item(s string, more ...string) bool {
 	all := clip(s) + "\n"
 	for _, m := range more {
 		all += clip(m) + "\n"
 	}
-	if w.full || w.b.Len()+len(all) > MaxBytes-reserve {
+	if w.full || w.b.Len()+len(all) > w.max-reserve {
 		w.full = true
+		w.dropped++
 		return false
 	}
 	w.b.WriteString(all)
 	return true
 }
 
-func (w *writer) more(n int, what string) {
-	fmt.Fprintf(&w.b, "  ...and %d more %s; the full log has them\n", n, what)
+func (w *writer) String() string {
+	if w.dropped == 0 {
+		return w.b.String()
+	}
+	return w.b.String() + fmt.Sprintf("  ...and %d more failures; the full log has them\n", w.dropped)
 }
-
-func (w *writer) String() string { return w.b.String() }
 
 var ansi = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
 
