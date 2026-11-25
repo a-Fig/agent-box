@@ -10,11 +10,14 @@ See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Quick start: a Linux server
 
-**Host** (Ubuntu or Debian, kernel 6.12+, as root). `provision/setup-host.sh` sets up Incus and the `agents` project, then prints the line a client adds the host with.
+**Host** (Ubuntu or Debian, kernel 6.12+, 6GB RAM and about 75GB free disk, as root). `provision/setup-host.sh` sets up Incus and the `agents` project, builds the `agent-base` image boxes start from, then prints the line a client adds the host with. Ubuntu 24.04 ships 6.8: first `sudo apt install linux-generic-hwe-24.04` and reboot.
 
 ```sh
-git clone https://github.com/a-Fig/agent-box && sudo agent-box/provision/setup-host.sh
+sudo apt install -y git
+git clone https://github.com/a-Fig/agent-box && sudo agent-box/provision/setup-host.sh --build-base
 ```
+
+Setup takes about 10 minutes, most of it the image build. The pool is 80% of the free disk under `/var/lib` and needs 60GiB: the 30GiB cache and one medium box ([provision/README.md](provision/README.md#a-linux-server) has the caps).
 
 **Client** (each machine your agents run on: Linux, macOS or Windows). Install `box` and the `incus` client, then add the host with the line setup printed.
 

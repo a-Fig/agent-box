@@ -221,7 +221,9 @@ else
   [ -z "$(incus storage list -f csv)" ] || die "Incus here already has storage pools, none named 'default'. Setup would change its default profile and HTTPS address, so it stops. Use a host without Incus, or one whose 'default' pool is btrfs."
   pool_n=${POOL_SIZE%GiB}
   case "$pool_n" in ''|*[!0-9]*) pool_n=0 ;; esac
-  [ "$pool_n" -ge 50 ] || die "pool size '$POOL_SIZE' isn't 50GiB or more, in GiB (the cache volume is 30GiB and a box 18GiB or more). Free disk space under /var/lib, or set AGENTS_POOL_SIZE=<n>GiB."
+  # 60: the 30GiB cache and one medium box (30GiB root), the default size and the size
+  # --build-base's builder launches at. With 50 (2026-11-25, a 60GB VM) both hit limits.disk.
+  [ "$pool_n" -ge 60 ] || die "pool size '$POOL_SIZE' isn't 60GiB or more, in GiB (the 30GiB cache volume and one medium box, 30GiB). It is 80% of the free disk under /var/lib: free about 75GB there, or set AGENTS_POOL_SIZE=<n>GiB (no more than is free)."
   sed "s/^\( *size:\) 200GiB$/\1 $POOL_SIZE/" "$HERE/incus-preseed.yaml" | incus admin init --preseed
   note "applied incus-preseed.yaml (btrfs pool of $POOL_SIZE, incusbr0 NAT bridge, HTTPS on :8443)"
 fi
@@ -451,7 +453,7 @@ if [ "$BUILD_BASE" -eq 1 ]; then
   fi
 else
   step "Image 'agent-base'"
-  note "not built (optional, but box launches it by default). Build with: setup-host.sh --build-base"
+  note "not built. box launches it, so runs fail with 'Image \"agent-base\" not found' until it is. Build with: setup-host.sh --build-base"
 fi
 
 # ---------------------------------------------------------------- VM capability
