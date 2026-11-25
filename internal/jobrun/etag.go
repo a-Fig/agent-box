@@ -11,8 +11,10 @@ import (
 // write it back with its ETag, and the tray writes the project's keys and
 // each box's CPU limits every few seconds when they differ from what it
 // wants, so a write can meet 412 "ETag doesn't match". A 412 means nothing
-// was written, so a retry is safe. It tries five times, 200ms, 400ms, ...
-// apart, and returns ctx.Err() if ctx ends while it waits.
+// was written, so a retry is safe. It also retries a delete Incus refuses
+// because another operation holds the instance, such as the tray's limit
+// write (#71). It tries five times, 200ms, 400ms, ... apart, and returns
+// ctx.Err() if ctx ends while it waits.
 func RetryETag(ctx context.Context, set func() error) error {
 	var err error
 	for try := 0; try < 5; try++ {
@@ -23,7 +25,7 @@ func RetryETag(ctx context.Context, set func() error) error {
 			case <-time.After(time.Duration(try) * 200 * time.Millisecond):
 			}
 		}
-		if err = set(); err == nil || !IsETagRace(err) {
+		if err = set(); err == nil || !(IsETagRace(err) || IsBusy(err)) {
 			return err
 		}
 	}
@@ -33,4 +35,10 @@ func RetryETag(ctx context.Context, set func() error) error {
 // IsETagRace says whether err is Incus refusing a write whose ETag is stale.
 func IsETagRace(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "ETag doesn't match")
+}
+
+// IsBusy says whether err is Incus refusing an operation because another
+// one holds the instance: 'Instance is busy running a "update" operation'.
+func IsBusy(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Instance is busy running")
 }
