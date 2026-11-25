@@ -1,11 +1,12 @@
 # v0.1.0: go/no-go (2026-11-25)
 
-**Go: tag v0.1.0 on `dc68a60`** (main, the dev→main merge #112). Then run the three hand steps
+**Go: tag v0.1.0 on `9ae1fde`** (main, the dev→main merge #126, frozen until the tag; its
+nightly is `v0.0.1-nightly.20261125.10`). Then run the three hand steps
 below once. Every installed part is a dev build, and a dev build never updates itself, so the tag
 alone changes nothing on either machine.
 
 ```sh
-git fetch origin && git tag v0.1.0 dc68a60 && git push origin v0.1.0
+git fetch origin && git tag v0.1.0 9ae1fde && git push origin v0.1.0
 ```
 
 release.yml then builds and publishes the release (about 4 minutes). It is the first stable
@@ -14,7 +15,7 @@ release: GitHub's `releases/latest` is 404 until then, and nightlies become `v0.
 ## After the tag, once
 
 Each part was checked against a test prerelease of `dc68a60` (`v0.0.0-test.13`, deleted
-afterwards); see Checked.
+afterwards), and nothing in these steps changed after it; see Checked.
 
 1. **Laptop, box.exe:** `box update --version v0.1.0`. It swaps `C:\Users\smash\bin\box.exe`
    for the release and keeps `box.old.exe`. Sessions whose `box mcp` started after #74
@@ -37,7 +38,7 @@ hourly, and boxd from its hourly timer.
 
 ## What's in it
 
-Everything since agent-box went live on the PC (2026-11-24), in 16 dev→main merges:
+Everything since agent-box went live on the PC (2026-11-24), in 20 dev→main merges:
 
 - **Boxes:**
   - `box run` syncs the worktree to a box on the gaming PC and runs a command there: named boxes
@@ -57,8 +58,27 @@ Everything since agent-box went live on the PC (2026-11-24), in 16 dev→main me
   - The dashboard and its app, at `https://agent-box.<tailnet>/`.
 - **Queue:** runs wait on the PC instead of being refused. A queued job evicts finished
   throwaways for room, now also when disk is the cap (#103).
+- **Since the full check (`dc68a60`, #119 to #126):** digest fixes for Go and vitest,
+  `box join` for Antigravity, `box pull` from a GPU box My PC stopped, "no stable release yet"
+  in place of GitHub's raw 404, and clearer My PC and GPU messages.
 - **Releases:** versions from tags; nightlies; self-update of box.exe and its skill, boxtray and
   boxd; `--rollback`. This is the first stable release.
+
+## Re-checked (2026-11-25, against `9ae1fde`)
+
+The fast part of the checklist used the rolled-out `box 9ae1fde`, CLI and a fresh `box mcp`. The
+PC ran tray `dc68a60` and boxd `eb6e478`. All passed:
+
+- **Smoke:** a new box at 2h; `go test ./internal/...` on it, back to 2h; detached at 24h, then
+  reattached with exit 7 and the full log, back to 2h; `rm`.
+- **Throwaway:** it runs and is kept 30 minutes.
+- **Pushed result:** `push: true`, ended and delivered.
+- **Failure digest:** a failing `go test` leads with `FAIL: 1 of 2 tests failed (go test)` and
+  `TestBroken  dg_test.go:9: want 3, got 2`, exit 1.
+- **GPU refusal:** a second `--gpu` exits 75, "the GPU box is in use (job …); run on CPU or
+  wait".
+- **My PC:** a CLI run exits 75, "pc is in My PC mode; run it locally".
+- **Queue:** `queued`, 1, `mypc`, and it started 2s after the switch back to Full.
 
 ## Checked (2026-11-25, against `dc68a60`)
 
@@ -98,14 +118,14 @@ Earlier the same day: the tray's self-update and rollback, headless, live on the
   task allows breakaway from its job object. Nobody was logged on at the PC. The headless path,
   which covers a missing tray, was checked.
 - **Memory reclaim to swap in My PC.** Not re-run this time; it passed on 2026-11-24.
-- **`deploy-boxd.sh`.** Not re-run; boxd `dc68a60` was deployed earlier the same day.
+- **`deploy-boxd.sh`.** Not re-run here; autumnal-coyote deployed boxd `eb6e478` with it the same day.
 - **The hourly check against a real stable release.** It can't be checked before one exists.
   The by-hand install it shares code with was checked (above).
 
 ## Known, not blocking
 
 - A box built inside a box reports the box's snapshot commit, not the repo's (`box 35c340e`
-  instead of `dc68a60`), because the snapshot is a commit of its own. Release builds come from
+  for a build of `dc68a60`), because the snapshot is a commit of its own. Release builds come from
   release.yml and are unaffected.
 - Commands in a box run as root, unlike most CI (README). One pi-vi test in about 6,000 depended
   on it.
