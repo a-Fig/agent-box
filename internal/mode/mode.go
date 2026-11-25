@@ -73,6 +73,3 @@ func (m Mode) priority() string {
 	}
 	return "0"
 }
-
-// legacyKeys are instance keys earlier versions set; they are removed if found.
-var legacyKeys = []string{"limits.cpu.allowance"}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/jobrun"
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 // The page's controls (docs/ui.md, "Controls"): the mode request, cancel a
@@ -166,7 +167,7 @@ func (w *Watcher) RequestMode(ctx context.Context, req dash.ModeRequest) (dash.M
 	defer cancel()
 	// The tray writes the project's keys every few seconds (jobrun.RetryETag).
 	if err := jobrun.RetryETag(ctx, func() error {
-		_, err := w.Incus.CLI(ctx, "", "project", "set", w.project(), keyModeRequest+"="+string(b))
+		_, err := w.Incus.CLI(ctx, "", "project", "set", mode.Project, mode.ProjectModeRequestKey+"="+string(b))
 		return err
 	}); err != nil {
 		return dash.Machine{}, err
@@ -177,13 +178,6 @@ func (w *Watcher) RequestMode(ctx context.Context, req dash.ModeRequest) (dash.M
 	w.machine.ModeRequested = &req
 	w.emit(dash.Event{Name: dash.EventMachine, Data: w.machine})
 	return w.machine, nil
-}
-
-func (w *Watcher) project() string {
-	if s, ok := w.Incus.(*Socket); ok {
-		return s.Proj
-	}
-	return "agents"
 }
 
 // CancelJob does what box cancel does, then records the job ended with 130.

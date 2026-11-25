@@ -136,7 +136,7 @@ Known limits. Subagents share their parent's thread, so a push wakes the parent:
 | Shared | `limits.cpu` = the size's Shared CPUs (1/2/4), `limits.cpu.priority=0` | 12GiB | Resumes paused boxes. |
 | Full | `limits.cpu` = the size's Full CPUs (2/4/8), `limits.cpu.priority=10` | 24GiB | Resumes paused boxes. |
 
-- `limits.cpu=N` is the real cap: the box can use at most N CPUs. `limits.cpu.allowance` is only a weight between Linux processes, so it does nothing against Windows; the tray removes it if it finds one. A box's memory stays as it was launched in every mode; the project's memory cap follows the mode (Memory, below).
+- `limits.cpu=N` is the real cap: the box can use at most N CPUs. `limits.cpu.allowance` is only a weight between Linux processes, so it does nothing against Windows. A box's memory stays as it was launched in every mode; the project's memory cap follows the mode (Memory, below).
 - **Every tick** the tray reads each instance's config from `incus list --format json` and sets only the keys that differ, so a limit an agent changed is put back, with no extra calls when nothing changed. In My PC it pauses any running instance on every tick, which also catches an agent resuming one.
 - Game detection was removed on 2026-11-25 (Tyler): the owner switches modes by hand; automatic switching may come later.
 - It uses an admin client cert, which agents don't have. The mode is stored in the `agents` project config as `user.agent-box.mode`, so `box` can read it. A mode check in `box` is advisory: an agent can ignore it. The tray's per-tick enforcement is what holds the limits.

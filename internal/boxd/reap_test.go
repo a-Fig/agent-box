@@ -3,6 +3,8 @@ package boxd
 import (
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 func TestEndedExpiry(t *testing.T) {
@@ -13,7 +15,7 @@ func TestEndedExpiry(t *testing.T) {
 		in := inst("w", "Running", "small", created)
 		in.Config["user.expires"] = expires.Format(time.RFC3339)
 		if throwaway {
-			in.Config[keyThrowaway] = "true"
+			in.Config[jobrun.ThrowawayKey] = "true"
 		}
 		return in
 	}
@@ -51,7 +53,7 @@ func TestReapEndedUnreadJob(t *testing.T) {
 		job, second := "w-0001.20261124-180000-ab12", "w-0001.20261124-180500-cd34"
 		r.f.set(func() {
 			in := inst("w-0001", "Running", "small", t0)
-			in.Config[keyThrowaway] = "true"
+			in.Config[jobrun.ThrowawayKey] = "true"
 			in.Config["user.expires"] = t0.Add(jobTTL).Format(time.RFC3339)
 			r.f.ins = []Instance{in}
 			r.f.jobs["w-0001"] = []fakeJob{{name: job, state: "running", log: "x", meta: metaJSON}}

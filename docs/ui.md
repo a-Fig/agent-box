@@ -315,12 +315,12 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
 | `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
-| `GET /api/queue`, `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |
+| `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |
 
 ### Shapes
 
 - **`Machine`:** `{id, name, reachable, mode, modeRequested: {mode, at, by} | null,
-  chosen: {mode, at} | null, trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
+  trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
   gpu}, wslMemory, boxd: Version | null, tray: Version | null}`.
   `Version` is `{commit, time, modified}`, the commit a binary was built from (`internal/version`).
@@ -329,8 +329,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   differ ("boxd e823842 (3h newer than tray)"): on 2026-11-25 the PC twice ran a boxd hours older than
   the repo, and nothing showed it.
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
-  key never written, or one holding a value boxtray doesn't write. `chosen` is
-  `user.agent-box.chosen`, the mode the enforcers act on (null if unset or not a mode).
+  key never written, or one holding a value boxtray doesn't write.
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
   memLimit, cpus, cpuPct}`
 - **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,

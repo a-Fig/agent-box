@@ -13,9 +13,6 @@ import (
 // The queue's endpoints (docs/queue.md, "API").
 func (s *Server) queueRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/queue", s.enqueue)
-	mux.HandleFunc("GET /api/queue", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, dash.QueuePage{Jobs: s.W.Queued()})
-	})
 	mux.HandleFunc("GET /api/queue/{job}", s.queuedJob)
 	mux.Handle("POST /api/queue/{job}/cancel", control(http.HandlerFunc(s.cancelQueued)))
 	mux.Handle("POST /api/queue/{job}/front", control(http.HandlerFunc(s.frontQueued)))
