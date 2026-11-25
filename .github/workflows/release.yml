@@ -61,7 +61,9 @@ jobs:
           }
           build windows amd64 box-windows-amd64.exe ./cmd/box
           build linux amd64 box-linux-amd64 ./cmd/box
+          build linux arm64 box-linux-arm64 ./cmd/box
           build darwin arm64 box-darwin-arm64 ./cmd/box
+          build darwin amd64 box-darwin-amd64 ./cmd/box
           build windows amd64 boxtray-windows-amd64.exe ./cmd/boxtray -H=windowsgui
           build linux amd64 boxd-linux-amd64 ./cmd/boxd
           # As LF, whatever the checkout did, since they run in the distro.

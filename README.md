@@ -1,12 +1,36 @@
 # agent-box
 
-Turns a Windows gaming PC on the tailnet into on-demand, disposable Linux boxes for coding agents, without touching Windows.
+Turns a spare Linux machine, or a Windows gaming PC, into on-demand, disposable Linux boxes that coding agents run heavy work on: test suites, `-race`, builds.
 
-- **Incus** in WSL2 does the boxes, API, auth and web UI.
-- **boxtray** sits in the Windows tray: one click picks *My PC*, *Shared* or *Full*.
+- **Incus** on the host does the boxes, API, auth and web UI.
 - **box** is a thin sync-and-run CLI + MCP for agents: `box run --new --reason "..." -- go test ./...`.
+- **boxtray**, on a Windows host, sits in the tray: one click picks *My PC*, *Shared* or *Full*. Without it a host stays in Shared.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
+
+## Quick start: a Linux server
+
+**Host** (Ubuntu or Debian, as root). Coming: `provision/setup-host.sh` isn't merged yet. It sets up Incus and the `agents` project, then prints the line a client adds the host with.
+
+```sh
+git clone https://github.com/a-Fig/agent-box && sudo agent-box/provision/setup-host.sh
+```
+
+**Client** (each machine your agents run on: Linux, macOS or Windows). Install `box` and the `incus` client, then add the host with the line setup printed.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/a-Fig/agent-box/main/install.sh | sh
+# Windows PowerShell: irm https://raw.githubusercontent.com/a-Fig/agent-box/main/install.ps1 | iex
+incus remote add pc https://<host>:8443 --token <token>
+```
+
+**Agent.** `box join` gives Claude Code, Codex and Antigravity the box tools. Or hand your agent [docs/agents/join.md](docs/agents/join.md), which also covers Cursor.
+
+```sh
+box join
+```
+
+A Windows gaming PC as the host, with the tray, is set up with [provision/README.md](provision/README.md).
 
 ## How fast
 
@@ -22,7 +46,7 @@ Measured runs, through `box run`:
 
 ## Using `box`
 
-Build it with `go build ./cmd/box`. It needs the Windows `incus` client with a remote named `pc` that can reach the `agents` project.
+Install it with the quick start above, or build it with `go build ./cmd/box`. It needs the `incus` client with a remote named `pc` that can reach the `agents` project.
 
 ```sh
 box status                            # worth offloading now? PC, mode, room per size, this repo's box
