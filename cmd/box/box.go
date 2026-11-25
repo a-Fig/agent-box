@@ -614,7 +614,7 @@ type RunOpts struct {
 	Dir string   // local git worktree
 	Cmd []string // one shell string, or argv to quote
 	Box string   // box to use; "" is the repo's own box
-	New bool     // use a throwaway box, deleted afterwards
+	New bool     // use a throwaway box, kept KeepEnded after the job, else deleted
 	// Size of a box launched for this run: "" is medium for a new box and
 	// any size for an existing one.
 	Size string
@@ -849,7 +849,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			}
 		}
 		if o.New {
-			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 		}
 		return r, err
 	}
@@ -866,7 +866,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true)
 	default:
-		fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 	}
 	return r, err
 }
