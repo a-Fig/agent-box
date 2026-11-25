@@ -144,5 +144,5 @@ if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then ver
 rm -f "$j.cancel.$$"
 test -f "$j.exit" || exit 4
 echo "$verdict $(cat "$j.exit")"
-`, root, job, marked, code)
+`, root, Shq(job), marked, code)
 }

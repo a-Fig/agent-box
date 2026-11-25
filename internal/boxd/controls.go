@@ -32,7 +32,9 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 // tailnet name from `tailscale whois`, else the login.
 func (s *Server) device(r *http.Request) string {
 	if s.W.Whois != nil {
-		ip := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0])
+		// The last address is the one the nearest proxy (tailscale serve) set.
+		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		ip := strings.TrimSpace(hops[len(hops)-1])
 		if net.ParseIP(ip) != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
@@ -62,7 +64,7 @@ func TailscaleWhois(ctx context.Context, ip string) string {
 	if w.Node.ComputedName != "" {
 		return w.Node.ComputedName
 	}
-	return strings.TrimSuffix(strings.SplitN(w.Node.Name, ".", 2)[0], ".")
+	return strings.SplitN(w.Node.Name, ".", 2)[0]
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -103,6 +105,10 @@ func (s *Server) deleteBox(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
+	if b.CreatedAt.IsZero() {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "createdAt names the box")
+		return
+	}
 	err := s.W.DeleteBox(r.Context(), r.PathValue("name"), b.CreatedAt, s.device(r))
 	writeControl(w, err, func() { w.WriteHeader(http.StatusNoContent) })
 }
@@ -110,6 +116,10 @@ func (s *Server) deleteBox(w http.ResponseWriter, r *http.Request) {
 func (s *Server) extendBox(w http.ResponseWriter, r *http.Request) {
 	var b dash.ExtendBody
 	if !decode(w, r, &b) {
+		return
+	}
+	if b.CreatedAt.IsZero() {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "createdAt names the box")
 		return
 	}
 	if !slices.Contains(dash.ExtendHours, b.Hours) {
@@ -207,6 +217,9 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 		return dash.Job{}, err
 	}
 	f := strings.Fields(string(out))
+	if len(f) == 2 && f[0] == "finished" {
+		return dash.Job{}, errEnded // it ended on its own first; the next poll records how
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.record(record{Type: recControl, Control: &controlRec{Action: "cancel", Target: key, By: by}})
@@ -216,21 +229,10 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 		return done, nil
 	}
 	before, now, code := *j, w.Now().UTC(), 130
-	if len(f) == 2 && f[0] == "finished" {
-		if c, err := parseInt(f[1]); err == nil {
-			code = c
-		}
-	}
 	j.State, j.Exit, j.EndedAt = dash.JobDone, &code, &now
 	delete(w.died, key)
 	w.settle(key, j, before)
 	return *j, nil
-}
-
-func parseInt(s string) (int, error) {
-	var n int
-	err := json.Unmarshal([]byte(s), &n)
-	return n, err
 }
 
 // boxFor finds the box of a name made at createdAt.
@@ -257,7 +259,7 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	defer cancel()
 	// Incus has no compare-and-delete; check again just before, so the window
 	// for a reuse of the name is the length of one call.
-	if err := w.checkCreated(ctx, name, createdAt); err != nil {
+	if _, err := w.checkCreated(ctx, name, createdAt); err != nil {
 		return err
 	}
 	if _, err := w.Incus.CLI(ctx, "", "delete", name, "--force"); err != nil {
@@ -269,21 +271,21 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	return nil
 }
 
-// checkCreated reads the box's creation time from Incus now.
-func (w *Watcher) checkCreated(ctx context.Context, name string, createdAt time.Time) error {
+// checkCreated reads the box from Incus now and checks its creation time.
+func (w *Watcher) checkCreated(ctx context.Context, name string, createdAt time.Time) (Instance, error) {
 	ins, err := w.Incus.Instances(ctx)
 	if err != nil {
-		return err
+		return Instance{}, err
 	}
 	for _, in := range ins {
 		if in.Name == name {
 			if !in.CreatedAt.Equal(createdAt) {
-				return errNameNew
+				return in, errNameNew
 			}
-			return nil
+			return in, nil
 		}
 	}
-	return errBoxGone
+	return Instance{}, errBoxGone
 }
 
 // ExtendBox adds hours to the later of now and the box's expiry.
@@ -294,12 +296,15 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
-	if err := w.checkCreated(ctx, name, createdAt); err != nil {
+	in, err := w.checkCreated(ctx, name, createdAt)
+	if err != nil {
 		return b, err
 	}
+	// From the expiry Incus holds now, not the poll's copy, which another
+	// writer may have moved since.
 	from := w.Now().UTC()
-	if b.ExpiresAt != nil && b.ExpiresAt.After(from) {
-		from = *b.ExpiresAt
+	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
+		from = t.UTC()
 	}
 	until := from.Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
 	if _, err := w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+until.Format(time.RFC3339)); err != nil {
