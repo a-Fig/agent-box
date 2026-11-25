@@ -36,7 +36,8 @@ A release is a pushed tag `vX.Y.Z` on `main`, as in Murmur.
 1. Merge the dev→main PR, as today: CI green, and every PR in it reviewed.
 2. Tag it. `.github/workflows/release.yml` builds the parts below, runs `govulncheck`, and
    publishes a GitHub release with `SHA256SUMS`:
-   - `box-windows-amd64.exe`, `box-linux-amd64`, `box-darwin-arm64`
+   - `box-windows-amd64.exe`, `box-linux-amd64`, `box-linux-arm64`, `box-darwin-arm64`,
+     `box-darwin-amd64` (`install.sh` and `install.ps1` download these)
    - `boxtray-windows-amd64.exe`
    - `boxd-linux-amd64`
    - `agent-box-boxd.service`, `install-boxd.sh`
