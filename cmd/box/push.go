@@ -139,14 +139,19 @@ type jobRecord struct {
 	Worktree string `json:"worktree"`
 	GPU      bool   `json:"gpu"`
 	New      bool   `json:"new"` // a throwaway box, kept endedKeep after the job
+	// Queued is a job box_run handed to boxd's queue: the watcher follows it
+	// through the queue first (waitQueued).
+	Queued bool `json:"queued,omitempty"`
 }
 
 // jobEnd is <job>.ended: everything needed to send the end again.
 type jobEnd struct {
-	Code int    `json:"code"`
-	Lost bool   `json:"lost,omitempty"`
-	Took int64  `json:"tookSeconds"`
-	Tail string `json:"tail,omitempty"`
+	Code int  `json:"code"`
+	Lost bool `json:"lost,omitempty"`
+	// Dropped is a queued job that left the queue without running.
+	Dropped bool   `json:"dropped,omitempty"`
+	Took    int64  `json:"tookSeconds"`
+	Tail    string `json:"tail,omitempty"`
 }
 
 // thread is the T3 thread of this session, or "".
@@ -303,9 +308,9 @@ func (a *App) releaseLease(job, ext, token string) {
 	}
 }
 
-// startWatch records a running job and starts its watcher. It says whether
-// the result will be pushed.
-func (a *App) startWatch(info jobMeta, job string, gpu, throwaway bool) bool {
+// startWatch records a running or queued job and starts its watcher. It
+// says whether the result will be pushed.
+func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) bool {
 	if !a.canPush() {
 		return false
 	}
@@ -313,7 +318,7 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway bool) bool {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	rec := jobRecord{Job: job, Thread: a.thread(), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway}
+	rec := jobRecord{Job: job, Thread: a.thread(), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
@@ -361,7 +366,7 @@ func (a *App) safetyNet(skip string) string {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".watchlog"} {
+			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog"} {
 				os.Remove(a.statePath(job, ext))
 			}
 			continue
@@ -457,7 +462,7 @@ func endedMessage(r jobRecord, e jobEnd) string {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
 	if r.New {
-		msg += fmt.Sprintf("Box and log kept %d minutes. ", int(endedKeep.Minutes()))
+		msg += fmt.Sprintf("Box and log kept up to %d minutes (a launch short of room may take them sooner). ", int(endedKeep.Minutes()))
 	}
 	return msg + fmt.Sprintf("Full log: box_job id %s offset 0. Artifacts: box_pull, before this repo's next run.", r.Job)
 }
@@ -585,6 +590,17 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 	lost := func() (jobEnd, bool) {
 		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines)}, true
 	}
+	if rec.Queued {
+		out, ok := w.waitQueued(ctx, rec)
+		switch {
+		case !ok:
+			return jobEnd{}, false
+		case out.end != nil:
+			return *out.end, true
+		case !out.started.IsZero():
+			start = out.started // took counts the run, not the wait
+		}
+	}
 	var pauseDeadline time.Time
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
@@ -685,7 +701,10 @@ func (a *App) deliver(ctx context.Context, rec jobRecord, end jobEnd) error {
 		return nil
 	}
 	msg := endedMessage(rec, end)
-	if end.Lost {
+	switch {
+	case end.Dropped:
+		msg = droppedMessage(rec)
+	case end.Lost:
 		msg = lostMessage(rec, end)
 	}
 	if err := a.send(ctx, rec.Thread, msg); err != nil {

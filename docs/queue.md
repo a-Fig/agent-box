@@ -50,7 +50,9 @@ to sit and wait. So it can hand the run to a queue and keep working.
 laptop and agent reaches.
 - The queue is a JSON file per job in `/var/lib/agent-box/queue/`, plus its bundle. It is
   crash-safe: on start, `boxd` reloads it, and drops a job without its bundle or a bundle without its
-  job.
+  job. A job's file records when a start began, before anything is launched or run. A start cut
+  short by a restart is then retried in the same box, unless the job's files are already in it, in
+  which case it has started and is not run twice.
 - **Scheduling.** Each poll (3s), `boxd` works out what each job waits for: My PC, a game, the GPU,
   or room for its size. A job on an existing running box needs no room. `boxd` starts at most one
   job at a time; the caps are read again on the next poll.
@@ -100,7 +102,8 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
 It is built after the push design and `boxd`'s read side, both of which it depends on.
 1. `boxd`: the queue store, the scheduler, the starter and the API.
 2. `box`: queue on no room or pause, the snapshot upload, `box watch` following queued jobs, the
-   nudge, and `queue: false`.
+   nudge, and `queue: false`. Built in `cmd/box/queue.go`: only `box_run` queues, since only it
+   can push. The CLI's `box run` still exits 75, because nothing would follow its job.
 3. The page: the Queue section and its controls. Overview and Jobs show the line in order, with
    each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
    **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page

@@ -41,6 +41,11 @@ type queued struct {
 	QueuedAt time.Time         `json:"queuedAt"`
 	Order    int64             `json:"order"` // lower starts first; front moves a job below the rest
 	Bytes    int64             `json:"bytes"` // the bundle's size
+	// Starting is when a start began, written before it launches a box or
+	// runs anything, and kept until the job leaves the queue. A boxd that
+	// restarts finds it and looks in the box before starting the job again,
+	// so a start cut short never runs the job twice.
+	Starting *time.Time `json:"starting,omitempty"`
 
 	view     dash.Job // the job as the page sees it, from Meta
 	starting bool
@@ -287,6 +292,16 @@ func (q *Queue) get(job string) (*queued, bool) {
 	defer q.mu.Unlock()
 	it, ok := q.items[job]
 	return it, ok
+}
+
+// markStarting records on disk that a start of it began at t.
+func (q *Queue) markStarting(it *queued, t time.Time) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if it.Starting == nil {
+		it.Starting = &t
+	}
+	return q.save(it)
 }
 
 func (q *Queue) setStarting(it *queued, v bool) {

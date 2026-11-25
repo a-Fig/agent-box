@@ -214,8 +214,13 @@ const refusalTimeout = 2 * time.Second
 // refuseErr reports a run turned away (exit 75) for err: no room or the GPU
 // taken.
 func (a *App) refuseErr(ctx context.Context, err error, m jobMeta) {
-	var g *errGPUBusy
-	a.refuse(ctx, err.Error(), m, func(context.Context) string {
+	a.refuse(ctx, err.Error(), m, errCause(err))
+}
+
+// errCause is the refusal cause of err: no room or the GPU taken.
+func errCause(err error) func(context.Context) string {
+	return func(context.Context) string {
+		var g *errGPUBusy
 		switch {
 		case errors.As(err, &g):
 			return refusedGPUBusy
@@ -223,7 +228,7 @@ func (a *App) refuseErr(ctx context.Context, err error, m jobMeta) {
 			return refusedFull
 		}
 		return ""
-	})
+	}
 }
 
 // refusePaused reports a run turned away because of paused, a reach or
@@ -231,7 +236,12 @@ func (a *App) refuseErr(ctx context.Context, err error, m jobMeta) {
 // gives a game as the reason. An unreachable PC or a frozen box in another
 // mode sends nothing.
 func (a *App) refusePaused(ctx context.Context, paused string, m jobMeta) {
-	a.refuse(ctx, paused+"; run it locally", m, func(ctx context.Context) string {
+	a.refuse(ctx, paused+"; run it locally", m, a.pausedCause(paused))
+}
+
+// pausedCause is the refusal cause of paused (see refusePaused).
+func (a *App) pausedCause(paused string) func(context.Context) string {
+	return func(ctx context.Context) string {
 		if !strings.HasSuffix(paused, " is in My PC mode") {
 			return ""
 		}
@@ -239,7 +249,28 @@ func (a *App) refusePaused(ctx context.Context, paused string, m jobMeta) {
 			return refusedYielding
 		}
 		return refusedMyPC
-	})
+	}
+}
+
+// turnAway queues a run that can't start now when q.o.Queue allows and the
+// cause is one the queue waits out (queueable); otherwise, or if boxd won't
+// take it, it refuses the run as before: exit 75.
+func (a *App) turnAway(ctx context.Context, q queueRun, msg string, cause func(context.Context) string) JobResult {
+	if q.o.Queue {
+		cctx, cancel := context.WithTimeout(ctx, refusalTimeout)
+		why := cause(cctx)
+		cancel()
+		if queueable(why, q.sz) {
+			r, ok, qmsg := a.enqueue(ctx, q)
+			if ok {
+				return r
+			}
+			msg += "; not queued: " + qmsg
+		}
+		cause = func(context.Context) string { return why }
+	}
+	a.refuse(ctx, msg, q.info, cause)
+	return JobResult{State: statePaused, Code: exitPaused}
 }
 
 // refuse prints msg and tells boxd the cause, as a best effort: errors are

@@ -98,6 +98,14 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if strings.HasPrefix(script, "test -e ") { // startedInBox, and startJob's own check
+		for _, j := range f.jobs[box] {
+			if strings.Contains(script, "/"+j.name+".log") {
+				return nil, nil
+			}
+		}
+		return nil, &ExitError{Code: 1}
+	}
 	for _, j := range f.jobs[box] {
 		if strings.Contains(script, j.name+".log") {
 			var off int

@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +72,9 @@ type App struct {
 	Post func(ctx context.Context, url string, body []byte) error
 	// Browse opens an address in the person's browser; tests replace it.
 	Browse func(url string) error
+	// HTTP sends requests to boxd for the queue (queue.go); nil is
+	// http.DefaultClient. Tests replace it.
+	HTTP func(*http.Request) (*http.Response, error)
 	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
 	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
 	// per-job files. Any of them nil or empty means no push.
@@ -461,13 +466,67 @@ func (a *App) reclaim(ctx context.Context) bool {
 	return any
 }
 
+// keptScript prints "kept" when a box runs no job and a job has ended there.
+func keptScript() string {
+	return "# kept jobs\n" + aliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
+ended=
+for p in *.pid; do
+  [ -e "$p" ] || continue
+  j=${p%%.pid}
+  if [ -e "$j.exit" ]; then ended=1; continue; fi
+  alive "$(cat "$p" 2>/dev/null)" "$j" && exit 0
+done
+[ -n "$ended" ] && echo kept
+exit 0
+`, workRoot)
+}
+
+// keptThrowaways lists the throwaway boxes kept after their job ended
+// (endedKeep: box run and boxd move a throwaway's expiry to then, for box
+// pull and the full log), the first to expire first. They hold their room
+// until the reaper deletes them, so a launch short of room deletes them, as
+// claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
+// kept box is a running throwaway whose expiry is within the keep window,
+// with no job running and one that ended; a throwaway still being set up
+// for its job has none ended.
+func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
+	var out []instance
+	for _, in := range insts {
+		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
+		if in.Config[throwawayKey] != "true" || in.Status != "Running" || err != nil ||
+			exp.After(a.Now().Add(endedKeep+time.Minute)) {
+			continue
+		}
+		look, cancel := a.probeCtx(ctx) // a box frozen since the list would hold the exec
+		res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
+		cancel()
+		if err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept" {
+			out = append(out, in)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Config[expiresKey] < out[j].Config[expiresKey] })
+	return out
+}
+
 // launch creates box name. Refused for the project's caps, it deletes
-// reclaimable boxes and tries once more.
+// reclaimable boxes and tries once more, then deletes kept throwaways one at
+// a time, trying again after each.
 // extra are more launch flags, like box new's reason.
 func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra ...string) error {
 	err := a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	if isNoRoom(err) && a.reclaim(ctx) {
 		err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
+	}
+	if isNoRoom(err) {
+		if insts, lerr := a.list(ctx); lerr == nil {
+			for _, in := range a.keptThrowaways(ctx, insts) {
+				fmt.Fprintf(a.Err, "box: deleting %s, kept after its job, for room\n", in.Name)
+				a.removeQuietly(ctx, in.Name)
+				if err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra); !isNoRoom(err) {
+					break
+				}
+			}
+		}
 	}
 	return err
 }
@@ -551,6 +610,9 @@ type RunOpts struct {
 	// Reason is the agent's why, for the .meta and refusals. The CLI and MCP
 	// require it; Run doesn't check it.
 	Reason string
+	// Queue hands a run that can't start now to boxd's queue instead of
+	// refusing it (queue.go). box_run sets it when the result can be pushed.
+	Queue bool
 }
 
 // exitTimeout is the exit code of a command the box killed at its timeout,
@@ -601,9 +663,14 @@ type JobResult struct {
 	Box   string `json:"box,omitempty"`
 	State string `json:"state,omitempty"`
 	Code  int    `json:"exitCode"`
-	// Push is set on a box_run that returned a running job: whether its
-	// result will arrive as a turn in the agent's T3 thread.
+	// Push is set on a box_run that returned a running or queued job:
+	// whether its result will arrive as a turn in the agent's T3 thread.
 	Push *bool `json:"push,omitempty"`
+	// A queued job's place in line, from 1, and what it waits for.
+	Position int    `json:"position,omitempty"`
+	Why      string `json:"why,omitempty"`
+
+	throwaway bool // a queued job's box is a throwaway, kept after the job
 }
 
 // Run syncs the worktree to a box, runs the command there and follows its
@@ -641,6 +708,18 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	a.warnSubmodules(ctx, rp.Top)
 	info := a.runInfo(ctx, rp, o, sz)
+	var id, bundle string
+	// qr is the run as the queue takes it, from where Run has got to. A run
+	// turned away by a pause gets a throwaway: the checks below on the repo's
+	// box (its size, that it isn't a throwaway) haven't run, and the tray may
+	// stop a frozen box, which the queue doesn't start again.
+	qr := func(paused bool) queueRun {
+		q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: info, bundle: bundle, ref: id}
+		if o.New || sz.GPU || paused {
+			q.box, q.new = rp.Name, true
+		}
+		return q
+	}
 
 	insts, paused := a.reach(ctx)
 	var inst *instance
@@ -657,8 +736,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			except = box
 		}
 		if err := a.claimGPU(ctx, insts, except); err != nil {
-			a.refuseErr(ctx, err, info)
-			return JobResult{State: statePaused, Code: exitPaused}, nil
+			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
 		}
 	}
 	if paused == "" && !o.New {
@@ -677,12 +755,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 	if paused != "" {
-		a.refusePaused(ctx, paused, info)
-		return JobResult{State: statePaused, Code: exitPaused}, nil
+		return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
 	}
 
-	id := a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
-	bundle, err := snapshot(ctx, a.R, rp.Top, id)
+	id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
+	bundle, err = snapshot(ctx, a.R, rp.Top, id)
 	if err != nil {
 		return JobResult{Code: 1}, err
 	}
@@ -697,13 +774,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
 		case isTempFail(err):
-			a.refuseErr(ctx, err, info)
-			return JobResult{State: statePaused, Code: exitPaused}, nil
+			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
 		case err != nil:
 			return JobResult{Code: 1}, err
 		case paused != "":
-			a.refusePaused(ctx, paused, info)
-			return JobResult{State: statePaused, Code: exitPaused}, nil
+			return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
 		}
 	}
 	if o.New {
@@ -713,8 +788,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
 			if isTempFail(err) {
-				a.refuseErr(ctx, err, info)
-				return JobResult{State: statePaused, Code: exitPaused}, nil
+				return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
 			}
 			return JobResult{Box: box, Code: 1}, err
 		}

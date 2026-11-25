@@ -375,3 +375,44 @@ func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
 		t.Fatalf("still queued: %+v", q)
 	}
 }
+
+// A start cut short by a boxd restart doesn't run the job twice: boxd looks
+// in the box first, and starts it only if its files aren't there.
+func TestQueueStartCutShortIsNotRepeated(t *testing.T) {
+	for _, inBox := range []bool{true, false} {
+		r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+		_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+		box, _, _ := strings.Cut(rep.Job, ".")
+		it, _ := r.w.Queue.get(rep.Job)
+		began := r.c.now().UTC()
+		if err := r.w.Queue.markStarting(it, began); err != nil {
+			t.Fatal(err)
+		}
+		// The restart: the store reloads it marked, and the box it launched is there.
+		q, err := OpenQueue(filepath.Join(r.dir, "queue"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if re, ok := q.get(rep.Job); !ok || re.Starting == nil || !re.Starting.Equal(began) {
+			t.Fatalf("reloaded: %+v", re)
+		}
+		r.f.set(func() {
+			in := inst(box, "Running", "small", r.c.now())
+			in.Config["user.box.throwaway"] = "true"
+			r.f.ins = append(r.f.ins, in)
+			if inBox {
+				r.f.jobs[box] = []fakeJob{{name: rep.Job, state: "running", log: "x"}}
+			}
+			r.f.cfg["user.agent-box.mode"] = "full"
+		})
+		r.c.add(3 * time.Second)
+		r.poll()
+		cli := strings.Join(r.f.cli, "\n")
+		if strings.Contains(cli, "launch ") || strings.Contains(cli, "exec "+box+" -- bash -lc ") == inBox {
+			t.Fatalf("in box %v: %s", inBox, cli)
+		}
+		if q := r.w.Queued(); len(q) != 0 {
+			t.Fatalf("in box %v: still queued: %+v", inBox, q)
+		}
+	}
+}
