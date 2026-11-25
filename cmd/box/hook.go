@@ -56,11 +56,21 @@ func (a *App) hookActive(thread string) bool {
 // Hook is `box hook`: it writes Claude Code's PostToolUse output for the
 // ended jobs of this session, or nothing.
 func (a *App) Hook(stdin io.Reader, out io.Writer) {
+	// The event. The thread comes from the environment, which a subagent and
+	// a claude started from the agent's shell inherit too: a subagent's event
+	// carries agent_id, and a child claude has its own session_id. Either
+	// would take the notice from the agent it is for.
+	var ev struct {
+		SessionID string `json:"session_id"`
+		AgentID   string `json:"agent_id"`
+	}
 	if stdin != nil {
-		io.Copy(io.Discard, io.LimitReader(stdin, 1<<20)) // the event; the thread comes from the environment
+		b, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
+		json.Unmarshal(b, &ev)
+		io.Copy(io.Discard, stdin)
 	}
 	thread := a.thread()
-	if !validThread.MatchString(thread) || a.StateDir == "" {
+	if !validThread.MatchString(thread) || a.StateDir == "" || ev.AgentID != "" {
 		return
 	}
 	if _, err := os.Stat(a.StateDir); err != nil {
@@ -78,7 +88,7 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 	for _, e := range ents {
 		have[e.Name()] = true
 	}
-	var msgs []string
+	var msgs, jobs []string
 	for _, e := range ents {
 		job, ok := strings.CutSuffix(e.Name(), ".ended")
 		if !ok || have[job+".notified"] || !have[job+".json"] {
@@ -86,13 +96,11 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		}
 		var rec jobRecord
 		var end jobEnd
-		if readJSON(a.statePath(job, ".json"), &rec) != nil || rec.Thread != thread || readJSON(a.statePath(job, ".ended"), &end) != nil {
+		if readJSON(a.statePath(job, ".json"), &rec) != nil || rec.Thread != thread || readJSON(a.statePath(job, ".ended"), &end) != nil ||
+			rec.Session != "" && ev.SessionID != "" && rec.Session != ev.SessionID {
 			continue
 		}
-		if won, err := a.claimBy(job, ".notified", "hook"); err != nil || !won {
-			continue
-		}
-		msgs = append(msgs, endMessage(rec, end))
+		msgs, jobs = append(msgs, endMessage(rec, end)), append(jobs, job)
 	}
 	if len(msgs) == 0 {
 		return
@@ -101,8 +109,17 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		"hookEventName":     "PostToolUse",
 		"additionalContext": strings.Join(msgs, "\n\n"),
 	}})
-	if err == nil {
-		out.Write(append(b, '\n'))
+	if err != nil {
+		return
+	}
+	if _, err := out.Write(append(b, '\n')); err != nil {
+		return
+	}
+	// Marked only once the output is written: a hook killed before this
+	// leaves the end owed, to be sent again, rather than lost. Two hooks at
+	// once (parallel tool calls) may both tell it, which is fine.
+	for _, job := range jobs {
+		a.claimBy(job, ".notified", "hook")
 	}
 }
 
@@ -149,12 +166,21 @@ func (c joinConfig) claudeSettingsPaths() []string {
 }
 
 // setHook adds box's PostToolUse hook to a settings file, or with leave
-// removes it. It says what it did, "" for nothing.
+// removes it. It says what it did, "" for nothing. A file it changes keeps its
+// keys, their order and a BOM, but is written back indented by 2 spaces with
+// LF line ends: leave restores the settings, not always the file's bytes. A
+// symlinked file is written through the link.
 func setHook(path, exe string, leave bool) (string, error) {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		path = p
+	}
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
+	bom := bytes.HasPrefix(b, utf8BOM)
+	b = bytes.TrimPrefix(b, utf8BOM)
+	write := func(v any) error { return writeOrdered(path, v, bom) }
 	root := &object{}
 	if len(bytes.TrimSpace(b)) > 0 {
 		v, err := decodeOrdered(b)
@@ -180,7 +206,7 @@ func setHook(path, exe string, leave bool) (string, error) {
 	}
 	// Take out every box hook, so join is repeatable and a moved binary is
 	// replaced rather than added twice.
-	removed := 0
+	removed, same := 0, false
 	var kept []any
 	for _, g := range groups {
 		grp, ok := g.(*object)
@@ -194,6 +220,7 @@ func setHook(path, exe string, leave bool) (string, error) {
 			if ho, ok := h.(*object); ok {
 				if cmd, _ := ho.get("command").(string); isBoxHook.MatchString(cmd) {
 					removed++
+					same = cmd == hookCommand(exe)
 					continue
 				}
 			}
@@ -220,7 +247,10 @@ func setHook(path, exe string, leave bool) (string, error) {
 		if len(hooks.keys) == 0 {
 			root.del("hooks")
 		}
-		return "removed the hook from " + path, writeOrdered(path, root)
+		return "removed the hook from " + path, write(root)
+	}
+	if removed == 1 && same {
+		return "hook already in " + path, nil // as it is: no rewrite
 	}
 	entry := &object{}
 	entry.set("type", "command")
@@ -235,9 +265,9 @@ func setHook(path, exe string, leave bool) (string, error) {
 		return "", err
 	}
 	if removed > 0 {
-		return "hook already in " + path, writeOrdered(path, root)
+		return "replaced the hook in " + path, write(root)
 	}
-	return "added the hook to " + path, writeOrdered(path, root)
+	return "added the hook to " + path, write(root)
 }
 
 // object is a JSON object that keeps its keys' order.
@@ -353,8 +383,13 @@ func marshalRaw(v any) ([]byte, error) {
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
-func writeOrdered(path string, v any) error {
+var utf8BOM = []byte{0xef, 0xbb, 0xbf}
+
+func writeOrdered(path string, v any, bom bool) error {
 	var b bytes.Buffer
+	if bom {
+		b.Write(utf8BOM)
+	}
 	e := json.NewEncoder(&b)
 	e.SetEscapeHTML(false)
 	e.SetIndent("", "  ")

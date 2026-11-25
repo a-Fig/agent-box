@@ -135,8 +135,11 @@ func spawnWatcher(stateDir, job string) error {
 
 // jobRecord is <job>.json.
 type jobRecord struct {
-	Job      string `json:"job"`
-	Thread   string `json:"thread"` // the session the result is for
+	Job    string `json:"job"`
+	Thread string `json:"thread"` // the session the result is for
+	// Session is Claude Code's session ID, when box_run ran under Claude
+	// Code: box hook tells only that session, not a claude started inside it.
+	Session  string `json:"session,omitempty"`
 	Reason   string `json:"reason"`
 	Command  string `json:"command"`
 	Worktree string `json:"worktree"`
@@ -321,7 +324,7 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	rec := jobRecord{Job: job, Thread: a.thread(), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
+	rec := jobRecord{Job: job, Thread: a.thread(), Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
@@ -357,6 +360,12 @@ func (a *App) safetyNet(skip string) string {
 		if strings.HasPrefix(name, ".claim-") || strings.HasPrefix(name, ".tmp-") {
 			if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > tempKeep {
 				os.Remove(filepath.Join(a.StateDir, name)) // left by a crashed writer
+			}
+			continue
+		}
+		if strings.HasSuffix(name, ".hookseen") {
+			if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
+				os.Remove(filepath.Join(a.StateDir, name)) // a thread long gone
 			}
 			continue
 		}

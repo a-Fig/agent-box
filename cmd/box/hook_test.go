@@ -115,6 +115,7 @@ func TestWatcherLeavesTheEndToARunningHook(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newPushEnv(t, &fakePC{t: t}, "thread-a")
 			a := e.a
+			a.WatchPoll = 50 * time.Millisecond // a grace of 32 steps, about 1.6s: room for the hook on a slow runner
 			job := "widget.20261123-115000-aaaa"
 			hookJob(t, a, job, "thread-a", &end, false)
 			if c.hookSeen {
@@ -256,5 +257,70 @@ func TestJoinLeavesABadSettingsFileAlone(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(p); string(b) != "{ not json" {
 		t.Fatalf("file changed: %q", b)
+	}
+}
+
+// A subagent's tool call, or a claude started inside the session, doesn't
+// take the notice: its event says so, by agent_id or another session_id.
+func TestHookSkipsSubagentsAndOtherSessions(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t}, "thread-a")
+	a := e.a
+	job := "widget.20261123-115000-aaaa"
+	writeJSON(a.statePath(job, ".json"), jobRecord{Job: job, Thread: "thread-a", Session: "sess-1", Command: "go test ./..."})
+	writeJSON(a.statePath(job, ".ended"), jobEnd{Code: 0, Took: 9})
+	for _, ev := range []string{`{"session_id":"sess-1","agent_id":"sub-1"}`, `{"session_id":"sess-2"}`} {
+		var out bytes.Buffer
+		a.Hook(strings.NewReader(ev), &out)
+		if out.Len() != 0 || a.exists(job, ".notified") {
+			t.Fatalf("event %s: said %q, notified %v", ev, out.String(), a.exists(job, ".notified"))
+		}
+	}
+	var out bytes.Buffer
+	a.Hook(strings.NewReader(`{"session_id":"sess-1"}`), &out)
+	if !strings.Contains(out.String(), job) || !a.exists(job, ".notified") {
+		t.Fatalf("its own session: %q", out.String())
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// A hook that can't write its output leaves the end owed, for the watcher
+// or the next hook.
+func TestHookLeavesTheEndOwedWhenItCantWrite(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t}, "thread-a")
+	job := "widget.20261123-115000-aaaa"
+	hookJob(t, e.a, job, "thread-a", &jobEnd{Code: 0, Took: 9}, false)
+	e.a.Hook(nil, failWriter{})
+	if e.a.exists(job, ".notified") {
+		t.Fatal("marked notified with nothing written")
+	}
+}
+
+// A settings file with a BOM keeps it, and a join that finds its hook in
+// place leaves the file's bytes alone, however they are laid out.
+func TestJoinKeepsABOMAndAnInstalledHook(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "settings.json")
+	exe := filepath.Join(dir, "box.exe")
+	write(t, p, "\xef\xbb\xbf{\r\n    \"model\": \"opus\"\r\n}\r\n")
+	if did, err := setHook(p, exe, false); err != nil || !strings.HasPrefix(did, "added") {
+		t.Fatalf("setHook = %q, %v", did, err)
+	}
+	b, _ := os.ReadFile(p)
+	if !bytes.HasPrefix(b, []byte("\xef\xbb\xbf{")) || !strings.Contains(string(b), `/box.exe\" hook"`) {
+		t.Fatalf("after join:\n%q", b)
+	}
+	laidOut := strings.Replace(string(b), "\n", "\r\n", -1) // as an editor might save it
+	write(t, p, laidOut)
+	if did, err := setHook(p, exe, false); err != nil || !strings.HasPrefix(did, "hook already") {
+		t.Fatalf("again: %q, %v", did, err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != laidOut {
+		t.Fatal("rewrote a file whose hook was in place")
+	}
+	if did, err := setHook(p, filepath.Join(dir, "moved", "box.exe"), false); err != nil || !strings.HasPrefix(did, "replaced") {
+		t.Fatalf("moved: %q, %v", did, err)
 	}
 }
