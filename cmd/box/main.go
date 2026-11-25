@@ -45,6 +45,9 @@ const usage = `usage:
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
   box --version                             the release and commit this box was built from
+  box update [--version <tag>] [--rollback] update box to the latest stable release now, install
+                                            a release or nightly by tag, or swap box.old back
+                                            (box mcp checks hourly; AGENT_BOX_NO_UPDATE=1 stops it)
 
 --reason (required for run): one or two sentences, 10 to 300 characters, on
 why this needs a box. The PC's owner sees it on the dashboard.
@@ -276,10 +279,44 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		return 0
 	case "mcp":
+		go autoUpdate(ctx, a)
 		if exe, err := os.Executable(); err == nil {
 			a.MCPExe = exe
 		}
 		if err := serveMCP(ctx, a, stdin, a.Out); err != nil {
+			return fail(err)
+		}
+		return 0
+	case "update":
+		tag := fs.String("version", "", "install this release tag, a nightly included")
+		rollback := fs.Bool("rollback", false, "swap box.old back in")
+		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 0 || *rollback && *tag != "" {
+			fmt.Fprint(a.Err, usageText())
+			return 2
+		}
+		u, err := newUpdater(a, a.Out)
+		if err == nil {
+			if *rollback {
+				err = u.Rollback(ctx)
+			} else {
+				err = u.Update(ctx, *tag)
+			}
+		}
+		if err != nil {
+			return fail(err)
+		}
+		return 0
+	case "skill-sync": // from an updater (update.go): print the skill's SHA-256, or update copies of an old one
+		if len(args) == 1 {
+			fmt.Fprintln(a.Out, skillSHA())
+			return 0
+		}
+		home, err := os.UserHomeDir()
+		if err == nil { // not box join's config: that refuses a box under the temp folder
+			err = skillSync(joinConfig{Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+				CodexHome: os.Getenv("CODEX_HOME"), Out: a.Out}, args[1:]...)
+		}
+		if err != nil {
 			return fail(err)
 		}
 		return 0
