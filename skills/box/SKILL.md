@@ -16,7 +16,7 @@ description: Offload heavy test runs and builds from this laptop to a disposable
 4. **`state: queued`**: no room, My PC, or the GPU taken; a snapshot waits in line and the result is pushed. Can't wait? Run locally and `box_cancel` it.
 5. **`state: refused` (exit 75): not queued (PC busy, paused or unreachable): run locally.** So is a pushed "lost". A "paused" job may resume; run locally instead? `box_cancel` it. `done` with exit 75 is the command's own.
 6. `go test`/vitest results lead with failures (file:line); `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
-7. `box_pull` fetches reports or build output before the repo's next run replaces it. Parallel runs: `new: true`.
+7. `box_pull` fetches reports or build output before the repo's next run replaces it, or a queued job takes a `new` box's room. Parallel runs: `new: true`.
 
 Boxes are throwaway; `/cache` survives.
 

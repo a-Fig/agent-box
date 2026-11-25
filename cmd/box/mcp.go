@@ -70,7 +70,7 @@ var tools = []tool{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
-		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept 30 minutes after the run for box_pull, then deleted. Use it for parallel runs on one repo, which otherwise take turns."},
+		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept up to 30 minutes after the run for box_pull, then deleted; a queued job or another launch that needs the room deletes it sooner. Use it for parallel runs on one repo, which otherwise take turns."},
 		"size":    sizeArg,
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
@@ -79,7 +79,7 @@ var tools = []tool{
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
 	}, "dir", "command", "reason"), jobOutput},
-	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept 30 minutes after its job ends (for box_pull), then deleted. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs, newest first, with state, start time and log size; use it to find a job ID you lost. " + pausedHint, obj(map[string]any{
+	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept up to 30 minutes after its job ends (for box_pull), unless another run needs the room. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs, newest first, with state, start time and log size; use it to find a job ID you lost. " + pausedHint, obj(map[string]any{
 		"id":     str("Job ID from box_run. Omit to list jobs."),
 		"wait":   str(`Stop waiting after this long. Default 10m.`),
 		"offset": integer("Read the log from this byte offset, without waiting. Default 0."),

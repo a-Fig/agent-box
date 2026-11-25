@@ -588,7 +588,7 @@ func endedMessage(r jobRecord, e jobEnd) string {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
 	if r.New {
-		msg += fmt.Sprintf("Box and log kept up to %d minutes (a launch short of room may take them sooner). ", int(endedKeep.Minutes()))
+		msg += fmt.Sprintf("Box and log kept up to %d minutes (a queued job or another launch that needs the room takes them sooner). ", int(endedKeep.Minutes()))
 	}
 	return msg + fmt.Sprintf("Full log: box_job id %s offset 0. Artifacts: box_pull, before this repo's next run.", r.Job)
 }
