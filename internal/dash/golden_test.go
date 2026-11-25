@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,8 +78,11 @@ func TestScenariosShowTheirCase(t *testing.T) {
 	if s := get("busy"); len(s.State.Boxes) != 3 || count(s.State.Jobs, dash.JobRunning) != 2 {
 		t.Errorf("busy has %d boxes and %d running jobs, want 3 and 2", len(s.State.Boxes), count(s.State.Jobs, dash.JobRunning))
 	}
-	if m := get("yielding").State.Machines[0]; !m.Yielding || m.ModeRequested == nil || m.Mode != dash.ModeMyPC {
+	if m := get("yielding").State.Machines[0]; !m.Yielding || m.ModeRequested == nil || m.Mode != dash.ModeMyPC || m.Chosen == nil || m.Chosen.Mode == dash.ModeMyPC {
 		t.Errorf("yielding: %+v", m)
+	}
+	if m := get("busy").State.Machines[0]; m.Chosen == nil || m.Chosen.Mode != m.Mode {
+		t.Errorf("busy's chosen mode is %+v, its mode %s", m.Chosen, m.Mode)
 	}
 	full := get("full")
 	if r := full.State.Machines[0].Room; r != (dash.Room{}) {
@@ -90,6 +94,17 @@ func TestScenariosShowTheirCase(t *testing.T) {
 	}
 	if refused == 0 {
 		t.Error("full has no refusals for full caps")
+	}
+	for name, want := range map[string]int{"full": 3, "yielding": 2, "busy": 0} {
+		if n := count(get(name).State.Jobs, dash.JobQueued); n != want {
+			t.Errorf("%s has %d queued jobs, want %d", name, n, want)
+		}
+	}
+	if m := get("headless").State.Machines[0]; m.Enforcer != dash.EnforcerHeadless || !m.TrayAlive(goldenNow) || m.Mode != dash.ModeFull || m.ModeRequested == nil {
+		t.Errorf("headless: %+v", m)
+	}
+	if m := get("busy").State.Machines[0]; m.Enforcer != dash.EnforcerTray {
+		t.Errorf("busy's enforcer is %q", m.Enforcer)
 	}
 	if s := get("tray-down"); s.State.Machines[0].TrayAlive(s.State.Now) {
 		t.Error("tray-down's tray is alive")
@@ -117,6 +132,14 @@ func TestScenarioJobs(t *testing.T) {
 		for _, j := range append(s.State.Jobs, s.Jobs.Jobs...) {
 			if j.Key != dash.JobKey(j.Box, j.ID, j.StartedAt) {
 				t.Errorf("%s: key %q isn't box/id/startedAt", name, j.Key)
+			}
+			if j.State == dash.JobQueued {
+				// While it waits, StartedAt is QueuedAt (dash.Job).
+				if j.QueuedAt == nil || !j.StartedAt.Equal(*j.QueuedAt) || j.Position < 1 || !slices.Contains(dash.Refusals, j.Why) {
+					t.Errorf("%s: queued job %+v breaks the queue's rules", name, j)
+				}
+			} else if j.Position != 0 || j.Why != "" {
+				t.Errorf("%s: %s job %q has a place in the queue", name, j.State, j.Key)
 			}
 			if j.Kind != dash.Classify(j.Command, j.GPU) {
 				t.Errorf("%s: %q is %s, but the table says %s", name, j.Command, j.Kind, dash.Classify(j.Command, j.GPU))

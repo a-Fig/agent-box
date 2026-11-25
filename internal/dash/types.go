@@ -25,9 +25,26 @@ const (
 // Modes lists the modes a person can ask for, in the switch's order.
 var Modes = []string{ModeFull, ModeShared, ModeMyPC}
 
-// TrayStaleAfter is how old Machine.TrayLastSeen may be before the tray counts
-// as down. The tray writes user.agent-box.tray-seen every 30s.
+// TrayStaleAfter is how old Machine.TrayLastSeen may be before the enforcer
+// counts as down. The active enforcer writes user.agent-box.tray-seen every 30s.
 const TrayStaleAfter = 90 * time.Second
+
+// Enforcers: which process applies the mode, Machine.Enforcer, from
+// user.agent-box.enforcer as boxtray writes it. The tray runs while someone is
+// logged on to the PC; the headless enforcer (boxtray --headless) runs while
+// nobody is, and has no game detection.
+const (
+	EnforcerTray     = "tray"
+	EnforcerHeadless = "headless"
+)
+
+// ChosenMode is the mode the enforcers act on, the project key user.agent-box.chosen
+// ({mode, at} JSON): the last pick, a tray click or an adopted request, and At when it was made.
+// While a game makes the PC yield, it is the mode that comes back when the game ends.
+type ChosenMode struct {
+	Mode string    `json:"mode"`
+	At   time.Time `json:"at"`
+}
 
 // ModeRequest is a mode someone asked for from the page, waiting for the tray
 // to apply it (user.agent-box.mode-request). By is the asking device.
@@ -63,15 +80,18 @@ type Machine struct {
 	Mode          string       `json:"mode"`
 	ModeReason    string       `json:"modeReason"` // why, while yielding: "gaming: steam:570"
 	ModeRequested *ModeRequest `json:"modeRequested"`
+	Chosen        *ChosenMode  `json:"chosen"` // null until a pick is stored
 	Yielding      bool         `json:"yielding"`
-	TrayLastSeen  *time.Time   `json:"trayLastSeen"` // null: never seen
+	TrayLastSeen  *time.Time   `json:"trayLastSeen"` // the active enforcer's heartbeat; null: never seen
+	Enforcer      string       `json:"enforcer"`     // who wrote it: EnforcerTray, EnforcerHeadless, or "" if unknown
 	Caps          Resources    `json:"caps"`
 	Allocated     Resources    `json:"allocated"`
 	Room          Room         `json:"room"`
 	WSLMemory     int64        `json:"wslMemory"` // bytes the distro's VM holds now
 }
 
-// TrayAlive reports whether the tray has written its heartbeat lately.
+// TrayAlive reports whether the active enforcer, tray or headless, has written its heartbeat
+// lately.
 func (m Machine) TrayAlive(now time.Time) bool {
 	return m.TrayLastSeen != nil && now.Sub(*m.TrayLastSeen) < TrayStaleAfter
 }
@@ -374,6 +394,13 @@ const (
 
 // SSE event names on GET /api/events. The first event is EventState; each
 // after it carries one whole object that replaces the old one.
+//
+// The queue rides on these: a job's queuing, and every change to a waiting
+// job's Position or Why, is an EventJob with the whole job, so the page can
+// keep the line from events alone. When it starts or is cancelled, an
+// EventJobGone takes its waiting key away; a started job then comes as an
+// EventJob under its running key (its StartedAt is the start), with the same
+// ID and QueuedAt.
 const (
 	EventState   = "state"    // State
 	EventMachine = "machine"  // Machine

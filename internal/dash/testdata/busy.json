@@ -10,8 +10,13 @@
         "mode": "full",
         "modeReason": "",
         "modeRequested": null,
+        "chosen": {
+          "mode": "full",
+          "at": "2026-11-24T15:30:00Z"
+        },
         "yielding": false,
         "trayLastSeen": "2026-11-24T17:29:48Z",
+        "enforcer": "tray",
         "caps": {
           "cpu": 24,
           "memory": 12884901888,

@@ -101,4 +101,8 @@ It is built after the push design and `boxd`'s read side, both of which it depen
 1. `boxd`: the queue store, the scheduler, the starter and the API.
 2. `box`: queue on no room or pause, the snapshot upload, `box watch` following queued jobs, the
    nudge, and `queue: false`.
-3. The page: the Queue section and its controls.
+3. The page: the Queue section and its controls. Overview and Jobs show the line in order, with
+   each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
+   **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
+   says where it is in line. The `full` and `yielding` fixtures hold queued jobs, and the devserver
+   plays the queue. Counting queued jobs in History is still to do.

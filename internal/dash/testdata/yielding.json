@@ -14,8 +14,13 @@
           "at": "2026-11-24T17:27:00Z",
           "by": "dev-laptop"
         },
+        "chosen": {
+          "mode": "full",
+          "at": "2026-11-24T10:30:00Z"
+        },
         "yielding": true,
         "trayLastSeen": "2026-11-24T17:29:48Z",
+        "enforcer": "tray",
         "caps": {
           "cpu": 24,
           "memory": 12884901888,
@@ -99,6 +104,62 @@
         "why": ""
       },
       {
+        "key": "lantern/20261124-172550-3eb4/2026-11-24T17:25:50Z",
+        "id": "20261124-172550-3eb4",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "queued",
+        "exit": null,
+        "startedAt": "2026-11-24T17:25:50Z",
+        "endedAt": null,
+        "reason": "Checking the whole module after rebasing on main, while I keep editing.",
+        "command": "go vet ./... \u0026\u0026 go test ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "fa9f18d96fb2f0390f174c281c38fc574860379e",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "",
+        "queuedAt": "2026-11-24T17:25:50Z",
+        "position": 1,
+        "why": "yielding"
+      },
+      {
+        "key": "tidepool-6d7c/20261124-172905-b014/2026-11-24T17:29:05Z",
+        "id": "20261124-172905-b014",
+        "box": "tidepool-6d7c",
+        "machine": "pc",
+        "state": "queued",
+        "exit": null,
+        "startedAt": "2026-11-24T17:29:05Z",
+        "endedAt": null,
+        "reason": "Production build to check the bundle size budget.",
+        "command": "npm run build",
+        "kind": "build",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "main",
+        "commit": "ab1b992013ef7a2c429436a25bc2520acf218cd2",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "small",
+        "gpu": false,
+        "tail": "",
+        "queuedAt": "2026-11-24T17:29:05Z",
+        "position": 2,
+        "why": "yielding"
+      },
+      {
         "key": "tidepool-2364/20261124-152615-978d/2026-11-24T15:26:15Z",
         "id": "20261124-152615-978d",
         "box": "tidepool-2364",
@@ -177,7 +238,7 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [  3%]\ntests/test_data.py ..................................... [  6%]\ntests/test_model.py .......... [ 10%]\ntests/test_schedule.py .............................. [ 13%]\ntests/test_tokenizer.py ......... [ 16%]\ntests/test_data.py .................................... [ 20%]\ntests/test_model.py ................................. [ 23%]\ntests/test_schedule.py .............................. [ 26%]\ntests/test_tokenizer.py ............. [ 30%]\ntests/test_data.py ................................... [ 33%]\ntests/test_model.py ............................... [ 36%]\ntests/test_schedule.py .................................. [ 40%]\ntests/test_tokenizer.py ............................ [ 43%]\ntests/test_data.py ........... [ 46%]\ntests/test_model.py ............................ [ 50%]\ntests/test_schedule.py ........................ [ 53%]\ntests/test_tokenizer.py ........................... [ 56%]\ntests/test_data.py .................................... [ 60%]\ntests/test_model.py ........... [ 63%]\ntests/test_schedule.py .................................... [ 66%]\ntests/test_tokenizer.py ........ [ 70%]\ntests/test_data.py ......................... [ 73%]\ntests/test_model.py ........................ [ 76%]\ntests/test_schedule.py .................................. [ 80%]\ntests/test_tokenizer.py ........................ [ 83%]\ntests/test_data.py ........................ [ 86%]\ntests/test_model.py .......................... [ 90%]\ntests/test_schedule.py ............. [ 93%]\ntests/test_tokenizer.py ............................. [ 96%]\ntests/test_data.py ..................................... [100%]\n======== 318 passed in 412.80s ========\n",
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py .................................... [  3%]\ntests/test_data.py .................. [  6%]\ntests/test_model.py ............. [ 10%]\ntests/test_schedule.py .......... [ 13%]\ntests/test_tokenizer.py ........... [ 16%]\ntests/test_data.py ........... [ 20%]\ntests/test_model.py ..................................... [ 23%]\ntests/test_schedule.py .................................... [ 26%]\ntests/test_tokenizer.py .................. [ 30%]\ntests/test_data.py ....................... [ 33%]\ntests/test_model.py .................. [ 36%]\ntests/test_schedule.py .......... [ 40%]\ntests/test_tokenizer.py ........ [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py ................ [ 50%]\ntests/test_schedule.py ................ [ 53%]\ntests/test_tokenizer.py ............. [ 56%]\ntests/test_data.py ...................... [ 60%]\ntests/test_model.py ........ [ 63%]\ntests/test_schedule.py ......... [ 66%]\ntests/test_tokenizer.py ................................ [ 70%]\ntests/test_data.py ............. [ 73%]\ntests/test_model.py ......... [ 76%]\ntests/test_schedule.py ............................... [ 80%]\ntests/test_tokenizer.py .................................. [ 83%]\ntests/test_data.py ..................................... [ 86%]\ntests/test_model.py .................. [ 90%]\ntests/test_schedule.py ......... [ 93%]\ntests/test_tokenizer.py ................................ [ 96%]\ntests/test_data.py .................................... [100%]\n======== 318 passed in 412.80s ========\n",
         "queuedAt": null,
         "position": 0,
         "why": ""
@@ -714,7 +775,7 @@
         },
         "size": "medium",
         "gpu": false,
-        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [  3%]\ntests/test_data.py ..................................... [  6%]\ntests/test_model.py .......... [ 10%]\ntests/test_schedule.py .............................. [ 13%]\ntests/test_tokenizer.py ......... [ 16%]\ntests/test_data.py .................................... [ 20%]\ntests/test_model.py ................................. [ 23%]\ntests/test_schedule.py .............................. [ 26%]\ntests/test_tokenizer.py ............. [ 30%]\ntests/test_data.py ................................... [ 33%]\ntests/test_model.py ............................... [ 36%]\ntests/test_schedule.py .................................. [ 40%]\ntests/test_tokenizer.py ............................ [ 43%]\ntests/test_data.py ........... [ 46%]\ntests/test_model.py ............................ [ 50%]\ntests/test_schedule.py ........................ [ 53%]\ntests/test_tokenizer.py ........................... [ 56%]\ntests/test_data.py .................................... [ 60%]\ntests/test_model.py ........... [ 63%]\ntests/test_schedule.py .................................... [ 66%]\ntests/test_tokenizer.py ........ [ 70%]\ntests/test_data.py ......................... [ 73%]\ntests/test_model.py ........................ [ 76%]\ntests/test_schedule.py .................................. [ 80%]\ntests/test_tokenizer.py ........................ [ 83%]\ntests/test_data.py ........................ [ 86%]\ntests/test_model.py .......................... [ 90%]\ntests/test_schedule.py ............. [ 93%]\ntests/test_tokenizer.py ............................. [ 96%]\ntests/test_data.py ..................................... [100%]\n======== 318 passed in 412.80s ========\n",
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py .................................... [  3%]\ntests/test_data.py .................. [  6%]\ntests/test_model.py ............. [ 10%]\ntests/test_schedule.py .......... [ 13%]\ntests/test_tokenizer.py ........... [ 16%]\ntests/test_data.py ........... [ 20%]\ntests/test_model.py ..................................... [ 23%]\ntests/test_schedule.py .................................... [ 26%]\ntests/test_tokenizer.py .................. [ 30%]\ntests/test_data.py ....................... [ 33%]\ntests/test_model.py .................. [ 36%]\ntests/test_schedule.py .......... [ 40%]\ntests/test_tokenizer.py ........ [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py ................ [ 50%]\ntests/test_schedule.py ................ [ 53%]\ntests/test_tokenizer.py ............. [ 56%]\ntests/test_data.py ...................... [ 60%]\ntests/test_model.py ........ [ 63%]\ntests/test_schedule.py ......... [ 66%]\ntests/test_tokenizer.py ................................ [ 70%]\ntests/test_data.py ............. [ 73%]\ntests/test_model.py ......... [ 76%]\ntests/test_schedule.py ............................... [ 80%]\ntests/test_tokenizer.py .................................. [ 83%]\ntests/test_data.py ..................................... [ 86%]\ntests/test_model.py .................. [ 90%]\ntests/test_schedule.py ......... [ 93%]\ntests/test_tokenizer.py ................................ [ 96%]\ntests/test_data.py .................................... [100%]\n======== 318 passed in 412.80s ========\n",
         "queuedAt": null,
         "position": 0,
         "why": ""
@@ -1192,7 +1253,7 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 398114230,
+        "memUsed": 234720607,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1233,7 +1294,7 @@
             "tidepool": 150
           }
         },
-        "memUsed": 435415066,
+        "memUsed": 322217849,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1269,7 +1330,7 @@
             "lantern": 604
           }
         },
-        "memUsed": 747233892,
+        "memUsed": 930707915,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1334,7 +1395,7 @@
             "orbit-android": 399
           }
         },
-        "memUsed": 1294106199,
+        "memUsed": 1273113611,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1360,7 +1421,7 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 231196392,
+        "memUsed": 255348253,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1401,7 +1462,7 @@
             "tidepool": 66
           }
         },
-        "memUsed": 2294261196,
+        "memUsed": 2392224847,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1442,7 +1503,7 @@
             "tidepool": 134
           }
         },
-        "memUsed": 580189502,
+        "memUsed": 845540566,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1502,7 +1563,7 @@
             "orbit-android": 324
           }
         },
-        "memUsed": 265698903,
+        "memUsed": 208664035,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1540,7 +1601,7 @@
             "tidepool": 227
           }
         },
-        "memUsed": 441342879,
+        "memUsed": 557061687,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1580,7 +1641,7 @@
             "sparrow-ml": 344
           }
         },
-        "memUsed": 771847135,
+        "memUsed": 464142030,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1617,7 +1678,7 @@
             "tidepool": 174
           }
         },
-        "memUsed": 2674432727,
+        "memUsed": 1580481746,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1643,7 +1704,7 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 2201680308,
+        "memUsed": 1287877674,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1727,7 +1788,7 @@
             "sparrow-ml": 192
           }
         },
-        "memUsed": 1790936535,
+        "memUsed": 1327764819,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1753,7 +1814,7 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 2449609243,
+        "memUsed": 1816091698,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1779,7 +1840,7 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 830145354,
+        "memUsed": 615453297,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1839,7 +1900,7 @@
             "lantern": 175
           }
         },
-        "memUsed": 1956268582,
+        "memUsed": 1932851769,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1876,7 +1937,7 @@
             "tidepool": 91
           }
         },
-        "memUsed": 4046635760,
+        "memUsed": 4007486683,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1902,7 +1963,7 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 4065290766,
+        "memUsed": 4055872669,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2127,7 +2188,7 @@
             "tidepool": 150
           }
         },
-        "memUsed": 104536764,
+        "memUsed": 119336455,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2183,7 +2244,7 @@
             "tidepool": 118
           }
         },
-        "memUsed": 1005621410,
+        "memUsed": 1030405555,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2216,6 +2277,6 @@
     "lantern/20261124-054922-f15a/2026-11-24T05:49:22Z": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
     "lantern/20261124-141525-1382/2026-11-24T14:15:25Z": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
     "lantern/20261124-170800-8f75/2026-11-24T17:08:00Z": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t6.736s\nok  \tgithub.com/acme/lantern/internal/sync\t7.048s\nok  \tgithub.com/acme/lantern/internal/api\t8.592s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t0.448s\nok  \tgithub.com/acme/lantern/cmd/lantern\t9.247s\nok  \tgithub.com/acme/lantern/internal/wire\t8.576s\nok  \tgithub.com/acme/lantern/internal/cache\t6.765s\nok  \tgithub.com/acme/lantern/internal/store\t3.874s\nok  \tgithub.com/acme/lantern/internal/sync\t5.161s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.165s\nok  \tgithub.com/acme/lantern/internal/metrics\t9.033s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.029s\nok  \tgithub.com/acme/lantern/internal/wire\t3.770s\nok  \tgithub.com/acme/lantern/internal/cache\t8.898s\nok  \tgithub.com/acme/lantern/internal/store\t7.490s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.652s\nok  \tgithub.com/acme/lantern/internal/config\t0.443s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.470s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.114s\nok  \tgithub.com/acme/lantern/internal/wire\t4.895s\nok  \tgithub.com/acme/lantern/internal/cache\t4.911s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.653s\nok  \tgithub.com/acme/lantern/internal/api\t4.865s\nok  \tgithub.com/acme/lantern/internal/config\t7.912s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.386s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.482s\nok  \tgithub.com/acme/lantern/internal/wire\t5.085s\n?   \tgithub.com/acme/lantern/internal/cache\t[no test files]\nok  \tgithub.com/acme/lantern/internal/store\t6.390s\nok  \tgithub.com/acme/lantern/internal/sync\t7.971s\nok  \tgithub.com/acme/lantern/internal/api\t8.665s\nok  \tgithub.com/acme/lantern/internal/config\t6.679s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.225s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.794s\n?   \tgithub.com/acme/lantern/internal/wire\t[no test files]\nok  \tgithub.com/acme/lantern/internal/cache\t5.608s\nok  \tgithub.com/acme/lantern/internal/store\t8.601s\nok  \tgithub.com/acme/lantern/internal/sync\t7.876s\nok  \tgithub.com/acme/lantern/internal/api\t4.950s\nok  \tgithub.com/acme/lantern/internal/config\t6.206s\nok  \tgithub.com/acme/lantern/internal/metrics\t0.432s\n?   \tgithub.com/acme/lantern/cmd/lantern\t[no test files]\nok  \tgithub.com/acme/lantern/internal/wire\t6.355s\nok  \tgithub.com/acme/lantern/internal/cache\t5.491s\nok  \tgithub.com/acme/lantern/internal/store\t8.029s\nok  \tgithub.com/acme/lantern/internal/sync\t5.620s\nok  \tgithub.com/acme/lantern/internal/api\t3.311s\nok  \tgithub.com/acme/lantern/internal/config\t3.054s\n?   \tgithub.com/acme/lantern/internal/metrics\t[no test files]\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.898s\nok  \tgithub.com/acme/lantern/internal/wire\t4.799s\nok  \tgithub.com/acme/lantern/internal/cache\t3.164s\nok  \tgithub.com/acme/lantern/internal/store\t7.130s\nok  \tgithub.com/acme/lantern/internal/sync\t4.558s\nok  \tgithub.com/acme/lantern/internal/api\t7.582s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t3.193s\nok  \tgithub.com/acme/lantern/cmd/lantern\t9.361s\nok  \tgithub.com/acme/lantern/internal/wire\t1.908s\nok  \tgithub.com/acme/lantern/internal/cache\t1.544s\nok  \tgithub.com/acme/lantern/internal/store\t4.386s\nok  \tgithub.com/acme/lantern/internal/sync\t5.451s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t6.897s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.042s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.796s\nok  \tgithub.com/acme/lantern/internal/wire\t1.747s\nok  \tgithub.com/acme/lantern/internal/cache\t1.613s\nok  \tgithub.com/acme/lantern/internal/store\t4.426s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t5.297s\nok  \tgithub.com/acme/lantern/internal/config\t3.128s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.921s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.915s\nok  \tgithub.com/acme/lantern/internal/wire\t6.981s\nok  \tgithub.com/acme/lantern/internal/cache\t3.652s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.635s\nok  \tgithub.com/acme/lantern/internal/api\t6.033s\nok  \tgithub.com/acme/lantern/internal/config\t3.890s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.265s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.484s\nok  \tgithub.com/acme/lantern/internal/wire\t4.625s\n?   \tgithub.com/acme/lantern/internal/cache\t[no test files]\nok  \tgithub.com/acme/lantern/internal/store\t2.689s\nok  \tgithub.com/acme/lantern/internal/sync\t2.115s\nok  \tgithub.com/acme/lantern/internal/api\t3.832s\nok  \tgithub.com/acme/lantern/internal/config\t0.713s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.277s\n",
-    "sparrow-ml/20261124-101708-799f/2026-11-24T10:17:08Z": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [  3%]\ntests/test_data.py ..................................... [  6%]\ntests/test_model.py .......... [ 10%]\ntests/test_schedule.py .............................. [ 13%]\ntests/test_tokenizer.py ......... [ 16%]\ntests/test_data.py .................................... [ 20%]\ntests/test_model.py ................................. [ 23%]\ntests/test_schedule.py .............................. [ 26%]\ntests/test_tokenizer.py ............. [ 30%]\ntests/test_data.py ................................... [ 33%]\ntests/test_model.py ............................... [ 36%]\ntests/test_schedule.py .................................. [ 40%]\ntests/test_tokenizer.py ............................ [ 43%]\ntests/test_data.py ........... [ 46%]\ntests/test_model.py ............................ [ 50%]\ntests/test_schedule.py ........................ [ 53%]\ntests/test_tokenizer.py ........................... [ 56%]\ntests/test_data.py .................................... [ 60%]\ntests/test_model.py ........... [ 63%]\ntests/test_schedule.py .................................... [ 66%]\ntests/test_tokenizer.py ........ [ 70%]\ntests/test_data.py ......................... [ 73%]\ntests/test_model.py ........................ [ 76%]\ntests/test_schedule.py .................................. [ 80%]\ntests/test_tokenizer.py ........................ [ 83%]\ntests/test_data.py ........................ [ 86%]\ntests/test_model.py .......................... [ 90%]\ntests/test_schedule.py ............. [ 93%]\ntests/test_tokenizer.py ............................. [ 96%]\ntests/test_data.py ..................................... [100%]\n======== 318 passed in 412.80s ========\n"
+    "sparrow-ml/20261124-101708-799f/2026-11-24T10:17:08Z": "$ uv run pytest -x tests/\ntests/test_tokenizer.py .................................... [  3%]\ntests/test_data.py .................. [  6%]\ntests/test_model.py ............. [ 10%]\ntests/test_schedule.py .......... [ 13%]\ntests/test_tokenizer.py ........... [ 16%]\ntests/test_data.py ........... [ 20%]\ntests/test_model.py ..................................... [ 23%]\ntests/test_schedule.py .................................... [ 26%]\ntests/test_tokenizer.py .................. [ 30%]\ntests/test_data.py ....................... [ 33%]\ntests/test_model.py .................. [ 36%]\ntests/test_schedule.py .......... [ 40%]\ntests/test_tokenizer.py ........ [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py ................ [ 50%]\ntests/test_schedule.py ................ [ 53%]\ntests/test_tokenizer.py ............. [ 56%]\ntests/test_data.py ...................... [ 60%]\ntests/test_model.py ........ [ 63%]\ntests/test_schedule.py ......... [ 66%]\ntests/test_tokenizer.py ................................ [ 70%]\ntests/test_data.py ............. [ 73%]\ntests/test_model.py ......... [ 76%]\ntests/test_schedule.py ............................... [ 80%]\ntests/test_tokenizer.py .................................. [ 83%]\ntests/test_data.py ..................................... [ 86%]\ntests/test_model.py .................. [ 90%]\ntests/test_schedule.py ......... [ 93%]\ntests/test_tokenizer.py ................................ [ 96%]\ntests/test_data.py .................................... [100%]\n======== 318 passed in 412.80s ========\n"
   }
 }
