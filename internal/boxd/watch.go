@@ -494,6 +494,19 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 		t = t.UTC()
 		m.TrayLastSeen = &t
 	}
+	// Which enforcer wrote the heartbeat, and the pick it acts on (the mode
+	// that comes back after a game). Values other than boxtray's are unknown.
+	switch e := cfg[mode.ProjectEnforcerKey]; e {
+	case dash.EnforcerTray, dash.EnforcerHeadless:
+		m.Enforcer = e
+	}
+	if v := cfg[mode.ProjectChosenKey]; v != "" {
+		var c dash.ChosenMode
+		if json.Unmarshal([]byte(v), &c) == nil && c.Mode != "" {
+			c.At = c.At.UTC()
+			m.Chosen = &c
+		}
+	}
 	m.Caps, m.Allocated, m.Room = allot(cfg, proj, ins)
 	if w.WSLMemory != nil {
 		m.WSLMemory = w.WSLMemory()
