@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 // StatusReport says whether offloading to the PC is worth it now.
@@ -31,6 +32,7 @@ type StatusReport struct {
 	GPU     string   `json:"gpu"`
 	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
 	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
+	Update  string   `json:"update,omitempty"`  // a newer stable release is out than this box
 }
 
 // SizeRoom is one box size, what a box of it gets now, and how many more
@@ -52,8 +54,9 @@ type RepoBox struct {
 
 // Status reports the PC's state and, when dir is in a git repo, the repo's
 // box and its running jobs. An unreachable PC is included in the report.
-func (a *App) Status(ctx context.Context, dir string) StatusReport {
-	s := StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1}
+func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
+	s = StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1}
+	defer func() { s.Update = behind(a.StateDir, version.Tag) }()
 	if dir != "" {
 		if rp, err := openRepo(ctx, a.R, dir); err == nil {
 			s.Repo = rp.Name
@@ -335,6 +338,9 @@ func firstLine(s string) string {
 // writeStatus prints a report: the advice first, then the details.
 func writeStatus(w io.Writer, s StatusReport) {
 	fmt.Fprintln(w, s.Advice)
+	if s.Update != "" {
+		fmt.Fprintln(w, s.Update)
+	}
 	if !s.Reachable {
 		return
 	}
