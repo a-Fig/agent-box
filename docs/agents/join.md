@@ -16,9 +16,10 @@ what it changes:
   stable release, checksum checked; `box update --rollback` swaps the previous one back.
   `AGENT_BOX_NO_UPDATE=1` in the environment turns this off.
 - **The agents get five tools.** `box join` registers `box mcp` as a user-scope MCP server, for every
-  project, with each agent it finds: Claude Code and Codex through their CLIs, and Antigravity in its
-  `mcp_config.json`. It copies the box skill into their skills folders, and adds `box hook` to Claude
-  Code's `PostToolUse` hooks, which shows a busy agent its finished jobs.
+  project, with each agent installed here (its CLI on PATH, or its config folder present): Claude
+  Code and Codex through their CLIs, and Antigravity in its `mcp_config.json`. Agents that aren't
+  installed are skipped. It copies the box skill into their skills folders, and adds `box hook` to
+  Claude Code's `PostToolUse` hooks, which shows a busy agent its finished jobs.
 - **Your worktree leaves this machine.** Each run copies the worktree, uncommitted and untracked
   files included (not ignored ones), to a box on the host. Whoever runs the host can read it there.
   Values passed with `--env` are visible in the box, so box refuses names that look like secrets.
@@ -55,8 +56,9 @@ Your shell may not see the new PATH yet: use the full path the installer printed
 
     box join
 
-It is safe to run twice. Then run `box status`: its first line says whether the host has room
-now. Tell your user what join printed, and that a session already running may not load the new
+It is safe to run twice. It ends by saying which agents it set up and which it skipped. If it found
+none, it changed nothing and printed the server entry to add by hand, as below. Then run
+`box status`: its first line says whether the host has room now. Tell your user what join printed, and that a session already running may not load the new
 tools: in T3 Code, stop and send any message, or open a new thread; in a terminal, start a new
 session (`claude --continue` keeps the conversation). Don't say the tools are there until they show
 up in your list.

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -65,25 +66,96 @@ func agentCLIs(exe string) []agentCLI {
 	}
 }
 
-// skillPaths returns the user skill locations for Claude Code, Codex and
-// Antigravity.
+// claudeDirs are Claude Code's config directories: ~/.claude and, when set,
+// $CLAUDE_CONFIG_DIR.
+func (c joinConfig) claudeDirs() []string {
+	dirs := []string{filepath.Join(c.Home, ".claude")}
+	if c.ClaudeConfigDir != "" && !strings.EqualFold(filepath.Clean(c.ClaudeConfigDir), filepath.Clean(dirs[0])) {
+		dirs = append(dirs, filepath.Clean(c.ClaudeConfigDir))
+	}
+	return dirs
+}
+
+// codexHome is Codex's home: $CODEX_HOME, else ~/.codex.
+func (c joinConfig) codexHome() string {
+	if c.CodexHome != "" {
+		return c.CodexHome
+	}
+	return filepath.Join(c.Home, ".codex")
+}
+
+// skillPaths returns every user skill location for Claude Code, Codex and
+// Antigravity, installed or not: leave and skill-sync look in all of them.
 func (c joinConfig) skillPaths() []string {
-	paths := []string{filepath.Join(c.Home, ".claude", "skills", "box", "SKILL.md")}
-	if c.ClaudeConfigDir != "" {
-		p := filepath.Join(c.ClaudeConfigDir, "skills", "box", "SKILL.md")
-		if !strings.EqualFold(filepath.Clean(p), filepath.Clean(paths[0])) {
-			paths = append(paths, p)
-		}
+	var paths []string
+	for _, d := range c.claudeDirs() {
+		paths = append(paths, filepath.Join(d, "skills", "box", "SKILL.md"))
 	}
-	codexHome := c.CodexHome
-	if codexHome == "" {
-		codexHome = filepath.Join(c.Home, ".codex")
-	}
-	paths = append(paths, filepath.Join(codexHome, "skills", "box", "SKILL.md"))
+	paths = append(paths, filepath.Join(c.codexHome(), "skills", "box", "SKILL.md"))
 	for _, h := range c.antigravityHomes() {
 		paths = append(paths, filepath.Join(h, "config", "skills", "box", "SKILL.md"))
 	}
 	return paths
+}
+
+// installed is what box join sets up: the agents on this machine. As in mur
+// join, an agent is there when its CLI is on PATH or its config directory
+// exists, so join never makes a folder for an agent nobody installed.
+type installed struct {
+	cli        map[string]string // agent CLI name to its path, for those on PATH
+	claudeDirs []string
+	codexHome  string // "" without Codex
+	agHomes    []string
+}
+
+func (c joinConfig) findAgents() installed {
+	f := installed{cli: map[string]string{}}
+	if c.LookPath != nil {
+		for _, a := range agentCLIs(c.Exe) {
+			if bin, err := c.LookPath(a.name); err == nil {
+				f.cli[a.name] = bin
+			}
+		}
+	}
+	for _, d := range c.claudeDirs() {
+		if isDir(d) {
+			f.claudeDirs = append(f.claudeDirs, d)
+		}
+	}
+	if len(f.claudeDirs) == 0 && f.cli["claude"] != "" {
+		// A CLI that hasn't run yet: its config goes where Claude Code will look.
+		d := filepath.Join(c.Home, ".claude")
+		if c.ClaudeConfigDir != "" {
+			d = filepath.Clean(c.ClaudeConfigDir)
+		}
+		f.claudeDirs = []string{d}
+	}
+	if h := c.codexHome(); isDir(h) || f.cli["codex"] != "" {
+		f.codexHome = h
+	}
+	f.agHomes = c.antigravityHomes()
+	return f
+}
+
+// skillPaths are the skill files join writes: one per agent home it found.
+func (f installed) skillPaths() []string {
+	var paths []string
+	for _, d := range f.claudeDirs {
+		paths = append(paths, filepath.Join(d, "skills", "box", "SKILL.md"))
+	}
+	if f.codexHome != "" {
+		paths = append(paths, filepath.Join(f.codexHome, "skills", "box", "SKILL.md"))
+	}
+	for _, h := range f.agHomes {
+		paths = append(paths, filepath.Join(h, "config", "skills", "box", "SKILL.md"))
+	}
+	return paths
+}
+
+// manualMCP is the server entry to add by hand to an agent join doesn't set up.
+func manualMCP(exe string) string {
+	cmd, _ := json.Marshal(exe)
+	return "{\n  \"mcpServers\": {\n    \"box\": { \"command\": " + string(cmd) + ", \"args\": [\"mcp\"] }\n  }\n}\n"
 }
 
 // antigravityHomes returns each Antigravity home directory that is configured
@@ -222,21 +294,36 @@ func sameAntigravityEntry(o *object, exe string) bool {
 }
 
 // join registers box mcp as a user-scope MCP server named box with each
-// agent it finds (Claude Code, Codex and Antigravity), installs the box skill,
-// and adds box hook to Claude Code's settings (hook.go); leave undoes all three.
+// agent it finds installed (Claude Code, Codex and Antigravity), installs the
+// box skill, and adds box hook to Claude Code's settings (hook.go); leave
+// undoes all three wherever they are.
 func join(ctx context.Context, c joinConfig, leave bool) error {
 	if !leave && !filepath.IsAbs(c.Exe) {
 		return fmt.Errorf("box binary path %q isn't absolute", c.Exe)
 	}
+	f := c.findAgents()
+	if !leave && len(f.claudeDirs) == 0 && f.codexHome == "" && len(f.agHomes) == 0 {
+		fmt.Fprintf(c.Out, "box join found no Claude Code, Codex or Antigravity here (no CLI on PATH, no config folder), so it changed nothing.\n"+
+			"For another agent that speaks MCP, add this server to its MCP config by hand:\n\n%s", manualMCP(c.Exe))
+		return errors.New("no coding agent found")
+	}
 	var errs []error
-	claude := false
+	var setUp, skipped []string
 	for _, a := range agentCLIs(c.Exe) {
-		bin, err := c.LookPath(a.name)
-		if err != nil {
+		bin, onPath := f.cli[a.name]
+		present := onPath || a.name == "claude" && len(f.claudeDirs) > 0 || a.name == "codex" && f.codexHome != ""
+		if !present {
 			fmt.Fprintf(c.Out, "%s: not installed, skipped\n", a.name)
+			skipped = append(skipped, a.name)
 			continue
 		}
-		claude = claude || a.name == "claude"
+		setUp = append(setUp, a.name)
+		if !onPath {
+			if !leave {
+				fmt.Fprintf(c.Out, "%s: %s isn't on PATH, so the MCP server isn't registered; add it by hand (docs/agents/join.md)\n", a.name, a.name)
+			}
+			continue
+		}
 		// Removing first makes join repeatable: add refuses an existing name.
 		rm, err := c.R.Run(ctx, Cmd{Name: bin, Args: a.remove})
 		if err != nil {
@@ -261,11 +348,13 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 		}
 		fmt.Fprintf(c.Out, "%s: registered MCP server box (user scope): %s mcp\n", a.name, c.Exe)
 	}
-	agHomes := c.antigravityHomes()
-	if len(agHomes) == 0 {
+	if len(f.agHomes) == 0 {
 		fmt.Fprintf(c.Out, "antigravity: not installed, skipped\n")
+		skipped = append(skipped, "antigravity")
+	} else {
+		setUp = append(setUp, "antigravity")
 	}
-	for _, h := range agHomes {
+	for _, h := range f.agHomes {
 		p := filepath.Join(h, "config", "mcp_config.json")
 		did, err := setAntigravityMCP(p, c.Exe, leave)
 		if err != nil {
@@ -276,11 +365,18 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			fmt.Fprintf(c.Out, "antigravity: %s\n", did)
 		}
 	}
-	// The hook goes where Claude Code is; leave takes it out wherever it is.
-	for _, p := range c.claudeSettingsPaths() {
-		if !claude && !leave {
-			break
+	// The hook goes in each Claude Code config directory join found; leave
+	// takes it out wherever it is.
+	hookAt := c.claudeSettingsPaths()
+	skillAt := c.skillPaths()
+	if !leave {
+		hookAt = nil
+		for _, d := range f.claudeDirs {
+			hookAt = append(hookAt, filepath.Join(d, "settings.json"))
 		}
+		skillAt = f.skillPaths()
+	}
+	for _, p := range hookAt {
 		if _, err := os.Stat(p); leave && err != nil {
 			continue
 		}
@@ -293,7 +389,7 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			fmt.Fprintf(c.Out, "claude: %s\n", did)
 		}
 	}
-	for _, p := range c.skillPaths() {
+	for _, p := range skillAt {
 		existing, err := os.ReadFile(p)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
@@ -335,6 +431,13 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			continue
 		}
 		fmt.Fprintf(c.Out, "skill: installed %s\n", p)
+	}
+	if !leave {
+		fmt.Fprintf(c.Out, "set up: %s", strings.Join(setUp, ", "))
+		if len(skipped) > 0 {
+			fmt.Fprintf(c.Out, "; skipped, not installed: %s", strings.Join(skipped, ", "))
+		}
+		fmt.Fprintln(c.Out)
 	}
 	return errors.Join(errs...)
 }

@@ -40,8 +40,8 @@ const usage = `usage:
                                             (box_run starts it detached; not for people)
   box hook                                  Claude Code's PostToolUse hook: this session's ended jobs,
                                             mid-turn (box join adds it; not for people)
-  box join [--leave]                        register box mcp with Claude Code, Codex and Antigravity,
-                                            install the skill and Claude Code's hook
+  box join [--leave]                        register box mcp with the installed Claude Code, Codex and
+                                            Antigravity, install the skill and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
   box --version                             the release and commit this box was built from
