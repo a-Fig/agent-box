@@ -85,9 +85,8 @@ answers, the window goes to it (2026-11-24).
 ## What it shows
 
 **Overview**, the first screen, answering "what's happening on my PC right now":
-- each machine (today the PC; later guest hosts, #8): its mode and why (Full, Shared, My PC, or
-  "yielding: <game>"), a mode request waiting on a game ("Full when the game ends"), what fits now
-  (`box status`'s room), the caps against what is allocated, and whether the tray is alive;
+- each machine (today the PC; later guest hosts, #8): its mode (Full, Shared or My PC), a mode
+  request waiting to be applied, what fits now (`box status`'s room), the caps against what is allocated, and whether the tray is alive;
 - each box: name, repo, size, state, memory and CPU use, and its expiry;
 - running jobs: command, agent, repo and branch, how long they have run, and a live log tail.
 
@@ -102,8 +101,8 @@ whole log while the box still exists, and the kept tail after.
 - what agents use boxes for: jobs by kind (see Use cases below);
 - the busiest repos and agents;
 - the median run time per repo;
-- a mode and yield timeline, with the runs it turned away (refusals), so it is plain what games
-  cost agents;
+- a mode timeline, with the runs it turned away (refusals), so it is plain what My PC costs
+  agents;
 - memory in use against the cap.
 
 ## Controls
@@ -132,8 +131,6 @@ The same set everywhere, since everywhere is the same page.
   clears the key.
   - A request older than 10 minutes is dropped, so one written while the tray was down isn't
     applied days later.
-  - A running game still wins. The request waits until the yield ends, and the page shows it as
-    pending.
 - **The chosen mode lives in the project: `user.agent-box.chosen`** (`{mode, at}` JSON), written by
   whichever enforcer is active when a click or a request is applied. The tray and the headless
   enforcer both adopt it when they start enforcing, so a pick made from the page while nobody is
@@ -194,9 +191,8 @@ A command that matches none is `other`.
 A run turned away with exit 75 never reaches a box, so `box` also sends `POST /api/refusals`
 (`dash.RefusalBody`: `{why, reason, size, gpu, repo, agent}`, where `reason` is the agent's and
 `agent` its display name), as a best effort with a 2s timeout, ignoring errors. `why` is a cause
-code: `yielding` (My PC with a game as the tray's reason), `mypc`, `full` (Incus refused the
-launch for the project's caps) or `gpu-busy`. A refusal that fits none, such as an unreachable PC
-or a frozen box outside My PC, isn't sent. Without it the history couldn't show what yields and
+code: `mypc`, `full` (Incus refused the launch for the project's caps) or `gpu-busy`. A refusal that fits none, such as an unreachable PC
+or a frozen box outside My PC, isn't sent. Without it the history couldn't show what My PC and
 full caps cost.
 
 ### Jobs that end with their box
@@ -214,7 +210,7 @@ otherwise), masks the tail as it masks every tail, records the end, and answers 
 - **`events-YYYY-MM-DD.jsonl`**, kept 180 days:
   - job started and job ended, with the `.meta`, exit code and duration;
   - box created and box deleted;
-  - mode and yield changes, mode requests, and controls (with the device);
+  - mode changes, mode requests, and controls (with the device);
   - refusals.
 - **`samples-YYYY-MM-DD.jsonl`**, kept 14 days: a line per box and one for the machine each minute
   (memory, CPU time, allocated memory).
@@ -273,11 +269,11 @@ JSON over HTTPS, on the same origin as the page.
   - 403 when the caller isn't an owner, or a `POST` lacks `X-Agent-Box: 1`;
   - 404 for something that's gone;
   - 409 for a request that can't be applied now: cancelling a job whose box is frozen
-    (`code: "yielding"` during a game, `"frozen"` in My PC, since a frozen box can't run the kill),
+    (`code: "frozen"`, since a frozen box can't run the kill),
     or one that has already ended (`"not-running"`); and a box control for a box whose name a
     newer box now has (`"gone"`, see below);
   - 502 when Incus failed.
-  - The codes are constants in `internal/dash` (`CodeYielding` and the rest).
+  - The codes are constants in `internal/dash` (`CodeFrozen` and the rest).
 - **In a path**, a job's key is one segment, escaped (`encodeURIComponent`), since it holds `/`.
 - **A job's box** is the box of its name made no later than 10 minutes after the job started
   (`createdAt <= startedAt + 10m`, `dash.JobBoxGrace`): `box run --new` makes the job's ID and
@@ -310,8 +306,8 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
-| `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode, reason}]`: the effective mode, a yield being `mypc` with the tray's reason (`gaming: steam:570`). |
-| `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. During a game it waits, as the handshake says; it is not refused. |
+| `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |
+| `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. |
 | `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
 | `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
@@ -323,8 +319,8 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 ### Shapes
 
-- **`Machine`:** `{id, name, reachable, mode, modeReason, modeRequested: {mode, at, by} | null,
-  chosen: {mode, at} | null, yielding, trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
+- **`Machine`:** `{id, name, reachable, mode, modeRequested: {mode, at, by} | null,
+  chosen: {mode, at} | null, trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
   gpu}, wslMemory, boxd: Version | null, tray: Version | null}`.
   `Version` is `{commit, time, modified}`, the commit a binary was built from (`internal/version`).
@@ -334,8 +330,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   the repo, and nothing showed it.
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
   key never written, or one holding a value boxtray doesn't write. `chosen` is
-  `user.agent-box.chosen`, the mode the enforcers act on (null if unset or not a mode): while a game
-  makes the PC yield, the mode that comes back afterwards ("Shared when the game ends").
+  `user.agent-box.chosen`, the mode the enforcers act on (null if unset or not a mode).
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
   memLimit, cpus, cpuPct}`
 - **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
@@ -353,7 +348,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   `internal/dash/testdata/<scenario>.json`, built at 2026-11-24T17:30:00Z):
   - empty;
   - busy (three boxes, two running jobs);
-  - yielding to a game, with a mode request pending and two jobs queued;
+  - My PC, with a job paused and two jobs queued;
   - full, with refusals and three jobs queued;
   - tray down;
   - headless: nobody logged on, the headless enforcer holding Full, a mode request waiting for the
@@ -395,7 +390,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 ## Not now
 
 - Guest hosts (#8). `Machine.id` exists so that a second machine is just a second entry.
-- Notifications, for example a job failing or a yield starting. The app can do them as Murmur's
+- Notifications, for example a job failing or the mode changing. The app can do them as Murmur's
   does once the basics are in.
 - A separate Agents page: it is a filter on Jobs for now.
 - GPU sampling, p90s and a month range.

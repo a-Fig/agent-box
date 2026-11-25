@@ -22,6 +22,6 @@ Boxes are throwaway; `/cache` survives.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).
 
-**Sizes** (`size`): small (quick), medium (default), large (Gradle). **GPU**: `gpu: true` gets the RTX 3070, one at a time; a game stops it.
+**Sizes** (`size`): small (quick), medium (default), large (Gradle). **GPU**: `gpu: true` gets the RTX 3070, one at a time; My PC stops it.
 
 Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS, uv, JDK 17, Android SDK 34/35 (lazy, ~1 GB first run; or `sdkmanager --list`), gh, git, build-essential, Chromium libraries (Puppeteer: `--no-sandbox`).

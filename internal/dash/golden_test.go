@@ -78,8 +78,8 @@ func TestScenariosShowTheirCase(t *testing.T) {
 	if s := get("busy"); len(s.State.Boxes) != 3 || count(s.State.Jobs, dash.JobRunning) != 2 {
 		t.Errorf("busy has %d boxes and %d running jobs, want 3 and 2", len(s.State.Boxes), count(s.State.Jobs, dash.JobRunning))
 	}
-	if m := get("yielding").State.Machines[0]; !m.Yielding || m.ModeRequested == nil || m.Mode != dash.ModeMyPC || m.Chosen == nil || m.Chosen.Mode == dash.ModeMyPC {
-		t.Errorf("yielding: %+v", m)
+	if s := get("mypc"); s.State.Machines[0].Mode != dash.ModeMyPC || count(s.State.Jobs, dash.JobPaused) != 1 {
+		t.Errorf("mypc: %+v", s.State.Machines[0])
 	}
 	if m := get("busy").State.Machines[0]; m.Chosen == nil || m.Chosen.Mode != m.Mode {
 		t.Errorf("busy's chosen mode is %+v, its mode %s", m.Chosen, m.Mode)
@@ -95,7 +95,7 @@ func TestScenariosShowTheirCase(t *testing.T) {
 	if refused == 0 {
 		t.Error("full has no refusals for full caps")
 	}
-	for name, want := range map[string]int{"full": 3, "yielding": 2, "busy": 0} {
+	for name, want := range map[string]int{"full": 3, "mypc": 2, "busy": 0} {
 		if n := count(get(name).State.Jobs, dash.JobQueued); n != want {
 			t.Errorf("%s has %d queued jobs, want %d", name, n, want)
 		}

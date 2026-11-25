@@ -70,12 +70,12 @@ func TestControls(t *testing.T) {
 
 	// Cancel: a frozen box can't run the kill.
 	key := url.PathEscape(dash.JobKey("w", "20261124-175900-ab12", t0.Add(-time.Minute)))
-	r.f.set(func() { r.f.ins[0].Status = "Frozen"; r.f.cfg["user.agent-box.reason"] = "gaming: x" })
+	r.f.set(func() { r.f.ins[0].Status = "Frozen" })
 	r.poll()
-	if code, b := r.post("/api/jobs/"+key+"/cancel", `{}`); code != 409 || !strings.Contains(string(b), `"yielding"`) {
+	if code, b := r.post("/api/jobs/"+key+"/cancel", `{}`); code != 409 || !strings.Contains(string(b), `"frozen"`) {
 		t.Fatalf("cancel frozen: %d %s", code, b)
 	}
-	r.f.set(func() { r.f.ins[0].Status = "Running"; r.f.cfg["user.agent-box.reason"] = "" })
+	r.f.set(func() { r.f.ins[0].Status = "Running" })
 	r.poll()
 	code, b = r.post("/api/jobs/"+key+"/cancel", `{}`)
 	var j dash.Job
@@ -175,7 +175,7 @@ func TestExtendRetryReadsTheNewExpiry(t *testing.T) {
 // Machine says which enforcer runs and the mode it acts on, from boxtray's
 // project keys; a value boxtray doesn't write is left out.
 func TestMachineEnforcerAndChosen(t *testing.T) {
-	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "user.agent-box.reason": "gaming: steam:570",
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc",
 		"user.agent-box.enforcer": "headless", "user.agent-box.tray-seen": "2026-11-24T17:59:30Z",
 		"user.agent-box.chosen": `{"mode":"full","at":"2026-11-24T09:00:00+01:00"}`})
 	m := r.w.Machine()

@@ -14,8 +14,7 @@ import (
 	"time"
 )
 
-// Modes a machine can be in, as the tray writes user.agent-box.mode. It writes
-// the effective mode: while a game runs that is MyPC, with Yielding set.
+// Modes a machine can be in, as the tray writes user.agent-box.mode.
 const (
 	ModeFull   = "full"
 	ModeShared = "shared"
@@ -32,7 +31,7 @@ const TrayStaleAfter = 90 * time.Second
 // Enforcers: which process applies the mode, Machine.Enforcer, from
 // user.agent-box.enforcer as boxtray writes it. The tray runs while someone is
 // logged on to the PC; the headless enforcer (boxtray --headless) runs while
-// nobody is, and has no game detection.
+// nobody is.
 const (
 	EnforcerTray     = "tray"
 	EnforcerHeadless = "headless"
@@ -40,7 +39,6 @@ const (
 
 // ChosenMode is the mode the enforcers act on, the project key user.agent-box.chosen
 // ({mode, at} JSON): the last pick, a tray click or an adopted request, and At when it was made.
-// While a game makes the PC yield, it is the mode that comes back when the game ends.
 type ChosenMode struct {
 	Mode string    `json:"mode"`
 	At   time.Time `json:"at"`
@@ -78,10 +76,8 @@ type Machine struct {
 	Name          string       `json:"name"`
 	Reachable     bool         `json:"reachable"`
 	Mode          string       `json:"mode"`
-	ModeReason    string       `json:"modeReason"` // why, while yielding: "gaming: steam:570"
 	ModeRequested *ModeRequest `json:"modeRequested"`
-	Chosen        *ChosenMode  `json:"chosen"` // null until a pick is stored
-	Yielding      bool         `json:"yielding"`
+	Chosen        *ChosenMode  `json:"chosen"`       // null until a pick is stored
 	TrayLastSeen  *time.Time   `json:"trayLastSeen"` // the active enforcer's heartbeat; null: never seen
 	Enforcer      string       `json:"enforcer"`     // who wrote it: EnforcerTray, EnforcerHeadless, or "" if unknown
 	Caps          Resources    `json:"caps"`
@@ -313,14 +309,11 @@ type QueueCounts struct {
 	MedianWaitSeconds float64 `json:"medianWaitSeconds"`
 }
 
-// Segment is a stretch of one effective mode, for the timeline. A yield is a
-// MyPC segment whose Reason says why ("gaming: steam:570"); the others have
-// none.
+// Segment is a stretch of one mode, for the timeline.
 type Segment struct {
-	Start  time.Time `json:"start"`
-	End    time.Time `json:"end"`
-	Mode   string    `json:"mode"`
-	Reason string    `json:"reason"`
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+	Mode  string    `json:"mode"`
 }
 
 // Ranges of GET /api/history.
@@ -340,14 +333,13 @@ type History struct {
 // Why a run was turned away with exit 75: RefusalBody.Why and the key of a
 // bucket's refusals.byWhy.
 const (
-	RefusedYielding = "yielding" // a game is running
-	RefusedMyPC     = "mypc"
-	RefusedFull     = "full" // the caps have no room for its size
-	RefusedGPUBusy  = "gpu-busy"
+	RefusedMyPC    = "mypc"
+	RefusedFull    = "full" // the caps have no room for its size
+	RefusedGPUBusy = "gpu-busy"
 )
 
 // Refusals lists the causes in display order.
-var Refusals = []string{RefusedYielding, RefusedMyPC, RefusedFull, RefusedGPUBusy}
+var Refusals = []string{RefusedMyPC, RefusedFull, RefusedGPUBusy}
 
 // RefusalBody is POST /api/refusals, sent by box as a best effort. Why is the
 // refusal's cause; Reason the agent's own reason for the run.
@@ -412,7 +404,6 @@ const (
 	CodeBadRequest = "bad-request" // 400
 	CodeForbidden  = "forbidden"   // 403: the caller isn't an owner
 	CodeNotFound   = "not-found"   // 404: the box or job is gone
-	CodeYielding   = "yielding"    // 409: the box is frozen for a game
 	CodeFrozen     = "frozen"      // 409: the box is frozen for My PC
 	CodeNotRunning = "not-running" // 409: the job has already ended
 	CodeGone       = "gone"        // 409: the box of that name is another one now

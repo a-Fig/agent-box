@@ -1,8 +1,8 @@
 //go:build windows
 
 // Command boxtray is the Windows tray app: it picks how much of the PC agents
-// get (My PC / Shared / Full), pauses agents while a game runs, and keeps the
-// PC awake while agent instances run. With --headless it is instead the
+// get (My PC / Shared / Full) and keeps the PC awake while agent instances
+// run. With --headless it is instead the
 // enforcer for when nobody is logged on (headless_windows.go). Build it with
 // -ldflags "-H=windowsgui".
 package main
@@ -133,8 +133,8 @@ func main() {
 		}
 	}
 	if err != nil {
-		// No window means no icon and no menu, but enforcing modes and
-		// yielding to games matters more, so keep going.
+		// No window means no icon and no menu, but enforcing the mode
+		// matters more, so keep going.
 		t = nil
 		lg.Printf("tray window failed (%v): running the mode loop without an icon", err)
 	}
@@ -144,7 +144,7 @@ func main() {
 	hb := newHeartbeat(mgr.Incus, mode.EnforcerTray, lg.Printf)
 	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat}
 	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
-	lg.Printf("mode and yield loop started")
+	lg.Printf("mode loop started")
 
 	if t == nil {
 		select {} // nothing to pump; only a kill ends this

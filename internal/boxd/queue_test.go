@@ -225,11 +225,11 @@ func TestQueueIsFairAcrossSessions(t *testing.T) {
 }
 
 func TestQueueRefusalsAndLimits(t *testing.T) {
-	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "user.agent-box.reason": "gaming: x", "limits.instances": "10"})
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.instances": "10"})
 	gpu := small("g", "s")
 	gpu.GPU = true
-	if code, _, eb := r.enqueue(gpu, "G"); code != 409 || eb.Code != dash.CodeYielding {
-		t.Fatalf("gpu while yielding: %d %+v", code, eb)
+	if code, _, eb := r.enqueue(gpu, "G"); code != 409 || eb.Code != dash.CodeFrozen {
+		t.Fatalf("gpu in My PC: %d %+v", code, eb)
 	}
 	bad := small("w", "s")
 	bad.Checkout = "../etc"
@@ -264,7 +264,7 @@ func TestQueueRefusalsAndLimits(t *testing.T) {
 
 	// A start that fails drops the job as lost and removes its throwaway.
 	r.f.set(func() {
-		r.f.cfg["user.agent-box.mode"], r.f.cfg["user.agent-box.reason"] = "full", ""
+		r.f.cfg["user.agent-box.mode"] = "full"
 		r.f.cliErr = func(args []string) error {
 			if args[0] == "exec" {
 				return errors.New("exec failed")

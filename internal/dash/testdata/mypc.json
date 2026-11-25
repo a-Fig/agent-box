@@ -1,0 +1,2442 @@
+{
+  "name": "mypc",
+  "about": "My PC is chosen, so every box is frozen, a job paused and two runs queued.",
+  "state": {
+    "machines": [
+      {
+        "id": "pc",
+        "name": "Gaming PC",
+        "reachable": true,
+        "mode": "mypc",
+        "modeRequested": null,
+        "chosen": {
+          "mode": "mypc",
+          "at": "2026-11-24T17:12:00Z"
+        },
+        "trayLastSeen": "2026-11-24T17:29:48Z",
+        "enforcer": "tray",
+        "caps": {
+          "cpu": 24,
+          "memory": 12884901888,
+          "instances": 6,
+          "disk": 161061273600
+        },
+        "allocated": {
+          "cpu": 8,
+          "memory": 8589934592,
+          "instances": 2,
+          "disk": 96636764160
+        },
+        "room": {
+          "small": 2,
+          "medium": 1,
+          "large": 0,
+          "gpu": 0
+        },
+        "wslMemory": 5109836676,
+        "boxd": {
+          "commit": "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e",
+          "time": "2026-11-23T15:30:00Z",
+          "modified": false
+        },
+        "tray": {
+          "commit": "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e",
+          "time": "2026-11-23T15:30:00Z",
+          "modified": false
+        }
+      }
+    ],
+    "boxes": [
+      {
+        "name": "lantern",
+        "machine": "pc",
+        "size": "medium",
+        "gpu": false,
+        "state": "frozen",
+        "throwaway": false,
+        "repo": "https://github.com/acme/lantern",
+        "createdAt": "2026-11-24T15:30:00Z",
+        "expiresAt": "2026-11-25T16:40:00Z",
+        "memUsed": 2834678415,
+        "memLimit": 4294967296,
+        "cpus": 2,
+        "cpuPct": 0
+      },
+      {
+        "name": "sparrow-ml",
+        "machine": "pc",
+        "size": "medium",
+        "gpu": false,
+        "state": "frozen",
+        "throwaway": false,
+        "repo": "https://github.com/acme/sparrow-ml",
+        "createdAt": "2026-11-24T16:40:00Z",
+        "expiresAt": "2026-11-24T18:40:00Z",
+        "memUsed": 1331439861,
+        "memLimit": 4294967296,
+        "cpus": 2,
+        "cpuPct": 0
+      }
+    ],
+    "jobs": [
+      {
+        "key": "lantern/20261124-170800-6d39/2026-11-24T17:08:00Z",
+        "id": "20261124-170800-6d39",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "paused",
+        "exit": null,
+        "startedAt": "2026-11-24T17:08:00Z",
+        "endedAt": null,
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "f7058057a47be81898a8f33d3bb358b427a42425",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "?   \tgithub.com/acme/lantern/internal/metrics\t[no test files]\nok  \tgithub.com/acme/lantern/cmd/lantern\t9.226s\nok  \tgithub.com/acme/lantern/internal/wire\t4.660s\nok  \tgithub.com/acme/lantern/internal/cache\t1.005s\nok  \tgithub.com/acme/lantern/internal/store\t8.018s\nok  \tgithub.com/acme/lantern/internal/sync\t8.779s\nok  \tgithub.com/acme/lantern/internal/api\t4.184s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t0.439s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.318s\nok  \tgithub.com/acme/lantern/internal/wire\t2.525s\nok  \tgithub.com/acme/lantern/internal/cache\t5.012s\nok  \tgithub.com/acme/lantern/internal/store\t5.813s\nok  \tgithub.com/acme/lantern/internal/sync\t0.770s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.546s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.592s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.614s\nok  \tgithub.com/acme/lantern/internal/wire\t5.126s\nok  \tgithub.com/acme/lantern/internal/cache\t0.852s\nok  \tgithub.com/acme/lantern/internal/store\t2.185s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.186s\nok  \tgithub.com/acme/lantern/internal/config\t8.432s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.886s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.809s\nok  \tgithub.com/acme/lantern/internal/wire\t2.259s\nok  \tgithub.com/acme/lantern/internal/cache\t3.754s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t2.062s\nok  \tgithub.com/acme/lantern/internal/api\t9.277s\nok  \tgithub.com/acme/lantern/internal/config\t1.154s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.784s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.084s\nok  \tgithub.com/acme/lantern/internal/wire\t4.815s\n?   \tgithub.com/acme/lantern/internal/cache\t[no test files]\nok  \tgithub.com/acme/lantern/internal/store\t8.937s\nok  \tgithub.com/acme/lantern/internal/sync\t4.247s\nok  \tgithub.com/acme/lantern/internal/api\t2.001s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-172550-f89e/2026-11-24T17:25:50Z",
+        "id": "20261124-172550-f89e",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "queued",
+        "exit": null,
+        "startedAt": "2026-11-24T17:25:50Z",
+        "endedAt": null,
+        "reason": "Checking the whole module after rebasing on main, while I keep editing.",
+        "command": "go vet ./... \u0026\u0026 go test ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "7ac5c9b12f2ac5abb6f7ad9dd70b9d14a6dced5c",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "",
+        "queuedAt": "2026-11-24T17:25:50Z",
+        "position": 1,
+        "why": "mypc"
+      },
+      {
+        "key": "tidepool-77f5/20261124-172905-80a6/2026-11-24T17:29:05Z",
+        "id": "20261124-172905-80a6",
+        "box": "tidepool-77f5",
+        "machine": "pc",
+        "state": "queued",
+        "exit": null,
+        "startedAt": "2026-11-24T17:29:05Z",
+        "endedAt": null,
+        "reason": "Production build to check the bundle size budget.",
+        "command": "npm run build",
+        "kind": "build",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "main",
+        "commit": "9de2e735a2baf47c8f857a637b0667692e1bbae8",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "small",
+        "gpu": false,
+        "tail": "",
+        "queuedAt": "2026-11-24T17:29:05Z",
+        "position": 2,
+        "why": "mypc"
+      },
+      {
+        "key": "lantern-5b57/20261124-155812-f1c4/2026-11-24T15:58:12Z",
+        "id": "20261124-155812-f1c4",
+        "box": "lantern-5b57",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T15:58:12Z",
+        "endedAt": "2026-11-24T16:07:30Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "4293ceee60b3dff5b8d4423c4cd05d9e4d6f3a9c",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml-b87e/20261124-115141-3c53/2026-11-24T11:51:41Z",
+        "id": "20261124-115141-3c53",
+        "box": "sparrow-ml-b87e",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T11:51:41Z",
+        "endedAt": "2026-11-24T12:19:35Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "fix/tokenizer-pad",
+        "commit": "b6dd1941b83623c2342d4e44fca6977e118169ee",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    7/200  loss 2.8136  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\nstep   14/200  loss 2.7926  lr 2.0e-4  3.4 it/s  gpu mem 6.7 GiB\nstep   22/200  loss 2.7640  lr 2.0e-4  3.2 it/s  gpu mem 6.5 GiB\nstep   29/200  loss 2.7018  lr 2.0e-4  3.9 it/s  gpu mem 6.0 GiB\nstep   37/200  loss 2.6690  lr 2.0e-4  3.8 it/s  gpu mem 6.4 GiB\nstep   44/200  loss 2.6418  lr 2.0e-4  3.9 it/s  gpu mem 6.3 GiB\nstep   51/200  loss 2.5848  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   59/200  loss 2.5696  lr 2.0e-4  3.8 it/s  gpu mem 6.4 GiB\nstep   66/200  loss 2.5292  lr 2.0e-4  3.8 it/s  gpu mem 6.6 GiB\n",
+        "queuedAt": "2026-11-24T11:39:44Z",
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android/20261124-093140-305b/2026-11-24T09:31:40Z",
+        "id": "20261124-093140-305b",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 2,
+        "startedAt": "2026-11-24T09:31:40Z",
+        "endedAt": "2026-11-24T09:38:17Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "62ad9118b6336f3959f2df1ab953861efa224294",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android/20261124-075335-2d6e/2026-11-24T07:53:35Z",
+        "id": "20261124-075335-2d6e",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 2,
+        "startedAt": "2026-11-24T07:53:35Z",
+        "endedAt": "2026-11-24T07:58:23Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "main",
+        "commit": "9cb7130f2e554dd8d423e31f667935a062c476a8",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-073514-6278/2026-11-24T07:35:14Z",
+        "id": "20261124-073514-6278",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "lost",
+        "exit": null,
+        "startedAt": "2026-11-24T07:35:14Z",
+        "endedAt": "2026-11-24T07:36:52Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "09c0c371b13d641a5fb1793e1dbee12a367ad53f",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-b04f/20261124-063317-b55f/2026-11-24T06:33:17Z",
+        "id": "20261124-063317-b55f",
+        "box": "orbit-android-b04f",
+        "machine": "pc",
+        "state": "done",
+        "exit": 1,
+        "startedAt": "2026-11-24T06:33:17Z",
+        "endedAt": "2026-11-24T06:43:39Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "ccae4a9c340cdfca49ec340c6f2c47090c95ca8b",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "tidepool-92c4/20261124-060245-25a9/2026-11-24T06:02:45Z",
+        "id": "20261124-060245-25a9",
+        "box": "tidepool-92c4",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T06:02:45Z",
+        "endedAt": "2026-11-24T06:08:11Z",
+        "reason": "Coverage run for the review; it doubles the suite's memory.",
+        "command": "npm test -- --coverage",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "fix/hydration-flash",
+        "commit": "6546c40844eb78e1fb460d08b13b59576647f45b",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (6 tests) 122ms\n ✓ src/store/session.test.ts (22 tests) 217ms\n ✓ src/ui/Button.test.tsx (21 tests) 608ms\n ✓ src/api/client.test.ts (3 tests) 391ms\n ✓ src/hydrate.test.ts (4 tests) 711ms\n ✓ src/router/cache.test.ts (5 tests) 402ms\n ✓ src/store/session.test.ts (8 tests) 360ms\n ✓ src/ui/Button.test.tsx (6 tests) 799ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml/20261124-040703-eedf/2026-11-24T04:07:03Z",
+        "id": "20261124-040703-eedf",
+        "box": "sparrow-ml",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T04:07:03Z",
+        "endedAt": "2026-11-24T04:16:36Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "ee7bd774c1b1daab0c49eadabeb7958fad8291f5",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............................... [  3%]\ntests/test_data.py ...................... [  6%]\ntests/test_model.py .................................. [ 10%]\ntests/test_schedule.py ............ [ 13%]\ntests/test_tokenizer.py ................................. [ 16%]\ntests/test_data.py .......................... [ 20%]\ntests/test_model.py ............... [ 23%]\ntests/test_schedule.py ........ [ 26%]\ntests/test_tokenizer.py .............. [ 30%]\ntests/test_data.py .......................... [ 33%]\ntests/test_model.py ......................... [ 36%]\ntests/test_schedule.py .................... [ 40%]\ntests/test_tokenizer.py .......................... [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py .............. [ 50%]\ntests/test_schedule.py ......................... [ 53%]\ntests/test_tokenizer.py .......... [ 56%]\ntests/test_data.py ..................................... [ 60%]\ntests/test_model.py .............................. [ 63%]\ntests/test_schedule.py ................................ [ 66%]\ntests/test_tokenizer.py ........ [ 70%]\ntests/test_data.py ................. [ 73%]\ntests/test_model.py ........................ [ 76%]\ntests/test_schedule.py ........................ [ 80%]\ntests/test_tokenizer.py ................................. [ 83%]\ntests/test_data.py ............................... [ 86%]\ntests/test_model.py ............................... [ 90%]\ntests/test_schedule.py ............. [ 93%]\ntests/test_tokenizer.py ........ [ 96%]\ntests/test_data.py ................... [100%]\n======== 318 passed in 412.80s ========\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml/20261124-032510-20bf/2026-11-24T03:25:10Z",
+        "id": "20261124-032510-20bf",
+        "box": "sparrow-ml",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T03:25:10Z",
+        "endedAt": "2026-11-24T03:31:47Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "2f5d7e28b8a84ef7d613c22355d190c960cb3317",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ................... [  3%]\ntests/test_data.py .......... [  6%]\ntests/test_model.py .................................... [ 10%]\ntests/test_schedule.py ..................... [ 13%]\ntests/test_tokenizer.py ................... [ 16%]\ntests/test_data.py ................................... [ 20%]\ntests/test_model.py ................. [ 23%]\ntests/test_schedule.py ........... [ 26%]\ntests/test_tokenizer.py ................................... [ 30%]\ntests/test_data.py ...................... [ 33%]\ntests/test_model.py ........................... [ 36%]\ntests/test_schedule.py .................... [ 40%]\ntests/test_tokenizer.py ................... [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py ................. [ 50%]\ntests/test_schedule.py ................................ [ 53%]\ntests/test_tokenizer.py .............. [ 56%]\ntests/test_data.py ........................... [ 60%]\ntests/test_model.py ................................ [ 63%]\ntests/test_schedule.py .............................. [ 66%]\ntests/test_tokenizer.py ........... [ 70%]\ntests/test_data.py ................................. [ 73%]\ntests/test_model.py ......... [ 76%]\ntests/test_schedule.py ..................... [ 80%]\ntests/test_tokenizer.py ................................. [ 83%]\ntests/test_data.py ............................ [ 86%]\ntests/test_model.py ............. [ 90%]\ntests/test_schedule.py ................................... [ 93%]\ntests/test_tokenizer.py ............ [ 96%]\ntests/test_data.py ........... [100%]\n======== 318 passed in 412.80s ========\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml-ed5f/20261124-030340-bbff/2026-11-24T03:03:40Z",
+        "id": "20261124-030340-bbff",
+        "box": "sparrow-ml-ed5f",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T03:03:40Z",
+        "endedAt": "2026-11-24T03:30:32Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "f43e91e43d7c88e2657e4397c36357da25837247",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    4/200  loss 2.8342  lr 2.0e-4  3.8 it/s  gpu mem 6.2 GiB\nstep    8/200  loss 2.8016  lr 2.0e-4  3.0 it/s  gpu mem 6.2 GiB\nstep   13/200  loss 2.7603  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   17/200  loss 2.7132  lr 2.0e-4  3.7 it/s  gpu mem 6.0 GiB\nstep   22/200  loss 2.6572  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   26/200  loss 2.6292  lr 2.0e-4  3.4 it/s  gpu mem 6.1 GiB\nstep   31/200  loss 2.5920  lr 2.0e-4  3.1 it/s  gpu mem 6.8 GiB\nstep   35/200  loss 2.5694  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep   40/200  loss 2.5023  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   44/200  loss 2.4836  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   48/200  loss 2.4113  lr 2.0e-4  3.8 it/s  gpu mem 6.7 GiB\nstep   53/200  loss 2.4089  lr 2.0e-4  3.1 it/s  gpu mem 6.6 GiB\nstep   57/200  loss 2.3553  lr 2.0e-4  3.5 it/s  gpu mem 6.6 GiB\nstep   62/200  loss 2.3010  lr 2.0e-4  3.5 it/s  gpu mem 6.8 GiB\nstep   66/200  loss 2.2781  lr 2.0e-4  3.2 it/s  gpu mem 6.2 GiB\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-015409-7d72/2026-11-24T01:54:09Z",
+        "id": "20261124-015409-7d72",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T01:54:09Z",
+        "endedAt": "2026-11-24T01:55:18Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "main",
+        "commit": "14ac7fe51cdec2b5ada3aee988b526f58b1b215d",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": "2026-11-24T01:43:01Z",
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern-6bd9/20261124-011952-4a48/2026-11-24T01:19:52Z",
+        "id": "20261124-011952-4a48",
+        "box": "lantern-6bd9",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T01:19:52Z",
+        "endedAt": "2026-11-24T01:33:24Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "3a8ff2e3834d10f98bf019de7eba165df1c8637d",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "tidepool-71ce/20261124-003314-1ff5/2026-11-24T00:33:14Z",
+        "id": "20261124-003314-1ff5",
+        "box": "tidepool-71ce",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T00:33:14Z",
+        "endedAt": "2026-11-24T00:35:20Z",
+        "reason": "Production build to check the bundle size budget.",
+        "command": "npm run build",
+        "kind": "build",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "main",
+        "commit": "a195235b136986238639c06faf348e4493856953",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "small",
+        "gpu": false,
+        "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n  CC   build/tidepool/obj11.o\n  CC   build/tidepool/obj12.o\n  CC   build/tidepool/obj13.o\n  CC   build/tidepool/obj14.o\n",
+        "queuedAt": "2026-11-24T00:27:47Z",
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-000410-df34/2026-11-24T00:04:10Z",
+        "id": "20261124-000410-df34",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T00:04:10Z",
+        "endedAt": "2026-11-24T00:09:15Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "5ea3efc94fcf638a535cc142c9453d692e76fceb",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.336s\nok  \tgithub.com/acme/lantern/internal/sync\t4.560s\nok  \tgithub.com/acme/lantern/internal/api\t7.451s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t0.805s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.579s\nok  \tgithub.com/acme/lantern/internal/wire\t2.445s\nok  \tgithub.com/acme/lantern/internal/cache\t6.070s\nok  \tgithub.com/acme/lantern/internal/store\t9.271s\nok  \tgithub.com/acme/lantern/internal/sync\t7.398s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.970s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.190s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.833s\nok  \tgithub.com/acme/lantern/internal/wire\t2.473s\nok  \tgithub.com/acme/lantern/internal/cache\t2.938s\nok  \tgithub.com/acme/lantern/internal/store\t5.238s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t5.304s\nok  \tgithub.com/acme/lantern/internal/config\t7.205s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.885s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.421s\nok  \tgithub.com/acme/lantern/internal/wire\t7.808s\nok  \tgithub.com/acme/lantern/internal/cache\t3.534s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t6.977s\nok  \tgithub.com/acme/lantern/internal/api\t4.771s\nok  \tgithub.com/acme/lantern/internal/config\t5.136s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.102s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.585s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261123-233136-bfb7/2026-11-23T23:31:36Z",
+        "id": "20261123-233136-bfb7",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T23:31:36Z",
+        "endedAt": "2026-11-23T23:36:15Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "4a1310a21624d2b88c650dcc5d29fc00a9191b14",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.432s\nok  \tgithub.com/acme/lantern/internal/sync\t0.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.134s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t6.112s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.752s\nok  \tgithub.com/acme/lantern/internal/wire\t2.421s\nok  \tgithub.com/acme/lantern/internal/cache\t5.372s\nok  \tgithub.com/acme/lantern/internal/store\t7.026s\nok  \tgithub.com/acme/lantern/internal/sync\t1.892s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.805s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.048s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.744s\nok  \tgithub.com/acme/lantern/internal/wire\t9.054s\nok  \tgithub.com/acme/lantern/internal/cache\t3.518s\nok  \tgithub.com/acme/lantern/internal/store\t2.753s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.120s\nok  \tgithub.com/acme/lantern/internal/config\t1.677s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.783s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.900s\nok  \tgithub.com/acme/lantern/internal/wire\t7.488s\nok  \tgithub.com/acme/lantern/internal/cache\t6.651s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t3.757s\nok  \tgithub.com/acme/lantern/internal/api\t2.584s\nok  \tgithub.com/acme/lantern/internal/config\t8.124s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.224s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.931s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-00ab/20261123-221538-6e83/2026-11-23T22:15:38Z",
+        "id": "20261123-221538-6e83",
+        "box": "orbit-android-00ab",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T22:15:38Z",
+        "endedAt": "2026-11-23T22:25:52Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "1458d0b90726c94039af48ddc474dd3ae76714c2",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-3bca/20261123-213117-8e4d/2026-11-23T21:31:17Z",
+        "id": "20261123-213117-8e4d",
+        "box": "orbit-android-3bca",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T21:31:17Z",
+        "endedAt": "2026-11-23T21:38:32Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "619782e7b80ae5fbaeb2a5a3a3c21239b78ecd6e",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-8fdc/20261123-205501-7c07/2026-11-23T20:55:01Z",
+        "id": "20261123-205501-7c07",
+        "box": "orbit-android-8fdc",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T20:55:01Z",
+        "endedAt": "2026-11-23T21:05:04Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "ddec3525f29531d990cd15e96d17c0086dfac773",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261123-182308-1aa8/2026-11-23T18:23:08Z",
+        "id": "20261123-182308-1aa8",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T18:23:08Z",
+        "endedAt": "2026-11-23T18:25:39Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "25fe62639845ad033c39c7cf790b72ab2b86b206",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android/20261123-174810-a5d7/2026-11-23T17:48:10Z",
+        "id": "20261123-174810-a5d7",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T17:48:10Z",
+        "endedAt": "2026-11-23T17:53:34Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "dbb97aea7a1c2c320088b62829b6b7d8ae2ecab0",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261123-174740-bf70/2026-11-23T17:47:40Z",
+        "id": "20261123-174740-bf70",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T17:47:40Z",
+        "endedAt": "2026-11-23T17:52:36Z",
+        "reason": "Checking the whole module after rebasing on main, while I keep editing.",
+        "command": "go vet ./... \u0026\u0026 go test ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "8ee6ea6a0f979d55dae328d56e8e51fa38befb8a",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.327s\nok  \tgithub.com/acme/lantern/internal/sync\t0.557s\nok  \tgithub.com/acme/lantern/internal/api\t7.406s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.891s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.259s\nok  \tgithub.com/acme/lantern/internal/wire\t7.508s\nok  \tgithub.com/acme/lantern/internal/cache\t3.991s\nok  \tgithub.com/acme/lantern/internal/store\t7.114s\nok  \tgithub.com/acme/lantern/internal/sync\t4.033s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.110s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.600s\nok  \tgithub.com/acme/lantern/internal/wire\t6.321s\nok  \tgithub.com/acme/lantern/internal/cache\t1.275s\nok  \tgithub.com/acme/lantern/internal/store\t1.503s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t3.029s\nok  \tgithub.com/acme/lantern/internal/config\t5.973s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.824s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.572s\nok  \tgithub.com/acme/lantern/internal/wire\t2.305s\nok  \tgithub.com/acme/lantern/internal/cache\t3.446s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t2.513s\nok  \tgithub.com/acme/lantern/internal/api\t7.946s\nok  \tgithub.com/acme/lantern/internal/config\t2.465s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.045s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.007s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      }
+    ],
+    "now": "2026-11-24T17:30:00Z"
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "key": "lantern-5b57/20261124-155812-f1c4/2026-11-24T15:58:12Z",
+        "id": "20261124-155812-f1c4",
+        "box": "lantern-5b57",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T15:58:12Z",
+        "endedAt": "2026-11-24T16:07:30Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "4293ceee60b3dff5b8d4423c4cd05d9e4d6f3a9c",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml-b87e/20261124-115141-3c53/2026-11-24T11:51:41Z",
+        "id": "20261124-115141-3c53",
+        "box": "sparrow-ml-b87e",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T11:51:41Z",
+        "endedAt": "2026-11-24T12:19:35Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "fix/tokenizer-pad",
+        "commit": "b6dd1941b83623c2342d4e44fca6977e118169ee",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    7/200  loss 2.8136  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\nstep   14/200  loss 2.7926  lr 2.0e-4  3.4 it/s  gpu mem 6.7 GiB\nstep   22/200  loss 2.7640  lr 2.0e-4  3.2 it/s  gpu mem 6.5 GiB\nstep   29/200  loss 2.7018  lr 2.0e-4  3.9 it/s  gpu mem 6.0 GiB\nstep   37/200  loss 2.6690  lr 2.0e-4  3.8 it/s  gpu mem 6.4 GiB\nstep   44/200  loss 2.6418  lr 2.0e-4  3.9 it/s  gpu mem 6.3 GiB\nstep   51/200  loss 2.5848  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   59/200  loss 2.5696  lr 2.0e-4  3.8 it/s  gpu mem 6.4 GiB\nstep   66/200  loss 2.5292  lr 2.0e-4  3.8 it/s  gpu mem 6.6 GiB\n",
+        "queuedAt": "2026-11-24T11:39:44Z",
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android/20261124-093140-305b/2026-11-24T09:31:40Z",
+        "id": "20261124-093140-305b",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 2,
+        "startedAt": "2026-11-24T09:31:40Z",
+        "endedAt": "2026-11-24T09:38:17Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "62ad9118b6336f3959f2df1ab953861efa224294",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android/20261124-075335-2d6e/2026-11-24T07:53:35Z",
+        "id": "20261124-075335-2d6e",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 2,
+        "startedAt": "2026-11-24T07:53:35Z",
+        "endedAt": "2026-11-24T07:58:23Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "main",
+        "commit": "9cb7130f2e554dd8d423e31f667935a062c476a8",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-073514-6278/2026-11-24T07:35:14Z",
+        "id": "20261124-073514-6278",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "lost",
+        "exit": null,
+        "startedAt": "2026-11-24T07:35:14Z",
+        "endedAt": "2026-11-24T07:36:52Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "09c0c371b13d641a5fb1793e1dbee12a367ad53f",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-b04f/20261124-063317-b55f/2026-11-24T06:33:17Z",
+        "id": "20261124-063317-b55f",
+        "box": "orbit-android-b04f",
+        "machine": "pc",
+        "state": "done",
+        "exit": 1,
+        "startedAt": "2026-11-24T06:33:17Z",
+        "endedAt": "2026-11-24T06:43:39Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "ccae4a9c340cdfca49ec340c6f2c47090c95ca8b",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "tidepool-92c4/20261124-060245-25a9/2026-11-24T06:02:45Z",
+        "id": "20261124-060245-25a9",
+        "box": "tidepool-92c4",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T06:02:45Z",
+        "endedAt": "2026-11-24T06:08:11Z",
+        "reason": "Coverage run for the review; it doubles the suite's memory.",
+        "command": "npm test -- --coverage",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "fix/hydration-flash",
+        "commit": "6546c40844eb78e1fb460d08b13b59576647f45b",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (6 tests) 122ms\n ✓ src/store/session.test.ts (22 tests) 217ms\n ✓ src/ui/Button.test.tsx (21 tests) 608ms\n ✓ src/api/client.test.ts (3 tests) 391ms\n ✓ src/hydrate.test.ts (4 tests) 711ms\n ✓ src/router/cache.test.ts (5 tests) 402ms\n ✓ src/store/session.test.ts (8 tests) 360ms\n ✓ src/ui/Button.test.tsx (6 tests) 799ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml/20261124-040703-eedf/2026-11-24T04:07:03Z",
+        "id": "20261124-040703-eedf",
+        "box": "sparrow-ml",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T04:07:03Z",
+        "endedAt": "2026-11-24T04:16:36Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "ee7bd774c1b1daab0c49eadabeb7958fad8291f5",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............................... [  3%]\ntests/test_data.py ...................... [  6%]\ntests/test_model.py .................................. [ 10%]\ntests/test_schedule.py ............ [ 13%]\ntests/test_tokenizer.py ................................. [ 16%]\ntests/test_data.py .......................... [ 20%]\ntests/test_model.py ............... [ 23%]\ntests/test_schedule.py ........ [ 26%]\ntests/test_tokenizer.py .............. [ 30%]\ntests/test_data.py .......................... [ 33%]\ntests/test_model.py ......................... [ 36%]\ntests/test_schedule.py .................... [ 40%]\ntests/test_tokenizer.py .......................... [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py .............. [ 50%]\ntests/test_schedule.py ......................... [ 53%]\ntests/test_tokenizer.py .......... [ 56%]\ntests/test_data.py ..................................... [ 60%]\ntests/test_model.py .............................. [ 63%]\ntests/test_schedule.py ................................ [ 66%]\ntests/test_tokenizer.py ........ [ 70%]\ntests/test_data.py ................. [ 73%]\ntests/test_model.py ........................ [ 76%]\ntests/test_schedule.py ........................ [ 80%]\ntests/test_tokenizer.py ................................. [ 83%]\ntests/test_data.py ............................... [ 86%]\ntests/test_model.py ............................... [ 90%]\ntests/test_schedule.py ............. [ 93%]\ntests/test_tokenizer.py ........ [ 96%]\ntests/test_data.py ................... [100%]\n======== 318 passed in 412.80s ========\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml/20261124-032510-20bf/2026-11-24T03:25:10Z",
+        "id": "20261124-032510-20bf",
+        "box": "sparrow-ml",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T03:25:10Z",
+        "endedAt": "2026-11-24T03:31:47Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "2f5d7e28b8a84ef7d613c22355d190c960cb3317",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ................... [  3%]\ntests/test_data.py .......... [  6%]\ntests/test_model.py .................................... [ 10%]\ntests/test_schedule.py ..................... [ 13%]\ntests/test_tokenizer.py ................... [ 16%]\ntests/test_data.py ................................... [ 20%]\ntests/test_model.py ................. [ 23%]\ntests/test_schedule.py ........... [ 26%]\ntests/test_tokenizer.py ................................... [ 30%]\ntests/test_data.py ...................... [ 33%]\ntests/test_model.py ........................... [ 36%]\ntests/test_schedule.py .................... [ 40%]\ntests/test_tokenizer.py ................... [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py ................. [ 50%]\ntests/test_schedule.py ................................ [ 53%]\ntests/test_tokenizer.py .............. [ 56%]\ntests/test_data.py ........................... [ 60%]\ntests/test_model.py ................................ [ 63%]\ntests/test_schedule.py .............................. [ 66%]\ntests/test_tokenizer.py ........... [ 70%]\ntests/test_data.py ................................. [ 73%]\ntests/test_model.py ......... [ 76%]\ntests/test_schedule.py ..................... [ 80%]\ntests/test_tokenizer.py ................................. [ 83%]\ntests/test_data.py ............................ [ 86%]\ntests/test_model.py ............. [ 90%]\ntests/test_schedule.py ................................... [ 93%]\ntests/test_tokenizer.py ............ [ 96%]\ntests/test_data.py ........... [100%]\n======== 318 passed in 412.80s ========\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "sparrow-ml-ed5f/20261124-030340-bbff/2026-11-24T03:03:40Z",
+        "id": "20261124-030340-bbff",
+        "box": "sparrow-ml-ed5f",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T03:03:40Z",
+        "endedAt": "2026-11-24T03:30:32Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "f43e91e43d7c88e2657e4397c36357da25837247",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    4/200  loss 2.8342  lr 2.0e-4  3.8 it/s  gpu mem 6.2 GiB\nstep    8/200  loss 2.8016  lr 2.0e-4  3.0 it/s  gpu mem 6.2 GiB\nstep   13/200  loss 2.7603  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   17/200  loss 2.7132  lr 2.0e-4  3.7 it/s  gpu mem 6.0 GiB\nstep   22/200  loss 2.6572  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\nstep   26/200  loss 2.6292  lr 2.0e-4  3.4 it/s  gpu mem 6.1 GiB\nstep   31/200  loss 2.5920  lr 2.0e-4  3.1 it/s  gpu mem 6.8 GiB\nstep   35/200  loss 2.5694  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep   40/200  loss 2.5023  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   44/200  loss 2.4836  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   48/200  loss 2.4113  lr 2.0e-4  3.8 it/s  gpu mem 6.7 GiB\nstep   53/200  loss 2.4089  lr 2.0e-4  3.1 it/s  gpu mem 6.6 GiB\nstep   57/200  loss 2.3553  lr 2.0e-4  3.5 it/s  gpu mem 6.6 GiB\nstep   62/200  loss 2.3010  lr 2.0e-4  3.5 it/s  gpu mem 6.8 GiB\nstep   66/200  loss 2.2781  lr 2.0e-4  3.2 it/s  gpu mem 6.2 GiB\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-015409-7d72/2026-11-24T01:54:09Z",
+        "id": "20261124-015409-7d72",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T01:54:09Z",
+        "endedAt": "2026-11-24T01:55:18Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "main",
+        "commit": "14ac7fe51cdec2b5ada3aee988b526f58b1b215d",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": "2026-11-24T01:43:01Z",
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern-6bd9/20261124-011952-4a48/2026-11-24T01:19:52Z",
+        "id": "20261124-011952-4a48",
+        "box": "lantern-6bd9",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T01:19:52Z",
+        "endedAt": "2026-11-24T01:33:24Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "3a8ff2e3834d10f98bf019de7eba165df1c8637d",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "tidepool-71ce/20261124-003314-1ff5/2026-11-24T00:33:14Z",
+        "id": "20261124-003314-1ff5",
+        "box": "tidepool-71ce",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T00:33:14Z",
+        "endedAt": "2026-11-24T00:35:20Z",
+        "reason": "Production build to check the bundle size budget.",
+        "command": "npm run build",
+        "kind": "build",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "main",
+        "commit": "a195235b136986238639c06faf348e4493856953",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "small",
+        "gpu": false,
+        "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n  CC   build/tidepool/obj11.o\n  CC   build/tidepool/obj12.o\n  CC   build/tidepool/obj13.o\n  CC   build/tidepool/obj14.o\n",
+        "queuedAt": "2026-11-24T00:27:47Z",
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261124-000410-df34/2026-11-24T00:04:10Z",
+        "id": "20261124-000410-df34",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T00:04:10Z",
+        "endedAt": "2026-11-24T00:09:15Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "5ea3efc94fcf638a535cc142c9453d692e76fceb",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.336s\nok  \tgithub.com/acme/lantern/internal/sync\t4.560s\nok  \tgithub.com/acme/lantern/internal/api\t7.451s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t0.805s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.579s\nok  \tgithub.com/acme/lantern/internal/wire\t2.445s\nok  \tgithub.com/acme/lantern/internal/cache\t6.070s\nok  \tgithub.com/acme/lantern/internal/store\t9.271s\nok  \tgithub.com/acme/lantern/internal/sync\t7.398s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.970s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.190s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.833s\nok  \tgithub.com/acme/lantern/internal/wire\t2.473s\nok  \tgithub.com/acme/lantern/internal/cache\t2.938s\nok  \tgithub.com/acme/lantern/internal/store\t5.238s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t5.304s\nok  \tgithub.com/acme/lantern/internal/config\t7.205s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.885s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.421s\nok  \tgithub.com/acme/lantern/internal/wire\t7.808s\nok  \tgithub.com/acme/lantern/internal/cache\t3.534s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t6.977s\nok  \tgithub.com/acme/lantern/internal/api\t4.771s\nok  \tgithub.com/acme/lantern/internal/config\t5.136s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.102s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.585s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261123-233136-bfb7/2026-11-23T23:31:36Z",
+        "id": "20261123-233136-bfb7",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T23:31:36Z",
+        "endedAt": "2026-11-23T23:36:15Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "4a1310a21624d2b88c650dcc5d29fc00a9191b14",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.432s\nok  \tgithub.com/acme/lantern/internal/sync\t0.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.134s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t6.112s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.752s\nok  \tgithub.com/acme/lantern/internal/wire\t2.421s\nok  \tgithub.com/acme/lantern/internal/cache\t5.372s\nok  \tgithub.com/acme/lantern/internal/store\t7.026s\nok  \tgithub.com/acme/lantern/internal/sync\t1.892s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.805s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.048s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.744s\nok  \tgithub.com/acme/lantern/internal/wire\t9.054s\nok  \tgithub.com/acme/lantern/internal/cache\t3.518s\nok  \tgithub.com/acme/lantern/internal/store\t2.753s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.120s\nok  \tgithub.com/acme/lantern/internal/config\t1.677s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.783s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.900s\nok  \tgithub.com/acme/lantern/internal/wire\t7.488s\nok  \tgithub.com/acme/lantern/internal/cache\t6.651s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t3.757s\nok  \tgithub.com/acme/lantern/internal/api\t2.584s\nok  \tgithub.com/acme/lantern/internal/config\t8.124s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.224s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.931s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-00ab/20261123-221538-6e83/2026-11-23T22:15:38Z",
+        "id": "20261123-221538-6e83",
+        "box": "orbit-android-00ab",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T22:15:38Z",
+        "endedAt": "2026-11-23T22:25:52Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "1458d0b90726c94039af48ddc474dd3ae76714c2",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-3bca/20261123-213117-8e4d/2026-11-23T21:31:17Z",
+        "id": "20261123-213117-8e4d",
+        "box": "orbit-android-3bca",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T21:31:17Z",
+        "endedAt": "2026-11-23T21:38:32Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "619782e7b80ae5fbaeb2a5a3a3c21239b78ecd6e",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android-8fdc/20261123-205501-7c07/2026-11-23T20:55:01Z",
+        "id": "20261123-205501-7c07",
+        "box": "orbit-android-8fdc",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T20:55:01Z",
+        "endedAt": "2026-11-23T21:05:04Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "ddec3525f29531d990cd15e96d17c0086dfac773",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261123-182308-1aa8/2026-11-23T18:23:08Z",
+        "id": "20261123-182308-1aa8",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T18:23:08Z",
+        "endedAt": "2026-11-23T18:25:39Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "25fe62639845ad033c39c7cf790b72ab2b86b206",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "orbit-android/20261123-174810-a5d7/2026-11-23T17:48:10Z",
+        "id": "20261123-174810-a5d7",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T17:48:10Z",
+        "endedAt": "2026-11-23T17:53:34Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "dbb97aea7a1c2c320088b62829b6b7d8ae2ecab0",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261123-174740-bf70/2026-11-23T17:47:40Z",
+        "id": "20261123-174740-bf70",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T17:47:40Z",
+        "endedAt": "2026-11-23T17:52:36Z",
+        "reason": "Checking the whole module after rebasing on main, while I keep editing.",
+        "command": "go vet ./... \u0026\u0026 go test ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "8ee6ea6a0f979d55dae328d56e8e51fa38befb8a",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.327s\nok  \tgithub.com/acme/lantern/internal/sync\t0.557s\nok  \tgithub.com/acme/lantern/internal/api\t7.406s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.891s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.259s\nok  \tgithub.com/acme/lantern/internal/wire\t7.508s\nok  \tgithub.com/acme/lantern/internal/cache\t3.991s\nok  \tgithub.com/acme/lantern/internal/store\t7.114s\nok  \tgithub.com/acme/lantern/internal/sync\t4.033s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.110s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.600s\nok  \tgithub.com/acme/lantern/internal/wire\t6.321s\nok  \tgithub.com/acme/lantern/internal/cache\t1.275s\nok  \tgithub.com/acme/lantern/internal/store\t1.503s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t3.029s\nok  \tgithub.com/acme/lantern/internal/config\t5.973s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.824s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.572s\nok  \tgithub.com/acme/lantern/internal/wire\t2.305s\nok  \tgithub.com/acme/lantern/internal/cache\t3.446s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t2.513s\nok  \tgithub.com/acme/lantern/internal/api\t7.946s\nok  \tgithub.com/acme/lantern/internal/config\t2.465s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.045s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.007s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      }
+    ],
+    "more": false
+  },
+  "day": {
+    "range": "day",
+    "buckets": [
+      {
+        "start": "2026-11-23T18:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "go-build": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 2.02
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 151
+          }
+        },
+        "memUsed": 4437099535,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T19:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1.89
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 3736205913,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T20:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.1,
+            "medium": 0.43
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 603
+          }
+        },
+        "memUsed": 1080342273,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T21:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.22
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 435
+          }
+        },
+        "memUsed": 861108924,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T22:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.19
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 614
+          }
+        },
+        "memUsed": 647208166,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T23:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "go-test": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.49
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 279
+          }
+        },
+        "memUsed": 1278783960,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 2
+          },
+          "byKind": {
+            "build": 1,
+            "go-test": 1
+          },
+          "byRepo": {
+            "lantern": 1,
+            "tidepool": 1
+          },
+          "byAgent": {
+            "brisk-heron": 1,
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1.02,
+            "small": 0.05
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 305,
+            "tidepool": 126
+          }
+        },
+        "memUsed": 2571876288,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 327
+        }
+      },
+      {
+        "start": "2026-11-24T01:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 2
+          },
+          "byKind": {
+            "build": 1,
+            "go-build": 1
+          },
+          "byRepo": {
+            "lantern": 2
+          },
+          "byAgent": {
+            "quiet-otter": 2
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.24,
+            "medium": 1.01
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 441
+          }
+        },
+        "memUsed": 3855230536,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 668
+        }
+      },
+      {
+        "start": "2026-11-24T02:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 2545251185,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T03:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 2
+          },
+          "byKind": {
+            "gpu": 1,
+            "py-test": 1
+          },
+          "byRepo": {
+            "sparrow-ml": 2
+          },
+          "byAgent": {
+            "sparrow-wt-2": 1,
+            "still-pine": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.46,
+            "medium": 1.52
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "sparrow-ml": 1005
+          }
+        },
+        "memUsed": 5561084258,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T04:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "py-test": 1
+          },
+          "byRepo": {
+            "sparrow-ml": 1
+          },
+          "byAgent": {
+            "sparrow-wt-2": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1.02
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "sparrow-ml": 573
+          }
+        },
+        "memUsed": 2178290571,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T05:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 2079976385,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T06:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 1,
+            "pass": 1
+          },
+          "byKind": {
+            "gradle": 1,
+            "js-test": 1
+          },
+          "byRepo": {
+            "orbit-android": 1,
+            "tidepool": 1
+          },
+          "byAgent": {
+            "amber-fox": 1,
+            "brisk-heron": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.3,
+            "medium": 0.28
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 622,
+            "tidepool": 326
+          }
+        },
+        "memUsed": 1690539905,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T07:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 1,
+            "lost": 1
+          },
+          "byKind": {
+            "go-build": 1,
+            "gradle": 1
+          },
+          "byRepo": {
+            "lantern": 1,
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1,
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.55
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 288
+          }
+        },
+        "memUsed": 1212881533,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T08:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 2
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 4319301642,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T09:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1.63
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 397
+          }
+        },
+        "memUsed": 3408895949,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T10:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 1916303453,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T11:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "gpu": 1
+          },
+          "byRepo": {
+            "sparrow-ml": 1
+          },
+          "byAgent": {
+            "still-pine": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.16,
+            "medium": 0.64
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "sparrow-ml": 1674
+          }
+        },
+        "memUsed": 1789930681,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 717
+        }
+      },
+      {
+        "start": "2026-11-24T12:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.33
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 1192283677,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T13:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T14:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T15:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "build": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.05,
+            "medium": 0.5
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 558
+          }
+        },
+        "memUsed": 1578861360,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T16:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.13,
+            "medium": 1.33
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 3711140327,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T17:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "mypc": 4
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 2083059137,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 2,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      }
+    ],
+    "segments": [
+      {
+        "start": "2026-11-23T18:00:00Z",
+        "end": "2026-11-24T10:30:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-24T10:30:00Z",
+        "end": "2026-11-24T17:12:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-24T17:12:00Z",
+        "end": "2026-11-24T17:30:00Z",
+        "mode": "mypc"
+      }
+    ]
+  },
+  "week": {
+    "range": "week",
+    "buckets": [
+      {
+        "start": "2026-11-18T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-19T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-20T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-21T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-22T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 7
+          },
+          "byKind": {
+            "go-build": 1,
+            "go-test": 2,
+            "gradle": 4
+          },
+          "byRepo": {
+            "lantern": 3,
+            "orbit-android": 4
+          },
+          "byAgent": {
+            "amber-fox": 4,
+            "quiet-otter": 3
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.51,
+            "medium": 5.27
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 279,
+            "orbit-android": 519
+          }
+        },
+        "memUsed": 606920581,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-24T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 3,
+            "lost": 1,
+            "pass": 10
+          },
+          "byKind": {
+            "build": 3,
+            "go-build": 2,
+            "go-test": 1,
+            "gpu": 2,
+            "gradle": 3,
+            "js-test": 1,
+            "py-test": 2
+          },
+          "byRepo": {
+            "lantern": 5,
+            "orbit-android": 3,
+            "sparrow-ml": 4,
+            "tidepool": 2
+          },
+          "byAgent": {
+            "amber-fox": 3,
+            "brisk-heron": 2,
+            "quiet-otter": 5,
+            "sparrow-wt-2": 2,
+            "still-pine": 2
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.94,
+            "large": 0.71,
+            "medium": 15.5,
+            "small": 0.05
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "mypc": 4
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 432,
+            "orbit-android": 397,
+            "sparrow-ml": 1093,
+            "tidepool": 226
+          }
+        },
+        "memUsed": 1663963930,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 5,
+          "started": 3,
+          "medianWaitSeconds": 668
+        }
+      }
+    ],
+    "segments": [
+      {
+        "start": "2026-11-23T17:30:00Z",
+        "end": "2026-11-24T10:30:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-24T10:30:00Z",
+        "end": "2026-11-24T17:12:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-24T17:12:00Z",
+        "end": "2026-11-24T17:30:00Z",
+        "mode": "mypc"
+      }
+    ]
+  },
+  "logs": {
+    "lantern/20261123-174740-bf70/2026-11-23T17:47:40Z": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t1.327s\nok  \tgithub.com/acme/lantern/internal/sync\t0.557s\nok  \tgithub.com/acme/lantern/internal/api\t7.406s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t5.891s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.259s\nok  \tgithub.com/acme/lantern/internal/wire\t7.508s\nok  \tgithub.com/acme/lantern/internal/cache\t3.991s\nok  \tgithub.com/acme/lantern/internal/store\t7.114s\nok  \tgithub.com/acme/lantern/internal/sync\t4.033s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t1.110s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.582s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.600s\nok  \tgithub.com/acme/lantern/internal/wire\t6.321s\nok  \tgithub.com/acme/lantern/internal/cache\t1.275s\nok  \tgithub.com/acme/lantern/internal/store\t1.503s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t3.029s\nok  \tgithub.com/acme/lantern/internal/config\t5.973s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.824s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.572s\nok  \tgithub.com/acme/lantern/internal/wire\t2.305s\nok  \tgithub.com/acme/lantern/internal/cache\t3.446s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t2.513s\nok  \tgithub.com/acme/lantern/internal/api\t7.946s\nok  \tgithub.com/acme/lantern/internal/config\t2.465s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.045s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.007s\n",
+    "lantern/20261123-182308-1aa8/2026-11-23T18:23:08Z": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+    "lantern/20261123-233136-bfb7/2026-11-23T23:31:36Z": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t7.432s\nok  \tgithub.com/acme/lantern/internal/sync\t0.768s\nok  \tgithub.com/acme/lantern/internal/api\t4.134s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t6.112s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.752s\nok  \tgithub.com/acme/lantern/internal/wire\t2.421s\nok  \tgithub.com/acme/lantern/internal/cache\t5.372s\nok  \tgithub.com/acme/lantern/internal/store\t7.026s\nok  \tgithub.com/acme/lantern/internal/sync\t1.892s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.805s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.048s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.744s\nok  \tgithub.com/acme/lantern/internal/wire\t9.054s\nok  \tgithub.com/acme/lantern/internal/cache\t3.518s\nok  \tgithub.com/acme/lantern/internal/store\t2.753s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.120s\nok  \tgithub.com/acme/lantern/internal/config\t1.677s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.783s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.900s\nok  \tgithub.com/acme/lantern/internal/wire\t7.488s\nok  \tgithub.com/acme/lantern/internal/cache\t6.651s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t3.757s\nok  \tgithub.com/acme/lantern/internal/api\t2.584s\nok  \tgithub.com/acme/lantern/internal/config\t8.124s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.224s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.931s\n",
+    "lantern/20261124-000410-df34/2026-11-24T00:04:10Z": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.336s\nok  \tgithub.com/acme/lantern/internal/sync\t4.560s\nok  \tgithub.com/acme/lantern/internal/api\t7.451s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t0.805s\nok  \tgithub.com/acme/lantern/cmd/lantern\t0.579s\nok  \tgithub.com/acme/lantern/internal/wire\t2.445s\nok  \tgithub.com/acme/lantern/internal/cache\t6.070s\nok  \tgithub.com/acme/lantern/internal/store\t9.271s\nok  \tgithub.com/acme/lantern/internal/sync\t7.398s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.970s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.190s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.833s\nok  \tgithub.com/acme/lantern/internal/wire\t2.473s\nok  \tgithub.com/acme/lantern/internal/cache\t2.938s\nok  \tgithub.com/acme/lantern/internal/store\t5.238s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t5.304s\nok  \tgithub.com/acme/lantern/internal/config\t7.205s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.885s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.421s\nok  \tgithub.com/acme/lantern/internal/wire\t7.808s\nok  \tgithub.com/acme/lantern/internal/cache\t3.534s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t6.977s\nok  \tgithub.com/acme/lantern/internal/api\t4.771s\nok  \tgithub.com/acme/lantern/internal/config\t5.136s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.102s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.585s\n",
+    "lantern/20261124-015409-7d72/2026-11-24T01:54:09Z": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",
+    "lantern/20261124-170800-6d39/2026-11-24T17:08:00Z": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.394s\nok  \tgithub.com/acme/lantern/internal/sync\t1.248s\nok  \tgithub.com/acme/lantern/internal/api\t2.812s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t8.700s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.952s\nok  \tgithub.com/acme/lantern/internal/wire\t7.330s\nok  \tgithub.com/acme/lantern/internal/cache\t8.823s\nok  \tgithub.com/acme/lantern/internal/store\t3.808s\nok  \tgithub.com/acme/lantern/internal/sync\t1.067s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.633s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.460s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.866s\nok  \tgithub.com/acme/lantern/internal/wire\t2.126s\nok  \tgithub.com/acme/lantern/internal/cache\t9.103s\nok  \tgithub.com/acme/lantern/internal/store\t3.541s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t1.516s\nok  \tgithub.com/acme/lantern/internal/config\t5.621s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.201s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.250s\nok  \tgithub.com/acme/lantern/internal/wire\t4.880s\nok  \tgithub.com/acme/lantern/internal/cache\t3.617s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t6.248s\nok  \tgithub.com/acme/lantern/internal/api\t1.336s\nok  \tgithub.com/acme/lantern/internal/config\t2.599s\nok  \tgithub.com/acme/lantern/internal/metrics\t9.097s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.876s\nok  \tgithub.com/acme/lantern/internal/wire\t7.913s\n?   \tgithub.com/acme/lantern/internal/cache\t[no test files]\nok  \tgithub.com/acme/lantern/internal/store\t2.830s\nok  \tgithub.com/acme/lantern/internal/sync\t3.003s\nok  \tgithub.com/acme/lantern/internal/api\t4.852s\nok  \tgithub.com/acme/lantern/internal/config\t3.963s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.249s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.168s\n?   \tgithub.com/acme/lantern/internal/wire\t[no test files]\nok  \tgithub.com/acme/lantern/internal/cache\t1.633s\nok  \tgithub.com/acme/lantern/internal/store\t1.831s\nok  \tgithub.com/acme/lantern/internal/sync\t0.474s\nok  \tgithub.com/acme/lantern/internal/api\t3.258s\nok  \tgithub.com/acme/lantern/internal/config\t4.211s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.321s\n?   \tgithub.com/acme/lantern/cmd/lantern\t[no test files]\nok  \tgithub.com/acme/lantern/internal/wire\t1.542s\nok  \tgithub.com/acme/lantern/internal/cache\t9.194s\nok  \tgithub.com/acme/lantern/internal/store\t8.612s\nok  \tgithub.com/acme/lantern/internal/sync\t6.001s\nok  \tgithub.com/acme/lantern/internal/api\t5.489s\nok  \tgithub.com/acme/lantern/internal/config\t5.500s\n?   \tgithub.com/acme/lantern/internal/metrics\t[no test files]\nok  \tgithub.com/acme/lantern/cmd/lantern\t9.226s\nok  \tgithub.com/acme/lantern/internal/wire\t4.660s\nok  \tgithub.com/acme/lantern/internal/cache\t1.005s\nok  \tgithub.com/acme/lantern/internal/store\t8.018s\nok  \tgithub.com/acme/lantern/internal/sync\t8.779s\nok  \tgithub.com/acme/lantern/internal/api\t4.184s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t0.439s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.318s\nok  \tgithub.com/acme/lantern/internal/wire\t2.525s\nok  \tgithub.com/acme/lantern/internal/cache\t5.012s\nok  \tgithub.com/acme/lantern/internal/store\t5.813s\nok  \tgithub.com/acme/lantern/internal/sync\t0.770s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.546s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.592s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.614s\nok  \tgithub.com/acme/lantern/internal/wire\t5.126s\nok  \tgithub.com/acme/lantern/internal/cache\t0.852s\nok  \tgithub.com/acme/lantern/internal/store\t2.185s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t4.186s\nok  \tgithub.com/acme/lantern/internal/config\t8.432s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.886s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.809s\nok  \tgithub.com/acme/lantern/internal/wire\t2.259s\nok  \tgithub.com/acme/lantern/internal/cache\t3.754s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t2.062s\nok  \tgithub.com/acme/lantern/internal/api\t9.277s\nok  \tgithub.com/acme/lantern/internal/config\t1.154s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.784s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.084s\nok  \tgithub.com/acme/lantern/internal/wire\t4.815s\n?   \tgithub.com/acme/lantern/internal/cache\t[no test files]\nok  \tgithub.com/acme/lantern/internal/store\t8.937s\nok  \tgithub.com/acme/lantern/internal/sync\t4.247s\nok  \tgithub.com/acme/lantern/internal/api\t2.001s\n",
+    "sparrow-ml/20261124-032510-20bf/2026-11-24T03:25:10Z": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ................... [  3%]\ntests/test_data.py .......... [  6%]\ntests/test_model.py .................................... [ 10%]\ntests/test_schedule.py ..................... [ 13%]\ntests/test_tokenizer.py ................... [ 16%]\ntests/test_data.py ................................... [ 20%]\ntests/test_model.py ................. [ 23%]\ntests/test_schedule.py ........... [ 26%]\ntests/test_tokenizer.py ................................... [ 30%]\ntests/test_data.py ...................... [ 33%]\ntests/test_model.py ........................... [ 36%]\ntests/test_schedule.py .................... [ 40%]\ntests/test_tokenizer.py ................... [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py ................. [ 50%]\ntests/test_schedule.py ................................ [ 53%]\ntests/test_tokenizer.py .............. [ 56%]\ntests/test_data.py ........................... [ 60%]\ntests/test_model.py ................................ [ 63%]\ntests/test_schedule.py .............................. [ 66%]\ntests/test_tokenizer.py ........... [ 70%]\ntests/test_data.py ................................. [ 73%]\ntests/test_model.py ......... [ 76%]\ntests/test_schedule.py ..................... [ 80%]\ntests/test_tokenizer.py ................................. [ 83%]\ntests/test_data.py ............................ [ 86%]\ntests/test_model.py ............. [ 90%]\ntests/test_schedule.py ................................... [ 93%]\ntests/test_tokenizer.py ............ [ 96%]\ntests/test_data.py ........... [100%]\n======== 318 passed in 412.80s ========\n",
+    "sparrow-ml/20261124-040703-eedf/2026-11-24T04:07:03Z": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............................... [  3%]\ntests/test_data.py ...................... [  6%]\ntests/test_model.py .................................. [ 10%]\ntests/test_schedule.py ............ [ 13%]\ntests/test_tokenizer.py ................................. [ 16%]\ntests/test_data.py .......................... [ 20%]\ntests/test_model.py ............... [ 23%]\ntests/test_schedule.py ........ [ 26%]\ntests/test_tokenizer.py .............. [ 30%]\ntests/test_data.py .......................... [ 33%]\ntests/test_model.py ......................... [ 36%]\ntests/test_schedule.py .................... [ 40%]\ntests/test_tokenizer.py .......................... [ 43%]\ntests/test_data.py ............................... [ 46%]\ntests/test_model.py .............. [ 50%]\ntests/test_schedule.py ......................... [ 53%]\ntests/test_tokenizer.py .......... [ 56%]\ntests/test_data.py ..................................... [ 60%]\ntests/test_model.py .............................. [ 63%]\ntests/test_schedule.py ................................ [ 66%]\ntests/test_tokenizer.py ........ [ 70%]\ntests/test_data.py ................. [ 73%]\ntests/test_model.py ........................ [ 76%]\ntests/test_schedule.py ........................ [ 80%]\ntests/test_tokenizer.py ................................. [ 83%]\ntests/test_data.py ............................... [ 86%]\ntests/test_model.py ............................... [ 90%]\ntests/test_schedule.py ............. [ 93%]\ntests/test_tokenizer.py ........ [ 96%]\ntests/test_data.py ................... [100%]\n======== 318 passed in 412.80s ========\n"
+  }
+}

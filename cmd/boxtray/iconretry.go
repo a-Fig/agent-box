@@ -49,7 +49,7 @@ func (r *iconRetry) try() (again bool) {
 	r.logf("adding the notification icon failed (attempt %d): %v", r.tries, err)
 	if r.now().Sub(r.start) >= r.limit {
 		r.gaveUp = true
-		r.logf("giving up on the notification icon after %s; the mode and yield loop keeps running without it, and a new taskbar (Explorer restart) will try again", r.limit)
+		r.logf("giving up on the notification icon after %s; the mode loop keeps running without it, and a new taskbar (Explorer restart) will try again", r.limit)
 		return false
 	}
 	return true

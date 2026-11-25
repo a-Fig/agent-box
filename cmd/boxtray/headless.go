@@ -12,9 +12,3 @@ func headlessRequested(args []string) bool {
 	}
 	return false
 }
-
-// noGames wraps Sensors so the headless enforcer never yields: nobody can be
-// gaming at the login screen, so it always runs Full.
-type noGames struct{ Sensors }
-
-func (noGames) Gaming() (bool, string) { return false, "" }

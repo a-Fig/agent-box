@@ -89,8 +89,8 @@ func only(calls []string, prefixes ...string) []string {
 }
 
 // rtick ticks and waits for the reclaims it started.
-func rtick(m *Manager, at time.Duration, gaming bool) Status {
-	st := tick(m, at, gaming)
+func rtick(m *Manager, at time.Duration) Status {
+	st := tick(m, at)
 	m.rc.wait()
 	return st
 }
@@ -115,8 +115,8 @@ func TestEverySwapMaxIsTheBoxMemoryLimitEachTick(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running", "b", "Frozen", "c", "Stopped")
 	f.config["a"][MemoryCapKey] = "2GiB"
 	f.config["b"][MemoryCapKey] = "3000000000" // not page-aligned
-	rtick(m, 0, false)
-	rtick(m, 5*time.Second, false)
+	rtick(m, 0)
+	rtick(m, 5*time.Second)
 	want := []SwapBox{{"a", 1000, 2 << 30}, {"b", 1001, 3000000000 &^ 4095}}
 	if len(r.swaps) != 2 || fmt.Sprint(r.swaps[0]) != fmt.Sprint(want) || fmt.Sprint(r.swaps[1]) != fmt.Sprint(want) {
 		t.Fatalf("swaps %v", r.swaps)
@@ -127,7 +127,7 @@ func TestSwapSkipsBoxesWithoutAMemoryLimit(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running", "b", "Running")
 	delete(f.config["b"], MemoryCapKey) // no limit, own or inherited: not the size table's
 	f.config["b"][SizeKey] = "large"
-	st := rtick(m, 0, false)
+	st := rtick(m, 0)
 	if len(r.swaps) != 1 || len(r.swaps[0]) != 1 || r.swaps[0][0].Name != "a" {
 		t.Fatalf("swaps %v", r.swaps)
 	}
@@ -139,12 +139,12 @@ func TestSwapSkipsBoxesWithoutAMemoryLimit(t *testing.T) {
 func TestSwapResultsArePerBoxAndRetried(t *testing.T) {
 	_, m, r := newReclaimFake("a", "Running", "b", "Running")
 	r.swapFail["a"] = true
-	st := rtick(m, 0, false)
+	st := rtick(m, 0)
 	if st.Err == nil || !strings.Contains(st.Err.Error(), "swap a: gone") || strings.Contains(st.Err.Error(), "swap b") {
 		t.Fatalf("err %v", st.Err)
 	}
 	r.swapFail["a"] = false
-	if st := rtick(m, 5*time.Second, false); st.Err != nil {
+	if st := rtick(m, 5*time.Second); st.Err != nil {
 		t.Fatalf("err %v", st.Err)
 	}
 	if len(r.swaps) != 2 || len(r.swaps[1]) != 2 {
@@ -157,14 +157,14 @@ func TestUpkeepRunsAfterPausesStopsAndThaws(t *testing.T) {
 	f.config["g"][SizeKey] = GPUSize
 	f.logCap = true
 	r.f = f
-	rtick(m, 0, false)
+	rtick(m, 0)
 	f.take()
-	rtick(m, time.Second, true) // a game
+	m.SetChosen(MyPC)
+	rtick(m, time.Second)
 	equal(t, only(f.take(), "pause ", "stop ", "project limits.memory", "swap"),
 		[]string{"pause a", "stop g", "project limits.memory=12GiB", "swap"})
-	rtick(m, 2*time.Second, false) // still yielding: the debounce
-	f.take()
-	rtick(m, 2*time.Second+YieldDebounce, false)
+	m.SetChosen(Full)
+	rtick(m, 2*time.Second)
 	equal(t, only(f.take(), "resume ", "project limits.memory", "swap"),
 		[]string{"resume a", "project limits.memory=24GiB", "swap"})
 }
@@ -172,36 +172,39 @@ func TestUpkeepRunsAfterPausesStopsAndThaws(t *testing.T) {
 func TestMyPCReclaimsFrozenBoxesInParallelNotGPUOnes(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running", "b", "Frozen", "c", "Stopped", "g", "Running")
 	f.config["g"][SizeKey] = GPUSize
-	rtick(m, 0, false)
+	rtick(m, 0)
 	f.take()
 
-	rtick(m, time.Second, true) // a game starts
+	m.SetChosen(MyPC)
+	rtick(m, time.Second)
 	equal(t, r.take(), []string{"a/1000", "b/1001"})
 	if r.maxFlight != 2 {
 		t.Errorf("%d reclaims at once, want 2", r.maxFlight)
 	}
 	equal(t, only(f.take(), "pause "), []string{"pause a", "pause b"})
-	if st := rtick(m, 2*time.Second, true); len(st.Reclaimed) != 2 {
+	if st := rtick(m, 2*time.Second); len(st.Reclaimed) != 2 {
 		t.Fatalf("reclaimed %v", st.Reclaimed)
 	}
 	equal(t, r.take(), nil)
 
-	// The game ends: they resume with nothing to undo first.
-	rtick(m, 3*time.Second, false)
-	rtick(m, 3*time.Second+YieldDebounce, false)
+	// Back to Full: they resume with nothing to undo first.
+	m.SetChosen(Full)
+	rtick(m, 3*time.Second)
 	equal(t, only(f.take(), "resume "), []string{"resume a", "resume b"})
 
-	// Another game: a new freeze, reclaimed afresh.
-	rtick(m, time.Minute, true)
+	// My PC again: a new freeze, reclaimed afresh.
+	m.SetChosen(MyPC)
+	rtick(m, time.Minute)
 	equal(t, r.take(), []string{"a/1000", "b/1001"})
 }
 
 func TestStalledReclaimDoesntBlockTheTick(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running")
 	r.block = true
-	m.Tick(context.Background(), t0, false, "")
+	m.Tick(context.Background(), t0)
 	start := time.Now()
-	st := m.Tick(context.Background(), t0.Add(time.Second), true, "steam:1")
+	m.SetChosen(MyPC)
+	st := m.Tick(context.Background(), t0.Add(time.Second))
 	if time.Since(start) > time.Second || st.Err != nil {
 		t.Fatalf("tick took %v, err %v", time.Since(start), st.Err)
 	}
@@ -210,7 +213,7 @@ func TestStalledReclaimDoesntBlockTheTick(t *testing.T) {
 	}
 	// The reaper deleting the box cancels its reclaim.
 	expiry(f, "a", t0)
-	m.Tick(context.Background(), t0.Add(2*time.Second), true, "steam:1")
+	m.Tick(context.Background(), t0.Add(2*time.Second))
 	m.rc.wait()
 	if _, ok := f.state["a"]; ok {
 		t.Fatal("a not reaped")
@@ -224,19 +227,20 @@ func TestReclaimIsBestEffortAndOnlyFrozenStopStops(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running", "b", "Running")
 	r.notRan["a"] = true  // WSL failures: retried with backoff
 	r.left["b"] = 3 << 30 // the write happened, the RAM is still there
-	rtick(m, 0, false)
+	rtick(m, 0)
 	f.take()
-	rtick(m, time.Second, true)
+	m.SetChosen(MyPC)
+	rtick(m, time.Second)
 	equal(t, r.take(), []string{"a/1000", "b/1001"})
 
-	st := rtick(m, 2*time.Second, true)
+	st := rtick(m, 2*time.Second)
 	if st.Err == nil || !strings.Contains(st.Err.Error(), "wsl.exe failed") || len(st.Reclaimed) != 1 || st.Reclaimed[0] != (Reclaimed{"b", 3 << 30}) {
 		t.Fatalf("err %v, reclaimed %v", st.Err, st.Reclaimed)
 	}
-	rtick(m, 2*time.Second+ReclaimRetry, true)
+	rtick(m, 2*time.Second+ReclaimRetry)
 	equal(t, r.take(), []string{"a/1000"})
 	for i := 0; i < 12; i++ {
-		rtick(m, time.Duration(30+60*i)*time.Second, true)
+		rtick(m, time.Duration(30+60*i)*time.Second)
 	}
 	equal(t, only(f.take(), "stop "), nil)
 	if f.state["a"] != "Frozen" || f.state["b"] != "Frozen" {
@@ -245,19 +249,19 @@ func TestReclaimIsBestEffortAndOnlyFrozenStopStops(t *testing.T) {
 	if calls := r.take(); len(calls) == 0 || only(calls, "b/") != nil {
 		t.Fatalf("calls %q", calls) // a kept retrying, b never again
 	}
-	rtick(m, time.Second+FrozenStop, true)
+	rtick(m, time.Second+FrozenStop)
 	equal(t, only(f.take(), "stop "), []string{"stop a", "stop b"})
 }
 
 func TestReclaimIsResetWhenABoxIsPausedAgainOrRecreated(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running")
 	m.SetChosen(MyPC)
-	rtick(m, 0, false) // paused; its swap.max is set at the end of this tick
+	rtick(m, 0) // paused; its swap.max is set at the end of this tick
 	equal(t, r.take(), nil)
-	rtick(m, time.Second, false)
+	rtick(m, time.Second)
 	equal(t, r.take(), []string{"a/1000"})
 	f.state["a"] = "Running" // an agent resumes it
-	rtick(m, 2*time.Second, false)
+	rtick(m, 2*time.Second)
 	equal(t, r.take(), []string{"a/1000"})
 
 	// Deleted and recreated under the same name, still frozen: a new PID,
@@ -267,9 +271,9 @@ func TestReclaimIsResetWhenABoxIsPausedAgainOrRecreated(t *testing.T) {
 	f.add("a", "Frozen")
 	f.setCfg("x", MemoryCapKey, "4GiB")
 	f.setCfg("a", MemoryCapKey, "4GiB")
-	rtick(m, 3*time.Second, false)
+	rtick(m, 3*time.Second)
 	equal(t, r.take(), nil)
-	rtick(m, 4*time.Second, false)
+	rtick(m, 4*time.Second)
 	equal(t, r.take(), []string{"a/1001", "x/1000"})
 }
 
@@ -297,7 +301,7 @@ func TestReleaseCancelsATickInFlightAndBlocksNewOnes(t *testing.T) {
 	m := New(inc, MyPC)
 	m.Reclaim = newFakeReclaim()
 	done := make(chan Status, 1)
-	go func() { done <- m.Tick(context.Background(), t0, false, "") }()
+	go func() { done <- m.Tick(context.Background(), t0) }()
 	<-inc.entered
 	if !m.BeginRelease() {
 		t.Fatal("first release refused")
@@ -311,12 +315,12 @@ func TestReleaseCancelsATickInFlightAndBlocksNewOnes(t *testing.T) {
 		t.Fatal("a second release ran while one is held")
 	}
 	f.take()
-	st := m.Tick(context.Background(), t0.Add(time.Second), false, "")
+	st := m.Tick(context.Background(), t0.Add(time.Second))
 	if !st.Down || f.take() != nil || inc.lists.Load() != 1 {
 		t.Fatalf("tick during release: %+v, lists %d", st, inc.lists.Load())
 	}
 	m.EndRelease()
-	m.Tick(context.Background(), t0.Add(2*time.Second), false, "")
+	m.Tick(context.Background(), t0.Add(2*time.Second))
 	m.rc.wait()
 	if inc.lists.Load() != 2 || f.state["a"] != "Frozen" {
 		t.Fatalf("after release: lists %d, a %s", inc.lists.Load(), f.state["a"])
@@ -328,8 +332,9 @@ func TestReleaseDropsReclaimsAndStartsNone(t *testing.T) {
 	r.mu.Lock()
 	r.block = true
 	r.mu.Unlock()
-	m.Tick(context.Background(), t0, false, "")
-	m.Tick(context.Background(), t0.Add(time.Second), true, "steam:1")
+	m.Tick(context.Background(), t0)
+	m.SetChosen(MyPC)
+	m.Tick(context.Background(), t0.Add(time.Second))
 	m.BeginRelease() // returns once the blocked reclaim was cancelled and ended
 	r.mu.Lock()
 	r.block = false
@@ -337,14 +342,14 @@ func TestReleaseDropsReclaimsAndStartsNone(t *testing.T) {
 	r.take()
 	f.add("b", "Running")
 	f.setCfg("b", MemoryCapKey, "4GiB")
-	rtick(m, 2*time.Second, true)
+	rtick(m, 2*time.Second)
 	if calls := r.take(); calls != nil {
 		t.Fatalf("reclaims during release: %q", calls)
 	}
 	m.EndRelease()
-	rtick(m, 4*time.Second, true) // a's swap was confirmed before; b's is now
+	rtick(m, 4*time.Second) // a's swap was confirmed before; b's is now
 	equal(t, r.take(), []string{"a/1000"})
-	rtick(m, 5*time.Second, true)
+	rtick(m, 5*time.Second)
 	equal(t, r.take(), []string{"b/1001"})
 }
 
@@ -402,15 +407,16 @@ func TestSwappedBoxesStayFrozenLonger(t *testing.T) {
 	r.left["ok"] = 10 << 20
 	r.left["full"] = ReclaimLeft + 1 // no swap to go to, or swap ran out
 	r.notRan["never"] = true
-	rtick(m, 0, false)
-	rtick(m, time.Second, true) // a game: all three paused, reclaims start
-	rtick(m, 2*time.Second, true)
+	rtick(m, 0)
+	m.SetChosen(MyPC)
+	rtick(m, time.Second) // all three paused, reclaims start
+	rtick(m, 2*time.Second)
 	f.take()
-	rtick(m, time.Second+FrozenStop, true)
+	rtick(m, time.Second+FrozenStop)
 	equal(t, only(f.take(), "stop "), []string{"stop full", "stop never"})
-	rtick(m, time.Hour, true)
+	rtick(m, time.Hour)
 	equal(t, only(f.take(), "stop "), nil)
-	rtick(m, time.Second+FrozenSwappedStop, true)
+	rtick(m, time.Second+FrozenSwappedStop)
 	equal(t, only(f.take(), "stop "), []string{"stop ok"})
 }
 
@@ -419,9 +425,10 @@ func TestSwappedBoxesStayFrozenLonger(t *testing.T) {
 func TestFrozenLimitFollowsTheInstance(t *testing.T) {
 	f, m, r := newReclaimFake("a", "Running")
 	r.left["a"] = 10 << 20
-	rtick(m, 0, false)
-	rtick(m, time.Second, true)
-	rtick(m, 2*time.Second, true)
+	rtick(m, 0)
+	m.SetChosen(MyPC)
+	rtick(m, time.Second)
+	rtick(m, 2*time.Second)
 	if got := m.frozenLimit("a", 1000); got != FrozenSwappedStop {
 		t.Fatalf("limit %v", got)
 	}
@@ -430,12 +437,12 @@ func TestFrozenLimitFollowsTheInstance(t *testing.T) {
 	f.add("a", "Frozen")
 	f.setCfg("a", MemoryCapKey, "4GiB")
 	r.notRan["a"] = true // its reclaim doesn't get to run
-	rtick(m, time.Minute, true)
+	rtick(m, time.Minute)
 	if got := m.frozenLimit("a", 1001); got != FrozenStop {
 		t.Fatalf("new instance limit %v", got)
 	}
 	f.take()
-	rtick(m, time.Minute+FrozenStop, true)
+	rtick(m, time.Minute+FrozenStop)
 	equal(t, only(f.take(), "stop "), []string{"stop a"})
 }
 
@@ -449,15 +456,15 @@ func TestReclaimWaitsForSwapAndStoppedBoxesSkipTheBatch(t *testing.T) {
 	f.config["g"][SizeKey] = GPUSize
 	m.SetChosen(MyPC)
 	r.swapFail["a"] = true
-	rtick(m, 0, false)
+	rtick(m, 0)
 	if len(r.swaps) != 1 || len(r.swaps[0]) != 1 || r.swaps[0][0].Name != "a" {
 		t.Fatalf("swaps %v (the GPU box was stopped this tick)", r.swaps)
 	}
-	rtick(m, time.Second, false) // the batch failed for a: no reclaim yet
+	rtick(m, time.Second) // the batch failed for a: no reclaim yet
 	equal(t, r.take(), nil)
 	r.swapFail["a"] = false
-	rtick(m, 2*time.Second, false) // confirmed at the end of this tick
+	rtick(m, 2*time.Second) // confirmed at the end of this tick
 	equal(t, r.take(), nil)
-	rtick(m, 3*time.Second, false)
+	rtick(m, 3*time.Second)
 	equal(t, r.take(), []string{"a/1000"})
 }
