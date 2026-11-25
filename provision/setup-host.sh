@@ -137,7 +137,9 @@ else
   d_pool=${pool_gib}GiB
   # The disk cap never exceeds the pool, so a full pool is a clear quota refusal, not ENOSPC.
   pool_cap=${AGENTS_POOL_SIZE:-$d_pool}; pool_cap=${pool_cap%GiB}
-  disk_gib=$(( ${AGENTS_MAX_BOXES:-$d_boxes} * 18 + 30 )); [ "$disk_gib" -le "$pool_cap" ] || disk_gib=$pool_cap
+  # At least 60, the cache and one medium box (see the pool floor below), even with one box.
+  disk_gib=$(( ${AGENTS_MAX_BOXES:-$d_boxes} * 18 + 30 )); [ "$disk_gib" -ge 60 ] || disk_gib=60
+  [ "$disk_gib" -le "$pool_cap" ] || disk_gib=$pool_cap
   d_disk=${disk_gib}GiB
 fi
 CPU_CAP=${AGENTS_CPU_CAP:-$d_cpu}
@@ -223,7 +225,7 @@ else
   case "$pool_n" in ''|*[!0-9]*) pool_n=0 ;; esac
   # 60: the 30GiB cache and one medium box (30GiB root), the default size and the size
   # --build-base's builder launches at. With 50 (2026-11-25, a 60GB VM) both hit limits.disk.
-  [ "$pool_n" -ge 60 ] || die "pool size '$POOL_SIZE' isn't 60GiB or more, in GiB (the 30GiB cache volume and one medium box, 30GiB). It is 80% of the free disk under /var/lib: free about 75GB there, or set AGENTS_POOL_SIZE=<n>GiB (no more than is free)."
+  [ "$pool_n" -ge 60 ] || die "pool size '$POOL_SIZE' isn't 60GiB or more, in GiB (the 30GiB cache volume and one medium box, 30GiB). It is 80% of the free disk under /var/lib: free about 75GiB there, or set AGENTS_POOL_SIZE=<n>GiB (no more than is free)."
   sed "s/^\( *size:\) 200GiB$/\1 $POOL_SIZE/" "$HERE/incus-preseed.yaml" | incus admin init --preseed
   note "applied incus-preseed.yaml (btrfs pool of $POOL_SIZE, incusbr0 NAT bridge, HTTPS on :8443)"
 fi

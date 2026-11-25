@@ -10,7 +10,7 @@ See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Quick start: a Linux server
 
-**Host** (Ubuntu or Debian, kernel 6.12+, 6GB RAM and about 75GB free disk, as root). `provision/setup-host.sh` sets up Incus and the `agents` project, builds the `agent-base` image boxes start from, then prints the line a client adds the host with. Ubuntu 24.04 ships 6.8: first `sudo apt install linux-generic-hwe-24.04` and reboot.
+**Host** (Ubuntu or Debian, kernel 6.12+, 6GiB RAM and 75GiB free disk, as root). `provision/setup-host.sh` sets up Incus and the `agents` project, builds the `agent-base` image boxes start from, then prints the line a client adds the host with. Ubuntu 24.04 ships 6.8: first `sudo apt install linux-generic-hwe-24.04` and reboot.
 
 ```sh
 sudo apt install -y git
