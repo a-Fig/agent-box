@@ -322,6 +322,21 @@ func TestCLIBoxJobMakesTheWatcherQuiet(t *testing.T) {
 	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 {
 		t.Errorf("watch pushed after box job printed the result: %v, %d", err, e.push.count())
 	}
+
+	// Read from a terminal outside the session, it is still pushed.
+	_, st = e.run(t, "sleep 60")
+	job = st["job"].(string)
+	f.finish("0", "tail\n")
+	getenv := e.a.Getenv
+	e.a.Getenv = func(k string) string {
+		if k == "T3CODE_THREAD_ID" {
+			return ""
+		}
+		return getenv(k)
+	}
+	if c := run(context.Background(), e.a, []string{"job", job}, nil); c != 0 || e.a.exists(job, ".notified") {
+		t.Fatalf("box job outside the session: exit %d, notified %v", c, e.a.exists(job, ".notified"))
+	}
 }
 
 // Whatever the interleaving, the end reaches the agent at least once.
