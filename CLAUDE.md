@@ -43,14 +43,18 @@ this file loads into every session, so it stays short and points into `docs/` fo
 - WSL's ext4 has no project quotas, so the storage pool is btrfs: only it enforces disk sizes.
 - systemd in WSL counts as a container, so units with `ConditionVirtualization=!container` (such
   as `incus-lxcfs`) are skipped unless a drop-in clears the condition.
-- On the laptop, run Go only through `.scratch/golock.sh` (one Go run at a time) and never with
-  `-race`: the laptop starves. CI runs `-race`.
+- Run Go tests, vet and builds on a box (`box_run`), not the laptop. Only when box refuses (exit
+  75) run Go locally, through `.scratch/golock.sh` (one Go run at a time) and never with `-race`:
+  the laptop starves.
 
 ## Workflow
 
 Tyler's rules:
 
 - Reuse existing tools and open source before writing code; keep custom code thin.
+- Dogfood (2026-11-25): we use box ourselves, harder than other agents do: every test run and
+  build, parallel runs, the queue, cancel, pull and sizes. Each friction or bug we hit becomes an
+  issue with its job ID, and we fix it in the next release.
 - Simple first (2026-11-25): build the simplest version that works and keep it until it causes
   a real problem, then fix it only there. No guards or schemes for failures nobody has hit.
 - Go: standard library first; a dependency needs a written reason. `gofmt`, `go vet ./...` and
