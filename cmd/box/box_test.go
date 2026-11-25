@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -276,7 +277,7 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		if argv[0] == "bash" {
 			argv = argv[1:]
 		} else {
-			argv = []string{"-c", shellCommand(argv)}
+			argv = []string{"-c", jobrun.ShellCommand(argv)}
 		}
 		cmd := Cmd{Name: f.bash, Args: argv, Stdout: c.Stdout, Stderr: c.Stderr, Env: c.Env}
 		f.mu.Unlock()
@@ -639,10 +640,10 @@ func TestJobRejectsBadID(t *testing.T) {
 }
 
 func TestShellCommand(t *testing.T) {
-	if got := shellCommand([]string{"go test ./... && echo hi"}); got != "go test ./... && echo hi" {
+	if got := jobrun.ShellCommand([]string{"go test ./... && echo hi"}); got != "go test ./... && echo hi" {
 		t.Errorf("one arg = %q", got)
 	}
-	if got := shellCommand([]string{"echo", "it's", "a b"}); got != `'echo' 'it'\''s' 'a b'` {
+	if got := jobrun.ShellCommand([]string{"echo", "it's", "a b"}); got != `'echo' 'it'\''s' 'a b'` {
 		t.Errorf("argv = %q", got)
 	}
 }
@@ -802,4 +803,22 @@ func TestExitFilterDropsACutMarkerLine(t *testing.T) {
 	if code, ok := ef.exit(); !ok || code != "1" || out.String() != "box: a warning\n" || ef.digest() != "" {
 		t.Fatalf("exit %q %v, out %q, digest %q", code, ok, out.String(), ef.digest())
 	}
+}
+
+// copyFile is the fake incus file pull.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
