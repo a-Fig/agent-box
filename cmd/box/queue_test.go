@@ -506,6 +506,29 @@ func TestCLIBoxJobOnAFinishedQueuedJob(t *testing.T) {
 	}
 }
 
+// box job on a queued job while boxd can't be reached waits out the outage,
+// as the watcher does, rather than asking a box the job doesn't have yet.
+func TestCLIBoxJobRidesOutABoxdOutage(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{gone: map[string]bool{"my-repo-ab12": true}})
+	queued := time.Date(2026, 11, 23, 11, 55, 0, 0, time.UTC)
+	exit, ended := 4, queued.Add(3*time.Minute)
+	b.views = []dash.Job{{Box: "my-repo-ab12", State: dash.JobDone, QueuedAt: &queued, StartedAt: queued.Add(time.Minute), EndedAt: &ended, Exit: &exit, Tail: "after the outage\n"}}
+	fails := 2
+	e.a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if fails > 0 {
+			fails--
+			return nil, errors.New("connection refused")
+		}
+		return b.do(req)
+	}
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Queued: true})
+	var out, errOut strings.Builder
+	e.a.Out, e.a.Err = &out, &errOut
+	if c := run(context.Background(), e.a, []string{"job", queuedJobName}, nil); c != 4 || !strings.Contains(out.String(), "after the outage") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", c, out.String(), errOut.String())
+	}
+}
+
 // A queued job that ran and ended between two looks is read from its box:
 // the full log, not only boxd's tail.
 func TestFollowQueuedReadsAnUnwatchedEndFromItsBox(t *testing.T) {

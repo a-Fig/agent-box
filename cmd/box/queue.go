@@ -391,8 +391,8 @@ func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
 	case out.end != nil:
 		// It ran and ended between two looks: its kept box has the full log
 		// and digest; boxd's tail is the fallback once the box is gone.
-		if r, err := a.Job(ctx, job, 0); err == nil {
-			return r, nil
+		if r, err := a.Job(ctx, job, 0); err == nil && r.State == stateDone {
+			return r, nil // not a pause: a kept box frozen by My PC doesn't undo an end boxd has
 		}
 		io.WriteString(a.Out, out.end.Tail+"\n")
 		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code}, nil
@@ -401,11 +401,12 @@ func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
 	return a.Job(ctx, job, 0)
 }
 
-// stillQueued says whether boxd has job waiting in its queue now. box job
+// stillQueued says whether job may still wait in boxd's queue: boxd says so,
+// or can't be asked, in which case waitQueued rides out the outage. box job
 // follows such a job through the queue; any other is the box's to report.
 func (a *App) stillQueued(ctx context.Context, job string) bool {
 	j, found, err := a.queuedJob(ctx, job)
-	return err == nil && found && j.State == dash.JobQueued
+	return err != nil || found && j.State == dash.JobQueued
 }
 
 // notifiedBy is who wrote job's .notified ("cancel", "watcher", "box run",
