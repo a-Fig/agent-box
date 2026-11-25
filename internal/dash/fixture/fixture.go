@@ -440,10 +440,6 @@ func Allot(m *dash.Machine, boxes []dash.Box) {
 // state's job list, the jobs page and the history.
 func (w *world) finish(name, about string) Scenario {
 	m := &w.machine
-	if m.Chosen == nil && m.Enforcer != dash.EnforcerHeadless {
-		// The pick the enforcers act on; the headless enforcer's Full default is never stored.
-		m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: w.now.Add(-2 * time.Hour)}
-	}
 	Allot(m, w.boxes)
 	var used int64
 	for _, b := range w.boxes {
@@ -708,7 +704,6 @@ func buildBusy(w *world) {
 
 func buildMyPC(w *world) {
 	w.machine.Mode = dash.ModeMyPC
-	w.machine.Chosen = &dash.ChosenMode{Mode: dash.ModeMyPC, At: w.now.Add(-18 * time.Minute)}
 	lb := w.box("lantern", "medium", lantern, dash.BoxFrozen, false, 2*time.Hour, 23*time.Hour+10*time.Minute)
 	w.load(lb, 0.66, 0)
 	sb := w.box("sparrow-ml", "medium", sparrow, dash.BoxFrozen, false, 50*time.Minute, 70*time.Minute)

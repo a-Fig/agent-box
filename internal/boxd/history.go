@@ -33,7 +33,6 @@ const (
 	recBoxCreate   = "box-create"
 	recBoxDelete   = "box-delete"
 	recMode        = "mode" // the mode changed
-	recModeRequest = "mode-request"
 	recControl     = "control"
 	recRefusal     = "refusal"
 	recQueueAdd    = "queue-add"    // a job was queued
@@ -51,7 +50,6 @@ type record struct {
 	Seconds float64           `json:"seconds,omitempty"` // job-end: how long it ran
 	Box     *boxRec           `json:"box,omitempty"`
 	Mode    *modeRec          `json:"mode,omitempty"`
-	Request *dash.ModeRequest `json:"request,omitempty"`
 	Refusal *dash.RefusalBody `json:"refusal,omitempty"`
 	Control *controlRec       `json:"control,omitempty"`
 }
@@ -76,25 +74,29 @@ type controlRec struct {
 	By     string `json:"by"`
 }
 
-// sample is one line of a samples file, each minute: one for the machine and
-// one per box.
+// sample is one line of a samples file, each minute, for the machine. Files
+// written before 2026-11-25 also hold a line per box ("kind":"box"), which
+// nothing reads.
 type sample struct {
 	V        int       `json:"v"`
 	At       time.Time `json:"at"`
-	Kind     string    `json:"kind"` // machine, box
-	Box      string    `json:"box,omitempty"`
-	Size     string    `json:"size,omitempty"`
+	Kind     string    `json:"kind"` // machine
 	MemUsed  int64     `json:"memUsed"`
-	MemLimit int64     `json:"memLimit,omitempty"` // box
-	MemCap   int64     `json:"memCap,omitempty"`   // machine
-	MemAlloc int64     `json:"memAlloc,omitempty"` // machine: what boxes hold of the cap
+	MemCap   int64     `json:"memCap,omitempty"`
+	MemAlloc int64     `json:"memAlloc,omitempty"` // what boxes hold of the cap
 	WSL      int64     `json:"wslMemory,omitempty"`
-	CPUTime  int64     `json:"cpuTime,omitempty"` // box: nanoseconds
 }
 
 type boxSpan struct {
-	rec boxRec
-	end *time.Time
+	rec   boxRec
+	start time.Time
+	end   *time.Time
+}
+
+// unsetTime reports a zero or Unix-epoch timestamp that Incus reports while
+// an instance is still being created.
+func unsetTime(t time.Time) bool {
+	return t.IsZero() || t.Unix() <= 0
 }
 
 type modeAt struct {
@@ -190,7 +192,11 @@ func (h *History) apply(r record) {
 		h.jobs[j.Key] = &j
 	case recBoxCreate:
 		if r.Box != nil {
-			h.boxes[r.Box.id()] = &boxSpan{rec: *r.Box}
+			start := r.Box.CreatedAt
+			if unsetTime(start) {
+				start = r.At
+			}
+			h.boxes[r.Box.id()] = &boxSpan{rec: *r.Box, start: start}
 		}
 	case recBoxDelete:
 		if r.Box != nil {
@@ -520,13 +526,16 @@ func (h *History) Range(rng string, live Live) dash.History {
 		}
 	}
 	for _, s := range h.boxes {
+		if unsetTime(s.start) {
+			continue
+		}
 		to := now
 		if s.end != nil {
 			to = *s.end
 		}
 		for i := range out.Buckets {
 			bs := out.Buckets[i].Start
-			lo, hi := later(s.rec.CreatedAt, bs), earlier(to, bs.Add(step))
+			lo, hi := later(s.start, bs), earlier(to, bs.Add(step))
 			if hi.After(lo) {
 				out.Buckets[i].BoxHours.BySize[s.rec.Size] = round2(out.Buckets[i].BoxHours.BySize[s.rec.Size] + hi.Sub(lo).Hours())
 			}
@@ -702,4 +711,21 @@ func (h *History) JobByID(box, id string) (dash.Job, bool) {
 		return dash.Job{}, false
 	}
 	return *best, true
+}
+
+// BoxRepo returns the repo of the newest recorded job on the box created at
+// created, or "".
+func (h *History) BoxRepo(box string, created time.Time) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var best *dash.Job
+	for _, j := range h.jobs {
+		if j.Box == box && j.Repo != "" && holds(created, j.StartedAt) && (best == nil || j.StartedAt.After(best.StartedAt)) {
+			best = j
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.Repo
 }

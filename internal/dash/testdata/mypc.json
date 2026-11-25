@@ -9,10 +9,6 @@
         "reachable": true,
         "mode": "mypc",
         "modeRequested": null,
-        "chosen": {
-          "mode": "mypc",
-          "at": "2026-11-24T17:12:00Z"
-        },
         "trayLastSeen": "2026-11-24T17:29:48Z",
         "enforcer": "tray",
         "caps": {

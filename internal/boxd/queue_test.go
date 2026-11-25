@@ -567,3 +567,49 @@ func TestQueueStartClearsRestored(t *testing.T) {
 	}
 	t.Fatal("a start that looked left the job restored")
 }
+
+// A queued job that ends up reusing an existing box of a different size writes
+// that box's actual size and GPU flag into .meta (#128).
+func TestQueueReuseWritesActualBoxSizeInMeta(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	spec := small("widget", "quiet-otter")
+	spec.New = false
+	spec.Size = "medium"
+	spec.Meta = json.RawMessage(`{"v":1,"reason":"Run tests","command":"go test ./...","size":"medium","gpu":true}`)
+	_, rep, _ := r.enqueue(spec, "B")
+
+	var pushedMeta []byte
+	r.f.set(func() {
+		r.f.ins = []Instance{inst("widget", "Running", "small", r.c.now())}
+		r.f.cfg["user.agent-box.mode"] = "full"
+		r.f.cliErr = func(args []string) error {
+			if len(args) >= 5 && args[0] == "file" && strings.HasSuffix(args[4], ".meta") {
+				pushedMeta, _ = os.ReadFile(args[3])
+			}
+			return nil
+		}
+	})
+	r.poll()
+	for i := 0; i < 200; i++ {
+		if len(r.w.Queued()) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(r.w.Queued()) != 0 {
+		t.Fatal("queued job never started")
+	}
+	var got struct {
+		Size string `json:"size"`
+		GPU  bool   `json:"gpu"`
+	}
+	if err := json.Unmarshal(pushedMeta, &got); err != nil {
+		t.Fatalf("pushed meta %q: %v", pushedMeta, err)
+	}
+	if got.Size != "small" || got.GPU {
+		t.Fatalf("pushed meta size=%q gpu=%v, want small/false", got.Size, got.GPU)
+	}
+	if j, ok := r.w.QueuedView(rep.Job); !ok || j.Size != "small" || j.GPU || j.Kind != dash.KindGoTest {
+		t.Fatalf("started view = %+v, ok=%v", j, ok)
+	}
+}

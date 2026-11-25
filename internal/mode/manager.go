@@ -106,9 +106,6 @@ func (m *Manager) Chosen() Mode { m.mu.Lock(); defer m.mu.Unlock(); return m.cho
 // SetChosen records a new pick; the next Tick applies it.
 func (m *Manager) SetChosen(c Mode) { m.SetChosenAt(c, time.Now()) }
 
-// Last returns the result of the most recent Tick.
-func (m *Manager) Last() Status { m.tickMu.Lock(); defer m.tickMu.Unlock(); return m.last }
-
 // Tick brings Incus in line with the chosen mode.
 func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 	m.tickMu.Lock()
@@ -443,13 +440,6 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 	for _, kv := range want {
 		if cur, ok := in.Config[kv[0]]; !ok || cur != kv[1] {
 			if err := m.Incus.SetInstanceConfig(ctx, in.Name, kv[0], kv[1]); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-	for _, k := range legacyKeys {
-		if _, ok := in.Config[k]; ok {
-			if err := m.Incus.UnsetInstanceConfig(ctx, in.Name, k); err != nil {
 				errs = append(errs, err)
 			}
 		}

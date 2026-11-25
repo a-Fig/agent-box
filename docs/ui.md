@@ -25,7 +25,7 @@ One server, one page, three ways in.
   - `box app` (laptop) opens it in a window of its own, through
     [glaze](https://github.com/crgimenes/glaze), as `mur app` does (see Murmur's
     `docs/design/desktop.md`).
-  - The tray on the PC gets an **Open dashboard** item, which opens the same window.
+  - The tray on the PC gets an **Open dashboard** item, which opens the same window (not built, 2026-11-25).
   - Any browser on the tailnet, a phone included.
 
 ### Why a server on the PC rather than `box ui` serving from the laptop like `mur ui`
@@ -197,9 +197,9 @@ full caps cost.
 
 ### Jobs that end with their box
 
-`box` deletes a throwaway box as soon as it has read the run's exit, which can be inside `boxd`'s
-3s poll: `boxd` would then see the box vanish with no `.exit` read and record the job as `lost`. So
-after reading the exit and before deleting the box, `box` sends `POST /api/jobs/ended`
+`box` keeps a throwaway box 30 minutes after the run's exit, but a launch short of room can delete
+it sooner (#90), even inside `boxd`'s 3s poll: `boxd` would then see the box vanish with no `.exit`
+read and record the job as `lost`. So after reading the exit, `box` sends `POST /api/jobs/ended`
 (`{box, id, exit, endedAt, tail}`, `dash.JobEndedBody`), as a best effort with a 2s timeout,
 ignoring errors, like refusals. `boxd` takes it only for a job it knows is running (404
 otherwise), masks the tail as it masks every tail, records the end, and answers 204.
@@ -210,10 +210,11 @@ otherwise), masks the tail as it masks every tail, records the end, and answers 
 - **`events-YYYY-MM-DD.jsonl`**, kept 180 days:
   - job started and job ended, with the `.meta`, exit code and duration;
   - box created and box deleted;
-  - mode changes, mode requests, and controls (with the device);
+  - mode changes and controls (with the device; a mode request is a control);
   - refusals.
-- **`samples-YYYY-MM-DD.jsonl`**, kept 14 days: a line per box and one for the machine each minute
-  (memory, CPU time, allocated memory).
+- **`samples-YYYY-MM-DD.jsonl`**, kept 14 days: a line for the machine each minute (memory used,
+  the cap, what boxes hold of it, WSL's memory). Files from before 2026-11-25 also have a line per
+  box, which nothing reads.
 
 How the files are written and read:
 - Every line has `"v": 1`. A reader skips a truncated last line, so a crash mid-write loses one
@@ -249,7 +250,7 @@ storage.
   frozen box can't run either, so its jobs are paused and its log is shown as paused, not an
   error. The unit points `INCUS_CONF` at boxd's state directory, since `ProtectHome` hides
   `/root`.
-- **A throwaway outlives its job by about a second,** less than a poll. So `box` reports each run's
+- **A throwaway can go sooner than a poll** when a launch needs its room (#90). So `box` reports each run's
   end (`POST /api/jobs/ended`), and boxd records the job from that; a job whose box went without a
   report is `lost`.
 - **Its access.** `boxd` uses the PC's own Incus admin access, not one of the agents' restricted
@@ -315,12 +316,12 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
 | `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
-| `GET /api/queue`, `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |
+| `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |
 
 ### Shapes
 
 - **`Machine`:** `{id, name, reachable, mode, modeRequested: {mode, at, by} | null,
-  chosen: {mode, at} | null, trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
+  trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
   gpu}, wslMemory, boxd: Version | null, tray: Version | null}`.
   `Version` is `{commit, time, modified}`, the commit a binary was built from (`internal/version`).
@@ -329,8 +330,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   differ ("boxd e823842 (3h newer than tray)"): on 2026-11-25 the PC twice ran a boxd hours older than
   the repo, and nothing showed it.
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
-  key never written, or one holding a value boxtray doesn't write. `chosen` is
-  `user.agent-box.chosen`, the mode the enforcers act on (null if unset or not a mode).
+  key never written, or one holding a value boxtray doesn't write.
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
   memLimit, cpus, cpuPct}`
 - **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
@@ -370,7 +370,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - `setup-distro.sh` installs `boxd` and `agent-box-boxd.service`, and writes `boxd.json`. It also
   runs `tailscale serve --bg --https=443 http://127.0.0.1:7766`; port 7766 was chosen so nothing
   else on the distro takes it.
-- The tray's **Open dashboard** item opens `https://agent-box.<tailnet>.ts.net`.
+- The tray's **Open dashboard** item opens `https://agent-box.<tailnet>.ts.net` (not built, 2026-11-25).
 - The laptop's `box ui` and `box app` get that address from the `pc` remote's host name.
 
 ## Order of work
@@ -384,7 +384,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
    the owner check. History is recorded from here on.
 3. **The page**, against the devserver, then live. This runs in parallel with 2.
 4. **The controls,** with the tray's mode request and the tray's heartbeat.
-5. **`box ui`, `box app`,** the tray's **Open dashboard**, and the "PC unreachable" screen.
+5. **`box ui`, `box app`,** the tray's **Open dashboard** (not built, 2026-11-25), and the "PC unreachable" screen.
 6. **The history page and its charts.**
 
 ## Not now

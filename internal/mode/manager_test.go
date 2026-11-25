@@ -123,13 +123,6 @@ func (f *fake) setCfg(n, k, v string) {
 	}
 	f.config[n][k] = v
 }
-func (f *fake) UnsetInstanceConfig(_ context.Context, n, k string) error {
-	if err := f.rec("unset %s %s", n, k); err != nil {
-		return err
-	}
-	delete(f.config[n], k)
-	return nil
-}
 func (f *fake) ProjectConfig(_ context.Context, k string) (string, error) {
 	if f.failOn == "project get" {
 		return "", errors.New("boom")
@@ -313,14 +306,14 @@ func TestMemoryCapReadFailureIsReported(t *testing.T) {
 	}
 }
 
-func TestFullRaisesCPUAndRemovesLegacyAllowance(t *testing.T) {
+func TestFullRaisesCPU(t *testing.T) {
 	f := newFake("a", "Frozen")
-	f.config["a"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0", "limits.cpu.allowance": "50%"}
+	f.config["a"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0"}
 	m := New(f, Shared)
 	tick(m, 0)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=shared",
-		"unset a limits.cpu.allowance", "resume a",
+		"resume a",
 	})
 	m.SetChosen(Full)
 	tick(m, time.Second)
@@ -347,11 +340,10 @@ func TestReenforcesLimitsAnAgentChanged(t *testing.T) {
 	tick(m, 0)
 	f.take()
 
-	f.config["a"]["limits.cpu"] = "12"            // agent raised its CPUs
-	f.config["a"]["limits.cpu.allowance"] = "90%" // and added an allowance
-	delete(f.config["a"], "limits.cpu.priority")  // and dropped the priority
+	f.config["a"]["limits.cpu"] = "12"           // agent raised its CPUs
+	delete(f.config["a"], "limits.cpu.priority") // and dropped the priority
 	tick(m, time.Second)
-	equal(t, f.take(), []string{"set a limits.cpu=2", "set a limits.cpu.priority=0", "unset a limits.cpu.allowance"})
+	equal(t, f.take(), []string{"set a limits.cpu=2", "set a limits.cpu.priority=0"})
 	tick(m, 2*time.Second)
 	equal(t, f.take(), nil)
 }
@@ -368,7 +360,7 @@ func TestMyPCRepausesAnInstanceAnAgentResumed(t *testing.T) {
 
 func TestMyPCLeavesInstanceConfigAlone(t *testing.T) {
 	f := newFake("a", "Running")
-	f.config["a"] = map[string]string{"limits.cpu": "12", "limits.cpu.allowance": "50%"}
+	f.config["a"] = map[string]string{"limits.cpu": "12"}
 	m := New(f, MyPC)
 	tick(m, 0)
 	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "pause a"})
@@ -412,8 +404,7 @@ func TestThawSkipsNeverStartedStoppedInstance(t *testing.T) {
 		t.Run(string(md), func(t *testing.T) {
 			f := newFake("creating", "Stopped", "zero", "Stopped")
 			f.lastUsed["creating"] = time.Unix(0, 0).UTC()
-			f.config["creating"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0", "limits.cpu.allowance": "50%"}
-			f.config["zero"] = map[string]string{"limits.cpu.allowance": "50%"}
+			f.config["creating"] = map[string]string{"limits.cpu": "8", "limits.cpu.priority": "0"}
 			m := New(f, md)
 
 			tick(m, 0)
@@ -423,11 +414,9 @@ func TestThawSkipsNeverStartedStoppedInstance(t *testing.T) {
 			f.state["creating"] = "Running"
 			f.lastUsed["creating"] = t0.Add(10 * time.Second)
 			tick(m, 10*time.Second)
-			var want []string
+			want := []string{"set creating limits.cpu=2"} // an agent's 8 CPUs, back to Shared's
 			if md == Full {
-				want = []string{"set creating limits.cpu=4", "set creating limits.cpu.priority=10", "unset creating limits.cpu.allowance"}
-			} else {
-				want = []string{"unset creating limits.cpu.allowance"}
+				want = []string{"set creating limits.cpu=4", "set creating limits.cpu.priority=10"}
 			}
 			equal(t, f.take(), want)
 		})
@@ -440,14 +429,13 @@ func TestThawUpdatesLimitsOnPreviouslyRunStoppedInstance(t *testing.T) {
 	// the current mode's limits.
 	f := newFake("a", "Running", "old", "Stopped")
 	f.lastUsed["old"] = t0.Add(-time.Hour)
-	f.config["old"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "10", "limits.cpu.allowance": "50%"}
+	f.config["old"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "10"}
 	m := New(f, Full)
 
 	tick(m, 0)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=full",
 		"set a limits.cpu=4", "set a limits.cpu.priority=10",
-		"unset old limits.cpu.allowance",
 	})
 
 	// Freeze and stop "a" in My PC.
@@ -546,7 +534,6 @@ func TestCLIArgs(t *testing.T) {
 	c.Stop(ctx, "a")
 	c.Delete(ctx, "a")
 	c.SetInstanceConfig(ctx, "a", "limits.cpu", "2")
-	c.UnsetInstanceConfig(ctx, "a", "limits.cpu.allowance")
 	c.SetProjectConfig(ctx, ProjectModeKey, "full")
 	c.ProjectConfig(ctx, MemoryCapKey)
 	want := [][]string{
@@ -556,7 +543,6 @@ func TestCLIArgs(t *testing.T) {
 		{"stop", "a", "--force", "--project", "agents"},
 		{"delete", "a", "--force", "--project", "agents"},
 		{"config", "set", "a", "limits.cpu=2", "--project", "agents"},
-		{"config", "unset", "a", "limits.cpu.allowance", "--project", "agents"},
 		{"project", "set", "agents", "user.agent-box.mode=full"},
 		{"project", "get", "agents", "limits.memory"},
 	}

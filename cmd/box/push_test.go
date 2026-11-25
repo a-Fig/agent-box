@@ -170,6 +170,17 @@ func TestRunRunningPushesWhenThreadKnown(t *testing.T) {
 	if !strings.Contains(text, "running") || !strings.Contains(text, "push: true") {
 		t.Errorf("text = %q", text)
 	}
+	// The push brings the result, so the CLI's reattach hint would contradict it (#132).
+	if strings.Contains(text, "reattach with") {
+		t.Errorf("a pushed run tells the agent to reattach: %q", text)
+	}
+}
+
+func TestDropReattachLines(t *testing.T) {
+	log := "out\nbox: job j is still running; reattach with: box job j\nbox: keeping b; box job j hands it to the reaper once the job has ended\nmore\n"
+	if got := dropReattachLines(log); got != "out\nmore\n" {
+		t.Errorf("dropReattachLines = %q", got)
+	}
 }
 
 func TestRunRunningWithoutThreadHasNoPush(t *testing.T) {

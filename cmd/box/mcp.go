@@ -63,10 +63,10 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
+	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue; run locally if you need it now (a GPU run doesn't wait)"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail." + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
@@ -101,7 +101,7 @@ var sizeArg = map[string]any{"type": "string", "enum": sizeEnum(),
 
 // gpuArg is the gpu property of box_new and box_run.
 var gpuArg = map[string]any{"type": "boolean",
-	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; exit 75 if it's taken. It is stopped in My PC."}
+	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; while it's taken, a run with push waits for it in the queue, otherwise exit 75. It is stopped in My PC, and a GPU run doesn't wait out My PC (exit 75)."}
 
 func sizeEnum() []string {
 	var n []string
@@ -523,7 +523,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 			r.Push = &push
 		}
-		return jobResult(r, err, out.String(), warnings)
+		log := out.String()
+		if r.State == stateDetached && r.Push != nil && *r.Push {
+			log = dropReattachLines(log)
+		}
+		return jobResult(r, err, log, warnings)
 	case "box_job":
 		if args.ID == "" && args.Offset == nil && args.Limit == nil {
 			jobs, err := a.Jobs(ctx, "")
@@ -636,4 +640,21 @@ func (t *tailBuffer) String() string {
 		return "[earlier output cut]\n" + string(t.buf)
 	}
 	return string(t.buf)
+}
+
+// dropReattachLines takes the CLI's "reattach with: box job" and "keeping
+// <box>" lines out of a running job's log once a watcher has it: the push
+// brings the result and hands the box to the reaper, so those lines would
+// tell the agent to do what push says not to.
+func dropReattachLines(log string) string {
+	lines := strings.SplitAfter(log, "\n")
+	kept := lines[:0]
+	for _, l := range lines {
+		if strings.HasPrefix(l, "box: job ") && strings.Contains(l, "is still running; reattach with: box job ") ||
+			strings.HasPrefix(l, "box: keeping ") && strings.Contains(l, "hands it to the reaper once the job has ended") {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.Join(kept, "")
 }

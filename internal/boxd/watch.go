@@ -11,16 +11,8 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
-)
-
-// Keys on the project and its instances that boxd reads. The mode keys are
-// the tray's (internal/mode); the instance keys are box's (cmd/box).
-const (
-	keyModeRequest = "user.agent-box.mode-request"
-	keyTraySeen    = "user.agent-box.tray-seen"
-	keyExpires     = "user.expires"
-	keyThrowaway   = "user.box.throwaway"
 )
 
 // PollEvery is how often the watcher lists Incus (docs/ui.md, "Watching
@@ -44,7 +36,6 @@ type Watcher struct {
 	Logf        func(format string, args ...any)
 	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
 	Queue *Queue
-	Image string // the image a queued job's new box is launched from: agent-base
 	// Whois names the device at a tailnet address, for the history; nil uses
 	// the login.
 	Whois func(ctx context.Context, ip string) string
@@ -67,7 +58,6 @@ type Watcher struct {
 	listed    bool // lastIns is from a poll that listed the boxes
 	cpu       map[string]cpuMark
 	lastMode  *modeRec
-	lastReq   string
 	sampled   time.Time
 	subs      map[chan dash.Event]struct{}
 }
@@ -409,10 +399,12 @@ func fillMeta(j *dash.Job, m *meta) {
 		session = lastElem(m.Agent.Worktree)
 	}
 	j.Agent = dash.Agent{Client: m.Agent.Client, Session: session, Host: m.Agent.Host, Worktree: m.Agent.Worktree}
-	if m.Size != "" {
-		j.Size = m.Size
+	if j.Size == "" {
+		if m.Size != "" {
+			j.Size = m.Size
+		}
+		j.GPU = j.GPU || m.GPU
 	}
-	j.GPU = j.GPU || m.GPU
 	j.Kind = dash.Classify(j.Command, j.GPU)
 }
 
@@ -427,9 +419,16 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 	if cfg == nil {
 		cfg = in.Config
 	}
+	repo := w.repoOf[in.Name]
+	if repo == "" && w.Hist != nil && !unsetTime(in.CreatedAt) {
+		if r := w.Hist.BoxRepo(in.Name, in.CreatedAt.UTC()); r != "" {
+			w.repoOf[in.Name] = r
+			repo = r
+		}
+	}
 	b := dash.Box{Name: in.Name, Machine: w.MachineID, Size: sz.Name, GPU: sz.GPU, State: strings.ToLower(in.Status),
-		Throwaway: in.Config[keyThrowaway] == "true", Repo: w.repoOf[in.Name], CreatedAt: in.CreatedAt.UTC()}
-	if t, err := time.Parse(time.RFC3339, in.Config[keyExpires]); err == nil {
+		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC()}
+	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil {
 		t = t.UTC()
 		b.ExpiresAt = &t
 	}
@@ -452,6 +451,9 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]dash.Box) {
 	ids := map[string]bool{}
 	for _, in := range ins {
+		if unsetTime(in.CreatedAt) {
+			continue
+		}
 		sz := mode.SizeOf(in.Config)
 		rec := boxRec{Name: in.Name, Size: sz.Name, GPU: sz.GPU, CreatedAt: in.CreatedAt.UTC()}
 		ids[rec.id()] = true
@@ -495,28 +497,20 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 			m.Tray = &tv
 		}
 	}
-	if v := cfg[keyModeRequest]; v != "" {
+	if v := cfg[mode.ProjectModeRequestKey]; v != "" {
 		var r dash.ModeRequest
 		if json.Unmarshal([]byte(v), &r) == nil && r.Mode != "" {
 			m.ModeRequested = &r
 		}
 	}
-	if t, err := time.Parse(time.RFC3339, cfg[keyTraySeen]); err == nil {
+	if t, err := time.Parse(time.RFC3339, cfg[mode.ProjectTraySeenKey]); err == nil {
 		t = t.UTC()
 		m.TrayLastSeen = &t
 	}
-	// Which enforcer wrote the heartbeat, and the pick it acts on. Values
-	// other than boxtray's are unknown.
+	// Which enforcer wrote the heartbeat. Values other than boxtray's are unknown.
 	switch e := cfg[mode.ProjectEnforcerKey]; e {
 	case dash.EnforcerTray, dash.EnforcerHeadless:
 		m.Enforcer = e
-	}
-	if v := cfg[mode.ProjectChosenKey]; v != "" {
-		var c dash.ChosenMode
-		if json.Unmarshal([]byte(v), &c) == nil && slices.Contains(dash.Modes, c.Mode) {
-			c.At = c.At.UTC()
-			m.Chosen = &c
-		}
 	}
 	m.Caps, m.Allocated, m.Room = allot(cfg, proj, ins)
 	if w.WSLMemory != nil {
@@ -526,12 +520,6 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 	if cur := (modeRec{m.Mode}); m.Mode != "" && (w.lastMode == nil || *w.lastMode != cur) {
 		w.lastMode = &cur
 		w.record(record{Type: recMode, At: now, Mode: &cur})
-	}
-	if v := cfg[keyModeRequest]; v != w.lastReq {
-		w.lastReq = v
-		if m.ModeRequested != nil {
-			w.record(record{Type: recModeRequest, At: now, Request: m.ModeRequested})
-		}
 	}
 	if !reflect.DeepEqual(w.machine, m) {
 		w.machine = m
@@ -592,18 +580,12 @@ func allot(cfg map[string]string, proj Project, ins []Instance) (caps, held dash
 }
 
 func (w *Watcher) sample(now time.Time, ins []Instance, boxes map[string]dash.Box) {
-	ss := []sample{{At: now, Kind: "machine", MemCap: w.machine.Caps.Memory, MemAlloc: w.machine.Allocated.Memory,
-		WSL: w.machine.WSLMemory}}
+	s := sample{At: now, Kind: "machine", MemCap: w.machine.Caps.Memory, MemAlloc: w.machine.Allocated.Memory,
+		WSL: w.machine.WSLMemory}
 	for _, in := range ins {
-		b := boxes[in.Name]
-		s := sample{At: now, Kind: "box", Box: b.Name, Size: b.Size, MemUsed: b.MemUsed, MemLimit: b.MemLimit}
-		if in.State != nil {
-			s.CPUTime = in.State.CPU.Usage
-		}
-		ss[0].MemUsed += b.MemUsed
-		ss = append(ss, s)
+		s.MemUsed += boxes[in.Name].MemUsed
 	}
-	if err := w.Hist.Samples(ss); err != nil {
+	if err := w.Hist.Samples([]sample{s}); err != nil {
 		w.logf("boxd: history: %v", err)
 	}
 }

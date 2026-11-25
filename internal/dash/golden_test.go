@@ -81,9 +81,6 @@ func TestScenariosShowTheirCase(t *testing.T) {
 	if s := get("mypc"); s.State.Machines[0].Mode != dash.ModeMyPC || count(s.State.Jobs, dash.JobPaused) != 1 {
 		t.Errorf("mypc: %+v", s.State.Machines[0])
 	}
-	if m := get("busy").State.Machines[0]; m.Chosen == nil || m.Chosen.Mode != m.Mode {
-		t.Errorf("busy's chosen mode is %+v, its mode %s", m.Chosen, m.Mode)
-	}
 	full := get("full")
 	if r := full.State.Machines[0].Room; r != (dash.Room{}) {
 		t.Errorf("full has room %+v", r)

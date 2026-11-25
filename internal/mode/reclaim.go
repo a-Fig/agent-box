@@ -37,7 +37,7 @@ type SwapBox struct {
 }
 
 // Reclaimed is one reclaim that ran: what the box still holds afterwards,
-// for the log and the dashboard. Only frozenLimit reads it.
+// for the tray's status log.
 type Reclaimed struct {
 	Name string
 	Left int64

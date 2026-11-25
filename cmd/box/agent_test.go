@@ -110,7 +110,7 @@ func TestStatus(t *testing.T) {
 		ok     bool
 	}{
 		"unreachable": {&fakePC{listErr: true}, "unavailable: can't reach pc (incus list: Error: connection refused): run locally", false},
-		"my pc":       {&fakePC{mode: "mypc", project: limits}, "unavailable: PC is in My PC mode: run locally", false},
+		"my pc":       {&fakePC{mode: "mypc", project: limits}, "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue; run locally if you need it now (a GPU run doesn't wait)", false},
 		"repo box frozen": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "my-repo", Status: "Frozen"}}},
 			"unavailable: this repo's box my-repo is frozen: run locally", false},
 		"room": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "other", Status: "Running"}}},
@@ -118,13 +118,13 @@ func TestStatus(t *testing.T) {
 		"disk binds": {&fakePC{mode: "shared", project: diskFull},
 			"available: room for 1 large, or 1 medium, or 2 small", true},
 		"memory full": {&fakePC{mode: "full", project: limits, insts: []instance{{Name: "a", Config: large}, {Name: "b"}}},
-			"busy: no room for another box (CPU, memory or disk caps): run locally, or reuse a box with box_run box", false},
+			"busy: no room for another box (memory: 12GiB of 12GiB allocated): box run, or box_run with push, would wait in the PC's queue; run locally if you need it now", false},
 		"full slots": {&fakePC{mode: "full", project: three, insts: []instance{{Name: "a"}, {Name: "b"}, {Name: "c"}}},
-			"busy: all 3 box slots are taken: run locally, or reuse a box with box_run box", false},
+			"busy: all 3 box slots are taken: box run, or box_run with push, would wait in the PC's queue; run locally if you need it now", false},
 		"repo box": {&fakePC{mode: "full", project: three,
 			insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{expiresKey: "2026-11-23T14:00:00Z"}}, {Name: "b"}, {Name: "c"}},
 			jobs:  map[string]string{"my-repo": "my-repo.20261123-110000-beef running - 10\nmy-repo.20261123-100000-0001 done 0 5\n"}},
-			"available: this repo's box my-repo (medium: 4 CPUs/4GiB) is running, 1 job(s) running there (runs take turns); no room for more boxes", true},
+			"available: this repo's box my-repo (medium: 4 CPUs/4GiB) is running, 1 job(s) running there (runs take turns); no room for more boxes (box slots: 3 of 3)", true},
 		"large repo box": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "my-repo", Status: "Stopped", Config: large}}},
 			"available: this repo's box my-repo (large: 4 CPUs/8GiB) is stopped; room for 1 medium, or 2 small more", true},
 		"no mode": {&fakePC{project: map[string]string{}}, "available: medium: 2 CPUs/4GiB (mode unknown: the tray hasn't set it)", true},
@@ -142,7 +142,7 @@ func TestStatus(t *testing.T) {
 				}
 				var b bytes.Buffer
 				writeStatus(&b, s)
-				want := "mode: full\nboxes: 3 of 3 (0 free)\nroom for: none\n" +
+				want := "mode: full\nboxes: 3 of 3 (0 free)\nroom for: none (box slots: 3 of 3)\n" +
 					"sizes now: small 2 CPUs/2GiB/18GiB disk, medium 4 CPUs/4GiB/30GiB disk, large 8 CPUs/8GiB/40GiB disk (default medium)\n" +
 					"gpu: free, but no room for a gpu box now\n" +
 					"repo box: my-repo, medium, Running"

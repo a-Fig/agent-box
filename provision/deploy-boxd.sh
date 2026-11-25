@@ -46,8 +46,10 @@ echo "== building boxd at $commit$dirty, on a box"
 # On a box, not the laptop (#80): box run sends this checkout, uncommitted
 # changes included, and box pull fetches the build. The repo's own box stays
 # after the run, so the pull finds it whichever box.exe runs this.
+# --no-queue: a queued run prints no "box: job X on Y" line to read the job
+# from, and a deploy should fail at once rather than wait for room.
 BOX=${BOX:-box}
-job=$("$BOX" run --reason "deploy-boxd.sh: build boxd at $commit to deploy it to the PC" -- \
+job=$("$BOX" run --no-queue --reason "deploy-boxd.sh: build boxd at $commit to deploy it to the PC" -- \
   "mkdir -p .deploy && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$ldflags' -o .deploy/boxd ./cmd/boxd" 2>&1 |
   tee /dev/stderr | sed -n 's/^box: job \([^ ]*\) on .*/\1/p')
 [ -n "$job" ] || { echo "== the build on a box didn't start" >&2; exit 1; }

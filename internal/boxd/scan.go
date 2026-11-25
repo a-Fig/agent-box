@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 // The job files `box run` leaves in a box, /work/.box/<job>.{log,pid,exit,meta}
@@ -18,9 +19,6 @@ import (
 // way box does; alive and jobstate follow cmd/box's, reading at most a few
 // bytes of each file and checking .exit again once the wrapper is gone.
 const jobDir = "/work/.box"
-
-const aliveFn = `alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && { [ ! -r /proc/"$1"/cmdline ] || grep -aqF "$2" /proc/"$1"/cmdline; }; }
-`
 
 const jobStateFn = `jobstate() {
   if [ -f "$1.exit" ]; then echo "done $(head -c 16 "$1.exit")"
@@ -39,7 +37,7 @@ const jobStateFn = `jobstate() {
 // It looks at the newest maxScanJobs jobs only (job names sort by start).
 // Jobs named in its arguments (ones boxd has already recorded as ended) get
 // "-" for meta and tail, so a long-lived box costs little to scan.
-var scanScript = "# boxd scan\n" + aliveFn + jobStateFn + fmt.Sprintf(`cd %s 2>/dev/null || exit 0
+var scanScript = "# boxd scan\n" + jobrun.AliveFn + jobStateFn + fmt.Sprintf(`cd %s 2>/dev/null || exit 0
 declare -A skip; for s in "$@"; do skip[$s]=1; done
 logs=(*.log); [ -e "${logs[0]}" ] || exit 0
 n=%d; first=$(( ${#logs[@]} > n ? ${#logs[@]} - n : 0 ))

@@ -323,7 +323,8 @@ func skillSync(c joinConfig, was ...string) error {
 			continue
 		}
 		tmp := p + ".tmp"
-		if err := os.WriteFile(tmp, []byte(skills.Box), 0o644); err == nil {
+		err = os.WriteFile(tmp, []byte(skills.Box), 0o644)
+		if err == nil {
 			err = os.Rename(tmp, p)
 		}
 		if err != nil {

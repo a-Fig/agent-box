@@ -20,7 +20,13 @@ to sit and wait. So it can hand the run to a queue and keep working.
   - `queue: false` on `box_run`, for "I need the answer now or I'll run it locally";
   - a GPU run while the PC is in My PC: My PC can last hours, and GPU work is rarely urgent
     enough to wait it out;
-  - a session with no push (`push: false`): it couldn't hear when the job starts.
+  - a `box_run` with no push (`push: false`): it couldn't hear when the job starts;
+  - `box run --no-queue` on the CLI.
+- **`box run` on the CLI queues too** (#93, 2026-11-25). It prints `queued job X, 2nd in line
+  (waiting for room)` and follows the job through the queue and then in its box, since that
+  process is there to hear when the job starts. Ctrl-C leaves the job queued: `box job X` follows
+  it again, and `box cancel X` takes it off. No watcher or push is started for it. A run turned away by My PC (not a GPU run) is queued for a new
+  throwaway box, not for the repo's or a named box.
 - **The code is snapshotted when the job is queued.** The agent keeps editing after it hands the run
   off, so `box` sends the worktree as it is now. That covers uncommitted and untracked files, as a
   sync does: the snapshot is the git bundle `box run` already makes and pushes, with the commit at
@@ -71,7 +77,8 @@ laptop and agent reaches.
   - once it runs, the key's time is its real start, which `boxd` writes into the `.meta` as
     `startedAt`, next to `queuedAt`;
   - so the page gets `job-gone` for the waiting key, then `job` for the running one.
-- **Throwaways.** No `box run` follows a queued job, so once that job ends and nothing else runs
+- **Throwaways.** A queued job's end may go unread (a push, or a CLI follower that was
+  interrupted), so once that job ends and nothing else runs
   there, `boxd` gives a throwaway it launched 30 minutes to live, as `box run` does since #23, so
   `box pull` and the full log still work; the reaper deletes it then. A `box run` throwaway whose
   end nobody read (#53) gets the same 30 minutes, and its room can be taken like any kept one: its
@@ -84,14 +91,13 @@ laptop and agent reaches.
 
 ## API
 
-The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Every POST needs
+The types are in `internal/dash` (`QueueRequest`, `QueueReply`). Every POST needs
 `X-Agent-Box: 1`.
 - **`POST /api/queue`** (multipart/form-data): a `request` part, then a `bundle` part.
   - `request` is `{box, new, size, gpu, checkout, ref, command, env, timeout, meta}`. `meta` is the
     `.meta` box would write.
   - It returns 201 with `{job, key, position, why}`.
   - A GPU run while the PC is in My PC gets 409 (`frozen`).
-- **`GET /api/queue`:** `{jobs}`, the waiting jobs in the order they start.
 - **`GET /api/queue/{job}`:** one job by its name, whether it is waiting, running or finished. This
   is so `box watch` can follow it through its start.
 - **`POST /api/queue/{job}/cancel`** (204) and **`/front`** (200, the `Job`): controls. Both get 409
@@ -108,8 +114,8 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
 It is built after the push design and `boxd`'s read side, both of which it depends on.
 1. `boxd`: the queue store, the scheduler, the starter and the API.
 2. `box`: queue on no room or pause, the snapshot upload, `box watch` following queued jobs, the
-   nudge, and `queue: false`. Built in `cmd/box/queue.go`: only `box_run` queues, since only it
-   can push. The CLI's `box run` still exits 75, because nothing would follow its job.
+   nudge, and `queue: false`. Built in `cmd/box/queue.go`. At first only `box_run` queued, since
+   only it could push; the CLI's `box run` queues since #93, following its own job.
 3. The page: the Queue section and its controls. Overview and Jobs show the line in order, with
    each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
    **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
