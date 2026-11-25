@@ -440,6 +440,26 @@ func TestSafetyNetRestartsLostWatchers(t *testing.T) {
 	}
 }
 
+// A follow after a broken one (or a pause) prints the log from its start
+// again; the pushed tail has each line once. Seen live 2026-11-25 after a
+// pause: "pause-smoke-start" twice.
+func TestWatchTailAfterRefollowIsNotDoubled(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	e := newPushEnv(t, f, "thread-1")
+	_, st := e.call(t, "box_run", e.runArgs(nil, "go test ./..."))
+	job := st["job"].(string)
+	f.finish("0", "only-once\n")
+	f.mu.Lock()
+	f.followErr = 1
+	f.mu.Unlock()
+	if err := e.a.Watch(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if e.push.count() != 1 || strings.Count(e.push.sent[0].msg, "only-once") != 1 {
+		t.Errorf("pushed:\n%v", e.push.sent)
+	}
+}
+
 func TestWatcherLeaseIsExclusive(t *testing.T) {
 	f := &fakePC{t: t, block: true}
 	e := newPushEnv(t, f, "thread-1")
@@ -681,5 +701,21 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "box_status,box_run,box_job,box_cancel,box_pull" {
 		t.Errorf("tools = %v", names)
+	}
+}
+
+// reset drops the last follow's output only once the next one prints: a
+// follow that prints nothing (a frozen box, a gone one) keeps it, for the
+// tail of a lost push.
+func TestLineTailResetIsLazy(t *testing.T) {
+	var l lineTail
+	l.Write([]byte("last-words\n"))
+	l.reset()
+	if got := l.lastLines(5); got != "last-words" {
+		t.Errorf("after a reset with no output = %q", got)
+	}
+	l.Write([]byte("again\n"))
+	if got := l.lastLines(5); got != "again" {
+		t.Errorf("after the next follow printed = %q", got)
 	}
 }

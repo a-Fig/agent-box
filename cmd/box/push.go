@@ -465,13 +465,27 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 
 // lineTail keeps the end of what it is written, for the last lines of a log.
 type lineTail struct {
-	mu  sync.Mutex
-	buf []byte
+	mu    sync.Mutex
+	buf   []byte
+	stale bool // reset was called: the next write replaces buf
+}
+
+// reset is called before a follow that prints the log again from its start:
+// what was written goes at that follow's first write, so a follow that
+// prints nothing (a frozen box, a box gone) keeps the last one's tail for a
+// lost push.
+func (l *lineTail) reset() {
+	l.mu.Lock()
+	l.stale = true
+	l.mu.Unlock()
 }
 
 func (l *lineTail) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.stale && len(p) > 0 {
+		l.buf, l.stale = l.buf[:0], false
+	}
 	l.buf = append(l.buf, p...)
 	if len(l.buf) > 64<<10 {
 		l.buf = append(l.buf[:0], l.buf[len(l.buf)-64<<10:]...)
@@ -678,6 +692,9 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 	var pauseDeadline time.Time
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
+		// Each follow prints the whole log from its start, so a follow after
+		// a pause or a broken connection mustn't add to the last one's.
+		tail.reset()
 		res, err := w.Job(ctx, job, 0)
 		if ctx.Err() != nil {
 			return jobEnd{}, false
