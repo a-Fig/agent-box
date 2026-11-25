@@ -68,7 +68,8 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 
 // spareThrowaways lists the throwaway boxes kept after their job ended
 // (jobrun.EndedKeep: box once it read the exit, or boxd after a queued job;
-// not idleTTL, a result nobody has read, see reapEnded) with nothing running in them, the first to expire
+// not idleTTL, a result nobody has read, see reapEnded) with nothing running
+// in them, the first to expire
 // first. A kept box is there for box pull and the full log; a queued job
 // that needs its room comes first, as box's own claimGPU deletes an idle GPU
 // throwaway. A box launched for a job that hasn't started yet isn't one of
