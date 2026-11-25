@@ -562,7 +562,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			if err != nil {
 				// The box can't be read (gone, most likely): its recorded end
 				// is all there is. A bad offset or limit is still an error.
-				if end, ok := a.recordedEnd(args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
+				if end, ok := a.endedElsewhere(ctx, args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
 					box, _, _ := strings.Cut(args.ID, ".")
 					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
 					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code}, nil, end.Tail, warnings)
