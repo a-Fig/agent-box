@@ -453,7 +453,11 @@ if [ "$BUILD_BASE" -eq 1 ]; then
   fi
 else
   step "Image 'agent-base'"
-  note "not built. box launches it, so runs fail with 'Image \"agent-base\" not found' until it is. Build with: setup-host.sh --build-base"
+  if incus image alias list --format csv | cut -d, -f1 | grep -qx agent-base; then
+    note "exists (--rebuild-base builds it again)"
+  else
+    note "not built. box launches it, so runs fail with 'Image \"agent-base\" not found' until it is. Build with: setup-host.sh --build-base"
+  fi
 fi
 
 # ---------------------------------------------------------------- VM capability
