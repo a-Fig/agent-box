@@ -34,6 +34,9 @@ config:
           # reach the same folders through root's symlinks (agent-box-provision.sh).
           export PUPPETEER_CACHE_DIR=/cache/puppeteer
           export PLAYWRIGHT_BROWSERS_PATH=/cache/ms-playwright
+          # Playwright deletes browsers no recorded install uses, and its records name paths in
+          # other boxes it can't see, so it would delete a browser another box is running.
+          export PLAYWRIGHT_SKIP_BROWSER_GC=1
           # ANDROID_HOME only (not deprecated ANDROID_SDK_ROOT), so a per-job ANDROID_HOME override
           # does not collide with AGP's duplicate-SDK-var check.
           export ANDROID_HOME=/cache/android-sdk
@@ -42,6 +45,7 @@ config:
           # Robolectric cache dir here so the next Android run rebuilds /cache/android-sdk.
           if [ -d /cache ]; then
             mkdir -p /cache/gradle/init.d /cache/robolectric-m2 /cache/puppeteer /cache/ms-playwright 2>/dev/null || true
+            chmod a+rwX /cache/puppeteer /cache/ms-playwright 2>/dev/null || true
             if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
               _ab_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX 2>/dev/null || true)
               if [ -n "$_ab_tmp" ]; then
