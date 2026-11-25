@@ -117,21 +117,23 @@ npm() {
 `, shq(goRender), JobVar, "`")
 
 // goReduce is jq that cuts a go test -json report down to what Parse uses,
-// failures first, so a cut can only lose counts: each failed test, package
-// and build ends, the first lines of output of what failed, then pass and
-// skip counts per package, then box-end, which says nothing was cut.
+// smallest and most important first, so a cut loses only output lines:
+// box-start, each failed test, package and build ends, pass and skip counts
+// per package, then the first lines of output of what failed, then box-end,
+// which says nothing was cut.
 const goReduce = `[inputs | fromjson? | objects] as $e
 | ([$e[] | select(.Test != null and .Action == "fail") | (.Package // "") + " " + .Test] | INDEX(.)) as $f
 | ([$e[] | select(.Test == null and .Action == "fail") | .Package // ""] | INDEX(.)) as $fp
-| ($e[] | select(.Test != null and .Action == "fail") | {Action, Package, Test}),
+| {Action: "box-start"},
+  ($e[] | select(.Test != null and .Action == "fail") | {Action, Package, Test}),
   ($e[] | select(.Test == null and (.Action == "pass" or .Action == "skip" or .Action == "fail" or .Action == "build-fail")) | {Action, Package, ImportPath, FailedBuild}),
+  ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "skip"))] | group_by(.Package // "") | .[]
+    | {Action: "box-count", Package: .[0].Package, Pass: (map(select(.Action == "pass")) | length), Skip: (map(select(.Action == "skip")) | length)}),
   ([$e[] | select(.Action == "output" and .Test != null and .OutputType != "frame" and $f[(.Package // "") + " " + .Test] != null)]
     | group_by((.Package // "") + " " + .Test) | .[] | .[:40][] | {Action, Package, Test, Output: (.Output // "")[:300], OutputType}),
   ([$e[] | select(.Action == "output" and .Test == null and $fp[.Package // ""] != null)]
     | group_by(.Package // "") | .[] | .[:20][] | {Action, Package, Output: (.Output // "")[:300]}),
   ([$e[] | select(.Action == "build-output")] | group_by(.ImportPath) | .[] | .[:20][] | {Action, ImportPath, Output: (.Output // "")[:300]}),
-  ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "skip"))] | group_by(.Package // "") | .[]
-    | {Action: "box-count", Package: .[0].Package, Pass: (map(select(.Action == "pass")) | length), Skip: (map(select(.Action == "skip")) | length)}),
   {Action: "box-end"}`
 
 // vitestReduce keeps vitest's counts and the first of what failed. A digest

@@ -120,3 +120,25 @@ func TestVitestConfigReportersKept(t *testing.T) {
 		t.Fatalf("without a config: %q", log)
 	}
 }
+
+// A cut-down report that lost its end says so, and a second report with no
+// room left is named, not dropped.
+func TestGoCutShortAndNoRoom(t *testing.T) {
+	cut := `{"Action":"box-start"}
+{"Action":"fail","Package":"p","Test":"TestA"}
+{"Action":"output","Package":"p","Test":"TestA","Output":"    a_test.go:3: no\n"}
+`
+	if got := Go(cut); !strings.HasPrefix(got, "FAIL: 1 of 1 tests failed, report cut short (go test)") {
+		t.Fatalf("got:\n%s", got)
+	}
+	var g strings.Builder
+	g.WriteString(`{"Action":"box-start"}` + "\n")
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&g, `{"Action":"fail","Package":"p","Test":"TestN%d"}`+"\n", i)
+	}
+	g.WriteString(`{"Action":"box-end"}` + "\n")
+	got := Parse(goHead + "\n" + g.String() + vitestHead + "\n" + `{"numTotalTests":1,"numPassedTests":1,"testResults":[]}` + "\n")
+	if len(got) > MaxBytes || !strings.Contains(got, "no room for the vitest report's digest") {
+		t.Fatalf("%d bytes:\n%s", len(got), got)
+	}
+}

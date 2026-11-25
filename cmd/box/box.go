@@ -1081,9 +1081,9 @@ while :; do
     off=$size
   fi
   if [ $fin = 1 ]; then
-    d=$( ( %[4]s ) 2>/dev/null | base64 -w0 )
-    [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
+    d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0)
+    [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     exit 0
   fi
   if ! alive "$pid" %[2]s; then
@@ -1093,7 +1093,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker), digest.Script(f), shq(digestMarker))
+`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker))
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
@@ -1110,9 +1110,11 @@ const (
 // needs no second exec that a freeze could cut off.
 const exitMarker = "\x01box-exit "
 
-// digestMarker starts the line followScript prints on stderr before the exit
+// digestMarker starts the line followScript prints on stderr after the exit
 // line when the job left a test report: the cut-down report (digest.Script),
-// base64. It rides on the follow, so the digest costs no exec of its own.
+// base64. It rides on the follow, so the digest costs no exec of its own, and
+// comes after the exit, within 10 seconds, so it can't hold the result back:
+// a follow cut off before it just has no digest.
 const digestMarker = "\x01box-digest "
 
 // lockedWriter writes to w under mu.
@@ -1159,10 +1161,13 @@ func (e *exitFilter) Write(p []byte) (int, error) {
 	}
 }
 
-// flush writes a trailing partial line.
+// flush writes a trailing partial line, unless it is a marker's, cut off.
 func (e *exitFilter) flush() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if bytes.HasPrefix(e.buf, []byte(digestMarker)) || bytes.HasPrefix(e.buf, []byte(exitMarker)) {
+		e.buf = nil
+	}
 	if len(e.buf) > 0 {
 		e.w.Write(e.buf)
 		e.buf = nil

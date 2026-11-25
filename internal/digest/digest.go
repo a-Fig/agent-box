@@ -13,6 +13,10 @@ import (
 // the rest of the failures are counted, not listed.
 const MaxBytes = 3 << 10
 
+// noRoom is what Parse keeps back from each report's digest, for the line
+// that names a later report it had no room for.
+const noRoom = 80
+
 // maxLine caps one line of a digest.
 const maxLine = 240
 
@@ -24,13 +28,16 @@ func Parse(out string) string {
 		kind, body, _ := strings.Cut(sec, "\n")
 		room := MaxBytes - b.Len()
 		if room < 2*reserve {
-			break
+			if room >= noRoom {
+				fmt.Fprintf(&b, "(no room for the %s report's digest; the full log has it)\n", strings.TrimSpace(kind))
+			}
+			continue
 		}
 		switch strings.TrimSpace(kind) {
 		case "go":
-			b.WriteString(goDigest(body, room))
+			b.WriteString(goDigest(body, room-noRoom))
 		case "vitest":
-			b.WriteString(vitestDigest(body, room))
+			b.WriteString(vitestDigest(body, room-noRoom))
 		}
 	}
 	return b.String()
@@ -63,7 +70,7 @@ func goDigest(report string, max int) string {
 		buildOut   = map[string][]string{}
 		pass, skip int
 		any        bool
-		counted    bool // the report is goReduce's, which counts per package
+		reduced    bool // the report is goReduce's (box-start)
 		whole      bool // and it ends with box-end: nothing was cut off
 	)
 	sc := bufio.NewScanner(strings.NewReader(report))
@@ -76,10 +83,12 @@ func goDigest(report string, max int) string {
 		any = true
 		t := test{e.Package, e.Test}
 		switch {
+		case e.Action == "box-start":
+			reduced = true
 		case e.Action == "box-count":
 			var c struct{ Pass, Skip int }
 			json.Unmarshal(sc.Bytes(), &c)
-			pass, skip, counted = pass+c.Pass, skip+c.Skip, true
+			pass, skip = pass+c.Pass, skip+c.Skip
 		case e.Action == "box-end":
 			whole = true
 		case e.Action == "build-output":
@@ -139,8 +148,8 @@ func goDigest(report string, max int) string {
 	d := writer{max: max}
 	total := pass + skip + len(leaves)
 	cut := ""
-	if counted && !whole {
-		cut = ", counts cut short"
+	if reduced && !whole {
+		cut = ", report cut short"
 	}
 	switch {
 	case len(leaves) > 0:

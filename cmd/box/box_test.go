@@ -222,11 +222,11 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 					return Result{Code: 1}, nil
 				}
 				io.WriteString(c.Stdout, f.log)
-				if f.exit != "" && f.digest != "" {
-					io.WriteString(c.Stderr, digestMarker+base64.StdEncoding.EncodeToString([]byte(f.digest))+"\n")
-				}
 				if f.exit != "" {
 					io.WriteString(c.Stderr, exitMarker+strings.TrimSpace(f.exit)+"\n")
+				}
+				if f.exit != "" && f.digest != "" {
+					io.WriteString(c.Stderr, digestMarker+base64.StdEncoding.EncodeToString([]byte(f.digest))+"\n")
 				}
 			case isScript(c, "# cancelled"):
 				if f.cancelled {
@@ -767,5 +767,17 @@ func TestVersion(t *testing.T) {
 	a, out := testApp(&fakePC{})
 	if c := run(context.Background(), a, []string{"--version"}, nil); c != 0 || !strings.HasPrefix(out.String(), "box ") {
 		t.Fatalf("--version: %d %q", c, out)
+	}
+}
+
+// A follow cut off in the middle of the digest line leaves no base64 in the
+// output; the exit it read before still stands.
+func TestExitFilterDropsACutMarkerLine(t *testing.T) {
+	var out strings.Builder
+	ef := &exitFilter{w: &out}
+	io.WriteString(ef, "box: a warning\n"+exitMarker+"1\n"+digestMarker+"AAAA")
+	ef.flush()
+	if code, ok := ef.exit(); !ok || code != "1" || out.String() != "box: a warning\n" || ef.digest() != "" {
+		t.Fatalf("exit %q %v, out %q, digest %q", code, ok, out.String(), ef.digest())
 	}
 }
