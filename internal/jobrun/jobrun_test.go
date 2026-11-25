@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/a-Fig/agent-box/internal/digest"
 )
 
 // The agent's own cancel marks the job so its watcher stays quiet; the page's
@@ -34,5 +36,19 @@ func TestIsDisallowedMetadata(t *testing.T) {
 	err := errors.New("incus launch: Error: Failed creating instance from image: Instance metadata contained disallowed entries: [/var/lib/incus/...]")
 	if !IsDisallowedMetadata(err) {
 		t.Error("disallowed metadata error did not match")
+	}
+}
+
+func TestPayloadIncludesDigestWrappers(t *testing.T) {
+	for _, args := range [][]string{
+		{"npm run test:unit"},
+		{"npm -w packages/a test"},
+		{"npm", "--prefix", "packages/a", "test"},
+		{"echo", "hello"},
+	} {
+		got := Payload(nil, args, 0)
+		if !strings.HasPrefix(got, digest.Wrappers) {
+			t.Errorf("Payload(%q) missing digest.Wrappers", args)
+		}
 	}
 }
