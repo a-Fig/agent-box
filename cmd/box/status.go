@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,8 +29,8 @@ type StatusReport struct {
 	Replaceable int        `json:"replaceable,omitempty"`
 	Sizes       []SizeRoom `json:"sizes"`
 	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none (disk: 205GiB of 210GiB allocated)"; "no limit"
-	// GPU is "free", "free, but no room ...", "in use: job X" or
-	// "unavailable: ..." (My PC).
+	// GPU is "free", "free, but no room ...", "in use: job X",
+	// "unavailable: ..." (My PC) or gpuNone.
 	GPU     string   `json:"gpu"`
 	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
 	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
@@ -92,7 +93,12 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 		now = mode.Shared
 	}
 	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
-	s.GPU = a.gpuStatus(ctx, s, insts)
+	if a.hasGPU(ctx) {
+		s.GPU = a.gpuStatus(ctx, s, insts)
+	} else {
+		s.GPU = gpuNone
+		s.Sizes = slices.DeleteFunc(s.Sizes, func(sz SizeRoom) bool { return sz.GPU })
+	}
 	var repoBox *instance
 	if s.Repo != "" {
 		repoBox = find(insts, s.Repo)
@@ -114,6 +120,9 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 	s.Advice, s.Available = advice(s, repoBox)
 	return s
 }
+
+// gpuNone is the GPU status of a host that can't run a GPU box (hasGPU).
+const gpuNone = "none on this host"
 
 // gpuStatus says whether a GPU box could run now.
 func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) string {
@@ -297,6 +306,9 @@ const waitsAdvice = ": box run, or box_run with push, would wait in the PC's que
 func advice(s StatusReport, repoBox *instance) (string, bool) {
 	switch {
 	case s.Mode == string(mode.MyPC):
+		if s.GPU == gpuNone {
+			return "unavailable: PC is in My PC mode" + waitsAdvice, false
+		}
 		return "unavailable: PC is in My PC mode" + waitsAdvice + " (a GPU run doesn't wait)", false
 	case repoBox != nil && repoBox.Status == "Frozen":
 		return fmt.Sprintf("unavailable: this repo's box %s is frozen", repoBox.Name), false

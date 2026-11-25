@@ -161,14 +161,11 @@ func hookCommand(exe string) string { return `"` + filepath.ToSlash(exe) + `" ho
 var isBoxHook = regexp.MustCompile(`(?i)(^|[/\\"])box(\.exe)?"?\s+hook\s*$`)
 
 // claudeSettingsPaths are the settings files of Claude Code's config
-// directories, as skillPaths finds them.
+// directories, installed or not.
 func (c joinConfig) claudeSettingsPaths() []string {
-	paths := []string{filepath.Join(c.Home, ".claude", "settings.json")}
-	if c.ClaudeConfigDir != "" {
-		p := filepath.Join(c.ClaudeConfigDir, "settings.json")
-		if !strings.EqualFold(filepath.Clean(p), filepath.Clean(paths[0])) {
-			paths = append(paths, p)
-		}
+	var paths []string
+	for _, d := range c.claudeDirs() {
+		paths = append(paths, filepath.Join(d, "settings.json"))
 	}
 	return paths
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -378,5 +379,60 @@ func TestGPUConfirmNoticesOwnBoxGone(t *testing.T) {
 	a, out := testApp(f)
 	if r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Size: "gpu"}); err != nil || r.Code != exitPaused {
 		t.Errorf("Run = %+v, %v\n%s", r, err, out)
+	}
+}
+
+// A host whose project blocks unix-char devices (setup-host.sh off WSL) has
+// no GPU: status says so and leaves it out of the sizes and advice, and a GPU
+// run or box new is refused with 75 before anything launches. allow (the
+// WSL PC) and unset keep the GPU.
+func TestGPUHostDetection(t *testing.T) {
+	for _, v := range []string{"allow", ""} {
+		f := &fakePC{t: t, mode: "shared", project: map[string]string{gpuKey: v}}
+		a, _ := testApp(f)
+		if s := a.Status(context.Background(), ""); s.GPU != "free" {
+			t.Errorf("%s=%q: gpu = %q", gpuKey, v, s.GPU)
+		}
+	}
+
+	block := map[string]string{gpuKey: "block", "limits.instances": "6", "limits.cpu": "24", "limits.memory": "12GiB"}
+	for _, m := range []string{"shared", "mypc"} {
+		f := &fakePC{t: t, mode: m, project: block}
+		a, _ := testApp(f)
+		s := a.Status(context.Background(), "")
+		var b strings.Builder
+		writeStatus(&b, s)
+		if s.GPU != gpuNone || !strings.Contains(b.String(), "\ngpu: none on this host\n") {
+			t.Errorf("%s: gpu = %q\n%s", m, s.GPU, b.String())
+		}
+		for _, sz := range s.Sizes {
+			if sz.GPU {
+				t.Errorf("%s: sizes list gpu: %+v", m, s.Sizes)
+			}
+		}
+		if strings.Contains(strings.ToLower(s.Advice), "gpu") {
+			t.Errorf("%s: advice = %q", m, s.Advice)
+		}
+	}
+
+	f := &fakePC{t: t, mode: "shared", project: block}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"nvidia-smi"}, Size: mode.GPUSize, Queue: true})
+	if err != nil || r.Code != exitPaused || r.Job != "" || len(f.launches) != 0 || !strings.Contains(out.String(), "box: this host has no GPU for boxes") {
+		t.Errorf("Run = %+v, %v, %d launches\n%s", r, err, len(f.launches), out)
+	}
+	if _, err := a.New(context.Background(), "", time.Hour, mode.GPUSize, ""); !isTempFail(err) || len(f.launches) != 0 {
+		t.Errorf("New = %v, %d launches", err, len(f.launches))
+	}
+
+	// box_run says refused, 75.
+	repoJSON, _ := json.Marshal(newRepo(t))
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(repoJSON) + `,"command":"nvidia-smi","gpu":true,"push":false,"reason":"Check that the GPU box sees the card."}}}`
+	var resp bytes.Buffer
+	if err := serveMCP(context.Background(), a, strings.NewReader(in), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.String(); !strings.Contains(got, `"state":"refused"`) || !strings.Contains(got, `"exitCode":75`) || !strings.Contains(got, "no GPU for boxes") || len(f.launches) != 0 {
+		t.Errorf("box_run = %s", got)
 	}
 }

@@ -150,6 +150,7 @@ func TestJoinAddsAndRemovesTheHook(t *testing.T) {
 	home := isolateHome(t)
 	configDir := filepath.Join(home, ".claude_personal")
 	os.MkdirAll(configDir, 0o755)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	settings := filepath.Join(configDir, "settings.json")
 	orig := `{
   "model": "opus",

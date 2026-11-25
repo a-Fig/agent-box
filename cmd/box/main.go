@@ -40,8 +40,8 @@ const usage = `usage:
                                             (box_run starts it detached; not for people)
   box hook                                  Claude Code's PostToolUse hook: this session's ended jobs,
                                             mid-turn (box join adds it; not for people)
-  box join [--leave]                        register box mcp with Claude Code, Codex and Antigravity,
-                                            install the skill and Claude Code's hook
+  box join [--leave]                        register box mcp with the installed Claude Code, Codex and
+                                            Antigravity, install the skill and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
   box --version                             the release and commit this box was built from
@@ -56,8 +56,9 @@ Sizes (CPUs in Shared/Full mode, RAM, disk):
   %s.
 --size sets the size of a box that box new or box run launches (default
 medium). A reused box of another size isn't resized: the run gets a throwaway.
---gpu is --size gpu: the PC's GPU, one GPU box at a time. box run --gpu
-uses a throwaway. The tray stops a GPU box in My PC.
+--gpu is --size gpu: the PC's GPU, one GPU box at a time; on a host without
+one (box status: gpu: none) it exits 75. box run --gpu uses a throwaway. The
+tray stops a GPU box in My PC.
 
 A run that can't start now (no room, the GPU taken, My PC) waits in the PC's
 queue, and box run follows it there and then in its box; Ctrl-C leaves it
