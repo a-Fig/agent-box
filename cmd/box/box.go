@@ -258,6 +258,9 @@ func (a *App) New(ctx context.Context, name string, ttl time.Duration, size, rea
 		name = "box-" + a.Rand()
 	}
 	if sz.GPU {
+		if !a.hasGPU(ctx) {
+			return "", errNoGPU{}
+		}
 		insts, err := a.list(ctx)
 		if err != nil {
 			return "", err
@@ -312,10 +315,32 @@ func (e *errGPUBusy) Error() string {
 	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
 }
 
-// isTempFail says whether err means "not now": no room, or the GPU is taken.
+// errNoGPU is a GPU box asked for on a host without one (hasGPU). Callers
+// exit 75 as for a refusal, though waiting won't help.
+type errNoGPU struct{}
+
+func (errNoGPU) Error() string {
+	return "this host has no GPU for boxes; nothing started, run on CPU"
+}
+
+// gpuKey is the project key that tells a GPU host from one without:
+// setup-host.sh sets it to allow on WSL, for the GPU's /dev/dxg, and to block
+// elsewhere, where a GPU box can't start.
+const gpuKey = "restricted.devices.unix-char"
+
+// hasGPU says whether the host can run a GPU box. Only block says no: an
+// unset or unreadable key counts as a GPU host, so a failed read never turns
+// the GPU away, and a launch that can't get the devices fails on its own.
+func (a *App) hasGPU(ctx context.Context) bool {
+	return a.projectKey(ctx, gpuKey) != "block"
+}
+
+// isTempFail says whether err means "not now": no room, the GPU is taken, or
+// there is none.
 func isTempFail(err error) bool {
 	var g *errGPUBusy
-	return isNoRoom(err) || errors.As(err, &g)
+	var n errNoGPU
+	return isNoRoom(err) || errors.As(err, &g) || errors.As(err, &n)
 }
 
 // gpuHolder says what holds the GPU through box in: "job X" for its running
@@ -760,6 +785,10 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	if o.Timeout < 0 {
 		return JobResult{Code: 2}, errors.New("timeout must be positive")
+	}
+	if sz.GPU && !a.hasGPU(ctx) { // refused, not queued: waiting won't bring a GPU
+		fmt.Fprintln(a.Err, "box:", errNoGPU{})
+		return JobResult{State: statePaused, Code: exitPaused}, nil
 	}
 	rp, err := openRepo(ctx, a.R, o.Dir)
 	if err != nil {
