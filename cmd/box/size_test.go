@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 const memoryRefusal = `Error: Failed checking if instance creation allowed: Reached maximum aggregate value "12GiB" for "limits.memory" in project "agents"`
@@ -175,7 +177,7 @@ func TestStatusHonorsZeroAndContainerCaps(t *testing.T) {
 		room    string
 	}{
 		"instances":  {map[string]string{"limits.instances": "0"}, "none (box slots: 0 of 0)"},
-		"cpu":        {map[string]string{"limits.cpu": "0"}, "none (CPUs: 0 of 0 allocated)"},
+		"cpu":        {map[string]string{"limits.cpu": "0"}, "none (CPUs: 0 of 0 reserved)"},
 		"memory":     {map[string]string{"limits.memory": "0"}, "none (memory: 0GiB of 0GiB allocated)"},
 		"disk":       {map[string]string{"info": `{"resources":{"disk":{"Limit":0,"Usage":0}}}`}, "none (disk: 0GiB of 0GiB allocated)"},
 		"containers": {map[string]string{"info": `{"resources":{"containers":{"Limit":0,"Usage":0}}}`}, "none (containers)"},
@@ -200,6 +202,20 @@ func TestStatusNamesTheFullCap(t *testing.T) {
 	s := a.Status(context.Background(), "")
 	if s.Room != "none (disk: 205.3GiB of 210GiB allocated)" || !strings.Contains(s.Advice, "busy: no room for another box (disk: 205.3GiB of 210GiB allocated)") {
 		t.Errorf("room = %q, advice = %q\n%s", s.Room, s.Advice, out)
+	}
+
+	// The slots are full too, but a launch would delete the stopped GPU
+	// throwaway first: only the disk, which that doesn't free enough of, is named.
+	f = &fakePC{t: t, project: map[string]string{
+		"limits.instances": "2", "limits.cpu": "24", "limits.memory": "24GiB",
+		"info": fmt.Sprintf(`{"resources":{"disk":{"Limit":%d,"Usage":%d}}}`, int64(100)<<30, int64(145)<<30),
+	}, insts: []instance{
+		{Name: "a", Status: "Running", Config: map[string]string{mode.SizeKey: "small"}},
+		{Name: "g-1", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")},
+	}}
+	a, out = testApp(f)
+	if s := a.Status(context.Background(), ""); s.Room != "none (disk: 145GiB of 100GiB allocated)" {
+		t.Errorf("with a reclaimable box: room = %q\n%s", s.Room, out)
 	}
 }
 
