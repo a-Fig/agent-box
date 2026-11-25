@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -64,7 +65,7 @@ var tools = []tool{
 	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC or a game) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC or a game) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; the output tail follows, and is also structuredContent's tail. A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail." + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
@@ -77,7 +78,7 @@ var tools = []tool{
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
 	}, "dir", "command", "reason"), jobOutput},
-	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept 30 minutes after its job ends (for box_pull), then deleted. With offset or limit it doesn't wait: it returns that piece of the log, the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs, newest first, with state, start time and log size; use it to find a job ID you lost. " + pausedHint, obj(map[string]any{
+	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept 30 minutes after its job ends (for box_pull), then deleted. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs, newest first, with state, start time and log size; use it to find a job ID you lost. " + pausedHint, obj(map[string]any{
 		"id":     str("Job ID from box_run. Omit to list jobs."),
 		"wait":   str(`Stop waiting after this long. Default 10m.`),
 		"offset": integer("Read the log from this byte offset, without waiting. Default 0."),
@@ -120,7 +121,11 @@ var jobOutput = obj(map[string]any{
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+	"tail":     str("The end of the job's output (up to 32KiB), as in the text result."),
+	"error":    str("Why the call failed, when it did."),
+	"finished": str("Your jobs that ended since you last looked."),
 	// Only for a log page (box_job with offset or limit).
+	"log":        str("This page of the log, as text."),
 	"offset":     map[string]any{"type": "integer"},
 	"nextOffset": map[string]any{"type": "integer", "description": "Offset of the next page."},
 	"logBytes":   map[string]any{"type": "integer", "description": "Size of the log so far."},
@@ -162,6 +167,11 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			continue
 		}
 		if len(req.ID) == 0 { // notification: no reply
+			if req.Method == "notifications/initialized" {
+				// A client holding an older box's tools (box.exe was
+				// replaced under it) reloads them (#34).
+				send(rpcMsg{Method: "notifications/tools/list_changed"})
+			}
 			if req.Method == "notifications/cancelled" {
 				var p struct {
 					RequestID json.RawMessage `json:"requestId"`
@@ -188,7 +198,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			}
 			send(rpcMsg{ID: req.ID, Result: map[string]any{
 				"protocolVersion": p.ProtocolVersion,
-				"capabilities":    map[string]any{"tools": map[string]any{}, "logging": map[string]any{}},
+				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}, "logging": map[string]any{}},
 				"serverInfo":      map[string]any{"name": "box", "version": "0.1.0"},
 			}})
 		case "ping":
@@ -290,6 +300,7 @@ func pageResult(p Page) map[string]any {
 	structured := map[string]any{
 		"job": p.Job, "box": p.Box, "state": p.State, "exitCode": code,
 		"offset": p.Offset, "nextOffset": p.NextOffset, "logBytes": p.LogBytes, "more": p.More,
+		"log": strings.ToValidUTF8(p.Text, "�"),
 	}
 	if !utf8.ValidString(p.Text) {
 		structured["logBase64"] = base64.StdEncoding.EncodeToString([]byte(p.Text))
@@ -345,7 +356,14 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Position int      `json:"position,omitempty"`
 		Why      string   `json:"why,omitempty"`
 		Warnings []string `json:"warnings,omitempty"`
-	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings}
+		// Claude Code shows structuredContent instead of the text when a
+		// result has both (#33), so what the agent reads is here too.
+		Tail  string `json:"tail"`
+		Error string `json:"error,omitempty"`
+	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, log, ""}
+	if err != nil {
+		out.Error = err.Error()
+	}
 	if r.State == stateRunning || r.State == stateQueued {
 		out.ExitCode = nil
 	}
@@ -392,6 +410,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			if c, ok := res["content"].([]map[string]any); ok && len(c) > 0 {
 				c[0]["text"] = net + fmt.Sprint(c[0]["text"])
 			}
+			setStructured(res, "finished", strings.TrimSpace(net))
 		}()
 	}
 
@@ -416,6 +435,9 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		writeStatus(&b, st)
 		res := textResult(withWarnings(strings.TrimRight(b.String(), "\n")), false)
 		res["structuredContent"] = st
+		if len(warnings) > 0 {
+			setStructured(res, "warnings", warnings)
+		}
 		return res
 	case "box_cancel":
 		if a.wasQueued(args.ID) {
@@ -426,7 +448,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			if removed {
 				a.markNotified(args.ID, "cancel")
 				res := textResult("removed "+args.ID+" from the queue; it never ran", false)
-				res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": true, "exitCode": exitDetached}
+				res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": true, "exitCode": exitDetached, "message": "removed from the queue; it never ran"}
 				return res
 			} // it has started: stop it in its box
 		}
@@ -434,8 +456,9 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		res := textResult(cancelText(args.ID, cancelled, c), false)
-		res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": cancelled, "exitCode": c}
+		msg := cancelText(args.ID, cancelled, c)
+		res := textResult(msg, false)
+		res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": cancelled, "exitCode": c, "message": msg}
 		return res
 	case "box_pull":
 		if !filepath.IsAbs(args.Local) {
@@ -447,14 +470,22 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		}
 		return textResult(withWarnings("pulled to "+dest), false)
 	case "box_run":
+		// A session that loaded an older box's tools still sends their shape
+		// (#34): what was removed is ignored and a missing reason gets a
+		// default, each with a notice, rather than failing the call.
+		const stale = " Your tool list is from an older box; reload it."
 		if args.Box != "" {
-			return textResult("box_run no longer takes box: it uses this repo's box, or new: true for a throwaway. Naming a box is for the box CLI (box run --box).", true)
+			a.warn("box: notice: box_run no longer takes box, so " + args.Box + " was ignored: it uses this repo's box, or new: true for a throwaway." + stale)
 		}
 		if args.Wait != "" {
-			return textResult("box_run no longer takes wait: it waits 30 seconds, then returns running. Pass push false and use box_job if you can't take a pushed result.", true)
+			a.warn("box: notice: box_run no longer takes wait, so it was ignored: it waits 30 seconds, then returns running." + stale)
 		}
 		if args.Dir == "" || args.Command == "" {
 			return textResult("dir and command are required", true)
+		}
+		if strings.TrimSpace(args.Reason) == "" {
+			args.Reason = missingReason(args.Command)
+			a.warn("box: notice: box_run needs a reason, 10-300 characters on why this needs a box, which the PC's owner sees; this run's is \"" + args.Reason + "\"." + stale)
 		}
 		reason, err := checkReason(args.Reason, true, "reason")
 		if err != nil {
@@ -515,7 +546,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 				fmt.Fprintf(&b, "%s %s, started %s, log %dB\n", j.Job, j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
 			}
 			res := textResult(withWarnings(strings.TrimRight(b.String(), "\n")), false)
-			res["structuredContent"] = map[string]any{"jobs": append([]JobInfo{}, jobs...), "warnings": warnings}
+			res["structuredContent"] = map[string]any{"jobs": append([]JobInfo{}, jobs...), "warnings": append([]string{}, warnings...)}
 			return res
 		}
 		if args.Offset != nil || args.Limit != nil {
@@ -528,6 +559,13 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 			pg, err := a.LogPage(ctx, args.ID, off, lim)
 			if err != nil {
+				// The box can't be read (gone, most likely): its recorded end
+				// is all there is. A bad offset or limit is still an error.
+				if end, ok := a.recordedEnd(args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
+					box, _, _ := strings.Cut(args.ID, ".")
+					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
+					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code}, nil, end.Tail, warnings)
+				}
 				return textResult(err.Error(), true)
 			}
 			return pageResult(pg)
@@ -550,6 +588,34 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		return jobResult(r, err, out.String(), warnings)
 	}
 	return textResult("unknown tool "+p.Name, true)
+}
+
+// missingReason is the reason recorded for a box_run sent without one by a
+// session holding an older tool list, so the dashboard shows it as such.
+func missingReason(command string) string {
+	c := strings.Join(strings.Fields(command), " ")
+	if utf8.RuneCountInString(c) > 80 {
+		c = string([]rune(c)[:80]) + "…"
+	}
+	return "(no reason given) " + c
+}
+
+// setStructured adds key to a result's structuredContent, if it has one; a
+// result without it is text only, which clients show whole.
+func setStructured(res map[string]any, key string, v any) {
+	sc, ok := res["structuredContent"]
+	if !ok {
+		return
+	}
+	m, ok := sc.(map[string]any)
+	if !ok {
+		b, err := json.Marshal(sc)
+		if err != nil || json.Unmarshal(b, &m) != nil || m == nil {
+			return
+		}
+		res["structuredContent"] = m
+	}
+	m[key] = v
 }
 
 // tailBuffer keeps the last max bytes written to it.

@@ -40,6 +40,9 @@ import (
 //	                 push, by box_job when it returns a terminal result, or by
 //	                 box_cancel. Until it exists the end is still owed.
 //	<job>.paused     the watcher already pushed the paused message
+//
+//	<job>.result     the exit code and output tail box read, pushed or not
+//	                 (recordEnd), so box_job can give them after the box has gone
 
 // inlineWait is how long box_run follows a job, counted from the command's
 // start, before it returns "running".
@@ -366,7 +369,7 @@ func (a *App) safetyNet(skip string) string {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog"} {
+			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog", ".result"} {
 				os.Remove(a.statePath(job, ext))
 			}
 			continue
@@ -398,6 +401,57 @@ func (a *App) safetyNet(skip string) string {
 		return ""
 	}
 	return "finished since you last looked: " + strings.Join(lines, ", ") + "\n"
+}
+
+// keptTail is how much of a job's output its recorded end keeps: as much as
+// box_run and box_job return.
+const keptTail = 32 << 10
+
+// keepTail is the last keptTail bytes of s, from a whole character.
+func keepTail(s string) string {
+	if len(s) > keptTail {
+		s = s[len(s)-keptTail:]
+		for len(s) > 0 && !utf8.RuneStart(s[0]) {
+			s = s[1:]
+		}
+	}
+	return s
+}
+
+// recordEnd keeps, in <job>.result, the end of a job whose exit box has
+// read. It is its own file because .ended is the watcher's decision that an
+// end is owed to the agent, which a cancelled job's exit is not. Writing one
+// also prunes results past recordKeep, since the safety net runs only in T3.
+// A failure only costs the record, so it is dropped.
+func (a *App) recordEnd(job string, end jobEnd) {
+	if a.StateDir == "" || os.MkdirAll(a.StateDir, 0o755) != nil {
+		return
+	}
+	writeJSON(a.statePath(job, ".result"), end)
+	ents, _ := os.ReadDir(a.StateDir)
+	for _, e := range ents {
+		if !strings.HasSuffix(e.Name(), ".result") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
+			os.Remove(filepath.Join(a.StateDir, e.Name()))
+		}
+	}
+}
+
+// recordedEnd is a job's recorded end: the exit box read, else the end the
+// watcher recorded if it ran to an exit code.
+func (a *App) recordedEnd(job string) (jobEnd, bool) {
+	if a.StateDir == "" || !validJob.MatchString(job) {
+		return jobEnd{}, false
+	}
+	for _, ext := range []string{".result", ".ended"} {
+		var end jobEnd
+		if readJSON(a.statePath(job, ext), &end) == nil && !end.Lost && !end.Dropped {
+			return end, true
+		}
+	}
+	return jobEnd{}, false
 }
 
 // lineTail keeps the end of what it is written, for the last lines of a log.
