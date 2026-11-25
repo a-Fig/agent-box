@@ -211,6 +211,11 @@ func goDigest(report string, max int) string {
 		if failedIn[p] {
 			continue
 		}
+		// A panic outside any test (in TestMain, say) is named by its frame.
+		if loc, msg, _ := goProblem(pkgOut[p], p, module); loc != "" && strings.HasPrefix(msg, "panic: ") {
+			d.item("FAIL " + p + "  " + loc + ": " + msg)
+			continue
+		}
 		var lines []string
 		for _, l := range pkgOut[p] {
 			if l = strings.TrimSpace(l); l != "" && l != "FAIL" && !strings.HasPrefix(l, "FAIL\t") && !strings.HasPrefix(l, "exit status ") {

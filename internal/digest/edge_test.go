@@ -168,6 +168,23 @@ func TestGoRaceTimeoutAndPaths(t *testing.T) {
 	}
 }
 
+// A panic in TestMain fails its package with no test; its frame names it.
+func TestGoTestMainPanic(t *testing.T) {
+	report := `{"Action":"start","Package":"example.com/oddgo/mainpanic"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"panic: boom in TestMain\n"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"\n"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"goroutine 1 [running]:\n"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"example.com/oddgo/mainpanic.TestMain(0xc000102000)\n"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"\t/work/oddgo/mainpanic/p_test.go:4 +0x25\n"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"main.main()\n"}
+{"Action":"output","Package":"example.com/oddgo/mainpanic","Output":"\t_testmain.go:45 +0x9b\n"}
+{"Action":"fail","Package":"example.com/oddgo/mainpanic","Elapsed":0.01}
+`
+	if got := Go(report); !strings.Contains(got, "FAIL example.com/oddgo/mainpanic  mainpanic/p_test.go:4: panic: boom in TestMain") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
 // Script names the checkout's module after the go report, from the repo the
 // job's .repo file names (#110).
 func TestScriptNamesTheModule(t *testing.T) {
