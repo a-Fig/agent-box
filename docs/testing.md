@@ -19,7 +19,7 @@ need no PC.
 `.github/workflows/test.yml` runs on every PR and every push to `dev` and `main`:
 
 - **Linux:** `gofmt`, `go vet` (also with `GOOS=windows`), `go test -race`, `bash -n` and
-  shellcheck on `setup-distro.sh`, and a YAML parse of `provision/*.yaml`.
+  shellcheck on `setup-host.sh`, and a YAML parse of `provision/*.yaml`.
 - **Windows:** `go vet`, `go test`, a build of `boxtray.exe`, and a parse of `provision/*.ps1`.
 
 ## Live smoke test on the real PC

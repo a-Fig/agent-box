@@ -41,7 +41,7 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: provisioning scripts
         run: |
-          for f in provision/setup-distro.sh provision/install-boxd.sh provision/update-boxd.sh; do
+          for f in provision/setup-host.sh provision/install-boxd.sh provision/update-boxd.sh; do
             bash -n "$f"
             shellcheck -S warning "$f"
           done

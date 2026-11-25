@@ -52,7 +52,7 @@ answers, the window goes to it (2026-11-24).
 - **Who gets in.** `tailscale serve` adds `Tailscale-User-Login` to each request and strips any
   copy the client sent. Tagged devices (the Vi phones) and Funnel traffic get no such header.
   `boxd` accepts a request only when that login is in `"owners"` in `/etc/agent-box/boxd.json`;
-  `setup-distro.sh` writes Tyler's login there.
+  `setup-host.sh` writes Tyler's login there.
   - Users from other tailnets who were shared in do get a login header, so the check is an
     allowlist that fails closed when it is empty.
 - **The login names Tyler, not a person at a keyboard.** Agents on the laptop also arrive as Tyler,
@@ -367,7 +367,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 ## Install and run
 
-- `setup-distro.sh` installs `boxd` and `agent-box-boxd.service`, and writes `boxd.json`. It also
+- `setup-host.sh` installs `boxd` and `agent-box-boxd.service`, and writes `boxd.json`. It also
   runs `tailscale serve --bg --https=443 http://127.0.0.1:7766`; port 7766 was chosen so nothing
   else on the distro takes it.
 - The tray's **Open dashboard** item opens `https://agent-box.<tailnet>.ts.net` (not built, 2026-11-25).
