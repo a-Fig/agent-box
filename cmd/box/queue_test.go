@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -471,7 +472,53 @@ func TestCLIBoxJobOnAQueuedJob(t *testing.T) {
 	errOut.Reset()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if c := run(ctx, e.a, []string{"job", queuedJobName}, nil); c != 75 || !strings.Contains(errOut.String(), "is still queued; box job "+queuedJobName+" follows it, box cancel "+queuedJobName+" takes it off") {
+	if c := run(ctx, e.a, []string{"job", queuedJobName}, nil); c != 130 || !strings.Contains(errOut.String(), "is still queued; box job "+queuedJobName+" follows it, box cancel "+queuedJobName+" takes it off") {
 		t.Fatalf("interrupted: exit %d, stderr %q", c, errOut.String())
+	}
+}
+
+// Outside T3, box run's markRead writes .notified for the job it followed.
+// Reading that job again later gives its log, not "taken off the queue";
+// only a cancel's .notified means that.
+func TestCLIBoxJobOnAFinishedQueuedJob(t *testing.T) {
+	f := &fakePC{t: t, remotes: testRemotes, insts: []instance{{Name: "my-repo-ab12", Status: "Running", Config: map[string]string{throwawayKey: "true"}}}}
+	e := newPushEnv(t, f, "") // no T3 thread
+	queued := time.Date(2026, 11, 23, 11, 0, 0, 0, time.UTC)
+	exit, ended := 0, queued.Add(20*time.Minute)
+	b := &fakeBoxd{t: t, views: []dash.Job{{Box: "my-repo-ab12", State: dash.JobDone, QueuedAt: &queued, StartedAt: queued.Add(5 * time.Minute), EndedAt: &ended, Exit: &exit, Tail: "tail only\n"}}}
+	e.a.HTTP = b.do
+	f.log, f.exit = "the full log\n", "0\n"
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Queued: true, New: true})
+	e.a.markNotified(queuedJobName, "box run")
+	var out, errOut strings.Builder
+	e.a.Out, e.a.Err = &out, &errOut
+	if c := run(context.Background(), e.a, []string{"job", queuedJobName}, nil); c != 0 || !strings.Contains(out.String(), "the full log") || strings.Contains(errOut.String(), "never ran") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", c, out.String(), errOut.String())
+	}
+
+	// Taken off with box cancel while someone followed it: that follower says so.
+	b.views = []dash.Job{{Box: "my-repo-ab12", State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued, Position: 1, Why: dash.RefusedFull}}
+	os.Remove(e.a.statePath(queuedJobName, ".notified"))
+	e.a.markNotified(queuedJobName, "cancel")
+	errOut.Reset()
+	if r, _ := e.a.followQueued(context.Background(), queuedJobName); r.Code != 130 || !strings.Contains(errOut.String(), "taken off the queue; it never ran") {
+		t.Fatalf("cancelled: %+v, stderr %q", r, errOut.String())
+	}
+}
+
+// A queued job that ran and ended between two looks is read from its box:
+// the full log, not only boxd's tail.
+func TestFollowQueuedReadsAnUnwatchedEndFromItsBox(t *testing.T) {
+	f := &fakePC{insts: []instance{{Name: "my-repo-ab12", Status: "Running", Config: map[string]string{throwawayKey: "true"}}}}
+	e, b := newQueueEnv(t, f)
+	queued := time.Date(2026, 11, 23, 11, 0, 0, 0, time.UTC)
+	exit, ended := 1, queued.Add(2*time.Minute)
+	b.views = []dash.Job{{Box: "my-repo-ab12", State: dash.JobDone, QueuedAt: &queued, StartedAt: queued.Add(time.Minute), EndedAt: &ended, Exit: &exit, Tail: "tail only\n"}}
+	f.log, f.exit = "line 1\nthe full log\n", "1\n"
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Queued: true, New: true})
+	var out strings.Builder
+	e.a.Out = &out
+	if r, err := e.a.followQueued(context.Background(), queuedJobName); err != nil || r.Code != 1 || !strings.Contains(out.String(), "the full log") {
+		t.Fatalf("%+v %v, stdout %q", r, err, out.String())
 	}
 }

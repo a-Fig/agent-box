@@ -210,8 +210,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if !paged {
 			var r JobResult
 			var err error
-			if a.wasQueued(fs.Arg(0)) {
-				r, err = a.followQueued(ctx, fs.Arg(0)) // it may still wait in boxd's queue, with no box yet
+			if a.wasQueued(fs.Arg(0)) && a.stillQueued(ctx, fs.Arg(0)) {
+				r, err = a.followQueued(ctx, fs.Arg(0)) // it waits in boxd's queue, with no box yet
 			} else {
 				r, err = a.Job(ctx, fs.Arg(0), 0)
 			}

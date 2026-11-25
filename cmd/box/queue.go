@@ -377,22 +377,45 @@ func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
 	out, ok := a.waitQueued(ctx, rec)
 	box, _, _ := strings.Cut(job, ".")
 	switch {
-	case !ok && a.exists(job, ".notified"):
+	case !ok && a.notifiedBy(job) == "cancel":
 		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
 		return JobResult{Job: job, Box: box, State: stateDone, Code: exitDetached}, nil
 	case !ok:
+		// Interrupted: 130 as for a detach from a running job, not 75, which
+		// says "run it locally" though the job will still run on the PC.
 		fmt.Fprintf(a.Err, "box: job %s is still queued; box job %s follows it, box cancel %s takes it off\n", job, job, job)
-		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitPaused}, nil
+		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitDetached}, nil
 	case out.end != nil && out.end.Dropped:
 		fmt.Fprintf(a.Err, "box: job %s left the queue without running (it waited %s at most, or couldn't start): run it locally\n", job, elapsed(dash.QueueMaxAge))
 		return JobResult{Job: job, Box: box, State: stateDone, Code: exitPaused}, nil
 	case out.end != nil:
-		// It ran and ended before anyone followed it here: boxd has the tail.
+		// It ran and ended between two looks: its kept box has the full log
+		// and digest; boxd's tail is the fallback once the box is gone.
+		if r, err := a.Job(ctx, job, 0); err == nil {
+			return r, nil
+		}
 		io.WriteString(a.Out, out.end.Tail+"\n")
 		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code}, nil
 	}
 	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box)
 	return a.Job(ctx, job, 0)
+}
+
+// stillQueued says whether boxd has job waiting in its queue now. box job
+// follows such a job through the queue; any other is the box's to report.
+func (a *App) stillQueued(ctx context.Context, job string) bool {
+	j, found, err := a.queuedJob(ctx, job)
+	return err == nil && found && j.State == dash.JobQueued
+}
+
+// notifiedBy is who wrote job's .notified ("cancel", "watcher", "box run",
+// ...), or "" when there is none.
+func (a *App) notifiedBy(job string) string {
+	b, err := os.ReadFile(a.statePath(job, ".notified"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // lastLines is the last n lines of s.
