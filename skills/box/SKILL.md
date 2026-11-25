@@ -5,7 +5,7 @@ description: Offload heavy test runs and builds from this laptop to a disposable
 
 # box: offload heavy runs
 
-**Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, or several heavy runs at once. Run quick, focused tests locally.
+**Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, or several heavy runs at once. Run quick tests locally.
 
 1. `box_status` with your worktree as `dir`: its first line says whether to offload.
 2. `box_run` with `dir`, `command` and `reason` (why; the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` if it might hang (exit 124). Pipes use `pipefail`, so `| head` can exit 141.
@@ -24,4 +24,4 @@ Boxes are throwaway; `/cache` survives.
 
 **Sizes** (`size`): small (quick), medium (default), large (Gradle). **GPU**: `gpu: true` gets the RTX 3070, one at a time; a game stops it.
 
-Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS, uv, JDK 17, Android SDK 34/35 (lazy in /cache; first run fetches ~1 GB, or `sdkmanager --list`), gh, git, build-essential, Chromium's libraries (Puppeteer and Playwright downloads cache in /cache). Jobs run as root, so Puppeteer needs `--no-sandbox`.
+Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS, uv, JDK 17, Android SDK 34/35 (lazy, ~1 GB first run; or `sdkmanager --list`), gh, git, build-essential, Chromium libraries (Puppeteer: `--no-sandbox`).
