@@ -444,13 +444,6 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 			}
 		}
 	}
-	for _, k := range legacyKeys {
-		if _, ok := in.Config[k]; ok {
-			if err := m.Incus.UnsetInstanceConfig(ctx, in.Name, k); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
 	if err := errors.Join(errs...); err != nil {
 		return state, err // stay frozen until the limits are right
 	}

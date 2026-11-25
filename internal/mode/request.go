@@ -23,7 +23,7 @@ const (
 	RequestMaxAge = 10 * time.Minute
 )
 
-// ModeRequest is what the page writes to ProjectModeRequestKey.
+// ModeRequest is what boxd writes to ProjectModeRequestKey for the page.
 type ModeRequest struct {
 	Mode Mode      `json:"mode"`
 	At   time.Time `json:"at"`

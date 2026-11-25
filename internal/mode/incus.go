@@ -41,7 +41,6 @@ type Incus interface {
 	// Delete removes the instance and its disk (forced, so a frozen or running one goes too).
 	Delete(ctx context.Context, name string) error
 	SetInstanceConfig(ctx context.Context, name, key, value string) error
-	UnsetInstanceConfig(ctx context.Context, name, key string) error
 	// ProjectConfig reads one key of the project's config ("" when unset).
 	ProjectConfig(ctx context.Context, key string) (string, error)
 	// SetProjectConfig sets the mode label, the handshake keys and the memory
@@ -98,10 +97,6 @@ func (c CLI) Delete(ctx context.Context, name string) error {
 
 func (c CLI) SetInstanceConfig(ctx context.Context, name, key, value string) error {
 	return c.do(ctx, "config", "set", name, key+"="+value, "--project", Project)
-}
-
-func (c CLI) UnsetInstanceConfig(ctx context.Context, name, key string) error {
-	return c.do(ctx, "config", "unset", name, key, "--project", Project)
 }
 
 func (c CLI) ProjectConfig(ctx context.Context, key string) (string, error) {
