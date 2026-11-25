@@ -21,6 +21,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
@@ -1028,6 +1029,13 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 			fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
 			fmt.Fprint(a.Out, end.Tail)
 			return JobResult{Job: job, Box: box, State: stateDone, Code: end.Code}, nil
+		}
+		// Nobody here read it (a run that exited on a pause, a push that
+		// never came): boxd recorded every job's end (#90).
+		if j, found, berr := a.queuedJob(ctx, job); berr == nil && found && j.State == dash.JobDone && j.Exit != nil {
+			fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is boxd's record of its end. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
+			fmt.Fprint(a.Out, j.Tail)
+			return JobResult{Job: job, Box: box, State: stateDone, Code: *j.Exit}, nil
 		}
 	}
 	if err == nil && r.State == stateDone {
