@@ -235,7 +235,8 @@ var errNotQueued = errors.New("not waiting in the queue")
 func (a *App) cancelQueued(ctx context.Context, job string) error {
 	ctx, cancel := context.WithTimeout(ctx, queueTimeout)
 	defer cancel()
-	code, b, err := a.boxdDo(ctx, http.MethodPost, "/api/queue/"+url.PathEscape(job)+"/cancel", "", nil)
+	// boxd's controls take only JSON, so an empty object it is.
+	code, b, err := a.boxdDo(ctx, http.MethodPost, "/api/queue/"+url.PathEscape(job)+"/cancel", "application/json", strings.NewReader("{}"))
 	switch {
 	case err != nil:
 		return err

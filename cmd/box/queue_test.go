@@ -70,6 +70,12 @@ func (b *fakeBoxd) do(req *http.Request) (*http.Response, error) {
 		}
 		json.NewEncoder(rec).Encode(v)
 	case req.Method == "POST" && strings.HasSuffix(req.URL.Path, "/cancel"):
+		// boxd's control() middleware takes only JSON bodies (#132).
+		if !strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") || req.Header.Get(dash.ControlHeader) != "1" {
+			rec.WriteHeader(400)
+			json.NewEncoder(rec).Encode(dash.ErrorBody{Error: "the body must be JSON", Code: dash.CodeBadRequest})
+			break
+		}
 		if b.cancel == 0 {
 			b.cancel = 204
 		}
