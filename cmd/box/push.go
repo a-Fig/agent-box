@@ -183,6 +183,7 @@ type jobEnd struct {
 	Dropped bool   `json:"dropped,omitempty"`
 	Took    int64  `json:"tookSeconds"`
 	Tail    string `json:"tail,omitempty"`
+	Digest  string `json:"digest,omitempty"` // a test run's failure digest
 }
 
 // thread is the T3 thread of this session, or "".
@@ -564,7 +565,11 @@ func (r jobRecord) context() string {
 }
 
 func endedMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s ended, exit %d, after %s. %s\n%s\n%s\n", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second), fromBox, r.context(), mask.Mask(e.Tail))
+	msg := fmt.Sprintf("box: job %s ended, exit %d, after %s. %s\n%s\n", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second), fromBox, r.context())
+	if e.Digest != "" {
+		msg += mask.Mask(e.Digest) + "Output tail:\n"
+	}
+	msg += mask.Mask(e.Tail) + "\n"
 	if e.Code == exitPaused {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
@@ -735,7 +740,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
-			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines)}, true
+			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest}, true
 		case err == nil && res.State == statePaused && rec.GPU:
 			return lost() // a GPU box is stopped for a game, not frozen
 		case err == nil && res.State == statePaused:

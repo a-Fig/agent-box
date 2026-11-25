@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/digest"
 )
 
 // AliveFn defines alive PID JOB: whether PID is still JOB's wrapper and not
@@ -47,6 +50,13 @@ func Payload(env map[string]string, args []string, timeout time.Duration) string
 		// "go test ./... | tail" exits with go test's code, not tail's (#6).
 		cmd = "set -o pipefail\n" + cmd
 	}
+	// A Go test or vitest run also leaves its JSON report beside the log,
+	// for the failure digest (internal/digest). The functions are defined
+	// in the shell that runs the command, so the command's own children
+	// (a script that calls go test itself) run the real tools.
+	if k := dash.Classify(strings.Join(args, " "), false); k == dash.KindGoTest || k == dash.KindJSTest {
+		cmd = digest.Wrappers + cmd
+	}
 	if timeout > 0 {
 		secs := strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64)
 		// A hard timeout can kill the timeout process itself. Read its private
@@ -72,7 +82,8 @@ exit "$status"`, secs, Shq("exec 2>&4 3>&- 4>&-\n"+cmd))
 func StartScript(root, job, ref, repo, payload string) string {
 	w := root
 	f := w + "/.box/" + job
-	inner := fmt.Sprintf(`echo "$$" > %[2]s.pid.tmp && mv %[2]s.pid.tmp %[2]s.pid || exit 1
+	inner := fmt.Sprintf(`export `+digest.JobVar+`=%[2]s
+echo "$$" > %[2]s.pid.tmp && mv %[2]s.pid.tmp %[2]s.pid || exit 1
 exec 9>%[1]s/.box/%[3]s.lock
 flock 9 || exit 1
 if git init -q %[1]s/%[3]s && cd %[1]s/%[3]s &&

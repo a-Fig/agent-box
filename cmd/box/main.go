@@ -121,6 +121,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	}
 	code := func(r JobResult, err error) int {
 		c := r.Code
+		if r.Digest != "" {
+			fmt.Fprint(a.Err, "\n"+r.Digest)
+		}
 		if err != nil {
 			fmt.Fprintln(a.Err, "box:", err)
 			if c == 0 {

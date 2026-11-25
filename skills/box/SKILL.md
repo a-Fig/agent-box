@@ -15,8 +15,9 @@ description: Offload heavy test runs and builds from this laptop to a disposable
    - **Subagents pass `push: false`** (a push would wake the parent).
 4. **`state: queued`**: the PC is full or paused, so a snapshot waits in line; the result is pushed. Can't wait? Run locally and `box_cancel` it.
 5. **`state: refused` (exit 75): the PC is busy, paused or unreachable: run locally.** So is a pushed "lost". A "paused" job may resume; if you run locally instead, `box_cancel` it. `done` with exit 75 is the command's own.
-6. `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
-7. `box_pull` fetches reports or build output before the repo's next run replaces it. Parallel runs: `new: true`.
+6. A `go test` or vitest result leads with a digest: the failed tests with file:line and first assertion or panic, then counts. Read it before paging the log.
+7. `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
+8. `box_pull` fetches reports or build output before the repo's next run replaces it. Parallel runs: `new: true`.
 
 Boxes are throwaway; `/cache` survives.
 
