@@ -289,16 +289,17 @@ func sizeText(s StatusReport, name string) string {
 	return name
 }
 
-// waitsAdvice ends a status that says a run can't start now: box run and a
-// pushed box_run wait in the PC's queue instead (#93).
-const waitsAdvice = ": a run would wait in the PC's queue; run locally if you need it now"
+// waitsAdvice ends a status that says a run can't start now but would queue:
+// box run and a pushed box_run wait in the PC's queue (#93); box_run without
+// push still gets 75.
+const waitsAdvice = ": box run, or box_run with push, would wait in the PC's queue; run locally if you need it now"
 
 func advice(s StatusReport, repoBox *instance) (string, bool) {
 	switch {
 	case s.Mode == string(mode.MyPC):
 		return "unavailable: PC is in My PC mode" + waitsAdvice + " (a GPU run doesn't wait)", false
 	case repoBox != nil && repoBox.Status == "Frozen":
-		return fmt.Sprintf("unavailable: this repo's box %s is frozen", repoBox.Name) + waitsAdvice, false
+		return fmt.Sprintf("unavailable: this repo's box %s is frozen: run locally", repoBox.Name), false
 	case repoBox != nil && repoBox.Config[throwawayKey] != "true":
 		busy := ""
 		if n := len(s.RepoBox.Running); n > 0 {
