@@ -59,8 +59,26 @@ type Manager struct {
 	// each box frozen in My PC out to swap, in the background (reclaim.go).
 	Reclaim Reclaimer
 
-	mu     sync.Mutex // guards chosen
-	chosen Mode
+	// Handshake turns on the mode handshake (request.go): the manager adopts
+	// the project's chosen mode, publishes its own picks there, and applies
+	// the dashboard's requests. Both enforcers set it.
+	Handshake bool
+	// SeedChosen makes a manager that finds no chosen mode in the project
+	// publish its own, so the tray's saved pick becomes the project's. The
+	// headless enforcer leaves it off: its Full is a default, not a choice.
+	SeedChosen bool
+	// Persist, if set, is called with a mode adopted from the project or a
+	// request, so the tray can save it to boxtray.json like a menu click.
+	Persist func(Mode)
+	// Logf, if set, records adopted and dropped requests.
+	Logf func(format string, args ...any)
+
+	mu          sync.Mutex // guards chosen, choiceAt, chosenDirty
+	chosen      Mode
+	choiceAt    time.Time // when chosen was picked: a click, or a request's time
+	chosenDirty bool      // chosen is not yet stored in ProjectChosenKey
+
+	chosenSynced bool // ProjectChosenKey was read once (guarded by tickMu)
 
 	tickMu      sync.Mutex // serialises Tick (it calls Incus)
 	yielding    bool
@@ -96,7 +114,7 @@ func New(inc Incus, chosen Mode) *Manager {
 func (m *Manager) Chosen() Mode { m.mu.Lock(); defer m.mu.Unlock(); return m.chosen }
 
 // SetChosen records a new pick; the next Tick applies it.
-func (m *Manager) SetChosen(c Mode) { m.mu.Lock(); m.chosen = c; m.mu.Unlock() }
+func (m *Manager) SetChosen(c Mode) { m.SetChosenAt(c, time.Now()) }
 
 // Last returns the result of the most recent Tick.
 func (m *Manager) Last() Status { m.tickMu.Lock(); defer m.tickMu.Unlock(); return m.last }
@@ -122,6 +140,10 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	}
 
 	m.updateYield(now, gaming, reason)
+	var hsErrs []error
+	if m.Handshake {
+		hsErrs = m.handshake(ctx, now)
+	}
 	st := Status{Chosen: m.Chosen(), Yielding: m.yielding, Reason: m.reason}
 	st.Effective = st.Chosen
 	if m.yielding {
@@ -134,7 +156,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	}
 	m.rc.init()
 
-	var errs []error
+	errs := hsErrs
 	if m.projectDone && now.Sub(m.projectAt) >= ProjectRecheck {
 		// Read the label and the reason back once a minute; write only what
 		// differs, so a quiet minute costs one read and no write.

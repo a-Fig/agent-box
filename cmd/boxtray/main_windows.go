@@ -68,6 +68,18 @@ func main() {
 	}
 	mgr := mode.New(mode.CLI{Run: wslIncus}, loadMode(cfg))
 	mgr.Reclaim = mode.CgroupReclaim{Run: wslRoot}
+	// The project's chosen mode is the truth (a headless enforcer or a
+	// dashboard request may have changed it since this tray last ran);
+	// boxtray.json is the local copy, and the start-up pick if the project has none.
+	mgr.Handshake, mgr.SeedChosen, mgr.Logf = true, true, lg.Printf
+	mgr.Persist = func(m mode.Mode) {
+		if cfg == "" {
+			return
+		}
+		if err := saveMode(cfg, m); err != nil {
+			lg.Printf("could not save the mode: %v", err)
+		}
+	}
 	lg.Printf("mode at start: %s", mgr.Chosen())
 	wake := make(chan struct{}, 1)
 	poke := func() {

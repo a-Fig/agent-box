@@ -58,8 +58,8 @@ func headlessLogPath() string { return filepath.Join(filepath.Dir(logPath()), "b
 
 // runHeadless is `boxtray.exe --headless`, run by the agent-box-enforcer
 // scheduled task from startup, with or without anyone logged on. It runs the
-// same mode loop as the tray with the chosen mode fixed at Full and no game
-// detection, and it stands aside, writing nothing, while the interactive tray
+// same mode loop as the tray, with no game detection and Full as the default
+// until a pick is stored in the project (a tray click or a dashboard request), and it stands aside, writing nothing, while the interactive tray
 // runs. It returns only if another headless enforcer already runs.
 func runHeadless() {
 	lg = openLog(headlessLogPath(), maxLogBytes)
@@ -80,7 +80,10 @@ func runHeadless() {
 	cfg := loopCfg{
 		Manager: func() *mode.Manager {
 			hb.last = time.Time{} // say so at once after standing aside
+			// Full is only the default: the project's chosen mode (a tray
+			// pick or a dashboard request) replaces it on the first tick.
 			m := mode.New(inc, mode.Full)
+			m.Handshake, m.Logf = true, lg.Printf
 			m.Reclaim = mode.CgroupReclaim{Run: wslRoot} // swap limits are part of the job
 			return m
 		},
