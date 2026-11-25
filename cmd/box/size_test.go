@@ -115,17 +115,33 @@ func TestRunSizeMismatchUsesThrowaway(t *testing.T) {
 }
 
 func TestRunReusesBoxOfAnySizeWithoutSize(t *testing.T) {
-	for name, o := range map[string]RunOpts{
-		"no size":       {Cmd: []string{"true"}},
-		"matching size": {Cmd: []string{"true"}, Size: "large"},
+	for name, tc := range map[string]struct {
+		o      RunOpts
+		status string
+		size   string
+		gpu    bool
+	}{
+		"no size, stopped large": {o: RunOpts{Cmd: []string{"true"}}, status: "Stopped", size: "large"},
+		"no size, running small": {o: RunOpts{Cmd: []string{"true"}}, status: "Running", size: "small"},
+		"no size, running gpu":   {o: RunOpts{Cmd: []string{"true"}}, status: "Running", size: "gpu", gpu: true},
+		"matching size":          {o: RunOpts{Cmd: []string{"true"}, Size: "large"}, status: "Stopped", size: "large"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Stopped", Config: map[string]string{"user.box.size": "large"}}}, exit: "0"}
+			f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: tc.status, Config: map[string]string{"user.box.size": tc.size}}}, exit: "0"}
 			a, out := testApp(f)
+			o := tc.o
 			o.Dir = newRepo(t)
 			r, err := a.Run(context.Background(), o)
 			if err != nil || r.Code != 0 || r.Box != "my-repo" || len(f.launches) != 0 {
 				t.Fatalf("Run = %+v, %v, launches %q\n%s", r, err, f.launches, out)
+			}
+			var got jobMeta
+			raw := f.files["pc:my-repo/work/.box/"+r.Job+".meta"]
+			if err := json.Unmarshal([]byte(raw), &got); err != nil {
+				t.Fatalf("meta %q: %v", raw, err)
+			}
+			if got.Size != tc.size || got.GPU != tc.gpu {
+				t.Fatalf("meta size=%q gpu=%v, want size=%q gpu=%v", got.Size, got.GPU, tc.size, tc.gpu)
 			}
 		})
 	}

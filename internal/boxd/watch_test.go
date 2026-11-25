@@ -661,4 +661,10 @@ func TestWatcherSkipsUnsetCreatedAtAndRecoversBoxRepoAfterRestart(t *testing.T) 
 	if st := w2.State(); len(st.Boxes) != 1 || st.Boxes[0].Repo != "https://github.com/acme/widget.git" {
 		t.Fatalf("after restart box lost repo: %+v", st.Boxes)
 	}
+	// The box is small even though metaJSON says "medium" (as an older box
+	// binary writes when reusing a small repo box without --size): boxd keeps
+	// the box's real size.
+	if st := w2.State(); len(st.Jobs) != 1 || st.Jobs[0].Size != "small" {
+		t.Fatalf("job size = %q, want small: %+v", st.Jobs[0].Size, st.Jobs)
+	}
 }

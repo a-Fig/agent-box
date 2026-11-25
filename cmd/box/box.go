@@ -833,7 +833,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 
 	started := false // from here on the remote job may be running
 	if !o.New {
-		paused, err := a.ensureBox(ctx, box, inst, sz, o.Size)
+		actual, paused, err := a.ensureBox(ctx, box, inst, sz, o.Size)
 		var have existingBoxSize
 		switch {
 		case errors.As(err, &have):
@@ -845,6 +845,9 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			return JobResult{Code: 1}, err
 		case paused != "":
 			return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
+		default:
+			sz = actual
+			info.Size, info.GPU = sz.Name, sz.GPU
 		}
 	}
 	if o.New {
@@ -957,11 +960,12 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 	return "", errors.New("no free name for a throwaway box")
 }
 
-// ensureBox launches or starts a reused box. When a concurrent run launches
-// or starts it first, it carries on with that one.
-func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size, requestedSize string) (paused string, err error) {
+// ensureBox launches or starts a reused box and returns the size of the box it
+// actually used. When a concurrent run launches or starts it first, it carries
+// on with that one.
+func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size, requestedSize string) (actual mode.Size, paused string, err error) {
 	if inst != nil && inst.Status == "Running" {
-		return "", nil
+		return mode.SizeOf(inst.Config), "", nil
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
@@ -970,36 +974,39 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 		_, err = a.incusOK(ctx, "start", a.target(box))
 	}
 	if err == nil {
-		return "", nil
+		if inst != nil {
+			return mode.SizeOf(inst.Config), "", nil
+		}
+		return sz, "", nil
 	}
 	now, paused := a.check(ctx, box)
 	if paused != "" {
-		return paused, nil
+		return mode.Size{}, paused, nil
 	}
 	if now == nil {
 		if jobrun.IsDisallowedMetadata(err) {
-			return "", fmt.Errorf("%w (this or an earlier failed launch left an empty dir on the PC: /var/lib/incus/storage-pools/default/containers/%s_%s; use a new box (--new / new: true) until it is removed)", err, a.Project, box)
+			return mode.Size{}, "", fmt.Errorf("%w (this or an earlier failed launch left an empty dir on the PC: /var/lib/incus/storage-pools/default/containers/%s_%s; use a new box (--new / new: true) until it is removed)", err, a.Project, box)
 		}
-		return "", err
+		return mode.Size{}, "", err
 	}
 	if err := reusableBox(now, requestedSize); err != nil {
-		return "", err
+		return mode.Size{}, "", err
 	}
 	switch {
 	case now.Status == "Running":
-		return "", nil
+		return mode.SizeOf(now.Config), "", nil
 	case inst == nil: // someone else launched it but it isn't running yet
 		if _, err := a.incusOK(ctx, "start", a.target(box)); err != nil {
 			if now, paused := a.check(ctx, box); paused != "" {
-				return paused, nil
+				return mode.Size{}, paused, nil
 			} else if now != nil && now.Status == "Running" {
-				return "", reusableBox(now, requestedSize)
+				return mode.SizeOf(now.Config), "", reusableBox(now, requestedSize)
 			}
-			return "", err
+			return mode.Size{}, "", err
 		}
-		return "", nil
+		return mode.SizeOf(now.Config), "", nil
 	}
-	return "", err
+	return mode.Size{}, "", err
 }
 
 func (a *App) removeQuietly(ctx context.Context, box string) {
