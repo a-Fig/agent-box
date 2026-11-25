@@ -19,15 +19,13 @@ type StatusReport struct {
 	Reachable bool       `json:"reachable"`
 	Error     string     `json:"error,omitempty"` // why the PC can't be reached
 	Mode      string     `json:"mode"`            // mypc, shared, full, or "" if unknown
-	Yielding  bool       `json:"yielding"`        // the tray has paused boxes for a game
-	Reason    string     `json:"reason,omitempty"`
 	Boxes     int        `json:"boxes"`
 	MaxBoxes  int        `json:"maxBoxes"`  // -1: no limit
 	SlotsFree int        `json:"slotsFree"` // -1: no limit
 	Sizes     []SizeRoom `json:"sizes"`
 	Room      string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
 	// GPU is "free", "free, but no room ...", "in use: job X" or
-	// "unavailable: ..." (a game or My PC).
+	// "unavailable: ..." (My PC).
 	GPU     string   `json:"gpu"`
 	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
 	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
@@ -68,8 +66,6 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s.Reachable = true
 	s.Boxes = len(insts)
 	s.Mode = a.mode(ctx)
-	s.Reason = a.projectKey(ctx, mode.ProjectReasonKey)
-	s.Yielding = s.Reason != ""
 	kept := map[string]bool{}
 	for _, in := range a.keptThrowaways(ctx, insts) {
 		kept[in.Name] = true
@@ -85,10 +81,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 		s.MaxBoxes, s.SlotsFree = n, max(free, 0)
 	}
 	now := mode.Mode(s.Mode)
-	switch {
-	case s.Yielding:
-		now = mode.MyPC
-	case s.Mode == "": // no tray: boxes keep the Shared CPUs they launched with
+	if s.Mode == "" { // no tray: boxes keep the Shared CPUs they launched with
 		now = mode.Shared
 	}
 	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
@@ -117,10 +110,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 
 // gpuStatus says whether a GPU box could run now.
 func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) string {
-	switch {
-	case s.Yielding:
-		return "unavailable: the PC is yielding to a game"
-	case s.Mode == string(mode.MyPC):
+	if s.Mode == string(mode.MyPC) {
 		return "unavailable: the PC is in My PC mode"
 	}
 	for _, in := range insts {
@@ -284,8 +274,6 @@ func advice(s StatusReport, repoBox *instance) (string, bool) {
 	switch {
 	case s.Mode == string(mode.MyPC):
 		return "unavailable: PC is in My PC mode: run locally", false
-	case s.Yielding:
-		return fmt.Sprintf("unavailable: PC is yielding to a game (%s): run locally", s.Reason), false
 	case repoBox != nil && repoBox.Status == "Frozen":
 		return fmt.Sprintf("unavailable: this repo's box %s is frozen: run locally", repoBox.Name), false
 	case repoBox != nil && repoBox.Config[throwawayKey] != "true":
@@ -341,9 +329,6 @@ func writeStatus(w io.Writer, s StatusReport) {
 	m := s.Mode
 	if m == "" {
 		m = "unknown"
-	}
-	if s.Yielding {
-		m += ", yielding: " + s.Reason
 	}
 	fmt.Fprintf(w, "mode: %s\n", m)
 	if s.MaxBoxes >= 0 {

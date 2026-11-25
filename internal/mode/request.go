@@ -69,8 +69,7 @@ func (m *Manager) adoptNewer(c Mode, at time.Time, orEqual bool) bool {
 // handshake runs at the start of a Tick when Handshake is set. It first syncs
 // the chosen mode with the project (until that has worked the Tick applies
 // nothing: see Synced), then publishes a pick made here, then applies a
-// pending request unless a game is running. Every step that fails is retried
-// next tick.
+// pending request. Every step that fails is retried next tick.
 func (m *Manager) handshake(ctx context.Context, now time.Time) (errs []error) {
 	if !m.chosenSynced {
 		cur, err := m.Incus.ProjectConfig(ctx, ProjectChosenKey)
@@ -93,9 +92,6 @@ func (m *Manager) handshake(ctx context.Context, now time.Time) (errs []error) {
 	}
 	if err := m.publishChosen(ctx); err != nil {
 		errs = append(errs, err)
-	}
-	if m.yielding { // a game wins; the request stays pending
-		return errs
 	}
 	raw, err := m.Incus.ProjectConfig(ctx, ProjectModeRequestKey)
 	if err != nil {

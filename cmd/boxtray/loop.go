@@ -11,7 +11,6 @@ import (
 
 // Sensors are the Windows-side inputs and outputs; fakes stand in for tests.
 type Sensors interface {
-	Gaming() (bool, string)      // a game owns the PC
 	HostUp(context.Context) bool // the WSL distro is running (we never start it)
 	HoldAwake(on bool)           // keep the PC from sleeping
 }
@@ -59,14 +58,13 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 		}
 		var st mode.Status
 		if s.HostUp(ctx) {
-			gaming, reason := s.Gaming()
 			now := time.Now()
-			st = m.Tick(ctx, now, gaming, reason)
+			st = m.Tick(ctx, now)
 			if cfg.Beat != nil && !st.Down {
 				cfg.Beat(ctx, now)
 			}
 		} else {
-			st = mode.Status{Chosen: m.Chosen(), Effective: m.Chosen(), Down: true}
+			st = mode.Status{Chosen: m.Chosen(), Down: true}
 		}
 		s.HoldAwake(st.Running > 0)
 		report(st)

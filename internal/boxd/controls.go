@@ -196,7 +196,6 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 		job = *j
 		box = w.boxes[j.Box]
 	}
-	m := w.machine
 	w.mu.Unlock()
 	if !live {
 		if _, ok := w.Hist.Job(key); ok {
@@ -205,9 +204,6 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 		return dash.Job{}, errJobGone
 	}
 	if box.State == dash.BoxFrozen {
-		if m.Yielding {
-			return dash.Job{}, &controlError{http.StatusConflict, dash.CodeYielding, "the box is frozen for a game; it can't run the kill"}
-		}
 		return dash.Job{}, &controlError{http.StatusConflict, dash.CodeFrozen, "the box is frozen for My PC; it can't run the kill"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)

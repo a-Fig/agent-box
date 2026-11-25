@@ -23,11 +23,8 @@ const (
 	// and left it holding ReclaimLeft or less: frozen and in swap, it costs
 	// Windows next to no RAM, so its job may wait for Tyler much longer.
 	FrozenSwappedStop = 4 * time.Hour
-	// YieldDebounce is how long the game signal must stay clear before the
-	// chosen mode comes back, so alt-tab doesn't freeze and thaw the boxes.
-	YieldDebounce = 20 * time.Second
-	// ProjectRecheck is how often the mode label and the yield reason are
-	// read back (and rewritten if they differ) even though nothing changed here. Two enforcers
+	// ProjectRecheck is how often the mode label is read back (and
+	// rewritten if it differs) even though nothing changed here. Two enforcers
 	// can overlap for a tick when Tyler logs in or out (the headless one
 	// and the tray); whichever ran last may have left its own values.
 	ProjectRecheck = time.Minute
@@ -39,19 +36,16 @@ const (
 
 // Status is what one Tick found and did.
 type Status struct {
-	Chosen    Mode   // what the user picked
-	Effective Mode   // what is applied: MyPC while yielding, else Chosen
-	Yielding  bool   // a game is running (or just ended, within the debounce)
-	Reason    string // why, e.g. "steam:570"
-	Running   int    // instances running after this tick
-	Down      bool   // the Incus host was not reachable (or Release memory runs), nothing was applied
-	Err       error  // joined errors from this tick; the failed parts retry next tick
+	Chosen  Mode  // the mode picked and applied
+	Running int   // instances running after this tick
+	Down    bool  // the Incus host was not reachable (or Release memory runs), nothing was applied
+	Err     error // joined errors from this tick; the failed parts retry next tick
 	// Reclaimed lists the reclaims that ended since the last tick, with
 	// what each box still holds, for the log. Nothing acts on it.
 	Reclaimed []Reclaimed
 }
 
-// Manager drives instances toward the effective mode. Call Tick regularly;
+// Manager drives instances toward the chosen mode. Call Tick regularly;
 // every step is idempotent, so a failed call is retried on the next tick.
 type Manager struct {
 	Incus Incus
@@ -82,14 +76,9 @@ type Manager struct {
 	chosenSynced bool // ProjectChosenKey was read once (guarded by tickMu)
 
 	tickMu      sync.Mutex // serialises Tick (it calls Incus)
-	yielding    bool
-	clearSince  time.Time
-	reason      string
-	applied     Mode      // effective mode the fields below belong to
-	projectDone bool      // mode label set for applied
-	projectAt   time.Time // when the label was last written or read back
-	pubReason   string    // user.agent-box.reason as last read or written
-	reasonRead  bool      // pubReason was read from the project once
+	applied     Mode       // mode the fields below belong to
+	projectDone bool       // mode label set for applied
+	projectAt   time.Time  // when the label was last written or read back
 	frozenSince map[string]frozenAt
 	rc          reclaims
 	swapSet     map[string]int64  // box -> init PID whose memory.swap.max was confirmed last tick
@@ -120,9 +109,8 @@ func (m *Manager) SetChosen(c Mode) { m.SetChosenAt(c, time.Now()) }
 // Last returns the result of the most recent Tick.
 func (m *Manager) Last() Status { m.tickMu.Lock(); defer m.tickMu.Unlock(); return m.last }
 
-// Tick feeds the current game signal and brings Incus in line with the
-// effective mode.
-func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason string) Status {
+// Tick brings Incus in line with the chosen mode.
+func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 	m.tickMu.Lock()
 	defer m.tickMu.Unlock()
 
@@ -137,26 +125,22 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	m.cancelMu.Unlock()
 	defer func() { m.cancelMu.Lock(); m.tickCancel = nil; m.cancelMu.Unlock() }()
 	if m.releasing.Load() {
-		return Status{Chosen: m.Chosen(), Effective: m.Chosen(), Down: true}
+		return Status{Chosen: m.Chosen(), Down: true}
 	}
 
-	m.updateYield(now, gaming, reason)
 	var hsErrs []error
 	if m.Handshake {
 		hsErrs = m.handshake(ctx, now)
 		if !m.Synced() {
 			// Not read yet: applying the default could undo an earlier pick.
-			m.last = Status{Chosen: m.Chosen(), Effective: m.Chosen(), Down: true, Running: m.last.Running, Err: errors.Join(hsErrs...)}
+			m.last = Status{Chosen: m.Chosen(), Down: true, Running: m.last.Running, Err: errors.Join(hsErrs...)}
 			return m.last
 		}
 	}
-	st := Status{Chosen: m.Chosen(), Yielding: m.yielding, Reason: m.reason}
-	st.Effective = st.Chosen
-	if m.yielding {
-		st.Effective = MyPC
-	}
-	if st.Effective != m.applied {
-		m.applied, m.projectDone = st.Effective, false
+	st := Status{Chosen: m.Chosen()}
+	eff := st.Chosen
+	if eff != m.applied {
+		m.applied, m.projectDone = eff, false
 		m.frozenSince = map[string]frozenAt{}
 		m.rc.forgetAll()
 	}
@@ -164,34 +148,18 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 
 	errs := hsErrs
 	if m.projectDone && now.Sub(m.projectAt) >= ProjectRecheck {
-		// Read the label and the reason back once a minute; write only what
-		// differs, so a quiet minute costs one read and no write.
-		m.projectAt, m.reasonRead = now, false
-		if cur, err := m.Incus.ProjectConfig(ctx, ProjectModeKey); err == nil && cur != string(st.Effective) {
+		// Read the label back once a minute; write only if it differs, so a
+		// quiet minute costs one read and no write.
+		m.projectAt = now
+		if cur, err := m.Incus.ProjectConfig(ctx, ProjectModeKey); err == nil && cur != string(eff) {
 			m.projectDone = false
 		}
 	}
 	if !m.projectDone {
-		if err := m.applyProject(ctx, st.Effective); err != nil {
+		if err := m.applyProject(ctx, eff); err != nil {
 			errs = append(errs, err)
 		} else {
 			m.projectDone, m.projectAt = true, now
-		}
-	}
-	// Why the PC is yielding, for `box status`. Written only on change, so the
-	// common case (never yielding) costs no calls. It is read once first: a
-	// tray killed mid-yield (a crash during a game) leaves a reason behind,
-	// and `box status` would say the PC is busy until the next game ended.
-	if !m.reasonRead {
-		if cur, err := m.Incus.ProjectConfig(ctx, ProjectReasonKey); err == nil {
-			m.pubReason, m.reasonRead = cur, true
-		}
-	}
-	if want := yieldReason(m.yielding, m.reason); want != m.pubReason {
-		if err := m.Incus.SetProjectConfig(ctx, ProjectReasonKey, want); err != nil {
-			errs = append(errs, err)
-		} else {
-			m.pubReason = want
 		}
 	}
 	ins, err := m.Incus.List(ctx)
@@ -200,20 +168,16 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 		st.Running = m.last.Running
 	} else {
 		ins, errs = m.reap(ctx, now, ins, errs)
-		why := string(MyPC)
-		if m.yielding {
-			why = yieldReason(true, m.reason)
-		}
 		if m.Reclaim != nil {
 			var rerrs []error
 			st.Reclaimed, rerrs = m.rc.harvest(now)
 			errs = append(errs, rerrs...)
 		}
-		// Pausing, GPU stops and thawing come first; upkeep that a game
+		// Pausing, GPU stops and thawing come first; upkeep that the owner
 		// doesn't wait for (the memory cap, swap limits) runs after.
-		st.Running, errs = m.applyInstances(ctx, now, st.Effective, why, ins, errs)
+		st.Running, errs = m.applyInstances(ctx, now, eff, ins, errs)
 		if ctx.Err() == nil {
-			if err := m.applyMemoryCap(ctx, st.Effective, ins); err != nil {
+			if err := m.applyMemoryCap(ctx, eff, ins); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -274,33 +238,6 @@ func (m *Manager) reap(ctx context.Context, now time.Time, ins []Instance, errs 
 	return keep, errs
 }
 
-// updateYield starts yielding at once but stops only after YieldDebounce of
-// continuous quiet.
-func (m *Manager) updateYield(now time.Time, gaming bool, reason string) {
-	switch {
-	case gaming:
-		m.yielding, m.reason, m.clearSince = true, reason, time.Time{}
-	case m.yielding:
-		if m.clearSince.IsZero() {
-			m.clearSince = now
-		}
-		if now.Sub(m.clearSince) >= YieldDebounce {
-			m.yielding, m.reason, m.clearSince = false, "", time.Time{}
-		}
-	}
-}
-
-// yieldReason is the value of ProjectReasonKey: empty unless yielding.
-func yieldReason(yielding bool, reason string) string {
-	if !yielding {
-		return ""
-	}
-	if reason == "" {
-		return "gaming"
-	}
-	return "gaming: " + reason
-}
-
 // applyProject records the mode for `box`. It never touches project limits.
 func (m *Manager) applyProject(ctx context.Context, eff Mode) error {
 	return m.Incus.SetProjectConfig(ctx, ProjectModeKey, string(eff))
@@ -345,9 +282,8 @@ func AllocatedMemory(ins []Instance) int64 {
 	return sum
 }
 
-// applyInstances brings each instance in line with eff. why is what a GPU
-// box stopped in My PC is told (StoppedKey).
-func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, why string, ins []Instance, errs []error) (running int, _ []error) {
+// applyInstances brings each instance in line with eff.
+func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, ins []Instance, errs []error) (running int, _ []error) {
 	m.ended = map[string]string{}
 	seen := map[string]bool{}
 	for _, in := range ins {
@@ -359,7 +295,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 		var err error
 		switch {
 		case eff == MyPC && IsGPU(in.Config):
-			state, err = m.stopGPU(ctx, now, in, state, why)
+			state, err = m.stopGPU(ctx, now, in, state)
 		case eff == MyPC:
 			prev := state
 			state, err = m.freeze(ctx, now, in.Name, pidOf(in), state)
@@ -368,7 +304,7 @@ func (m *Manager) applyInstances(ctx context.Context, now time.Time, eff Mode, w
 			}
 		case IsGPU(in.Config) && state == "stopped" && in.Config[StoppedKey] != "":
 			// Stays stopped; stopGPU retries a failed expiry write.
-			state, err = m.stopGPU(ctx, now, in, state, why)
+			state, err = m.stopGPU(ctx, now, in, state)
 		default:
 			state, err = m.thaw(ctx, eff, in, state)
 		}
@@ -433,14 +369,14 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name string, pid in
 }
 
 // stopGPU is the My PC step for a GPU box: stop, not pause, because a frozen
-// CUDA process keeps its VRAM and a game needs it back. Before stopping it
-// records why (StoppedKey); once the stop worked it shortens the box's expiry
+// CUDA process keeps its VRAM and the owner needs it back. Before stopping it
+// marks the box (StoppedKey); once the stop worked it shortens the box's expiry
 // to GPUStoppedTTL, since its job died with it. Shortening it earlier would
 // let the reaper delete a box whose stop failed and that later resumed. If
 // the stop fails the box is paused, so it at least stops computing, and the
 // stop is retried next tick; so is a failed expiry write, for a stopped box
 // that carries the mark.
-func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state, why string) (string, error) {
+func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state string) (string, error) {
 	var errs []error
 	shorten := func() {
 		soon := now.Add(GPUStoppedTTL)
@@ -457,6 +393,7 @@ func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state
 		}
 		return state, errors.Join(errs...)
 	}
+	why := string(MyPC)
 	mark := func() error { return m.Incus.SetInstanceConfig(ctx, in.Name, StoppedKey, why) }
 	markErr := error(nil)
 	if in.Config[StoppedKey] != why {

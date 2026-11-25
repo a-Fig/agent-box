@@ -54,7 +54,7 @@ Sizes (CPUs in Shared/Full mode, RAM, disk):
 --size sets the size of a box that box new or box run launches (default
 medium). A reused box of another size isn't resized: the run gets a throwaway.
 --gpu is --size gpu: the PC's RTX 3070, one GPU box at a time. box run --gpu
-uses a throwaway. The tray stops a GPU box when a game starts or in My PC.
+uses a throwaway. The tray stops a GPU box in My PC.
 
 box run exits with the command's exit code, 124 when --timeout fired, or 75
 when the PC or box is paused, there is no room, or the GPU is taken or was

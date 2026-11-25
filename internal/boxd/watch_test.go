@@ -394,7 +394,7 @@ func TestWatcherPausesAndLosesJobs(t *testing.T) {
 
 	f.set(func() {
 		f.ins[0].Status = "Frozen"
-		f.cfg["user.agent-box.mode"], f.cfg["user.agent-box.reason"] = "mypc", "gaming: steam:570"
+		f.cfg["user.agent-box.mode"] = "mypc"
 	})
 	w.Poll(context.Background())
 	byBox := func() map[string]dash.Job {
@@ -407,7 +407,7 @@ func TestWatcherPausesAndLosesJobs(t *testing.T) {
 	if j := byBox()["a"]; j.State != dash.JobPaused {
 		t.Fatalf("frozen box's job: %+v", j)
 	}
-	if m := w.State().Machines[0]; !m.Yielding || m.Mode != "mypc" {
+	if m := w.State().Machines[0]; m.Mode != "mypc" {
 		t.Fatalf("machine: %+v", m)
 	}
 
@@ -443,9 +443,9 @@ func TestWatcherPausesAndLosesJobs(t *testing.T) {
 	}
 	var segs []string
 	for _, s := range w2.Hist.Range(dash.RangeDay, w2.Live()).Segments {
-		segs = append(segs, s.Mode+":"+s.Reason)
+		segs = append(segs, s.Mode)
 	}
-	if strings.Join(segs, ",") != "shared:,mypc:gaming: steam:570" {
+	if strings.Join(segs, ",") != "shared,mypc" {
 		t.Fatalf("segments %v", segs)
 	}
 }
@@ -527,11 +527,11 @@ func TestAPI(t *testing.T) {
 	if post(`{"why":"bored"}`, true) != 400 {
 		t.Fatal("unknown why accepted")
 	}
-	if post(`{"why":"yielding","reason":"race suite TOKEN=abcdefgh12345","size":"large","agent":"quiet-otter"}`, true) != 204 {
+	if post(`{"why":"mypc","reason":"race suite TOKEN=abcdefgh12345","size":"large","agent":"quiet-otter"}`, true) != 204 {
 		t.Fatal("refusal refused")
 	}
 	var h dash.History
-	if get("/api/history?range=day", &h) != 200 || len(h.Buckets) != 24 || h.Buckets[23].Refusals.ByWhy["yielding"] != 1 {
+	if get("/api/history?range=day", &h) != 200 || len(h.Buckets) != 24 || h.Buckets[23].Refusals.ByWhy["mypc"] != 1 {
 		t.Fatalf("history: %+v", h.Buckets[23])
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "events-2026-11-24.jsonl")); strings.Contains(string(b), "abcdefgh12345") {

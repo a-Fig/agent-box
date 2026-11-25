@@ -751,7 +751,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 			}
 			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines)}, true
 		case err == nil && res.State == statePaused && rec.GPU:
-			return lost() // a GPU box is stopped for a game, not frozen
+			return lost() // a GPU box is stopped in My PC, not frozen
 		case err == nil && res.State == statePaused:
 			if won, _ := a.claimBy(job, ".paused", "watcher"); won {
 				a.send(ctx, rec.Thread, pausedMessage(rec))

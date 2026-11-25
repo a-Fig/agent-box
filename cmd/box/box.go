@@ -403,8 +403,8 @@ func (a *App) confirmGPU(ctx context.Context, name string, sz mode.Size) error {
 }
 
 // gpuStopped is what to tell an agent whose job's GPU box isn't running
-// (the tray stops GPU boxes for games and My PC), or "" when box isn't a GPU
-// box or is running.
+// (the tray stops GPU boxes in My PC), or "" when box isn't a GPU box or is
+// running.
 func (a *App) gpuStopped(ctx context.Context, box string) string {
 	insts, err := a.list(ctx)
 	if err != nil {
@@ -414,11 +414,7 @@ func (a *App) gpuStopped(ctx context.Context, box string) string {
 	if in == nil || !mode.IsGPU(in.Config) || in.Status == "Running" {
 		return ""
 	}
-	why := in.Config[mode.StoppedKey]
-	switch {
-	case strings.HasPrefix(why, "gaming"):
-		return "the GPU box was stopped because the PC's owner started a game; rerun later or on CPU"
-	case why == string(mode.MyPC):
+	if in.Config[mode.StoppedKey] == string(mode.MyPC) {
 		return "the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU"
 	}
 	return "the GPU box " + box + " is " + strings.ToLower(in.Status) + "; rerun later or on CPU"
@@ -443,8 +439,8 @@ func reusableBox(in *instance, requestedSize string) error {
 // "agents"` or `Reached maximum number of instances in project "agents"`.
 var projectLimitRefusal = jobrun.LimitRefusal
 
-// reclaimable says whether in is a throwaway GPU box the tray stopped for a
-// game or My PC. It is kept for GPUStoppedTTL so box job can say why its job
+// reclaimable says whether in is a throwaway GPU box the tray stopped in My
+// PC. It is kept for GPUStoppedTTL so box job can say why its job
 // died, but it still holds a GPU box's memory and disk against the project's
 // caps, so any launch that would not fit deletes it first.
 // Only the tray's mark counts: Incus creates a box stopped before starting
@@ -833,7 +829,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	started = true
 	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
-		// The tray stops GPU boxes for games, and another run may then
+		// The tray stops GPU boxes in My PC, and another run may then
 		// delete one. Only then does the job surely not run: a frozen box's
 		// job may resume, so it keeps its job ID below.
 		if sz.GPU {
@@ -1260,7 +1256,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	if err != nil {
 		return "", 1, err
 	}
-	// The tray stops a GPU box for games. Its job may look dead (4) or the
+	// The tray stops a GPU box in My PC. Its job may look dead (4) or the
 	// exec may just end; either way the agent should hear why.
 	if res.Code != 0 && res.Code != 3 {
 		if msg := a.gpuStopped(ctx, box); msg != "" {

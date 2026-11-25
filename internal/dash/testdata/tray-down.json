@@ -8,7 +8,6 @@
         "name": "Gaming PC",
         "reachable": true,
         "mode": "shared",
-        "modeReason": "",
         "modeRequested": {
           "mode": "mypc",
           "at": "2026-11-24T17:25:00Z",
@@ -18,7 +17,6 @@
           "mode": "shared",
           "at": "2026-11-24T15:30:00Z"
         },
-        "yielding": false,
         "trayLastSeen": "2026-11-24T17:16:00Z",
         "enforcer": "tray",
         "caps": {
@@ -2028,8 +2026,7 @@
       {
         "start": "2026-11-23T18:00:00Z",
         "end": "2026-11-24T17:30:00Z",
-        "mode": "shared",
-        "reason": ""
+        "mode": "shared"
       }
     ]
   },
@@ -2271,8 +2268,7 @@
       {
         "start": "2026-11-23T17:30:00Z",
         "end": "2026-11-24T17:30:00Z",
-        "mode": "shared",
-        "reason": ""
+        "mode": "shared"
       }
     ]
   },

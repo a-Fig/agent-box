@@ -26,12 +26,10 @@ type server struct {
 	down bool
 	fail bool
 
-	player   *fixture.Player
-	plan     map[string]time.Time // when each running job will end
-	tick     int
-	yieldEnd time.Time // when the game being played ends; zero when none
-	before   string    // the mode to go back to after a yield
-	applyAt  time.Time // when the tray picks up a mode request
+	player  *fixture.Player
+	plan    map[string]time.Time // when each running job will end
+	tick    int
+	applyAt time.Time // when the tray picks up a mode request
 }
 
 // newest orders finished jobs as /api/jobs pages them: by startedAt, then key, newest first.
@@ -48,7 +46,7 @@ func newServer(sc fixture.Scenario, now func() time.Time) *server {
 	s := &server{
 		now: now, sc: sc, done: done, logs: sc.Logs,
 		subs: map[chan dash.Event]bool{}, player: fixture.NewPlayer(uint64(len(sc.Name)) * 7919),
-		plan: map[string]time.Time{}, before: dash.ModeShared,
+		plan: map[string]time.Time{},
 	}
 	if s.logs == nil {
 		s.logs = map[string]string{}
@@ -57,12 +55,6 @@ func newServer(sc fixture.Scenario, now func() time.Time) *server {
 	for i, j := range sc.State.Jobs {
 		if j.State == dash.JobRunning || j.State == dash.JobPaused {
 			s.plan[j.Key] = t.Add(time.Duration(40+25*i) * time.Second)
-		}
-	}
-	if m := s.machine(); m != nil && m.Yielding {
-		s.yieldEnd = t.Add(40 * time.Second)
-		if m.ModeRequested == nil {
-			s.before = dash.ModeShared
 		}
 	}
 	return s
@@ -316,7 +308,7 @@ func decode(body []byte, v any) error {
 }
 
 // handleMode writes a mode request, as boxd writes user.agent-box.mode-request; the tray applies
-// it within a tick, or after the game while one runs, or never while it is down. The reply is the
+// it within a tick, or never while it is down. The reply is the
 // machine with the request on it: 202, as nothing has changed yet.
 func (s *server) handleMode(r *http.Request, body []byte) (int, any, error) {
 	var b dash.ModeBody
@@ -331,7 +323,7 @@ func (s *server) handleMode(r *http.Request, body []byte) (int, any, error) {
 	m := s.machine()
 	now := s.now().UTC().Truncate(time.Second)
 	m.ModeRequested = &dash.ModeRequest{Mode: b.Mode, At: now, By: "devserver-browser"}
-	if !m.Yielding && m.TrayAlive(now) {
+	if m.TrayAlive(now) {
 		s.applyAt = s.now().Add(2 * time.Second)
 	}
 	s.publish(dash.EventMachine, *m)
@@ -350,8 +342,6 @@ func (s *server) handleCancel(r *http.Request, body []byte) (int, any, error) {
 		return 0, nil, fail(http.StatusConflict, dash.CodeNotRunning, "job %s.%s is waiting in the queue, not running: cancel it with /api/queue/%s.%s/cancel", j.Box, j.ID, j.Box, j.ID)
 	case !live || j.State == dash.JobDone || j.State == dash.JobLost:
 		return 0, nil, fail(http.StatusConflict, dash.CodeNotRunning, "job %s has already ended", j.ID)
-	case j.State == dash.JobPaused && s.machine().Yielding:
-		return 0, nil, fail(http.StatusConflict, dash.CodeYielding, "box %s is frozen while the PC plays a game, so its job can't be stopped until the game ends", j.Box)
 	case j.State == dash.JobPaused:
 		return 0, nil, fail(http.StatusConflict, dash.CodeFrozen, "box %s is frozen in My PC mode, so its job can't be stopped; switch to Shared or Full first", j.Box)
 	}

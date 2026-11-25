@@ -75,7 +75,7 @@ func TestPageAndState(t *testing.T) {
 
 // The controls answer as boxd will.
 func TestControls(t *testing.T) {
-	s, ts := start(t, "yielding")
+	s, ts := start(t, "mypc")
 	paused := s.sc.State.Jobs[0]
 	lanternMade := s.sc.State.Boxes[s.findBox("lantern")].CreatedAt.Format(time.RFC3339)
 	if paused.State != dash.JobPaused {
@@ -89,8 +89,8 @@ func TestControls(t *testing.T) {
 	}{
 		{"no header", "POST", "/api/mode", `{"mode":"full"}`, false, 403, dash.CodeForbidden},
 		{"bad mode", "POST", "/api/mode", `{"mode":"turbo"}`, true, 400, dash.CodeBadRequest},
-		{"mode waits for the game", "POST", "/api/mode", `{"mode":"shared"}`, true, 202, ""},
-		{"cancel while yielding", "POST", "/api/jobs/" + key(paused) + "/cancel", `{}`, true, 409, dash.CodeYielding},
+		{"mode request", "POST", "/api/mode", `{"mode":"shared"}`, true, 202, ""},
+		{"cancel while frozen", "POST", "/api/jobs/" + key(paused) + "/cancel", `{}`, true, 409, dash.CodeFrozen},
 		{"cancel a finished job", "POST", "/api/jobs/" + key(s.done[0]) + "/cancel", `{}`, true, 409, dash.CodeNotRunning},
 		{"cancel nothing", "POST", "/api/jobs/x%2Fy%2Fz/cancel", `{}`, true, 404, dash.CodeNotFound},
 		{"extend by 2h", "POST", "/api/boxes/lantern/extend", `{"hours":2,"createdAt":"` + lanternMade + `"}`, true, 400, dash.CodeBadRequest},
@@ -101,7 +101,7 @@ func TestControls(t *testing.T) {
 		{"delete a replaced box", "POST", "/api/boxes/lantern/delete", `{"createdAt":"2026-01-01T00:00:00Z"}`, true, 409, dash.CodeGone},
 		{"log of a frozen box", "GET", "/api/jobs/" + key(paused) + "/log?offset=0", "", false, 200, ""},
 		{"bad refusal", "POST", "/api/refusals", `{"why":"bored"}`, true, 400, dash.CodeBadRequest},
-		{"refusal", "POST", "/api/refusals", `{"why":"yielding","reason":"Full suite before the PR.","size":"medium"}`, true, 204, ""},
+		{"refusal", "POST", "/api/refusals", `{"why":"mypc","reason":"Full suite before the PR.","size":"medium"}`, true, 204, ""},
 		{"bad range", "GET", "/api/history?range=year", "", false, 400, dash.CodeBadRequest},
 	}
 	for _, c := range cases {
@@ -111,7 +111,7 @@ func TestControls(t *testing.T) {
 		}
 	}
 	if m := s.machine(); m.ModeRequested == nil || m.ModeRequested.Mode != dash.ModeShared || m.Mode != dash.ModeMyPC {
-		t.Errorf("after asking for Shared mid-game: %+v", m)
+		t.Errorf("after asking for Shared: %+v", m)
 	}
 	if b := s.sc.State.Boxes[s.findBox("lantern")]; b.ExpiresAt.Sub(t0) != 23*time.Hour+10*time.Minute+4*time.Hour {
 		t.Errorf("lantern expires %v", b.ExpiresAt)

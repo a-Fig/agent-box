@@ -8,14 +8,12 @@
         "name": "Gaming PC",
         "reachable": true,
         "mode": "full",
-        "modeReason": "",
         "modeRequested": {
           "mode": "shared",
           "at": "2026-11-24T17:23:00Z",
           "by": "phone"
         },
         "chosen": null,
-        "yielding": false,
         "trayLastSeen": "2026-11-24T17:29:48Z",
         "enforcer": "headless",
         "caps": {
@@ -1534,14 +1532,12 @@
       {
         "start": "2026-11-23T18:00:00Z",
         "end": "2026-11-24T08:30:00Z",
-        "mode": "shared",
-        "reason": ""
+        "mode": "shared"
       },
       {
         "start": "2026-11-24T08:30:00Z",
         "end": "2026-11-24T17:30:00Z",
-        "mode": "full",
-        "reason": ""
+        "mode": "full"
       }
     ]
   },
@@ -1779,14 +1775,12 @@
       {
         "start": "2026-11-23T17:30:00Z",
         "end": "2026-11-24T08:30:00Z",
-        "mode": "shared",
-        "reason": ""
+        "mode": "shared"
       },
       {
         "start": "2026-11-24T08:30:00Z",
         "end": "2026-11-24T17:30:00Z",
-        "mode": "full",
-        "reason": ""
+        "mode": "full"
       }
     ]
   },
