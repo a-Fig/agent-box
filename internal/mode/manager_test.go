@@ -404,7 +404,7 @@ func TestThawSkipsNeverStartedStoppedInstance(t *testing.T) {
 		t.Run(string(md), func(t *testing.T) {
 			f := newFake("creating", "Stopped", "zero", "Stopped")
 			f.lastUsed["creating"] = time.Unix(0, 0).UTC()
-			f.config["creating"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0"}
+			f.config["creating"] = map[string]string{"limits.cpu": "8", "limits.cpu.priority": "0"}
 			m := New(f, md)
 
 			tick(m, 0)
@@ -414,7 +414,7 @@ func TestThawSkipsNeverStartedStoppedInstance(t *testing.T) {
 			f.state["creating"] = "Running"
 			f.lastUsed["creating"] = t0.Add(10 * time.Second)
 			tick(m, 10*time.Second)
-			var want []string
+			want := []string{"set creating limits.cpu=2"} // an agent's 8 CPUs, back to Shared's
 			if md == Full {
 				want = []string{"set creating limits.cpu=4", "set creating limits.cpu.priority=10"}
 			}
