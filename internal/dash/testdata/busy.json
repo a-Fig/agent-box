@@ -306,7 +306,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (17 tests) 681ms\n ✓ src/store/session.test.ts (22 tests) 279ms\n ✓ src/ui/Button.test.tsx (21 tests) 424ms\n ✓ src/api/client.test.ts (6 tests) 854ms\n ✓ src/hydrate.test.ts (25 tests) 902ms\n ✓ src/router/cache.test.ts (16 tests) 644ms\n ✓ src/store/session.test.ts (3 tests) 700ms\n ✓ src/ui/Button.test.tsx (28 tests) 444ms\n ✓ src/api/client.test.ts (6 tests) 663ms\n ✓ src/hydrate.test.ts (20 tests) 407ms\n ✓ src/router/cache.test.ts (23 tests) 425ms\n ✓ src/store/session.test.ts (31 tests) 840ms\n ✓ src/ui/Button.test.tsx (22 tests) 845ms\n ✓ src/api/client.test.ts (18 tests) 880ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T06:15:15Z",
         "position": 0,
         "why": ""
       },
@@ -390,7 +390,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T04:09:40Z",
         "position": 0,
         "why": ""
       },
@@ -899,7 +899,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (17 tests) 681ms\n ✓ src/store/session.test.ts (22 tests) 279ms\n ✓ src/ui/Button.test.tsx (21 tests) 424ms\n ✓ src/api/client.test.ts (6 tests) 854ms\n ✓ src/hydrate.test.ts (25 tests) 902ms\n ✓ src/router/cache.test.ts (16 tests) 644ms\n ✓ src/store/session.test.ts (3 tests) 700ms\n ✓ src/ui/Button.test.tsx (28 tests) 444ms\n ✓ src/api/client.test.ts (6 tests) 663ms\n ✓ src/hydrate.test.ts (20 tests) 407ms\n ✓ src/router/cache.test.ts (23 tests) 425ms\n ✓ src/store/session.test.ts (31 tests) 840ms\n ✓ src/ui/Button.test.tsx (22 tests) 845ms\n ✓ src/api/client.test.ts (18 tests) 880ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T06:15:15Z",
         "position": 0,
         "why": ""
       },
@@ -983,7 +983,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T04:09:40Z",
         "position": 0,
         "why": ""
       },
@@ -1350,6 +1350,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1374,6 +1375,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1410,6 +1412,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1434,6 +1437,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1476,6 +1480,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1502,6 +1507,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1542,6 +1548,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1585,6 +1592,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1613,6 +1621,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1657,6 +1666,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1700,8 +1710,9 @@
         "memUsed": 6727296885,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 1019
         }
       },
       {
@@ -1739,6 +1750,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1780,8 +1792,9 @@
         "memUsed": 4655017102,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 1094
         }
       },
       {
@@ -1818,6 +1831,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1854,6 +1868,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1891,6 +1906,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1917,6 +1933,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1941,6 +1958,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1967,6 +1985,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1993,6 +2012,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2020,6 +2040,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2057,6 +2078,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2094,6 +2116,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2121,6 +2144,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       }
@@ -2170,6 +2194,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2194,6 +2219,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2218,6 +2244,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2242,6 +2269,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2266,6 +2294,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2312,6 +2341,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2369,8 +2399,9 @@
         "memUsed": 2628075607,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 1057
         }
       }
     ],

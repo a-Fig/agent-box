@@ -278,10 +278,12 @@ type Bucket struct {
 	Queued        QueueCounts   `json:"queued"`
 }
 
-// QueueCounts is a bucket's jobs queued (by when they were queued) and the
-// median wait of those that started in it.
+// QueueCounts is a bucket's jobs queued (by when they were queued, cancelled
+// and dropped ones too), and the queued jobs that started in it with their
+// median wait.
 type QueueCounts struct {
 	Jobs              int     `json:"jobs"`
+	Started           int     `json:"started"`
 	MedianWaitSeconds float64 `json:"medianWaitSeconds"`
 }
 

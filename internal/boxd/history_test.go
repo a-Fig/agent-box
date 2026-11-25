@@ -84,3 +84,42 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 		t.Fatal("180-day file kept")
 	}
 }
+
+// Queued jobs count in the hour they were queued, cancelled ones too; a
+// wait counts in the hour its job started. A reopened history says the same.
+func TestHistoryCountsQueuedJobsAndWaits(t *testing.T) {
+	dir := t.TempDir()
+	h, err := OpenHistory(dir, func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &dash.Job{Key: "w/1/x", ID: "1", Box: "w"}
+	at := func(d time.Duration) time.Time { return t0.Add(d) }
+	for _, d := range []time.Duration{-110 * time.Minute, -100 * time.Minute, -55 * time.Minute} {
+		h.Record(record{Type: recQueueAdd, At: at(d), Job: j})
+	}
+	h.Record(record{Type: recQueueCancel, At: at(-50 * time.Minute), Job: j})
+	h.Record(record{Type: recQueueStart, At: at(-80 * time.Minute), Job: j, Seconds: 1800})
+	for _, s := range []float64{600, 3000, 1200} {
+		h.Record(record{Type: recQueueStart, At: at(-45 * time.Minute), Job: j, Seconds: s})
+	}
+	check := func(h *History) {
+		t.Helper()
+		r := h.Range(dash.RangeDay, Live{})
+		want := map[int]dash.QueueCounts{21: {Jobs: 2, Started: 1, MedianWaitSeconds: 1800}, 22: {Jobs: 1, Started: 3, MedianWaitSeconds: 1200}}
+		for i, b := range r.Buckets {
+			if b.Queued != want[i] {
+				t.Fatalf("bucket %d (%s): %+v, want %+v", i, b.Start.Format("15:04"), b.Queued, want[i])
+			}
+		}
+		if w := h.Range(dash.RangeWeek, Live{}).Buckets[6].Queued; w.Jobs != 3 || w.Started != 4 || w.MedianWaitSeconds != 1500 {
+			t.Fatalf("week: %+v", w)
+		}
+	}
+	check(h)
+	h2, err := OpenHistory(dir, func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(h2)
+}

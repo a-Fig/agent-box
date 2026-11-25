@@ -98,7 +98,9 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
   short may be running in its box.
 - Queued jobs appear in `/api/state` as `Job.state: queued` with `queuedAt`, `position` and `why`
   (one of the refusal causes).
-- `/api/history` buckets carry `queued: {jobs, medianWaitSeconds}`.
+- `/api/history` buckets carry `queued: {jobs, started, medianWaitSeconds}`: the jobs queued in the
+  bucket (cancelled and dropped ones too), and the queued jobs that started in it with their median
+  wait.
 
 ## Order of work
 
@@ -111,4 +113,4 @@ It is built after the push design and `boxd`'s read side, both of which it depen
    each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
    **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
    says where it is in line. The `full` and `yielding` fixtures hold queued jobs, and the devserver
-   plays the queue. Counting queued jobs in History is still to do.
+   plays the queue. History counts queued jobs beside the runs turned away, with their median wait.

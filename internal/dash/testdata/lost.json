@@ -108,7 +108,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [  5%]\ntests/test_data.py ............... [ 11%]\ntests/test_model.py ............... [ 17%]\ntests/test_schedule.py ..................................... [ 23%]\ntests/test_tokenizer.py ............... [ 29%]\ntests/test_data.py .......................... [ 35%]\ntests/test_model.py ............................ [ 41%]\ntests/test_schedule.py ........................... [ 47%]\ntests/test_tokenizer.py .......... [ 52%]\ntests/test_data.py ..................... [ 58%]\ntests/test_model.py ...................... [ 64%]\ntests/test_schedule.py .................................... [ 70%]\ntests/test_tokenizer.py ......... [ 76%]\ntests/test_data.py ................................ [ 82%]\ntests/test_model.py ......................... [ 88%]\ntests/test_schedule.py ................................ [ 94%]\ntests/test_tokenizer.py ......................... [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T16:51:33Z",
         "position": 0,
         "why": ""
       },
@@ -444,7 +444,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T20:17:08Z",
         "position": 0,
         "why": ""
       },
@@ -500,7 +500,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t2.683s\nok  \tgithub.com/acme/lantern/internal/sync\t9.153s\nok  \tgithub.com/acme/lantern/internal/api\t7.326s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t7.923s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.371s\nok  \tgithub.com/acme/lantern/internal/wire\t7.218s\nok  \tgithub.com/acme/lantern/internal/cache\t1.148s\nok  \tgithub.com/acme/lantern/internal/store\t6.211s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T17:38:25Z",
         "position": 0,
         "why": ""
       }
@@ -533,7 +533,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [  5%]\ntests/test_data.py ............... [ 11%]\ntests/test_model.py ............... [ 17%]\ntests/test_schedule.py ..................................... [ 23%]\ntests/test_tokenizer.py ............... [ 29%]\ntests/test_data.py .......................... [ 35%]\ntests/test_model.py ............................ [ 41%]\ntests/test_schedule.py ........................... [ 47%]\ntests/test_tokenizer.py .......... [ 52%]\ntests/test_data.py ..................... [ 58%]\ntests/test_model.py ...................... [ 64%]\ntests/test_schedule.py .................................... [ 70%]\ntests/test_tokenizer.py ......... [ 76%]\ntests/test_data.py ................................ [ 82%]\ntests/test_model.py ......................... [ 88%]\ntests/test_schedule.py ................................ [ 94%]\ntests/test_tokenizer.py ......................... [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T16:51:33Z",
         "position": 0,
         "why": ""
       },
@@ -869,7 +869,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T20:17:08Z",
         "position": 0,
         "why": ""
       },
@@ -925,7 +925,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t2.683s\nok  \tgithub.com/acme/lantern/internal/sync\t9.153s\nok  \tgithub.com/acme/lantern/internal/api\t7.326s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t7.923s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.371s\nok  \tgithub.com/acme/lantern/internal/wire\t7.218s\nok  \tgithub.com/acme/lantern/internal/cache\t1.148s\nok  \tgithub.com/acme/lantern/internal/store\t6.211s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T17:38:25Z",
         "position": 0,
         "why": ""
       }
@@ -958,6 +958,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -994,6 +995,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1029,8 +1031,9 @@
         "memUsed": 2554465598,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 483
         }
       },
       {
@@ -1066,6 +1069,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1092,6 +1096,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1129,6 +1134,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1155,6 +1161,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1191,6 +1198,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1215,6 +1223,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1255,6 +1264,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1279,6 +1289,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1315,6 +1326,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1341,6 +1353,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1377,6 +1390,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1403,6 +1417,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1429,6 +1444,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1453,6 +1469,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1477,6 +1494,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1501,6 +1519,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1537,6 +1556,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1563,6 +1583,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1600,6 +1621,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1646,8 +1668,9 @@
         "memUsed": 5875584122,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 132
         }
       },
       {
@@ -1675,6 +1698,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       }
@@ -1724,6 +1748,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1748,6 +1773,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1772,6 +1798,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1796,6 +1823,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1820,6 +1848,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1865,8 +1894,9 @@
         "memUsed": 667824704,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 293
         }
       },
       {
@@ -1923,8 +1953,9 @@
         "memUsed": 1271839997,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 132
         }
       }
     ],

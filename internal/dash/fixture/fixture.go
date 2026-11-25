@@ -305,6 +305,13 @@ func (w *world) history(since time.Time, perDay int) {
 			Size: rn.size, GPU: rn.gpu,
 		}
 		j.Key = dash.JobKey(boxName, id, j.StartedAt)
+		// About one in six waited in the queue first, for up to 25 minutes. It is drawn from
+		// the ID, not w.rnd, so the rest of each scenario stays as it was.
+		hv := fnv.New32a()
+		hv.Write([]byte(id))
+		if v := hv.Sum32(); v%6 == 0 {
+			j.QueuedAt = ptr(j.StartedAt.Add(-time.Duration(30+v/6%1470) * time.Second))
+		}
 		switch p := w.rnd.IntN(100); {
 		case p < 78:
 			j.Exit = ptr(0)
@@ -601,6 +608,24 @@ func (w *world) historyFor(rng string, done []dash.Job) dash.History {
 	for _, r := range w.refusals {
 		if i := at(r.at); i >= 0 {
 			h.Buckets[i].Refusals.ByWhy[r.why]++
+		}
+	}
+	// Queued jobs count when they were queued; those that started, their wait when they started.
+	waits := make([][]float64, n)
+	for _, j := range w.jobs {
+		if j.QueuedAt == nil {
+			continue
+		}
+		if i := at(*j.QueuedAt); i >= 0 {
+			h.Buckets[i].Queued.Jobs++
+		}
+		if i := at(j.StartedAt); i >= 0 && j.State != dash.JobQueued {
+			waits[i] = append(waits[i], j.StartedAt.Sub(*j.QueuedAt).Seconds())
+		}
+	}
+	for i, ws := range waits {
+		if len(ws) > 0 {
+			h.Buckets[i].Queued.Started, h.Buckets[i].Queued.MedianWaitSeconds = len(ws), median(ws)
 		}
 	}
 	for _, s := range w.segments {

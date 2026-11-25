@@ -551,7 +551,7 @@ func (h *History) Range(rng string, live Live) dash.History {
 	}
 	for i, ws := range waits {
 		if len(ws) > 0 {
-			out.Buckets[i].Queued.MedianWaitSeconds = median(ws)
+			out.Buckets[i].Queued.Started, out.Buckets[i].Queued.MedianWaitSeconds = len(ws), median(ws)
 		}
 	}
 	out.Segments = segments(h.modes, start, now, live.Mode)
