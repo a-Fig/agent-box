@@ -399,3 +399,79 @@ func TestCLICancelOfAJobQueuedElsewhere(t *testing.T) {
 		t.Errorf("cancel of a job nobody has: %v", err)
 	}
 }
+
+// box run on the CLI queues a run that can't start now, as box_run does, and
+// follows it through the queue and into its box (#93). No watcher or push:
+// this process is the one following it, even inside a T3 thread.
+func TestCLIRunWaitsInTheQueue(t *testing.T) {
+	f := &fakePC{refuse: memoryRefusal}
+	e, b := newQueueEnv(t, f)
+	queued := time.Date(2026, 11, 23, 11, 59, 0, 0, time.UTC)
+	b.views = []dash.Job{
+		{Box: "my-repo-ab12", State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued, Position: 2, Why: dash.RefusedFull},
+		{Box: "my-repo-ab12", State: dash.JobRunning, QueuedAt: &queued, StartedAt: queued.Add(time.Minute)},
+	}
+	f.insts = []instance{{Name: "my-repo-ab12", Status: "Running", Config: map[string]string{throwawayKey: "true"}}} // boxd's box for the job
+	f.log, f.exit = "cli-queue-ok\n", "0\n"
+	var out, errOut strings.Builder
+	e.a.Out, e.a.Err = &out, &errOut
+	t.Chdir(e.repo)
+	c := run(context.Background(), e.a, []string{"run", "--reason", "Full suite for the queue change; too heavy here.", "--new", "--", "true"}, nil)
+	if c != 0 {
+		t.Fatalf("exit %d\nstdout %q\nstderr %q", c, out.String(), errOut.String())
+	}
+	for _, want := range []string{"queued job " + queuedJobName + ", 2nd in line (waiting for room)", "left the queue and started on my-repo-ab12"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr lacks %q: %q", want, errOut.String())
+		}
+	}
+	if !strings.Contains(out.String(), "cli-queue-ok") {
+		t.Errorf("stdout %q", out.String())
+	}
+	var rec jobRecord
+	if readJSON(e.a.statePath(queuedJobName, ".json"), &rec) != nil || !rec.Queued || rec.Thread != "" || len(*e.spawns) != 0 || e.push.count() != 0 {
+		t.Errorf("record %+v, watchers %v, pushes %d", rec, *e.spawns, e.push.count())
+	}
+}
+
+// --no-queue keeps the old refusal: exit 75 at once, nothing posted to boxd.
+func TestCLIRunNoQueue(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{refuse: memoryRefusal})
+	var errOut strings.Builder
+	e.a.Err = &errOut
+	t.Chdir(e.repo)
+	if c := run(context.Background(), e.a, []string{"run", "--reason", "Full suite for the queue change; too heavy here.", "--no-queue", "--new", "--", "true"}, nil); c != 75 {
+		t.Fatalf("exit %d: %q", c, errOut.String())
+	}
+	if strings.Contains(b.callList(), "/api/queue") {
+		t.Errorf("posted to the queue: %s", b.callList())
+	}
+}
+
+// box job on a job this laptop queued follows it through the queue instead
+// of calling it lost while it has no box yet; one that ended unwatched gets
+// boxd's result; Ctrl-C leaves it queued.
+func TestCLIBoxJobOnAQueuedJob(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{gone: map[string]bool{"my-repo-ab12": true}})
+	queued := time.Date(2026, 11, 23, 11, 0, 0, 0, time.UTC)
+	exit := 3
+	ended := queued.Add(20 * time.Minute)
+	b.views = []dash.Job{
+		{Box: "my-repo-ab12", State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued, Position: 1, Why: dash.RefusedFull},
+		{Box: "my-repo-ab12", State: dash.JobDone, QueuedAt: &queued, StartedAt: queued.Add(5 * time.Minute), EndedAt: &ended, Exit: &exit, Tail: "FAIL thing\n"},
+	}
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Queued: true})
+	var out, errOut strings.Builder
+	e.a.Out, e.a.Err = &out, &errOut
+	if c := run(context.Background(), e.a, []string{"job", queuedJobName}, nil); c != 3 || !strings.Contains(out.String(), "FAIL thing") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", c, out.String(), errOut.String())
+	}
+
+	b.views = []dash.Job{{Box: "my-repo-ab12", State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued, Position: 1, Why: dash.RefusedFull}}
+	errOut.Reset()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if c := run(ctx, e.a, []string{"job", queuedJobName}, nil); c != 75 || !strings.Contains(errOut.String(), "is still queued; box job "+queuedJobName+" follows it, box cancel "+queuedJobName+" takes it off") {
+		t.Fatalf("interrupted: exit %d, stderr %q", c, errOut.String())
+	}
+}

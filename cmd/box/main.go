@@ -24,8 +24,8 @@ func cancelText(job string, cancelled bool, code int) string {
 
 const usage = `usage:
   box status                                is offloading worth it now? (PC, mode, room, this repo's box)
-  box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
-                                            sync this worktree to a box and run cmd
+  box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m]
+          [--no-queue] -- <cmd...>          sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
   box jobs [--box name]                     list jobs, newest first
   box cancel <id>                           stop a running job, or take a queued one off the queue
@@ -59,9 +59,14 @@ medium). A reused box of another size isn't resized: the run gets a throwaway.
 --gpu is --size gpu: the PC's RTX 3070, one GPU box at a time. box run --gpu
 uses a throwaway. The tray stops a GPU box in My PC.
 
+A run that can't start now (no room, the GPU taken, My PC) waits in the PC's
+queue, and box run follows it there and then in its box; Ctrl-C leaves it
+queued, box job follows it again, box cancel takes it off. A GPU run doesn't
+wait out My PC. --no-queue exits 75 at once instead.
+
 box run exits with the command's exit code, 124 when --timeout fired, or 75
-when the PC or box is paused, there is no room, or the GPU is taken or was
-stopped. A job paused mid-run resumes if the PC's owner switches back within
+when the box was paused or stopped, the run wasn't queued, or it left the
+queue without running. A job paused mid-run resumes if the PC's owner switches back within
 15 minutes (4 hours once its memory is moved to swap), else it is lost; box job
 reattaches. A relative remote path in box pull starts at the job's checkout.
 The dashboard is https://<host>/ of the remote; --url points them elsewhere.
@@ -164,6 +169,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		envs := envFlags{}
 		fs.Var(envs, "env", "K=V passed to the command (repeatable; no secrets)")
 		reason := fs.String("reason", "", "required: one or two sentences (10 to 300 characters) on why this run needs a box")
+		noQueue := fs.Bool("no-queue", false, "exit 75 at once when the run can't start now, instead of waiting in the PC's queue")
 		if fs.Parse(args[1:]) != nil {
 			return 2
 		}
@@ -183,7 +189,15 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if err != nil {
 			return fail(err)
 		}
-		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why}))
+		r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why, Queue: !*noQueue})
+		if err == nil && r.State == stateQueued {
+			// This process follows the job through the queue and into its box (#93).
+			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}}
+			a.recordQueued(info, r.Job, *size == mode.GPUSize, r.throwaway)
+			r, err = a.followQueued(ctx, r.Job)
+			a.markRead(r.Job, r, err, "box run")
+		}
+		return code(r, err)
 	case "job":
 		offset := fs.Int64("offset", 0, "print the log from this byte, without waiting")
 		limit := fs.Int64("limit", 0, "print at most this many bytes of the log (default 32KiB)")
@@ -194,7 +208,13 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		paged := false
 		fs.Visit(func(f *flag.Flag) { paged = paged || f.Name == "offset" || f.Name == "limit" })
 		if !paged {
-			r, err := a.Job(ctx, fs.Arg(0), 0)
+			var r JobResult
+			var err error
+			if a.wasQueued(fs.Arg(0)) {
+				r, err = a.followQueued(ctx, fs.Arg(0)) // it may still wait in boxd's queue, with no box yet
+			} else {
+				r, err = a.Job(ctx, fs.Arg(0), 0)
+			}
 			a.markRead(fs.Arg(0), r, err, "box job")
 			return code(r, err)
 		}

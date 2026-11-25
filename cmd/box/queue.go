@@ -330,7 +330,7 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 			if j.QueuedAt != nil {
 				queuedAt = *j.QueuedAt
 			}
-			if waited := a.Now().Sub(queuedAt); waited >= dash.QueueNudge {
+			if waited := a.Now().Sub(queuedAt); rec.Thread != "" && waited >= dash.QueueNudge {
 				if won, _ := a.claimBy(rec.Job, ".nudged", "watcher"); won {
 					a.send(ctx, rec.Thread, nudgeMessage(rec, waited, j.Why))
 				}
@@ -351,6 +351,48 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 		return queueOutcome{started: j.StartedAt}, true // running or paused: the box has it
 	}
 	return out, false
+}
+
+// recordQueued writes the record of a job box run queued, so box job and box
+// cancel know it waits in boxd's queue (wasQueued). It has no thread: a CLI
+// run follows its own job, so no watcher or push is started for it.
+func (a *App) recordQueued(info jobMeta, job string, gpu, throwaway bool) {
+	if a.StateDir == "" || os.MkdirAll(a.StateDir, 0o755) != nil {
+		return
+	}
+	rec := jobRecord{Job: job, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
+	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
+		a.warn("box: warning: recording queued job " + job + ": " + err.Error())
+	}
+}
+
+// followQueued is box run's and box job's wait for a job in boxd's queue
+// (#93): it waits until the job leaves the queue, then follows it in its box
+// as box job does. Interrupted, it leaves the job queued and says how to
+// get back to it.
+func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
+	rec := jobRecord{Job: job, Queued: true}
+	readJSON(a.statePath(job, ".json"), &rec)
+	rec.Thread = "" // whoever follows here sees the job; no nudge is pushed
+	out, ok := a.waitQueued(ctx, rec)
+	box, _, _ := strings.Cut(job, ".")
+	switch {
+	case !ok && a.exists(job, ".notified"):
+		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
+		return JobResult{Job: job, Box: box, State: stateDone, Code: exitDetached}, nil
+	case !ok:
+		fmt.Fprintf(a.Err, "box: job %s is still queued; box job %s follows it, box cancel %s takes it off\n", job, job, job)
+		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitPaused}, nil
+	case out.end != nil && out.end.Dropped:
+		fmt.Fprintf(a.Err, "box: job %s left the queue without running (it waited %s at most, or couldn't start): run it locally\n", job, elapsed(dash.QueueMaxAge))
+		return JobResult{Job: job, Box: box, State: stateDone, Code: exitPaused}, nil
+	case out.end != nil:
+		// It ran and ended before anyone followed it here: boxd has the tail.
+		io.WriteString(a.Out, out.end.Tail+"\n")
+		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code}, nil
+	}
+	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box)
+	return a.Job(ctx, job, 0)
 }
 
 // lastLines is the last n lines of s.
