@@ -195,8 +195,9 @@ step "Initialising Incus (preseed)"
 if incus storage show default >/dev/null 2>&1; then
   note "storage pool 'default' exists: already initialised, skipping preseed"
 else
-  [ "${POOL_SIZE%GiB}" != "$POOL_SIZE" ] && [ "${POOL_SIZE%GiB}" -ge 50 ] 2>/dev/null \
-    || die "pool size '$POOL_SIZE' is under 50GiB (the cache volume is 30GiB and a box 18GiB or more). Free disk space under /var/lib, or set AGENTS_POOL_SIZE=<n>GiB."
+  pool_n=${POOL_SIZE%GiB}
+  case "$pool_n" in ''|*[!0-9]*) pool_n=0 ;; esac
+  [ "$pool_n" -ge 50 ] || die "pool size '$POOL_SIZE' isn't 50GiB or more, in GiB (the cache volume is 30GiB and a box 18GiB or more). Free disk space under /var/lib, or set AGENTS_POOL_SIZE=<n>GiB."
   sed "s/^\( *size:\) 200GiB$/\1 $POOL_SIZE/" "$HERE/incus-preseed.yaml" | incus admin init --preseed
   note "applied incus-preseed.yaml (btrfs pool of $POOL_SIZE, incusbr0 NAT bridge, HTTPS on :8443)"
 fi
@@ -557,14 +558,21 @@ if [ -z "$HOST_ADDR" ]; then
   [ -n "$HOST_ADDR" ] || HOST_ADDR='<this host>'
 fi
 port=${addr##*:}
+# `incus remote add <url> --token` asks to confirm a certificate the client doesn't trust (a
+# self-signed one; not the tailnet's Let's Encrypt one) and takes the fingerprint itself as the
+# answer, refusing any other (cmd/incus/remote.go, read 2026-11-25). So the fingerprint goes in on
+# stdin: one line, no prompt, and still checked. The bare-token form checks it too, but uses the
+# addresses in the token and gives up when the first one fails.
+fpr=$(incus info | sed -n 's/^ *certificate_fingerprint: *//p' | head -n1)
+[ -n "$fpr" ] || die "could not read this host's certificate fingerprint (incus info)"
 cat <<EOF
 
   On the client, with the Incus client installed, run once:
 
-    incus remote add $REMOTE https://$HOST_ADDR:$port --token $token --project $PROJECT
+    echo $fpr | incus remote add $REMOTE https://$HOST_ADDR:$port --token $token --project $PROJECT
 
-  The token is single-use and holds this host's certificate fingerprint, so a self-signed
-  certificate is fine. Rerun this script for another client's token (--host if the address is wrong).
+  The echo answers the client's certificate check with this host's fingerprint. The token is
+  single-use: rerun this script for another client (--host if the address is wrong).
 EOF
 [ "$REMOTE" = pc ] || printf '  box uses the remote named pc unless BOX_REMOTE=%s is set for it.\n' "$REMOTE"
 if [ "$WSL" -eq 1 ]; then
@@ -576,7 +584,7 @@ if [ "$WSL" -eq 1 ]; then
     #   incus remote add pc https://localhost:8443 --token <token>
 EOF
 else
-  note ""
+  echo
   note "No tray here, so the mode stays Shared: boxes always get Shared's CPUs."
   note "Incus listens on $addr, every interface; only trusted client certificates get in."
 fi
