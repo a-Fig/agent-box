@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,14 +20,21 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/boxd"
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 func main() {
 	cfgPath := flag.String("config", "/etc/agent-box/boxd.json", "config file")
 	socket := flag.String("socket", "/var/lib/incus/unix.socket", "Incus's unix socket")
 	page := flag.String("static", "", "serve the page from this folder instead of the embedded copy")
+	showVersion := flag.Bool("version", false, "print the release and commit this boxd was built from, and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version.Text("boxd", version.Get()))
+		return
+	}
 	cfg, err := boxd.LoadConfig(*cfgPath)
 	if err != nil {
 		log.Fatalf("boxd: %v", err)
@@ -45,7 +53,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("boxd: queue: %v", err)
 	}
-	w := &boxd.Watcher{Queue: queue, Whois: boxd.TailscaleWhois,
+	var ver *dash.Version
+	if v := version.Get(); v.Commit != "" {
+		ver = &v
+	}
+	w := &boxd.Watcher{Version: ver, Queue: queue, Whois: boxd.TailscaleWhois,
 		Incus: boxd.NewSocket(*socket, mode.Project), Hist: hist, Now: time.Now,
 		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, Logf: log.Printf,
 	}
@@ -68,7 +80,7 @@ func main() {
 		defer cancel()
 		hs.Shutdown(sctx)
 	}()
-	log.Printf("boxd: listening on %s for %d owner(s)", cfg.Listen, len(cfg.Owners))
+	log.Printf("boxd %s: listening on %s for %d owner(s)", version.Get(), cfg.Listen, len(cfg.Owners))
 	if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("boxd: %v", err)
 		os.Exit(1)

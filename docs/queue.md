@@ -73,7 +73,9 @@ laptop and agent reaches.
   - so the page gets `job-gone` for the waiting key, then `job` for the running one.
 - **Throwaways.** No `box run` follows a queued job, so once that job ends and nothing else runs
   there, `boxd` gives a throwaway it launched 30 minutes to live, as `box run` does since #23, so
-  `box pull` and the full log still work; the reaper deletes it then. Its exit code and tail are in
+  `box pull` and the full log still work; the reaper deletes it then. A `box run` job whose end
+  nobody read (#53) gets box new's 2 hours instead of the job's 24, and its room isn't taken: its
+  result is only in the box until `box` reads it. Its exit code and tail are in
   boxd by then. A queued job that needs the room of kept throwaways (its own, or `box run`'s) gets
   it: boxd deletes them first, soonest to expire first, as `box`'s claimGPU deletes an idle GPU
   throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each.

@@ -1,0 +1,99 @@
+# Pushing a tag like v0.3.0 publishes a release: box for Windows, Linux and macOS, the tray, boxd
+# and what installs boxd, with a SHA256SUMS file every updater checks its download against
+# (docs/releasing.md). Shaped like Murmur's release.yml.
+#
+# It runs on GitHub's Linux runner, which cross-compiles every target (CGO_ENABLED=0). A tag push
+# starts it, and only people with write access can push a tag here. nightly.yml calls it with a tag
+# it created, since a tag created with GITHUB_TOKEN starts no workflow. A tag with a "-" in it
+# (a nightly) is published as a prerelease, which no updater takes on its own.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to publish, already pushed
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # A called workflow's github.ref is its caller's, so the tag comes from the input.
+      TAG: ${{ inputs.tag || github.ref_name }}
+    concurrency:
+      group: release-${{ inputs.tag || github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      # Actions are pinned to a commit, since this job can write releases.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      # go.mod's go line is the Go a release is built with. No cache: one restored from another
+      # workflow's run would go into the binaries unchecked.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check the tag
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::The tag $TAG is not a version like v1.2.3 or v1.2.3-nightly.20261125.1, so nothing was released."
+            exit 1
+          fi
+          go version
+      - name: Build
+        run: |
+          set -euo pipefail
+          v=github.com/a-Fig/agent-box/internal/version
+          ldflags="-X $v.Tag=$TAG -X $v.Commit=$(git rev-parse HEAD) -X $v.Time=$(git log -1 --format=%cI HEAD) -X $v.Modified=false"
+          mkdir dist
+          build() { # GOOS GOARCH OUT PKG [EXTRA_LDFLAGS]
+            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "$ldflags ${5:-}" -o "dist/$3" "$4"
+          }
+          build windows amd64 box-windows-amd64.exe ./cmd/box
+          build linux amd64 box-linux-amd64 ./cmd/box
+          build darwin arm64 box-darwin-arm64 ./cmd/box
+          build windows amd64 boxtray-windows-amd64.exe ./cmd/boxtray -H=windowsgui
+          build linux amd64 boxd-linux-amd64 ./cmd/boxd
+          # As LF, whatever the checkout did, since they run in the distro.
+          tr -d '\r' < provision/systemd/agent-box-boxd.service > dist/agent-box-boxd.service
+          tr -d '\r' < provision/install-boxd.sh > dist/install-boxd.sh
+          # The updaters' probe: the binaries this runner can run must say the tag as their second
+          # word, or -X missed its variable.
+          for probe in "dist/box-linux-amd64 --version" "dist/boxd-linux-amd64 -version"; do
+            out=$($probe)
+            set -- $out
+            if [ "${2:-}" != "$TAG" ]; then
+              echo "::error::$probe says \"$out\", not the tag $TAG."
+              exit 1
+            fi
+            echo "$out"
+          done
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+      # A known vulnerability the binaries can reach stops the release; raising go.mod's go line to
+      # the Go release that fixes it is the usual cure.
+      - name: Check the binaries for known vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          for bin in dist/box-* dist/boxtray-* dist/boxd-*; do
+            echo "govulncheck $bin"
+            "$(go env GOPATH)/bin/govulncheck" -mode=binary "$bin"
+          done
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          flags=''
+          case "$TAG" in *-*) flags=--prerelease ;; esac
+          # shellcheck disable=SC2086
+          gh release create "$TAG" dist/* --verify-tag --title "$TAG" --generate-notes $flags

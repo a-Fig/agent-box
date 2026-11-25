@@ -5,17 +5,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 // fakeIncus is a project whose boxes and job files a test sets.
@@ -29,6 +32,11 @@ type fakeIncus struct {
 	cli    []string
 	cliErr func(args []string) error
 	cancel string // the last cancel script
+	// SetExpiryIf: each write made, as "<box> <expiry>", and a write that
+	// comes between a read and its PATCH (making it stale) when set.
+	expirySets []string
+	between    func(cfg map[string]string)
+	running    map[string][]string // jobs the running-jobs script sees that no scan has yet
 }
 
 type fakeJob struct {
@@ -39,10 +47,63 @@ type fakeJob struct {
 	endedAt     int64
 }
 
+// SetExpiryIf decides on a copy, without the lock (decide runs Exec), as
+// the real one decides between its GET and its PATCH. Writes replace the
+// config map, so a Poll reading an earlier copy never races them.
+func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+	for try := 0; try < 5; try++ {
+		read, ok := f.instance(name)
+		if !ok {
+			return false, nil
+		}
+		until, ok := decide(read)
+		if !ok {
+			return false, nil
+		}
+		f.mu.Lock()
+		i := slices.IndexFunc(f.ins, func(in Instance) bool { return in.Name == name })
+		switch {
+		case i < 0:
+			f.mu.Unlock()
+			return false, nil
+		case f.between != nil: // another write lands first: the ETag no longer matches
+			c := maps.Clone(f.ins[i].Config)
+			f.between(c)
+			f.ins[i].Config, f.between = c, nil
+			f.mu.Unlock()
+			continue
+		}
+		c := maps.Clone(f.ins[i].Config)
+		c[jobrun.ExpiresKey] = until.UTC().Format(time.RFC3339)
+		f.ins[i].Config = c
+		f.expirySets = append(f.expirySets, name+" "+c[jobrun.ExpiresKey])
+		f.mu.Unlock()
+		return true, nil
+	}
+	return false, errStale
+}
+
+// instance is a copy of one instance, its config too.
+func (f *fakeIncus) instance(name string) (Instance, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, in := range f.ins {
+		if in.Name == name {
+			in.Config = maps.Clone(in.Config)
+			return in, true
+		}
+	}
+	return Instance{}, false
+}
+
 func (f *fakeIncus) Instances(context.Context) ([]Instance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Instance(nil), f.ins...), f.err
+	ins := append([]Instance(nil), f.ins...)
+	for i := range ins {
+		ins[i].Config = maps.Clone(ins[i].Config)
+	}
+	return ins, f.err
 }
 
 func (f *fakeIncus) Project(context.Context) (Project, error) {
@@ -95,6 +156,18 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 				exit = "-"
 			}
 			fmt.Fprintf(&b, "J %s %s %s %d %d %s %s\n", j.name, j.state, exit, len(j.log), j.endedAt, meta, tail)
+		}
+		return []byte(b.String()), nil
+	}
+	if strings.HasPrefix(script, "# running jobs") {
+		var b strings.Builder
+		for _, j := range f.jobs[box] {
+			if j.state == "running" {
+				fmt.Fprintln(&b, j.name)
+			}
+		}
+		for _, name := range f.running[box] {
+			fmt.Fprintln(&b, name)
 		}
 		return []byte(b.String()), nil
 	}

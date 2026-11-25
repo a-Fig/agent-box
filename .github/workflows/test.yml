@@ -41,8 +41,10 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: provisioning scripts
         run: |
-          bash -n provision/setup-distro.sh
-          shellcheck -S warning provision/setup-distro.sh
+          for f in provision/setup-distro.sh provision/install-boxd.sh provision/update-boxd.sh; do
+            bash -n "$f"
+            shellcheck -S warning "$f"
+          done
           python3 - <<'PY'
           import glob, subprocess, tempfile, yaml
           for f in sorted(glob.glob('provision/*.yaml')):

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 // Sensors are the Windows-side inputs and outputs; fakes stand in for tests.
@@ -92,21 +94,30 @@ const heartbeatEvery = 30 * time.Second
 type heartbeat struct {
 	inc   mode.Incus
 	who   string // mode.EnforcerTray or mode.EnforcerHeadless
+	build string // this binary's version, as JSON
 	every time.Duration
 	last  time.Time
 	logf  func(format string, args ...any)
 }
 
 func newHeartbeat(inc mode.Incus, who string, logf func(string, ...any)) *heartbeat {
-	return &heartbeat{inc: inc, who: who, every: heartbeatEvery, logf: logf}
+	b, _ := json.Marshal(version.Get())
+	return &heartbeat{inc: inc, who: who, build: string(b), every: heartbeatEvery, logf: logf}
 }
 
 // beat writes the keys unless it did within the last h.every. Who comes
-// first, so a dashboard that sees a fresh time also sees the right name. A
-// failed write is retried on the next tick.
+// first, so a dashboard that sees a fresh time also sees the right name, and
+// the first beat (last is zero: this enforcer has just taken over) writes its
+// version too. A failed write is retried on the next tick.
 func (h *heartbeat) beat(ctx context.Context, now time.Time) {
 	if !h.last.IsZero() && now.Sub(h.last) < h.every {
 		return
+	}
+	if h.last.IsZero() {
+		if err := h.inc.SetProjectConfig(ctx, mode.ProjectTrayVersionKey, h.build); err != nil {
+			h.logf("heartbeat: %v", err)
+			return
+		}
 	}
 	if err := h.inc.SetProjectConfig(ctx, mode.ProjectEnforcerKey, h.who); err != nil {
 		h.logf("heartbeat: %v", err)

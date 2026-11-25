@@ -195,7 +195,9 @@ show no live child. The two pulls should print `file-ok` and `dir-ok`.
 
 ### Box sizes
 
-Not yet run on the PC (2026-11-23); it needs `setup-distro.sh` re-run first, for the new caps.
+On 2026-11-25, main `0d574a0`: the caps (10, 24, 24GiB in Full), and a small box's size, memory,
+disk, `limits.cpu.priority=0` and 2 CPUs in Full after a tick, all as below. The two large boxes
+weren't tried, since another agent's job was running.
 
 ```powershell
 incus --project agents project get pc:agents limits.instances   # 10
@@ -306,6 +308,11 @@ After the game ends and the tray is back in Shared, the box stays stopped, and t
 ## Live checks for pushes, the hook, the queue, the dashboard and deploys
 
 Added 2026-11-25. All passed that day against main `e823842`, except where a check says otherwise.
+Dashboard, Pushed result, Hook (join and the fake job), Queue and Paused mid-run passed again
+against main `0d574a0` (2026-11-25, 07:15-07:25 UTC), and so did the smoke test above except My
+PC, memory reclaim and the GPU box. On `0d574a0` the paused job's tail has each line once, and a
+`box_run` from a Codex session in T3 reports `push: true` with a notice that the push lasts as long
+as box's MCP server, then gets its end pushed.
 Shell steps are Git Bash on the laptop. Agent steps are tool calls from a Claude Code session in
 T3, so that `T3CODE_THREAD_ID` is set. Set `U=https://agent-box.<tailnet>.ts.net`, and set `BOX` to the built
 `box.exe` (outside `%TEMP%`).
@@ -355,7 +362,7 @@ The hook itself, with a fake ended job for a made-up thread:
 
 ```sh
 D="$LOCALAPPDATA/agent-box/jobs"; T=smoke-hook-$RANDOM; J=widget.20261125-000000-$T
-printf '{"job":"%s","thread":"%s","reason":"Hook smoke test.","command":"true","worktree":"C:\\tmp"}' "$J" "$T" > "$D/$J.json"
+printf '{"job":"%s","thread":"%s","reason":"Hook smoke test.","command":"true","worktree":"C:\\\\tmp"}' "$J" "$T" > "$D/$J.json"
 printf '{"code":0,"tookSeconds":5,"tail":"hook-smoke-ok"}' > "$D/$J.ended"
 echo '{"session_id":"s"}' | T3CODE_THREAD_ID=$T "$BOX" hook   # {"hookSpecificOutput":{"additionalContext":"box: job ... ended, exit 0 ... hook-smoke-ok ...","hookEventName":"PostToolUse"}}
 echo '{"session_id":"s"}' | T3CODE_THREAD_ID=$T "$BOX" hook   # nothing: told once

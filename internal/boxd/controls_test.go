@@ -192,3 +192,21 @@ func TestMachineEnforcerAndChosen(t *testing.T) {
 		t.Fatalf("unknown values: %+v", m)
 	}
 }
+
+// Machine carries boxd's own build and the tray's, from user.agent-box.tray-version.
+func TestMachineVersions(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full",
+		"user.agent-box.tray-version": `{"commit":"1378501abc","time":"2026-11-24T14:00:00-08:00","modified":true}`})
+	if m := r.w.Machine(); m.Boxd != nil || m.Tray == nil || m.Tray.String() != "1378501+" ||
+		!m.Tray.Time.Equal(time.Date(2026, 11, 24, 22, 0, 0, 0, time.UTC)) || m.Tray.Time.Location() != time.UTC {
+		t.Fatalf("machine: %+v %+v", m.Boxd, m.Tray)
+	}
+	r.w.Version = &dash.Version{Commit: "e823842def"}
+	for _, bad := range []string{"not json", `{"commit":"","time":null,"modified":false}`} {
+		r.f.set(func() { r.f.cfg["user.agent-box.tray-version"] = bad })
+		r.poll()
+		if m := r.w.Machine(); m.Boxd == nil || m.Boxd.Commit != "e823842def" || m.Tray != nil {
+			t.Fatalf("after %s: %+v %+v", bad, m.Boxd, m.Tray)
+		}
+	}
+}

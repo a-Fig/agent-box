@@ -1,0 +1,11 @@
+[Unit]
+Description=agent-box: check hourly for a new stable boxd release
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

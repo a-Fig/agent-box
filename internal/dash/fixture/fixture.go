@@ -168,6 +168,8 @@ func newWorld(name string, now time.Time) *world {
 	h.Write([]byte(name))
 	now = now.UTC().Truncate(time.Second)
 	seen := now.Add(-12 * time.Second)
+	built := now.Add(-26 * time.Hour)
+	v := dash.Version{Commit: "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e", Time: &built}
 	return &world{
 		now: now,
 		rnd: rand.New(rand.NewPCG(h.Sum64(), 0x5eed)),
@@ -176,6 +178,7 @@ func newWorld(name string, now time.Time) *world {
 			TrayLastSeen: &seen, Enforcer: dash.EnforcerTray,
 			Caps:      dash.Resources{CPU: 24, Memory: 12 << 30, Instances: 6, Disk: 150 << 30},
 			WSLMemory: 3 << 30,
+			Boxd:      &v, Tray: &v,
 		},
 		logs:  map[string]string{},
 		since: now.Add(-24 * time.Hour),
@@ -752,6 +755,9 @@ func buildTrayDown(w *world) {
 	seen := w.now.Add(-14 * time.Minute)
 	w.machine.TrayLastSeen = &seen
 	w.machine.ModeRequested = &dash.ModeRequest{Mode: dash.ModeMyPC, At: w.now.Add(-5 * time.Minute), By: "phone"}
+	// The tray is a build behind boxd, so the page shows its drift note.
+	trayBuilt := w.machine.Boxd.Time.Add(-3 * time.Hour)
+	w.machine.Tray = &dash.Version{Commit: "1378501c4d2e8f7a6b5c4d3e2f1a0b9c8d7e6f5a", Time: &trayBuilt}
 	tb := w.box("tidepool", "medium", tidepool, dash.BoxRunning, false, 90*time.Minute, 23*time.Hour+30*time.Minute)
 	w.load(tb, 0.49, 0.45)
 	w.running(tb, tidepool, 0, "fix/hydration-flash", 2*time.Minute+5*time.Second, dash.JobRunning)

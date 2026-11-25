@@ -326,7 +326,12 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - **`Machine`:** `{id, name, reachable, mode, modeReason, modeRequested: {mode, at, by} | null,
   chosen: {mode, at} | null, yielding, trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
-  gpu}, wslMemory}`.
+  gpu}, wslMemory, boxd: Version | null, tray: Version | null}`.
+  `Version` is `{commit, time, modified}`, the commit a binary was built from (`internal/version`).
+  `boxd` is the serving boxd's; `tray` is `user.agent-box.tray-version`, which the active enforcer
+  writes when it starts enforcing. The sidebar's foot shows both, with a quiet note when their commits
+  differ ("boxd e823842 (3h newer than tray)"): on 2026-11-25 the PC twice ran a boxd hours older than
+  the repo, and nothing showed it.
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
   key never written, or one holding a value boxtray doesn't write. `chosen` is
   `user.agent-box.chosen`, the mode the enforcers act on (null if unset or not a mode): while a game

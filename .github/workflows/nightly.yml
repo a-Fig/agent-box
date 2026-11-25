@@ -1,0 +1,156 @@
+# Each push to main whose tests pass becomes a prerelease, vX.Y.Z-nightly.YYYYMMDD.N, N counting
+# that day's nightlies from 1 (docs/releasing.md). X.Y.Z is the latest stable release with its patch
+# raised by one (v0.0.1 while there is none), so a nightly sorts above the stable release it
+# follows and below the next one. Nothing is tagged when the commit is already out as the latest
+# stable release or the newest nightly. Stable tags are Tyler's, by hand: this never makes one.
+#
+# Shaped like Murmur's nightly.yml, but on each green push rather than once a night. A tag created
+# with GITHUB_TOKEN starts no workflow, so this calls release.yml itself. Only the newest seven
+# nightlies are kept.
+name: nightly
+
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Say what would be tagged and pruned, and change nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    # A test run of a push to main that passed, or a run by hand.
+    if: >-
+      github.repository == 'a-Fig/agent-box' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the tag
+      actions: read # read test.yml's runs
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # status BASE HEAD: ahead, behind, identical or diverged, from HEAD's side.
+          status() { gh api "repos/$GH_REPO/compare/$1...$2" --jq .status; }
+          # has_release TAG: true if published, false on a 404; any other failure stops the run, so
+          # an API error never passes for a missing release.
+          has_release() {
+            if out=$(gh api "repos/$GH_REPO/releases/tags/$1" --jq .id 2>&1); then return 0; fi
+            case $out in *'HTTP 404'*) return 1 ;; esac
+            echo "::error::Reading the release $1: $out"; exit 1
+          }
+
+          # The commit whose tests passed; by hand, the newest such commit on main.
+          sha=$RUN_SHA
+          if [ -z "$sha" ]; then
+            sha=$(gh api "repos/$GH_REPO/actions/workflows/test.yml/runs?branch=main&event=push&status=success&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // empty')
+          fi
+          if [ -z "$sha" ]; then echo "::notice::No passing test run on main; nothing tagged."; exit 0; fi
+          main=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          if [ "$sha" != "$main" ] && [ "$(status "$sha" "$main")" != ahead ]; then
+            echo "::notice::$sha is no longer on main; nothing tagged."; exit 0
+          fi
+
+          # The latest stable release; a 404 is none yet.
+          if stable=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>&1); then
+            if ! printf '%s' "$stable" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::The latest stable release is \"$stable\", not a version like v1.2.3."; exit 1
+            fi
+          else
+            case $stable in *'HTTP 404'*) stable= ;; *) echo "::error::Reading the latest release: $stable"; exit 1 ;; esac
+          fi
+          # "TAG SHA", oldest first: by date, then N.
+          nightlies=$(gh api "repos/$GH_REPO/git/matching-refs/tags/v" --paginate \
+            --jq '.[] | select(.ref | test("^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.[0-9]{8}\\.[0-9]+$")) | "\(.ref | ltrimstr("refs/tags/")) \(.object.sha)"' \
+            | awk '{ split($1, a, "nightly."); split(a[2], b, "."); print b[1], b[2], $0 }' | sort -k1,1n -k2,2n | cut -d' ' -f3-)
+          # What counts as already out is the newest nightly with a published release. A tag without
+          # one is a failed (or still running) build: its commit can be tagged again, and pruning
+          # removes the tag in time.
+          published=
+          for t in $(printf '%s\n' "$nightlies" | cut -d' ' -f1 | sed '/^$/d' | tac); do
+            if has_release "$t"; then published=$(printf '%s\n' "$nightlies" | awk -v t="$t" '$1 == t { print $2 }'); break; fi
+            echo "$t has no published release; not counting it."
+          done
+          for base in $stable $published; do
+            s=$(status "$base" "$sha")
+            if [ "$s" = identical ] || [ "$s" = behind ]; then
+              echo "::notice::$sha has nothing new since $base; nothing tagged."; exit 0
+            fi
+          done
+
+          IFS=. read -r major minor patch <<< "${stable#v}"
+          if [ -z "$stable" ]; then major=0 minor=0 patch=0; fi
+          day=$(date -u +%Y%m%d)
+          n=$(printf '%s\n' "$nightlies" | cut -d' ' -f1 | awk -F'nightly.' -v d="$day" '{ split($2, b, "."); if (b[1] == d && b[2] + 0 > m) m = b[2] + 0 } END { print m + 1 }')
+          tag="v$major.$minor.$((patch + 1))-nightly.$day.$n"
+          echo "Tagging $sha as $tag."
+          if [ "$DRY_RUN" = true ]; then echo "::notice::Dry run: $tag would point at $sha."; exit 0; fi
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" --silent
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+
+  # Runs when nothing was tagged too, so a failed prune is retried.
+  prune:
+    needs: [tag, release]
+    if: ${{ !cancelled() && needs.tag.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          # As in the tag job: a 404 is no release, any other failure stops the run.
+          has_release() {
+            if out=$(gh api "repos/$GH_REPO/releases/tags/$1" --jq .id 2>&1); then return 0; fi
+            case $out in *'HTTP 404'*) return 1 ;; esac
+            echo "::error::Reading the release $1: $out"; exit 1
+          }
+          keep=7
+          old=$(gh api "repos/$GH_REPO/git/matching-refs/tags/v" --paginate \
+            --jq '.[].ref | ltrimstr("refs/tags/") | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.[0-9]{8}\\.[0-9]+$"))' \
+            | awk '{ split($1, a, "nightly."); split(a[2], b, "."); print b[1], b[2], $1 }' | sort -k1,1n -k2,2n | cut -d' ' -f3 | head -n -"$keep")
+          for t in $old; do
+            echo "Deleting $t."
+            if [ "$DRY_RUN" = true ]; then continue; fi
+            # A tag whose build failed has no release.
+            if has_release "$t"; then
+              gh release delete "$t" --cleanup-tag --yes
+            else
+              gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$t" --silent
+            fi
+          done

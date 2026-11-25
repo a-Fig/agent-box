@@ -277,7 +277,7 @@ if [ "$BUILD_BASE" -eq 1 ]; then
       || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
-      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh"
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
     incus delete "$builder" --project "$PROJECT"
     note "published as 'agent-base' (images are shared via the default project)"
   fi
@@ -367,6 +367,14 @@ fi
 # Only now, with the step done (set -e stops the script on a failure above, keeping it for a
 # rerun), is the staged copy deleted.
 rm -f "$HERE/boxd"
+
+step "boxd updates (the latest stable release, checked hourly; docs/releasing.md)"
+# After the boxd step: the timer runs at once when started, and must see the boxd this run installed.
+install -m 0755 "$HERE/update-boxd.sh" /usr/local/sbin/agent-box-update-boxd
+install -m 0644 "$HERE/systemd/agent-box-update.service" "$HERE/systemd/agent-box-update.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agent-box-update.timer >/dev/null 2>&1
+note "agent-box-update.timer enabled; a boxd that isn't a release is left alone (AGENT_BOX_NO_UPDATE=1 in /etc/agent-box/update.env turns it off)"
 
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then

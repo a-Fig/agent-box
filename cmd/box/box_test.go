@@ -661,3 +661,10 @@ func TestRunKeepsJobExpiryWhileAnotherJobRuns(t *testing.T) {
 		t.Errorf("expiry = %q, want the 24h job expiry kept", got)
 	}
 }
+
+func TestVersion(t *testing.T) {
+	a, out := testApp(&fakePC{})
+	if c := run(context.Background(), a, []string{"--version"}, nil); c != 0 || !strings.HasPrefix(out.String(), "box ") {
+		t.Fatalf("--version: %d %q", c, out)
+	}
+}

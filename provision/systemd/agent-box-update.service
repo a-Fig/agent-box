@@ -1,0 +1,10 @@
+[Unit]
+Description=agent-box: install the latest stable boxd release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# AGENT_BOX_NO_UPDATE=1 here turns the hourly update off.
+EnvironmentFile=-/etc/agent-box/update.env
+ExecStart=/usr/local/sbin/agent-box-update-boxd

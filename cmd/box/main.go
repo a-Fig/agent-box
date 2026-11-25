@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 func cancelText(job string, cancelled bool, code int) string {
@@ -43,6 +44,7 @@ const usage = `usage:
                                             and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
+  box --version                             the release and commit this box was built from
 
 --reason (required for run): one or two sentences, 10 to 300 characters, on
 why this needs a box. The PC's owner sees it on the dashboard.
@@ -96,6 +98,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	if len(args) == 0 {
 		fmt.Fprint(a.Err, usageText())
 		return 2
+	}
+	if args[0] == "--version" || args[0] == "version" {
+		fmt.Fprintln(a.Out, version.Text("box", version.Get()))
+		return 0
 	}
 	fs := flag.NewFlagSet("box "+args[0], flag.ContinueOnError)
 	fs.SetOutput(a.Err)
@@ -268,7 +274,15 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		return 0
 	case "mcp":
+		if exe, err := os.Executable(); err == nil {
+			a.MCPExe = exe
+		}
 		if err := serveMCP(ctx, a, stdin, a.Out); err != nil {
+			return fail(err)
+		}
+		return 0
+	case "mcp-call": // one request from box mcp, through the newest box.exe (mcpexe.go)
+		if err := runMCPCall(ctx, stdin, a.Out, callInProcess(a)); err != nil {
 			return fail(err)
 		}
 		return 0
