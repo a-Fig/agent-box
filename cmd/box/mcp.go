@@ -443,21 +443,14 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		}
 		return res
 	case "box_cancel":
-		if a.wasQueued(args.ID) {
-			removed, err := a.cancelQueuedOrStarted(ctx, args.ID)
-			if err != nil {
-				return textResult("cancel "+args.ID+": "+err.Error(), true)
-			}
-			if removed {
-				a.markNotified(args.ID, "cancel")
-				res := textResult("removed "+args.ID+" from the queue; it never ran", false)
-				res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": true, "exitCode": exitDetached, "message": "removed from the queue; it never ran"}
-				return res
-			} // it has started: stop it in its box
-		}
-		cancelled, c, err := a.Cancel(ctx, args.ID)
+		removed, cancelled, c, err := a.CancelAny(ctx, args.ID)
 		if err != nil {
 			return textResult(err.Error(), true)
+		}
+		if removed {
+			res := textResult("removed "+args.ID+" from the queue; it never ran", false)
+			res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": true, "exitCode": exitDetached, "message": "removed from the queue; it never ran"}
+			return res
 		}
 		msg := cancelText(args.ID, cancelled, c)
 		res := textResult(msg, false)

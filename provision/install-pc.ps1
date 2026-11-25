@@ -331,7 +331,7 @@ if ($BoxtrayPath) {
     $tTrig = New-ScheduledTaskTrigger -AtLogOn -User $me
     $tPrinc = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
     $tSett = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
-        -MultipleInstances IgnoreNew -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)   # restart if boxtray exits with an error
+        -MultipleInstances IgnoreNew -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)   # this doesn't restart an error exit (#97)
     Register-ScheduledTask -TaskName $TrayTask -Action $tAction -Trigger $tTrig -Principal $tPrinc -Settings $tSett -Force `
         -Description 'agent-box tray' | Out-Null
     Note "registered: $full"
@@ -344,7 +344,10 @@ if ($BoxtrayPath) {
     # aside whenever the interactive tray runs.
     Step "Scheduled Task '$EnforcerTask' (boxtray --headless at startup)"
     # A running instance would keep the old binary (and blocks replacing the exe).
+    # One that updated itself runs outside its task, so stopping the task misses it.
     Stop-ScheduledTask -TaskName $EnforcerTask -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='boxtray.exe'" | Where-Object { $_.CommandLine -like '*--headless*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $eAction = New-ScheduledTaskAction -Execute $full -Argument '--headless' -WorkingDirectory (Split-Path $full)
     $ePrinc = New-ScheduledTaskPrincipal -UserId $me -LogonType S4U -RunLevel Limited
     $eSett = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `

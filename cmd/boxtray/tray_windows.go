@@ -26,6 +26,7 @@ func u32(name string) *windows.LazyProc { return user32.NewProc(name) }
 const (
 	wmNull       = 0x0000
 	wmDestroy    = 0x0002
+	wmClose      = 0x0010
 	wmEndSession = 0x0016
 	wmTimer      = 0x0113
 	wmLButtonUp  = 0x0202
@@ -212,6 +213,10 @@ func (t *tray) loop() {
 	}
 	shellNI.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
 }
+
+// close ends the tray from another goroutine: WM_CLOSE destroys the window, WM_DESTROY quits the
+// message loop, and loop removes the icon.
+func (t *tray) close() { u32("PostMessageW").Call(t.hwnd, wmClose, 0, 0) }
 
 // setStatus is called from the poll goroutine; the icon is updated on the UI thread.
 func (t *tray) setStatus(st mode.Status) {

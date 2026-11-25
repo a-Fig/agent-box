@@ -31,7 +31,6 @@ import (
 
 const (
 	checkEvery = time.Hour
-	lockStale  = 10 * time.Minute // a lock older than this was left by a killed update
 )
 
 // updater updates one box binary. Its fields are what tests replace.
@@ -46,7 +45,7 @@ type updater struct {
 	Asset string // this platform's asset name
 	Now   func() time.Time
 	// Run runs a box binary and returns its stdout: --version, and skill-sync.
-	Run func(ctx context.Context, exe string, args ...string) (string, error)
+	Run update.Run
 	Out io.Writer
 }
 
@@ -120,21 +119,7 @@ func (u *updater) writeStamp(s stamp) {
 
 // lock takes update.lock, or reports false if another update holds it.
 func (u *updater) lock() (unlock func(), ok bool) {
-	os.MkdirAll(u.Dir, 0o755)
-	p := filepath.Join(u.Dir, "update.lock")
-	for range 2 {
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			f.Close()
-			return func() { os.Remove(p) }, true
-		}
-		fi, serr := os.Stat(p)
-		if serr != nil || u.Now().Sub(fi.ModTime()) < lockStale {
-			return nil, false
-		}
-		os.Remove(p) // left by an update that was killed
-	}
-	return nil, false
+	return update.Lock(filepath.Join(u.Dir, "update.lock"), u.Now())
 }
 
 // installed is the release tag of the box binary on disk ("" for a dev build), read from its
@@ -144,10 +129,7 @@ func (u *updater) installed(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
-	if f := strings.Fields(out); len(f) > 1 && update.ValidTag(f[1]) {
-		return f[1]
-	}
-	return ""
+	return update.VersionTag(out)
 }
 
 // auto is box mcp's check: at most hourly across sessions, stable releases only, never older,
@@ -237,10 +219,7 @@ func (u *updater) Update(ctx context.Context, tag string) error {
 	return nil
 }
 
-func (u *updater) oldPath() string {
-	ext := filepath.Ext(u.Exe)
-	return strings.TrimSuffix(u.Exe, ext) + ".old" + ext
-}
+func (u *updater) oldPath() string { return update.OldPath(u.Exe) }
 
 // install downloads rel's box, checks it, swaps it in and updates the skill.
 func (u *updater) install(ctx context.Context, rel update.Release, from string) error {
@@ -248,19 +227,8 @@ func (u *updater) install(ctx context.Context, rel update.Release, from string) 
 	if err != nil {
 		return err
 	}
-	dir, ext := filepath.Dir(u.Exe), filepath.Ext(u.Exe)
-	u.sweep()
-	staged := filepath.Join(dir, ".box-update-"+rel.Tag+ext)
-	if err := os.WriteFile(staged, data, 0o755); err != nil {
-		return err
-	}
-	defer os.Remove(staged) // gone already once it is swapped in
-	out, err := u.Run(ctx, staged, "--version")
-	if f := strings.Fields(out); err != nil || len(f) < 2 || f[1] != rel.Tag {
-		return fmt.Errorf("the downloaded box says %q, not %s (%v)", strings.TrimSpace(out), rel.Tag, err)
-	}
 	was := u.skillSum(ctx)
-	if err := u.swap(staged); err != nil {
+	if err := update.Install(ctx, u.Exe, rel.Tag, data, u.Run, u.Now()); err != nil {
 		return err
 	}
 	u.rememberSkill(was)
@@ -270,39 +238,6 @@ func (u *updater) install(ctx context.Context, rel update.Release, from string) 
 	}
 	fmt.Fprintf(u.Out, "box: updated %s from %s to %s (the old one is %s; box update --rollback)\n", u.Exe, from, rel.Tag, filepath.Base(u.oldPath()))
 	return nil
-}
-
-// swap moves next into Exe's place and keeps Exe as box.old. A box.old that can't be removed (a
-// session's server still runs it, on Windows) is renamed aside for sweep to take later.
-func (u *updater) swap(next string) error {
-	old := u.oldPath()
-	if err := os.Remove(old); err != nil && !errors.Is(err, os.ErrNotExist) {
-		if err := os.Rename(old, u.aside()); err != nil {
-			return fmt.Errorf("can't move %s aside: %w", old, err)
-		}
-	}
-	if err := os.Rename(u.Exe, old); err != nil {
-		return err
-	}
-	if err := os.Rename(next, u.Exe); err != nil {
-		os.Rename(old, u.Exe)
-		return err
-	}
-	return nil
-}
-
-func (u *updater) aside() string {
-	ext := filepath.Ext(u.Exe)
-	return fmt.Sprintf("%s.old-%d%s", strings.TrimSuffix(u.Exe, ext), u.Now().UnixNano(), ext)
-}
-
-// sweep removes the box.old-* files swap set aside, once nothing runs them.
-func (u *updater) sweep() {
-	ext := filepath.Ext(u.Exe)
-	matches, _ := filepath.Glob(strings.TrimSuffix(u.Exe, ext) + ".old-*" + ext)
-	for _, m := range matches {
-		os.Remove(m)
-	}
 }
 
 // Rollback is `box update --rollback`: box.old and box trade places, and the release rolled back
