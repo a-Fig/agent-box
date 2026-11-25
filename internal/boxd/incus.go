@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 // Incus is what boxd needs from Incus, all of it in project agents. The real
@@ -27,6 +29,12 @@ type Incus interface {
 	// CLI runs `incus <args...>` in the project, with stdin (often ""), for
 	// what starting a queued job takes: launch, file push, config set, exec.
 	CLI(ctx context.Context, stdin string, args ...string) ([]byte, error)
+	// SetExpiryIf reads the instance and, if decide says so, sets its
+	// user.expires to the time decide returns, in a write Incus refuses if
+	// anything changed the instance since that read. After a refusal it
+	// reads and decides again. It reports whether it wrote; an instance
+	// that is gone is no error.
+	SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error)
 }
 
 // Instance is the part of GET /1.0/instances?recursion=2 boxd reads.
@@ -150,6 +158,75 @@ func (s *Socket) Exec(ctx context.Context, name, script string, args ...string) 
 		return stdout.Bytes(), fmt.Errorf("incus exec %s: %w", name, err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// errStale is a write Incus refused with 412: the instance changed since it
+// was read.
+var errStale = errors.New("ETag doesn't match")
+
+// SetExpiryIf is a GET of the instance, for its config and ETag, then a
+// PATCH of user.expires with If-Match: a write that comes between, such as a
+// job's start setting its 24h, makes the PATCH fail with 412, and the next
+// try sees it. PATCH merges config keys, so nothing else is touched.
+func (s *Socket) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+	path := "/1.0/instances/" + url.PathEscape(name) + "?project=" + url.QueryEscape(s.Proj)
+	var wrote bool
+	err := jobrun.RetryETag(ctx, func() error {
+		wrote = false
+		req, err := http.NewRequestWithContext(ctx, "GET", "http://incus"+path, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return err
+		}
+		var env struct {
+			Error    string   `json:"error"`
+			Metadata Instance `json:"metadata"`
+		}
+		derr := json.NewDecoder(resp.Body).Decode(&env)
+		resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusNotFound:
+			return nil
+		case resp.StatusCode != http.StatusOK:
+			return fmt.Errorf("incus GET %s: %s: %s", name, resp.Status, env.Error)
+		case derr != nil:
+			return fmt.Errorf("incus GET %s: %w", name, derr)
+		}
+		until, ok := decide(env.Metadata)
+		if !ok {
+			return nil
+		}
+		body, _ := json.Marshal(map[string]any{"config": map[string]string{jobrun.ExpiresKey: until.UTC().Format(time.RFC3339)}})
+		patch, err := http.NewRequestWithContext(ctx, "PATCH", "http://incus"+path, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		patch.Header.Set("Content-Type", "application/json")
+		patch.Header.Set("If-Match", resp.Header.Get("ETag"))
+		presp, err := s.client.Do(patch)
+		if err != nil {
+			return err
+		}
+		var penv struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(presp.Body).Decode(&penv)
+		presp.Body.Close()
+		switch presp.StatusCode {
+		case http.StatusOK:
+			wrote = true
+			return nil
+		case http.StatusPreconditionFailed:
+			return fmt.Errorf("incus PATCH %s: %w", name, errStale)
+		case http.StatusNotFound:
+			return nil
+		}
+		return fmt.Errorf("incus PATCH %s: %s: %s", name, presp.Status, penv.Error)
+	})
+	return wrote, err
 }
 
 // maxExecOut bounds what boxd reads from a box: a scan of maxScanJobs jobs

@@ -69,7 +69,7 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 
 Boxes are throwaway. Nothing on one is kept: push work to git before the box goes.
 
-- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
+- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h). A job whose exit box never reads (no push, no `box_job`) would keep its 24h, so boxd, which sees every job end, sets the same 2h once nothing else runs there, in a write Incus refuses if the box changed since boxd read it, and only over the job's own 24h (#53).
 - **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
 - **Disk caps.** Root disk 18/30/40GiB per box by size, set by `box` at launch. `default-profile.yaml` gives other launches the 30GiB default. The 210GiB project cap includes the shared 30GiB cache volume. Rerunning setup applies the lower cache quota in place on Btrfs. If usage is already over 30GiB, free space before applying the quota so writes can continue. This WSL ext4 configuration lacks the project quotas needed by an Incus `dir` pool.
-- **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle and uv rebuild it).
+- **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle, uv and browser downloads rebuild it).

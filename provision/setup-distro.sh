@@ -277,7 +277,7 @@ if [ "$BUILD_BASE" -eq 1 ]; then
       || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
-      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh"
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
     incus delete "$builder" --project "$PROJECT"
     note "published as 'agent-base' (images are shared via the default project)"
   fi
