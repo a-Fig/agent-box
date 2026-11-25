@@ -23,6 +23,7 @@ set -euo pipefail
 PC=${1:-${AGENT_BOX_PC:-}}
 DISTRO=${AGENT_BOX_DISTRO:-agents}
 [ -n "$PC" ] || { echo "usage: $0 user@pc-host   (or set AGENT_BOX_PC)" >&2; exit 2; }
+[[ "$DISTRO" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad distro name $DISTRO" >&2; exit 2; }
 
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$ROOT"
@@ -38,24 +39,30 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$STAGE/boxd" ./cmd/
 tr -d '\r' < provision/systemd/agent-box-boxd.service > "$STAGE/agent-box-boxd.service"
 tr -d '\r' < provision/install-boxd.sh > "$STAGE/install-boxd.sh"
 (cd "$STAGE" && sha256sum boxd agent-box-boxd.service install-boxd.sh > SHA256SUMS)
-tar -cf "$STAGE/boxd-deploy.tar" -C "$STAGE" boxd agent-box-boxd.service install-boxd.sh SHA256SUMS
+run=boxd-deploy-$(date +%Y%m%d-%H%M%S)-$$
+tar -cf "$STAGE/$run.tar" -C "$STAGE" boxd agent-box-boxd.service install-boxd.sh SHA256SUMS
 echo "   boxd $(cut -c1-12 "$STAGE/SHA256SUMS" | head -n1)"
 
-# The .cmd runs in the SSH session's home folder on the PC, where scp put the tar.
-dest=/opt/agent-box-provision/deploy-boxd
+# The .cmd runs in the SSH session's home folder on the PC, where scp put the
+# tar. Each run has its own names there and in the distro, so two deploys at
+# once don't delete each other's files; install-boxd.sh lets one install run.
+dest=/opt/agent-box-provision/$run
 printf '%s\r\n' \
   '@echo off' \
-  "wsl.exe -d $DISTRO -u root --exec sh -c \"rm -rf $dest && mkdir -p $dest && tar -xf - -C $dest\" < boxd-deploy.tar || exit /b 1" \
-  "wsl.exe -d $DISTRO -u root --exec bash $dest/install-boxd.sh" > "$STAGE/boxd-deploy.cmd"
+  "wsl.exe -d $DISTRO -u root --exec sh -c \"rm -rf $dest && mkdir -p $dest && tar -xf - -C $dest\" < $run.tar || exit /b 1" \
+  "wsl.exe -d $DISTRO -u root --exec bash $dest/install-boxd.sh" \
+  'set rc=%ERRORLEVEL%' \
+  "wsl.exe -d $DISTRO -u root --exec rm -rf $dest" \
+  'exit /b %rc%' > "$STAGE/$run.cmd"
 
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
 echo "== copying to $PC"
-scp -q "${ssh_opts[@]}" "$STAGE/boxd-deploy.tar" "$STAGE/boxd-deploy.cmd" "$PC:"
+scp -q "${ssh_opts[@]}" "$STAGE/$run.tar" "$STAGE/$run.cmd" "$PC:"
 echo "== installing in the $DISTRO distro"
 rc=0
-ssh "${ssh_opts[@]}" "$PC" 'cmd.exe /c boxd-deploy.cmd' </dev/null || rc=$?
+ssh "${ssh_opts[@]}" "$PC" "cmd.exe /c $run.cmd" </dev/null || rc=$?
 # A batch file can't delete itself while it runs, so both go afterwards.
-ssh "${ssh_opts[@]}" "$PC" 'Remove-Item -ErrorAction SilentlyContinue boxd-deploy.cmd, boxd-deploy.tar' </dev/null || true
+ssh "${ssh_opts[@]}" "$PC" "Remove-Item -ErrorAction SilentlyContinue $run.cmd, $run.tar" </dev/null || true
 if [ "$rc" != 0 ]; then
   echo "== deploy failed (exit $rc); see above" >&2
   exit "$rc"

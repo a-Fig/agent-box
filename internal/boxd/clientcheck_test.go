@@ -24,7 +24,9 @@ func TestCheckClient(t *testing.T) {
 	}
 	// A config directory that can't be made, as under a read-only /root.
 	blocker := filepath.Join(dir, "file")
-	os.WriteFile(blocker, nil, 0o600)
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	err := CheckClient(env(map[string]string{"HOME": blocker}), found)
 	if err == nil || !strings.Contains(err.Error(), "INCUS_CONF") {
 		t.Fatalf("unwritable home: %v", err)
