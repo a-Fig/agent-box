@@ -521,24 +521,28 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 	if isNoRoom(err) && a.reclaim(ctx) {
 		err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	}
-	if isNoRoom(err) {
-		if insts, lerr := a.list(ctx); lerr == nil {
-			kept := a.keptThrowaways(ctx, insts)
-			if len(kept) > 0 && !a.fitsWithout(ctx, insts, kept, sz) {
-				// Deleting them all wouldn't fit it: keep them for their box pull (#87).
-				fmt.Fprintf(a.Err, "box: deleting the %d kept throwaways wouldn't make room for a %s box; leaving them\n", len(kept), sz.Name)
-				kept = nil
-			}
-			for _, in := range kept {
-				fmt.Fprintf(a.Err, "box: deleting %s, kept after its job, for room\n", in.Name)
-				if rerr := a.Rm(context.WithoutCancel(ctx), in.Name); rerr != nil && !isGone(rerr) {
-					a.warn(fmt.Sprintf("box: warning: removing %s: %v", in.Name, rerr))
-				}
-				if err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra); !isNoRoom(err) {
-					break
-				}
-			}
+	// Each pass looks again, since other launches may be taking the same room
+	// (#87): it deletes the first kept throwaway only if deleting them all
+	// would fit this box, so none is deleted for a launch that fails anyway.
+	for isNoRoom(err) {
+		insts, lerr := a.list(ctx)
+		if lerr != nil {
+			break
 		}
+		kept := a.keptThrowaways(ctx, insts)
+		if len(kept) == 0 {
+			break
+		}
+		if !a.fitsWithout(ctx, insts, kept, sz) {
+			fmt.Fprintf(a.Err, "box: deleting the %d kept throwaways wouldn't make room for a %s box; leaving them\n", len(kept), sz.Name)
+			break
+		}
+		fmt.Fprintf(a.Err, "box: deleting %s, kept after its job, for room\n", kept[0].Name)
+		if rerr := a.Rm(context.WithoutCancel(ctx), kept[0].Name); rerr != nil && !isGone(rerr) {
+			a.warn(fmt.Sprintf("box: warning: removing %s: %v", kept[0].Name, rerr))
+			break // it would be listed again
+		}
+		err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	}
 	return err
 }

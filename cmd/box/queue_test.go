@@ -325,9 +325,14 @@ func TestKeptThrowawaysStayWhenTheyCantMakeRoom(t *testing.T) {
 	if !strings.Contains(f.names(), "old-0001") || !strings.Contains(out.String(), "wouldn't make room for a large box; leaving them") {
 		t.Errorf("boxes %s, output %q", f.names(), out)
 	}
+}
+
+// A delete another launch got to first is no failure (#87).
+func TestIsGone(t *testing.T) {
 	if !isGone(errors.New(`incus delete: Error: Failed deleting instance pc:x in project "agents": Instance not found`)) ||
-		!isGone(errors.New("incus delete: Error: Stopping the instance pc:x failed: The instance is already stopped")) {
-		t.Error("isGone doesn't know a delete another launch got to first")
+		!isGone(errors.New("incus delete: Error: Stopping the instance pc:x failed: The instance is already stopped")) ||
+		isGone(errors.New("incus delete: Error: Failed to delete the storage volume")) {
+		t.Error("isGone is wrong about a delete")
 	}
 }
 
