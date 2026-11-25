@@ -21,10 +21,10 @@ func TestEndedExpiry(t *testing.T) {
 		in   Instance
 		want time.Time // zero: no write
 	}{
-		"throwaway, its job's 24h":    {box(true, own, started), now.Add(30 * time.Minute)},
+		"throwaway, its job's 24h":    {box(true, own, started), now.Add(2 * time.Hour)},
 		"repo box, its job's 24h":     {box(false, own, started.Add(-24*time.Hour)), now.Add(2 * time.Hour)},
 		"a later job's 24h":           {box(true, now.Add(jobTTL), started), time.Time{}},
-		"already short (box read it)": {box(true, now.Add(20*time.Minute), started), time.Time{}},
+		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), time.Time{}},
 		"extended from the page":      {box(true, own.Add(4*time.Hour), started), time.Time{}},
 		"another box of that name":    {box(true, own, started.Add(time.Hour)), time.Time{}},
 	} {
@@ -41,12 +41,14 @@ func TestEndedExpiry(t *testing.T) {
 }
 
 // A job box run started and nobody followed ends: boxd gives its throwaway
-// 30 minutes instead of the job's 24 hours (#53). A job that starts there
-// just as boxd writes keeps its own 24 hours.
+// box new's 2 hours instead of the job's 24 (#53). A job that starts there
+// keeps its own 24 hours, whether it shows in the box's running jobs (even
+// within jobExpirySlack of the first job's start) or its write comes
+// between boxd's read and its write.
 func TestReapEndedUnreadJob(t *testing.T) {
-	for _, race := range []bool{false, true} {
+	for _, tc := range []string{"alone", "write between", "a second job running"} {
 		r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
-		job := "w-0001.20261124-180000-ab12"
+		job, second := "w-0001.20261124-180000-ab12", "w-0001.20261124-180500-cd34"
 		r.f.set(func() {
 			in := inst("w-0001", "Running", "small", t0)
 			in.Config[keyThrowaway] = "true"
@@ -56,31 +58,35 @@ func TestReapEndedUnreadJob(t *testing.T) {
 		})
 		r.poll()
 		r.c.add(time.Hour)
-		next := r.c.now().Add(jobTTL).UTC().Format(time.RFC3339)
+		next := t0.Add(5*time.Minute + jobTTL).UTC().Format(time.RFC3339) // inside the slack
 		r.f.set(func() {
 			r.f.jobs["w-0001"][0].state, r.f.jobs["w-0001"][0].exit = "done", "0"
-			if race {
-				r.f.between = func(in *Instance) { in.Config["user.expires"] = next } // box run starting the next job
+			switch tc {
+			case "write between":
+				r.f.between = func(cfg map[string]string) { cfg["user.expires"] = r.c.now().Add(jobTTL).UTC().Format(time.RFC3339) }
+			case "a second job running": // started after boxd's scan, so not yet live
+				r.f.ins[0].Config["user.expires"] = next
+				r.f.running = map[string][]string{"w-0001": {second}}
 			}
 		})
 		r.poll()
 		var sets []string
 		var expires string
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 50; i++ {
+			time.Sleep(10 * time.Millisecond)
 			r.f.mu.Lock()
 			sets, expires = append([]string(nil), r.f.expirySets...), r.f.ins[0].Config["user.expires"]
-			raced := r.f.between == nil
 			r.f.mu.Unlock()
-			if len(sets) > 0 || (race && raced) {
+			if len(sets) > 0 {
 				break
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
-		switch want := r.c.now().Add(30 * time.Minute).UTC().Format(time.RFC3339); {
-		case !race && (len(sets) != 1 || expires != want):
-			t.Errorf("no race: sets %v, expires %s, want %s", sets, expires, want)
-		case race && (len(sets) != 0 || expires != next):
-			t.Errorf("race: sets %v, expires %s, want the next job's %s", sets, expires, next)
+		want := r.c.now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+		switch {
+		case tc == "alone" && (len(sets) != 1 || expires != want):
+			t.Errorf("%s: sets %v, expires %s, want %s", tc, sets, expires, want)
+		case tc != "alone" && len(sets) != 0:
+			t.Errorf("%s: cut a running job's expiry: sets %v, expires %s", tc, sets, expires)
 		}
 	}
 }

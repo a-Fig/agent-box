@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
@@ -66,7 +67,8 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 }
 
 // spareThrowaways lists the throwaway boxes kept after their job ended
-// (jobrun.EndedKeep) with nothing running in them, the first to expire
+// (jobrun.EndedKeep once box read the exit, idleTTL when nobody did, see
+// reapEnded) with nothing running in them, the first to expire
 // first. A kept box is there for box pull and the full log; a queued job
 // that needs its room comes first, as box's own claimGPU deletes an idle GPU
 // throwaway. A box launched for a job that hasn't started yet isn't one of
@@ -81,7 +83,7 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	for _, in := range ins {
 		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		if in.Config[keyThrowaway] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
-			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			exp.After(now.Add(idleTTL+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
 			continue
 		}
 		out = append(out, in)
@@ -461,33 +463,72 @@ func (w *Watcher) image() string {
 }
 
 // reapEnded gives a box whose job has ended, with nothing else running
-// there, the expiry box run's markIdle would: jobrun.EndedKeep for a
-// throwaway (so box pull and the full log still work), box new's idleTTL for
-// a repo box. box sets that only when it reads the job's exit, and a job
-// nobody reads (push false and no box_job, a watcher gone, a box run left
-// detached) would keep its 24h job expiry (#53). With w.mu held.
+// there, box new's idle expiry, idleTTL. box shortens the expiry only when it
+// reads a job's exit (markIdle), so a job nobody read (push false and no
+// box_job, a watcher gone, a box run left detached) kept its 24h job expiry
+// (#53). Unread, the box keeps idleTTL rather than box's jobrun.EndedKeep
+// even when it is a throwaway: whoever reads it later (a watcher restarted
+// after a laptop sleep, a late box_job) finds the result there, not "lost".
+// With w.mu held.
 //
-// The write is conditional (SetExpiryIf): it only shortens, and only an
-// expiry that is still this job's own, start plus jobTTL. A job that starts
-// there meanwhile sets its own 24h, which either comes first, and is then
-// not this job's, or makes the write fail on its ETag and be decided again.
+// Each try of the write (SetExpiryIf) reads the box, then checks, as
+// markIdle does, that no other job runs or is being started there, then
+// writes with the box's ETag. A job that starts there sets its 24h after its
+// PID file exists: before the check, the check sees it; after it, the write
+// fails on its ETag and is decided again, or comes after ours and wins.
 func (w *Watcher) reapEnded(j *dash.Job) {
-	for _, o := range w.live {
-		if o.Box == j.Box && o.Key != j.Key {
-			return
-		}
+	box, started, own := j.Box, j.StartedAt, j.Box+"."+j.ID
+	if w.boxBusy(box, own) {
+		return
 	}
-	box, started := j.Box, j.StartedAt
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-			return endedExpiry(in, started, w.Now().UTC())
+			until, ok := endedExpiry(in, started, w.Now().UTC())
+			if !ok || in.Status != "Running" {
+				return time.Time{}, false // a frozen box can't run the check: leave it
+			}
+			w.mu.Lock()
+			busy := w.boxBusy(box, own)
+			w.mu.Unlock()
+			if busy {
+				return time.Time{}, false
+			}
+			out, err := w.Incus.Exec(ctx, box, jobrun.RunningScript(workRoot))
+			if err != nil {
+				return time.Time{}, false
+			}
+			for _, name := range strings.Fields(string(out)) {
+				if name != own {
+					return time.Time{}, false // another job runs there
+				}
+			}
+			return until, true
 		})
 		if err != nil {
 			w.logf("boxd: after %s's job: %v", box, err)
 		}
 	}()
+}
+
+// boxBusy says whether a job other than own runs, or is being started, in
+// box, as far as boxd knows. With w.mu held.
+func (w *Watcher) boxBusy(box, own string) bool {
+	for _, o := range w.live {
+		if o.Box == box && o.Box+"."+o.ID != own {
+			return true
+		}
+	}
+	if b, _, _ := strings.Cut(w.starting, "."); w.starting != "" && b == box && w.starting != own {
+		return true
+	}
+	for name, sj := range w.started {
+		if sj.Box == box && name != own {
+			return true
+		}
+	}
+	return false
 }
 
 // jobExpirySlack is how far past its start plus jobTTL a job's own expiry
@@ -496,8 +537,9 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 const jobExpirySlack = 10 * time.Minute
 
 // endedExpiry is the expiry a box gets once the job that started at started
-// has ended, and whether to write it: only to shorten an expiry that is that
-// job's own, on the job's box.
+// has ended, and whether to write it: only to shorten an expiry no later
+// than that job's own (a later job's 24h, or an extend, is left alone), on
+// the job's box.
 func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 	if !holds(in.CreatedAt, started) {
 		return time.Time{}, false
@@ -506,11 +548,7 @@ func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 	if err != nil || cur.After(started.Add(jobTTL+jobExpirySlack)) {
 		return time.Time{}, false // not this job's expiry: a later job's, or set by hand
 	}
-	ttl := idleTTL
-	if in.Config[keyThrowaway] == "true" {
-		ttl = jobrun.EndedKeep
-	}
-	until := now.Add(ttl).Truncate(time.Second)
+	until := now.Add(idleTTL).Truncate(time.Second)
 	if !cur.After(until) {
 		return time.Time{}, false // already as short: box read the exit, or an extend
 	}

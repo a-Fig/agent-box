@@ -72,11 +72,12 @@ laptop and agent reaches.
     `startedAt`, next to `queuedAt`;
   - so the page gets `job-gone` for the waiting key, then `job` for the running one.
 - **Throwaways.** No `box run` follows a queued job, so once that job ends and nothing else runs
-  there, `boxd` gives a throwaway it launched 30 minutes to live, as `box run` does since #23, so
-  `box pull` and the full log still work; the reaper deletes it then. Its exit code and tail are in
+  there, `boxd` gives a throwaway it launched box new's 2 hours to live, so `box pull` and the full
+  log still work; the reaper deletes it then. Any job whose end nobody read (#53) gets the same, so
+  its box doesn't keep the job's 24 hours; once `box` reads an exit, a throwaway gets its 30 minutes. Its exit code and tail are in
   boxd by then. A queued job that needs the room of kept throwaways (its own, or `box run`'s) gets
   it: boxd deletes them first, soonest to expire first, as `box`'s claimGPU deletes an idle GPU
-  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each.
+  throwaway. Otherwise back-to-back queued jobs would wait 2 hours each.
 - `boxd` has no T3 access, so it doesn't push. The laptop's `box watch <job>` process (from the push
   design) follows the job while it is queued too, and sends the turn when it ends, or the nudge at 20
   minutes.

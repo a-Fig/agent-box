@@ -483,7 +483,8 @@ exit 0
 
 // keptThrowaways lists the throwaway boxes kept after their job ended
 // (endedKeep: box run and boxd move a throwaway's expiry to then, for box
-// pull and the full log), the first to expire first. They hold their room
+// pull and the full log; boxd gives one whose exit nobody read idleTTL), the
+// first to expire first. They hold their room
 // until the reaper deletes them, so a launch short of room deletes them, as
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
 // kept box is a running throwaway whose expiry is within the keep window,
@@ -494,7 +495,7 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 	for _, in := range insts {
 		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
 		if in.Config[throwawayKey] != "true" || in.Status != "Running" || err != nil ||
-			exp.After(a.Now().Add(endedKeep+time.Minute)) {
+			exp.After(a.Now().Add(idleTTL+time.Minute)) {
 			continue
 		}
 		look, cancel := a.probeCtx(ctx) // a box frozen since the list would hold the exec
@@ -1017,17 +1018,7 @@ const (
 )
 
 // runningScript prints the jobs still running in a box.
-func runningScript() string {
-	return "# running jobs\n" + aliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
-for p in *.pid; do
-  [ -e "$p" ] || continue
-  j=${p%%.pid}
-  [ -e "$j.exit" ] && continue
-  alive "$(cat "$p" 2>/dev/null)" "$j" && echo "$j"
-done
-exit 0
-`, workRoot)
-}
+func runningScript() string { return jobrun.RunningScript(workRoot) }
 
 // followScript prints a job's log, as it grows, until the job's .exit file
 // appears. It exits 3 for an unknown job and 4 for a job that died without

@@ -156,7 +156,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 		t.Fatalf("running: %+v", st.Jobs)
 	}
 
-	// It ends: boxd keeps the throwaway it launched for half an hour.
+	// It ends unread: boxd keeps the throwaway it launched for box new's 2h.
 	r.f.set(func() { r.f.jobs[box][0].state, r.f.jobs[box][0].exit = "done", "0" })
 	r.c.add(3 * time.Second)
 	r.poll()
@@ -164,7 +164,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.f.mu.Lock()
 	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 1 || sets[0] != want {
+	if want := box + " " + r.c.now().UTC().Add(2*time.Hour).Format(time.RFC3339); len(sets) != 1 || sets[0] != want {
 		t.Fatalf("throwaway's expiry: %v, want %s", sets, want)
 	}
 	var h dash.History
@@ -362,8 +362,12 @@ func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
 		t.Fatalf("made room from a box with a job running: %v", r.f.cli)
 	}
 
-	// fresh's job ended: box run keeps it for 30 minutes.
-	r.f.set(func() { r.f.jobs["fresh-0001"][0].state, r.f.jobs["fresh-0001"][0].exit = "done", "0" })
+	// fresh's job ended unread: boxd keeps it for 2 hours, and its room is
+	// still spare.
+	r.f.set(func() {
+		r.f.jobs["fresh-0001"][0].state, r.f.jobs["fresh-0001"][0].exit = "done", "0"
+		r.f.ins[1].Config["user.expires"] = r.c.now().Add(2 * time.Hour).Format(time.RFC3339)
+	})
 	r.c.add(3 * time.Second)
 	r.poll()
 	r.c.add(3 * time.Second)
