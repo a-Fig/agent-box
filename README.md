@@ -4,7 +4,7 @@ Turns a Windows gaming PC on the tailnet into on-demand, disposable Linux boxes 
 
 - **Incus** in WSL2 does the boxes, API, auth and web UI.
 - **boxtray** sits in the Windows tray: one click picks *My PC*, *Shared* or *Full power*.
-- **box** is a thin sync-and-run CLI + MCP for agents: `box run --new -- go test ./...`.
+- **box** is a thin sync-and-run CLI + MCP for agents: `box run --new --reason "..." -- go test ./...`.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -14,7 +14,9 @@ Build it with `go build ./cmd/box`. It needs the Windows `incus` client with a r
 
 ```sh
 box status                            # worth offloading now? PC, mode, room per size, this repo's box
-box run -- go test ./...              # sync this worktree to the repo's box and run there
+box run --reason "Full test suite for the parser change." -- go test ./...
+                                      # sync this worktree to the repo's box and run there
+                                      # (--reason is required; left out below)
 box run --new -- 'npm ci && npx vitest run'   # throwaway box, deleted afterwards
 box run --box big -- make test        # a box you name
 box run --size large -- ./gradlew test  # size of a box the run launches: small, medium (default), large
@@ -28,7 +30,11 @@ box pull <id> coverage ./out          # copy /work/<repo>/coverage into ./out/co
 box new scratch --ttl 2h --size small # launch a box (sets user.expires and its size)
 box ls                                # boxes, status, expiry
 box rm scratch
+box ui                                # the PC's dashboard in the browser
+box app                               # the dashboard in a window of its own (Windows)
 ```
+
+`box run --reason` (required, 10 to 300 characters) says why the run needs a box; `box new --reason` stores one as `user.box.reason`. `box run` records it in `/work/.box/<job>.meta` with the command, repo, branch, commit, size, `--env` names (never values) and who asked, and reports to the dashboard, best effort, a run turned away with exit 75 and how each run ended. Both are self-reported, for display ([docs/ui.md](docs/ui.md#agent-identity)).
 
 `box run` snapshots the worktree, including uncommitted and untracked files, without touching your index. It skips files that are both untracked and ignored. It checks the snapshot out in `/work/<repo>` and runs the command there, logging to `/work/.box/<job>.log` for reattachment. One argument runs as a shell string. Several are quoted word by word. The command returns its exit code, or **75** when the PC is in My PC mode, the box is paused or the PC can't be reached. Run the command locally in those cases. If the box is frozen while a job runs, `box run` and `box job` stop following at once and exit 75 with `job X is paused`. The job resumes if the PC's owner switches back within 15 minutes, or 4 hours once the tray has moved the box's memory to swap; after that the tray stops the box and the job is lost. `box job X` reattaches later. Runs on the same repo and box take turns. The job ID is printed before the job starts. Shallow clones produce snapshots without history. If the repo has checked-out submodules, box warns that their directories will be empty in the box.
 
@@ -44,7 +50,9 @@ Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4,
 
 `--env K=V` (repeatable) passes variables to the command. Boxes are shared and the values are visible in the box, so names containing `TOKEN`, `SECRET`, `KEY`, `PASSWORD`, `PASSWD` or `CREDENTIAL` are refused. `--timeout` returns exit `124` and force-kills a command that ignores TERM for 10 seconds. `box cancel` stops the job's session and writes exit code `130` if the wrapper hasn't already recorded an exit. `box pull <job|box> <remote-path> <local-dir>` copies a file or directory into `<local-dir>/<name>`. A relative remote path starts at the job's checkout. It never replaces an existing file and drops symlinks, so nothing lands outside `<local-dir>`. Pull right after the job, since the next job on the same repo replaces the checkout.
 
-`box mcp` is a stdio MCP server with `box_status`, `box_new`, `box_run`, `box_job`, `box_jobs`, `box_cancel`, `box_pull`, `box_rm` and `box_ls`, which behave like the commands above. Results start with a line that carries the key facts, and most also return `structuredContent`. `box_run` and `box_job` put the job ID, box, exit code and any warnings ahead of the output tail. `box_job` with `offset` or `limit` returns a page of the log and `nextOffset` without waiting. If a page contains incomplete UTF-8, `logBase64` in `structuredContent` preserves the original bytes. Info-level notifications announce the throwaway box before launch and the job ID before the job starts. Cancelling a call stops its setup, or stops following a started job without killing it.
+`box mcp` is a stdio MCP server with five tools, `box_status`, `box_run`, `box_job`, `box_cancel` and `box_pull`, which behave like the commands above. Creating, listing and deleting boxes (`new`, `ls`, `rm`) and `--box` are CLI only. Results start with a line that carries the key facts, and most also return `structuredContent`. `box_run` and `box_job` put the job ID, box, exit code and any warnings ahead of the output tail. `box_job` with `offset` or `limit` returns a page of the log and `nextOffset` without waiting, and without `id` it lists jobs. If a page contains incomplete UTF-8, `logBase64` in `structuredContent` preserves the original bytes. Info-level notifications announce the throwaway box before launch and the job ID before the job starts. Cancelling a call stops its setup, or stops following a started job without killing it.
+
+`box_run` returns the result inline if the job ends within 30 seconds of the command starting. Otherwise it returns `state: running` (`exitCode: null`) and `push`. When `push` is true, box has a T3 thread for this session (`T3CODE_THREAD_ID`, or Codex's `_meta.threadId`) and a detached `box watch` process on the laptop follows the job and sends the result into that thread with `t3 thread send`, as a turn starting `box: job ...`, so the agent can end its turn instead of waiting. The message has the reason, the command and the last 20 lines, masked like the dashboard's history. A throwaway box and its log are kept 30 minutes after the job, so `box_pull` still works. When `push` is false (no T3 thread, or `push: false`, which subagents pass) the agent calls `box_job`, which waits up to 10 minutes and always returns the full result. Every later `box_*` result starts with `finished since you last looked: ...` until a job's result has reached the agent, and restarts watchers that a laptop sleep or reboot killed. A refusal at start (exit 75) comes back at once as `state: refused` and is never pushed, nor is a job the agent cancelled. A duplicate notice is fine, a lost one is not: if `box_job` and the watcher race, the agent may get the result twice. `box_run` takes no `box` or `wait`. [Pushing results to the agent](docs/DESIGN.md#pushing-results-to-the-agent)
 
 `box join` registers `box mcp` as a user-scope MCP server with each agent CLI it finds. It installs the [box skill](skills/box/SKILL.md) in `~/.claude/skills/box/` and also in `$CLAUDE_CONFIG_DIR/skills/box/` when set. For Codex it uses `~/.codex/skills/box/` or `$CODEX_HOME/skills/box/` when set. Run `box join` from a built binary at its final path. `box join --leave` unregisters the servers and removes the installed skill files. A skill file with different contents is kept.
 

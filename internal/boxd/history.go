@@ -1,0 +1,655 @@
+package boxd
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/a-Fig/agent-box/internal/dash"
+)
+
+// The history is JSON lines in Dir (docs/ui.md, "History"): events-DATE.jsonl,
+// kept EventDays, and samples-DATE.jsonl, kept SampleDays. Every line has
+// "v": 1; a reader skips a line it can't parse, so a crash mid-write loses
+// that line only.
+const (
+	EventDays  = 180
+	SampleDays = 14
+	TailDays   = 30 // a job's kept tail is dropped from its events after this
+)
+
+// Event types in the events files.
+const (
+	recJobStart    = "job-start"
+	recJobEnd      = "job-end"
+	recBoxCreate   = "box-create"
+	recBoxDelete   = "box-delete"
+	recMode        = "mode" // the effective mode or its reason changed
+	recModeRequest = "mode-request"
+	recControl     = "control"
+	recRefusal     = "refusal"
+)
+
+// record is one line of an events file.
+type record struct {
+	V       int               `json:"v"`
+	At      time.Time         `json:"at"`
+	Type    string            `json:"type"`
+	Job     *dash.Job         `json:"job,omitempty"`
+	Seconds float64           `json:"seconds,omitempty"` // job-end: how long it ran
+	Box     *boxRec           `json:"box,omitempty"`
+	Mode    *modeRec          `json:"mode,omitempty"`
+	Request *dash.ModeRequest `json:"request,omitempty"`
+	Refusal *dash.RefusalBody `json:"refusal,omitempty"`
+	Control *controlRec       `json:"control,omitempty"`
+}
+
+type boxRec struct {
+	Name      string    `json:"name"`
+	Size      string    `json:"size"`
+	GPU       bool      `json:"gpu"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func (b boxRec) id() string { return b.Name + "@" + b.CreatedAt.UTC().Format(time.RFC3339Nano) }
+
+type modeRec struct {
+	Mode   string `json:"mode"`
+	Reason string `json:"reason"`
+}
+
+// controlRec is something done from the page (step 4 of docs/ui.md).
+type controlRec struct {
+	Action string `json:"action"`
+	Target string `json:"target"`
+	By     string `json:"by"`
+}
+
+// sample is one line of a samples file, each minute: one for the machine and
+// one per box.
+type sample struct {
+	V        int       `json:"v"`
+	At       time.Time `json:"at"`
+	Kind     string    `json:"kind"` // machine, box
+	Box      string    `json:"box,omitempty"`
+	Size     string    `json:"size,omitempty"`
+	MemUsed  int64     `json:"memUsed"`
+	MemLimit int64     `json:"memLimit,omitempty"` // box
+	MemCap   int64     `json:"memCap,omitempty"`   // machine
+	MemAlloc int64     `json:"memAlloc,omitempty"` // machine: what boxes hold of the cap
+	WSL      int64     `json:"wslMemory,omitempty"`
+	CPUTime  int64     `json:"cpuTime,omitempty"` // box: nanoseconds
+}
+
+type boxSpan struct {
+	rec boxRec
+	end *time.Time
+}
+
+type modeAt struct {
+	at time.Time
+	modeRec
+}
+
+type refusalAt struct {
+	at  time.Time
+	why string
+}
+
+// History writes the files and answers questions from them. It keeps every
+// event in memory: a busy day is a few hundred lines.
+type History struct {
+	dir string
+	now func() time.Time
+
+	mu       sync.Mutex
+	jobs     map[string]*dash.Job
+	boxes    map[string]*boxSpan
+	modes    []modeAt
+	refusals []refusalAt
+	memDays  map[string][]memAgg // done days' minute samples, by UTC hour
+}
+
+type memAgg struct {
+	sum, n int64
+	cap    int64
+}
+
+// OpenHistory reads the events files in dir, making dir if it is missing.
+func OpenHistory(dir string, now func() time.Time) (*History, error) {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+	h := &History{dir: dir, now: now, jobs: map[string]*dash.Job{}, boxes: map[string]*boxSpan{}, memDays: map[string][]memAgg{}}
+	files, _ := filepath.Glob(filepath.Join(dir, "events-*.jsonl"))
+	slices.Sort(files)
+	for _, f := range files {
+		eachLine(f, func(b []byte) {
+			var r record
+			if json.Unmarshal(b, &r) == nil && r.V == 1 {
+				h.apply(r)
+			}
+		})
+	}
+	h.dropOldTails()
+	return h, nil
+}
+
+func eachLine(path string, fn func([]byte)) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64<<10), 4<<20)
+	for sc.Scan() {
+		if b := bytes.TrimSpace(sc.Bytes()); len(b) > 0 {
+			fn(b)
+		}
+	}
+}
+
+// apply folds a record into memory.
+func (h *History) apply(r record) {
+	switch r.Type {
+	case recJobStart, recJobEnd:
+		if r.Job == nil {
+			return
+		}
+		j := *r.Job
+		if old, ok := h.jobs[j.Key]; ok && r.Type == recJobStart && old.State != dash.JobRunning {
+			return // an end already read wins over a repeated start
+		}
+		h.jobs[j.Key] = &j
+	case recBoxCreate:
+		if r.Box != nil {
+			h.boxes[r.Box.id()] = &boxSpan{rec: *r.Box}
+		}
+	case recBoxDelete:
+		if r.Box != nil {
+			if s, ok := h.boxes[r.Box.id()]; ok {
+				at := r.At
+				s.end = &at
+			}
+		}
+	case recMode:
+		if r.Mode != nil {
+			h.modes = append(h.modes, modeAt{r.At, *r.Mode})
+		}
+	case recRefusal:
+		if r.Refusal != nil {
+			h.refusals = append(h.refusals, refusalAt{r.At, r.Refusal.Why})
+		}
+	}
+}
+
+// Record appends an event, masking the job's and the refusal's text first.
+func (h *History) Record(r record) error {
+	r.V = 1
+	if r.At.IsZero() {
+		r.At = h.now()
+	}
+	r.At = r.At.UTC()
+	if r.Job != nil {
+		j := *r.Job
+		j.Command, j.Reason, j.Tail, j.Repo = Mask(j.Command), Mask(j.Reason), Mask(j.Tail), Mask(j.Repo)
+		if r.Type == recJobStart {
+			j.Tail = ""
+		}
+		r.Job = &j
+	}
+	if r.Refusal != nil {
+		f := *r.Refusal
+		f.Reason = Mask(f.Reason)
+		r.Refusal = &f
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.apply(r)
+	return appendLine(filepath.Join(h.dir, "events-"+r.At.Format("2006-01-02")+".jsonl"), b)
+}
+
+// Samples appends one minute's samples.
+func (h *History) Samples(ss []sample) error {
+	if len(ss) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	for _, s := range ss {
+		s.V = 1
+		b, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	at := ss[0].At.UTC()
+	return appendLine(filepath.Join(h.dir, "samples-"+at.Format("2006-01-02")+".jsonl"), bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+}
+
+func appendLine(path string, b []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o640)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// Prune deletes files past their keep and drops kept tails older than
+// TailDays from the events files.
+func (h *History) Prune() error {
+	now := h.now().UTC()
+	day := func(name, prefix string) (time.Time, bool) {
+		t, err := time.Parse("2006-01-02", strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".jsonl"))
+		return t, err == nil
+	}
+	h.mu.Lock() // Record appends to these files
+	defer h.mu.Unlock()
+	var errs []error
+	for _, k := range []struct {
+		prefix string
+		keep   int
+	}{{"events-", EventDays}, {"samples-", SampleDays}} {
+		files, _ := filepath.Glob(filepath.Join(h.dir, k.prefix+"*.jsonl"))
+		for _, f := range files {
+			t, ok := day(filepath.Base(f), k.prefix)
+			if !ok {
+				continue
+			}
+			age := now.Sub(t)
+			switch {
+			case age > time.Duration(k.keep+1)*24*time.Hour:
+				if err := os.Remove(f); err != nil {
+					errs = append(errs, err)
+				}
+			case k.prefix == "events-" && age > time.Duration(TailDays+1)*24*time.Hour:
+				if err := stripTails(f); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+	}
+	h.dropOldTails()
+	if len(errs) > 0 {
+		return fmt.Errorf("prune history: %v", errs)
+	}
+	return nil
+}
+
+// stripTails rewrites an events file without its jobs' tails, once.
+func stripTails(path string) error {
+	var out bytes.Buffer
+	changed := false
+	eachLine(path, func(b []byte) {
+		var r record
+		if json.Unmarshal(b, &r) == nil && r.Job != nil && r.Job.Tail != "" {
+			r.Job.Tail = ""
+			if nb, err := json.Marshal(r); err == nil {
+				b, changed = nb, true
+			}
+		}
+		out.Write(b)
+		out.WriteByte('\n')
+	})
+	if !changed {
+		return nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out.Bytes(), 0o640); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func (h *History) dropOldTails() {
+	cut := h.now().Add(-TailDays * 24 * time.Hour)
+	for _, j := range h.jobs {
+		if j.StartedAt.Before(cut) {
+			j.Tail = ""
+		}
+	}
+}
+
+// Job returns a recorded job.
+func (h *History) Job(key string) (dash.Job, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	j, ok := h.jobs[key]
+	if !ok {
+		return dash.Job{}, false
+	}
+	return *j, true
+}
+
+// EndedOn names the jobs ("<box>.<id>", as box names their files) recorded as
+// ended on the box created at created, so a scan can skip their details.
+func (h *History) EndedOn(box string, created time.Time) map[string]bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := map[string]bool{}
+	for _, j := range h.jobs {
+		if j.Box == box && (j.State == dash.JobDone || j.State == dash.JobLost) && holds(created, j.StartedAt) {
+			out[box+"."+j.ID] = true
+		}
+	}
+	return out
+}
+
+// Open returns the jobs recorded as started but not ended, and the boxes
+// recorded as created but not deleted: what a restart reconciles.
+func (h *History) Open() (jobs []dash.Job, boxes []boxRec) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, j := range h.jobs {
+		if j.State == dash.JobRunning || j.State == dash.JobPaused {
+			jobs = append(jobs, *j)
+		}
+	}
+	for _, b := range h.boxes {
+		if b.end == nil {
+			boxes = append(boxes, b.rec)
+		}
+	}
+	return jobs, boxes
+}
+
+// LastMode is the last mode recorded, or nil.
+func (h *History) LastMode() *modeRec {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.modes) == 0 {
+		return nil
+	}
+	m := h.modes[len(h.modes)-1].modeRec
+	return &m
+}
+
+// Filter is GET /api/jobs's query.
+type Filter struct {
+	Repo, Agent, Kind, Machine, Result, Q string
+	// Before is the last job of the page before: the page is the jobs after
+	// it in newest-first order.
+	Before *dash.Job
+	Limit  int
+}
+
+// newest orders jobs newest first: by startedAt, then by key, since start
+// times have one-second resolution.
+func newest(a, b dash.Job) int {
+	if c := b.StartedAt.Compare(a.StartedAt); c != 0 {
+		return c
+	}
+	return strings.Compare(b.Key, a.Key)
+}
+
+func (f Filter) match(j *dash.Job) bool {
+	if f.Repo != "" && f.Repo != j.Repo && f.Repo != repoShort(j.Repo) {
+		return false
+	}
+	if (f.Agent != "" && f.Agent != j.Agent.Session) || (f.Kind != "" && f.Kind != j.Kind) ||
+		(f.Machine != "" && f.Machine != j.Machine) || (f.Result != "" && f.Result != j.Result()) {
+		return false
+	}
+	if f.Before != nil && newest(*f.Before, *j) >= 0 {
+		return false
+	}
+	if q := strings.ToLower(f.Q); q != "" && !strings.Contains(strings.ToLower(j.Reason+"\n"+j.Command+"\n"+j.Branch), q) {
+		return false
+	}
+	return true
+}
+
+// Finished returns finished jobs that match f, newest first.
+func (h *History) Finished(f Filter) dash.JobsPage {
+	if f.Limit <= 0 {
+		f.Limit = 50
+	}
+	h.mu.Lock()
+	var all []dash.Job
+	for _, j := range h.jobs {
+		if (j.State == dash.JobDone || j.State == dash.JobLost) && f.match(j) {
+			all = append(all, *j)
+		}
+	}
+	h.mu.Unlock()
+	slices.SortFunc(all, newest)
+	p := dash.JobsPage{Jobs: all[:min(len(all), f.Limit)], More: len(all) > f.Limit}
+	if p.Jobs == nil {
+		p.Jobs = []dash.Job{}
+	}
+	return p
+}
+
+// repoShort is a repo's last path element without .git, as the page names it.
+func repoShort(url string) string {
+	url = strings.TrimSuffix(strings.TrimSuffix(url, "/"), ".git")
+	return url[strings.LastIndex(url, "/")+1:]
+}
+
+// Live is what the watcher knows now, for the history's last bucket.
+type Live struct {
+	Mode   modeRec
+	MemCap int64
+}
+
+// Range builds GET /api/history: 24 hourly buckets or 7 daily ones ending
+// with the one holding now.
+func (h *History) Range(rng string, live Live) dash.History {
+	now := h.now().UTC()
+	step, n := time.Hour, 24
+	start := now.Truncate(time.Hour).Add(-23 * time.Hour)
+	if rng == dash.RangeWeek {
+		step, n = 24*time.Hour, 7
+		start = now.Truncate(24 * time.Hour).Add(-6 * 24 * time.Hour)
+	}
+	out := dash.History{Range: rng, Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
+	durs := make([]map[string][]float64, n)
+	for i := range out.Buckets {
+		out.Buckets[i] = dash.Bucket{
+			Start: start.Add(time.Duration(i) * step),
+			Jobs: dash.JobCounts{ByResult: map[string]int{}, ByKind: map[string]int{}, ByRepo: map[string]int{},
+				ByAgent: map[string]int{}},
+			BoxHours:      dash.BoxHours{BySize: map[string]float64{}},
+			Refusals:      dash.RefusalCounts{ByWhy: map[string]int{}},
+			MedianSeconds: dash.Medians{ByRepo: map[string]float64{}},
+		}
+		durs[i] = map[string][]float64{}
+	}
+	at := func(t time.Time) int {
+		if t.Before(start) {
+			return -1
+		}
+		if i := int(t.Sub(start) / step); i < n {
+			return i
+		}
+		return -1
+	}
+
+	h.mu.Lock()
+	for _, j := range h.jobs {
+		i := at(j.StartedAt)
+		if i < 0 {
+			continue
+		}
+		b := &out.Buckets[i]
+		if r := j.Result(); r != "" {
+			b.Jobs.ByResult[r]++
+		}
+		b.Jobs.ByKind[j.Kind]++
+		b.Jobs.ByRepo[repoShort(j.Repo)]++
+		b.Jobs.ByAgent[j.Agent.Session]++
+		if j.State == dash.JobDone && j.EndedAt != nil {
+			r := repoShort(j.Repo)
+			durs[i][r] = append(durs[i][r], j.EndedAt.Sub(j.StartedAt).Seconds())
+		}
+	}
+	for _, s := range h.boxes {
+		to := now
+		if s.end != nil {
+			to = *s.end
+		}
+		for i := range out.Buckets {
+			bs := out.Buckets[i].Start
+			lo, hi := later(s.rec.CreatedAt, bs), earlier(to, bs.Add(step))
+			if hi.After(lo) {
+				out.Buckets[i].BoxHours.BySize[s.rec.Size] = round2(out.Buckets[i].BoxHours.BySize[s.rec.Size] + hi.Sub(lo).Hours())
+			}
+		}
+	}
+	for _, r := range h.refusals {
+		if i := at(r.at); i >= 0 {
+			out.Buckets[i].Refusals.ByWhy[r.why]++
+		}
+	}
+	out.Segments = segments(h.modes, start, now, live.Mode)
+	h.mu.Unlock()
+
+	for i, byRepo := range durs {
+		for r, ds := range byRepo {
+			out.Buckets[i].MedianSeconds.ByRepo[r] = median(ds)
+		}
+	}
+	h.fillMemory(out.Buckets, step, live.MemCap)
+	return out
+}
+
+// segments is the mode timeline from start to now: the mode in force at
+// start, then each change.
+func segments(modes []modeAt, start, now time.Time, cur modeRec) []dash.Segment {
+	var segs []dash.Segment
+	open := func(at time.Time, m modeRec) {
+		if n := len(segs); n > 0 {
+			if segs[n-1].Mode == m.Mode && segs[n-1].Reason == m.Reason {
+				return
+			}
+			segs[n-1].End = at
+		}
+		segs = append(segs, dash.Segment{Start: at, End: now, Mode: m.Mode, Reason: m.Reason})
+	}
+	for i, m := range modes {
+		if m.at.After(now) {
+			break
+		}
+		if !m.at.After(start) {
+			if i+1 == len(modes) || modes[i+1].at.After(start) {
+				open(start, m.modeRec)
+			}
+			continue
+		}
+		open(m.at, m.modeRec)
+	}
+	if len(segs) == 0 && cur.Mode != "" {
+		open(start, cur)
+	}
+	if segs == nil {
+		segs = []dash.Segment{}
+	}
+	return segs
+}
+
+// fillMemory sets each bucket's MemUsed (the mean of the machine's minute
+// samples) and MemCap (the largest cap sampled, else the cap now).
+func (h *History) fillMemory(bs []dash.Bucket, step time.Duration, capNow int64) {
+	if len(bs) == 0 {
+		return
+	}
+	today := h.now().UTC().Format("2006-01-02")
+	from, to := bs[0].Start, bs[len(bs)-1].Start.Add(step)
+	sums := make([]memAgg, len(bs))
+	for d := from.Truncate(24 * time.Hour); d.Before(to); d = d.Add(24 * time.Hour) {
+		date := d.Format("2006-01-02")
+		hours := h.memDay(date, date != today)
+		for hr, a := range hours {
+			t := d.Add(time.Duration(hr) * time.Hour)
+			if t.Before(from) || !t.Before(to) {
+				continue
+			}
+			i := int(t.Sub(from) / step)
+			sums[i].sum += a.sum
+			sums[i].n += a.n
+			sums[i].cap = max(sums[i].cap, a.cap)
+		}
+	}
+	for i := range bs {
+		if sums[i].n > 0 {
+			bs[i].MemUsed = sums[i].sum / sums[i].n
+		}
+		bs[i].MemCap = sums[i].cap
+		if bs[i].MemCap == 0 {
+			bs[i].MemCap = capNow
+		}
+	}
+}
+
+// memDay reads a day's machine samples into 24 hourly sums; a finished day
+// is cached.
+func (h *History) memDay(date string, done bool) []memAgg {
+	h.mu.Lock()
+	if a, ok := h.memDays[date]; ok {
+		h.mu.Unlock()
+		return a
+	}
+	h.mu.Unlock()
+	a := make([]memAgg, 24)
+	eachLine(filepath.Join(h.dir, "samples-"+date+".jsonl"), func(b []byte) {
+		if !bytes.Contains(b, []byte(`"machine"`)) {
+			return
+		}
+		var s sample
+		if json.Unmarshal(b, &s) == nil && s.V == 1 && s.Kind == "machine" {
+			hr := s.At.UTC().Hour()
+			a[hr].sum += s.MemUsed
+			a[hr].n++
+			a[hr].cap = max(a[hr].cap, s.MemCap)
+		}
+	})
+	if done {
+		h.mu.Lock()
+		h.memDays[date] = a
+		h.mu.Unlock()
+	}
+	return a
+}
+
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func earlier(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
+}
+
+func round2(f float64) float64 { return math.Round(f*100) / 100 }
+
+func median(ds []float64) float64 {
+	slices.Sort(ds)
+	n := len(ds)
+	if n%2 == 1 {
+		return math.Round(ds[n/2])
+	}
+	return math.Round((ds[n/2-1] + ds[n/2]) / 2)
+}

@@ -86,9 +86,12 @@ if ! alive "$pid" "$j" || [ "$(ps -o sid= -p "$pid" | tr -d ' ')" != "$pid" ]; t
   echo "cannot identify the session for job $j" >&2
   exit 4
 fi
-if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then exit 4; fi
+# Watchers read this to stay quiet about a job the agent cancelled; it is
+# there before the exit file can be.
+: > "$j.cancelled"
+if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
 for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
-if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then exit 4; fi
+if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
 if [ -f "$j.exit" ]; then echo "finished $(cat "$j.exit")"; exit 0; fi
 verdict=finished
 if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then verdict=cancelled; fi
@@ -285,8 +288,18 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 	}
 	if f[0] == "cancelled" {
 		a.markIdle(ctx, box)
+		a.markNotified(job, "cancel") // the agent cancelled it: no push of its end
 	}
 	return f[0] == "cancelled", code, nil
+}
+
+// wasCancelled says whether box cancel stopped the job (its .cancelled mark
+// in the box). Any failure to look says no: a duplicate notice beats a lost one.
+func (a *App) wasCancelled(ctx context.Context, job string) bool {
+	box, _, _ := strings.Cut(job, ".")
+	script := fmt.Sprintf("# cancelled\ntest -f %s/.box/%s.cancelled && echo yes\nexit 0\n", workRoot, job)
+	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", script}})
+	return err == nil && strings.TrimSpace(res.Stdout) == "yes"
 }
 
 // checkoutScript prints the checkout a relative path in box pull starts

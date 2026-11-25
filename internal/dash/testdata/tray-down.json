@@ -1,0 +1,1990 @@
+{
+  "name": "tray-down",
+  "about": "The tray hasn't been seen for 14 minutes, so a mode request from a phone isn't being picked up.",
+  "state": {
+    "machines": [
+      {
+        "id": "pc",
+        "name": "Gaming PC",
+        "reachable": true,
+        "mode": "shared",
+        "modeReason": "",
+        "modeRequested": {
+          "mode": "mypc",
+          "at": "2026-11-24T17:25:00Z",
+          "by": "phone"
+        },
+        "yielding": false,
+        "trayLastSeen": "2026-11-24T17:16:00Z",
+        "caps": {
+          "cpu": 24,
+          "memory": 12884901888,
+          "instances": 6,
+          "disk": 161061273600
+        },
+        "allocated": {
+          "cpu": 4,
+          "memory": 4294967296,
+          "instances": 1,
+          "disk": 64424509440
+        },
+        "room": {
+          "small": 4,
+          "medium": 2,
+          "large": 1,
+          "gpu": 1
+        },
+        "wslMemory": 3221225472
+      }
+    ],
+    "boxes": [
+      {
+        "name": "tidepool",
+        "machine": "pc",
+        "size": "medium",
+        "gpu": false,
+        "state": "running",
+        "throwaway": false,
+        "repo": "https://github.com/acme/tidepool",
+        "createdAt": "2026-11-24T16:00:00Z",
+        "expiresAt": "2026-11-25T17:00:00Z",
+        "memUsed": 2104533975,
+        "memLimit": 4294967296,
+        "cpus": 2,
+        "cpuPct": 45
+      }
+    ],
+    "jobs": [
+      {
+        "key": "tidepool/20261124-172755-8ec1/2026-11-24T17:27:55Z",
+        "id": "20261124-172755-8ec1",
+        "box": "tidepool",
+        "machine": "pc",
+        "state": "running",
+        "exit": null,
+        "startedAt": "2026-11-24T17:27:55Z",
+        "endedAt": null,
+        "reason": "Whole vitest suite after the router refactor; locally it spawns a worker per core.",
+        "command": "npx vitest run",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "fix/hydration-flash",
+        "commit": "33e0893961d5252d01e27e4c995dfb03e4edd43f",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": " ✓ src/store/session.test.ts (31 tests) 926ms\n ✓ src/ui/Button.test.tsx (22 tests) 346ms\n ✓ src/api/client.test.ts (27 tests) 164ms\n ✓ src/hydrate.test.ts (28 tests) 896ms\n ✓ src/router/cache.test.ts (31 tests) 860ms\n ✓ src/store/session.test.ts (23 tests) 421ms\n ✓ src/ui/Button.test.tsx (16 tests) 469ms\n ✓ src/api/client.test.ts (13 tests) 797ms\n ✓ src/hydrate.test.ts (4 tests) 131ms\n ✓ src/router/cache.test.ts (20 tests) 210ms\n ✓ src/store/session.test.ts (19 tests) 73ms\n ✓ src/ui/Button.test.tsx (20 tests) 742ms\n ✓ src/api/client.test.ts (18 tests) 585ms\n ✓ src/hydrate.test.ts (21 tests) 378ms\n ✓ src/router/cache.test.ts (19 tests) 231ms\n ✓ src/store/session.test.ts (6 tests) 134ms\n ✓ src/ui/Button.test.tsx (31 tests) 396ms\n ✓ src/api/client.test.ts (10 tests) 394ms\n ✓ src/hydrate.test.ts (17 tests) 802ms\n ✓ src/router/cache.test.ts (6 tests) 292ms\n ✓ src/store/session.test.ts (11 tests) 805ms\n ✓ src/ui/Button.test.tsx (4 tests) 222ms\n ✓ src/api/client.test.ts (18 tests) 658ms\n ✓ src/hydrate.test.ts (31 tests) 534ms\n ✓ src/router/cache.test.ts (13 tests) 711ms\n ✓ src/store/session.test.ts (20 tests) 83ms\n ✓ src/ui/Button.test.tsx (22 tests) 200ms\n ✓ src/api/client.test.ts (7 tests) 257ms\n ✓ src/hydrate.test.ts (24 tests) 271ms\n ✓ src/router/cache.test.ts (32 tests) 626ms\n ✓ src/store/session.test.ts (25 tests) 330ms\n ✓ src/ui/Button.test.tsx (22 tests) 327ms\n ✓ src/api/client.test.ts (32 tests) 77ms\n ✓ src/hydrate.test.ts (28 tests) 301ms\n ✓ src/router/cache.test.ts (22 tests) 149ms\n ✓ src/store/session.test.ts (17 tests) 466ms\n ✓ src/ui/Button.test.tsx (32 tests) 710ms\n ✓ src/api/client.test.ts (29 tests) 482ms\n ✓ src/hydrate.test.ts (9 tests) 406ms\n ✓ src/router/cache.test.ts (9 tests) 377ms\n ✓ src/store/session.test.ts (17 tests) 442ms\n ✓ src/ui/Button.test.tsx (16 tests) 836ms\n ✓ src/api/client.test.ts (24 tests) 633ms\n ✓ src/hydrate.test.ts (17 tests) 256ms\n ✓ src/router/cache.test.ts (5 tests) 41ms\n"
+      },
+      {
+        "key": "orbit-android/20261124-170740-f48d/2026-11-24T17:07:40Z",
+        "id": "20261124-170740-f48d",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T17:07:40Z",
+        "endedAt": "2026-11-24T17:12:27Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "54bdf96c62348bbfe7fe21993638cb02fb5665f6",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "orbit-android-9eb0/20261124-132249-f743/2026-11-24T13:22:49Z",
+        "id": "20261124-132249-f743",
+        "box": "orbit-android-9eb0",
+        "machine": "pc",
+        "state": "done",
+        "exit": 1,
+        "startedAt": "2026-11-24T13:22:49Z",
+        "endedAt": "2026-11-24T13:32:01Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "cf72a08c09e93d49061114bf46f2c4b5ef1e41f6",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n"
+      },
+      {
+        "key": "orbit-android-5c92/20261124-112647-c98f/2026-11-24T11:26:47Z",
+        "id": "20261124-112647-c98f",
+        "box": "orbit-android-5c92",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T11:26:47Z",
+        "endedAt": "2026-11-24T11:32:49Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "88842c33bfc0a921efef95b5bc6da39e3e70ce00",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "lantern/20261124-074927-f1c2/2026-11-24T07:49:27Z",
+        "id": "20261124-074927-f1c2",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T07:49:27Z",
+        "endedAt": "2026-11-24T07:50:32Z",
+        "reason": "",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "581a19b27837a78c5890093159e1a97af77de673",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\n"
+      },
+      {
+        "key": "sparrow-ml-c5de/20261124-073710-adbe/2026-11-24T07:37:10Z",
+        "id": "20261124-073710-adbe",
+        "box": "sparrow-ml-c5de",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T07:37:10Z",
+        "endedAt": "2026-11-24T08:09:04Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "fix/tokenizer-pad",
+        "commit": "0f36e641284dff301a26b9d667685984f03fa0d7",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    4/200  loss 2.8210  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep    8/200  loss 2.7786  lr 2.0e-4  3.9 it/s  gpu mem 6.3 GiB\nstep   13/200  loss 2.7372  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   17/200  loss 2.7032  lr 2.0e-4  3.7 it/s  gpu mem 6.5 GiB\nstep   22/200  loss 2.6619  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   26/200  loss 2.6101  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   31/200  loss 2.5866  lr 2.0e-4  3.9 it/s  gpu mem 6.4 GiB\nstep   35/200  loss 2.5473  lr 2.0e-4  3.9 it/s  gpu mem 6.0 GiB\nstep   40/200  loss 2.5132  lr 2.0e-4  3.1 it/s  gpu mem 6.4 GiB\nstep   44/200  loss 2.4700  lr 2.0e-4  3.2 it/s  gpu mem 6.0 GiB\nstep   48/200  loss 2.4139  lr 2.0e-4  3.8 it/s  gpu mem 6.6 GiB\nstep   53/200  loss 2.3725  lr 2.0e-4  3.9 it/s  gpu mem 6.0 GiB\nstep   57/200  loss 2.3532  lr 2.0e-4  3.7 it/s  gpu mem 6.8 GiB\nstep   62/200  loss 2.3175  lr 2.0e-4  3.5 it/s  gpu mem 6.1 GiB\nstep   66/200  loss 2.2421  lr 2.0e-4  3.4 it/s  gpu mem 6.3 GiB\n"
+      },
+      {
+        "key": "sparrow-ml-48ef/20261124-072755-8246/2026-11-24T07:27:55Z",
+        "id": "20261124-072755-8246",
+        "box": "sparrow-ml-48ef",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T07:27:55Z",
+        "endedAt": "2026-11-24T07:56:33Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "fix/tokenizer-pad",
+        "commit": "38ef3c62fe293201c6ae1504d02a33c1726b0ed0",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    6/200  loss 2.8277  lr 2.0e-4  3.1 it/s  gpu mem 6.1 GiB\nstep   12/200  loss 2.7998  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   18/200  loss 2.7675  lr 2.0e-4  3.4 it/s  gpu mem 6.7 GiB\nstep   24/200  loss 2.6978  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep   30/200  loss 2.6424  lr 2.0e-4  3.2 it/s  gpu mem 6.2 GiB\nstep   36/200  loss 2.6497  lr 2.0e-4  3.8 it/s  gpu mem 6.8 GiB\nstep   42/200  loss 2.5622  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   48/200  loss 2.5470  lr 2.0e-4  3.5 it/s  gpu mem 6.8 GiB\nstep   54/200  loss 2.4831  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   60/200  loss 2.4873  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep   66/200  loss 2.4116  lr 2.0e-4  3.4 it/s  gpu mem 6.4 GiB\n"
+      },
+      {
+        "key": "lantern-851f/20261124-050225-554e/2026-11-24T05:02:25Z",
+        "id": "20261124-050225-554e",
+        "box": "lantern-851f",
+        "machine": "pc",
+        "state": "done",
+        "exit": 2,
+        "startedAt": "2026-11-24T05:02:25Z",
+        "endedAt": "2026-11-24T05:04:28Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "83baf97d2890f97853d9256a77566afe528aabe1",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\nerror: process exited with status 1\n"
+      },
+      {
+        "key": "lantern-57b9/20261124-033210-f823/2026-11-24T03:32:10Z",
+        "id": "20261124-033210-f823",
+        "box": "lantern-57b9",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T03:32:10Z",
+        "endedAt": "2026-11-24T03:41:13Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "e6cad963772950b36189b76ccdefb6c8cfd92749",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n"
+      },
+      {
+        "key": "sparrow-ml-a8d9/20261124-023424-66b2/2026-11-24T02:34:24Z",
+        "id": "20261124-023424-66b2",
+        "box": "sparrow-ml-a8d9",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T02:34:24Z",
+        "endedAt": "2026-11-24T02:40:18Z",
+        "reason": "",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "exp/lora-rank",
+        "commit": "61e715cb75ea8d940200c2484e8852d58f69ef33",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ...................... [ 12%]\ntests/test_data.py ..................................... [ 25%]\ntests/test_model.py ............................. [ 37%]\ntests/test_schedule.py ............................. [ 50%]\ntests/test_tokenizer.py ................... [ 62%]\ntests/test_data.py ......................... [ 75%]\ntests/test_model.py ........................... [ 87%]\ntests/test_schedule.py ................................. [100%]\n======== 318 passed in 412.80s ========\n"
+      },
+      {
+        "key": "orbit-android-500f/20261124-011749-529b/2026-11-24T01:17:49Z",
+        "id": "20261124-011749-529b",
+        "box": "orbit-android-500f",
+        "machine": "pc",
+        "state": "lost",
+        "exit": null,
+        "startedAt": "2026-11-24T01:17:49Z",
+        "endedAt": "2026-11-24T01:29:59Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "b81af8199560dcb1efb9b00c3a94e77e4236571d",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n"
+      },
+      {
+        "key": "sparrow-ml-f148/20261124-000242-839c/2026-11-24T00:02:42Z",
+        "id": "20261124-000242-839c",
+        "box": "sparrow-ml-f148",
+        "machine": "pc",
+        "state": "done",
+        "exit": 1,
+        "startedAt": "2026-11-24T00:02:42Z",
+        "endedAt": "2026-11-24T00:06:52Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "02cf5c938cec8a5381eeaedc2723e99bf57a0b8f",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [ 12%]\ntests/test_data.py ............... [ 25%]\ntests/test_model.py ................................... [ 37%]\ntests/test_schedule.py ................................. [ 50%]\ntests/test_tokenizer.py .................................... [ 62%]\ntests/test_data.py ..................... [ 75%]\ntests/test_model.py .............................. [ 87%]\ntests/test_schedule.py ................... [100%]\nerror: process exited with status 1\n"
+      },
+      {
+        "key": "lantern/20261123-233854-a56f/2026-11-23T23:38:54Z",
+        "id": "20261123-233854-a56f",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T23:38:54Z",
+        "endedAt": "2026-11-23T23:40:39Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "8aa53ec11367d7510ae976f47d49bba074405e72",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\n"
+      },
+      {
+        "key": "orbit-android/20261123-224411-86d5/2026-11-23T22:44:11Z",
+        "id": "20261123-224411-86d5",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T22:44:11Z",
+        "endedAt": "2026-11-23T22:49:49Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "1a047c1908401b84c21ebed70a93af533ef76085",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "tidepool/20261123-223032-264c/2026-11-23T22:30:32Z",
+        "id": "20261123-223032-264c",
+        "box": "tidepool",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T22:30:32Z",
+        "endedAt": "2026-11-23T22:35:06Z",
+        "reason": "Whole vitest suite after the router refactor; locally it spawns a worker per core.",
+        "command": "npx vitest run",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "feat/router-cache",
+        "commit": "57d2f022f6807efd45463b0a30025eb920c25eb9",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (25 tests) 727ms\n ✓ src/store/session.test.ts (22 tests) 324ms\n ✓ src/ui/Button.test.tsx (21 tests) 463ms\n ✓ src/api/client.test.ts (3 tests) 700ms\n ✓ src/hydrate.test.ts (3 tests) 312ms\n ✓ src/router/cache.test.ts (17 tests) 805ms\n ✓ src/store/session.test.ts (12 tests) 869ms\n ✓ src/ui/Button.test.tsx (7 tests) 89ms\n ✓ src/api/client.test.ts (10 tests) 642ms\n ✓ src/hydrate.test.ts (5 tests) 216ms\n ✓ src/router/cache.test.ts (26 tests) 856ms\n ✓ src/store/session.test.ts (13 tests) 636ms\n ✓ src/ui/Button.test.tsx (25 tests) 182ms\n ✓ src/api/client.test.ts (27 tests) 657ms\n ✓ src/hydrate.test.ts (5 tests) 682ms\n ✓ src/router/cache.test.ts (24 tests) 576ms\n ✓ src/store/session.test.ts (29 tests) 241ms\n ✓ src/ui/Button.test.tsx (30 tests) 737ms\n ✓ src/api/client.test.ts (31 tests) 756ms\n ✓ src/hydrate.test.ts (20 tests) 535ms\n ✓ src/router/cache.test.ts (11 tests) 837ms\n ✓ src/store/session.test.ts (23 tests) 615ms\n ✓ src/ui/Button.test.tsx (13 tests) 157ms\n ✓ src/api/client.test.ts (9 tests) 246ms\n ✓ src/hydrate.test.ts (19 tests) 505ms\n ✓ src/router/cache.test.ts (15 tests) 45ms\n ✓ src/store/session.test.ts (11 tests) 44ms\n ✓ src/ui/Button.test.tsx (20 tests) 605ms\n ✓ src/api/client.test.ts (19 tests) 803ms\n ✓ src/hydrate.test.ts (3 tests) 333ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n"
+      },
+      {
+        "key": "lantern-f58d/20261123-200509-2e83/2026-11-23T20:05:09Z",
+        "id": "20261123-200509-2e83",
+        "box": "lantern-f58d",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T20:05:09Z",
+        "endedAt": "2026-11-23T20:12:55Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "e5f898e45c89c7fc2ce4a7f52999ea41474db2a5",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.004s\nok  \tgithub.com/acme/lantern/internal/sync\t1.733s\nok  \tgithub.com/acme/lantern/internal/api\t9.214s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t7.814s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.186s\nok  \tgithub.com/acme/lantern/internal/wire\t4.916s\nok  \tgithub.com/acme/lantern/internal/cache\t1.061s\nok  \tgithub.com/acme/lantern/internal/store\t5.974s\n"
+      },
+      {
+        "key": "orbit-android-a3fc/20261123-195341-6218/2026-11-23T19:53:41Z",
+        "id": "20261123-195341-6218",
+        "box": "orbit-android-a3fc",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T19:53:41Z",
+        "endedAt": "2026-11-23T19:59:55Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "main",
+        "commit": "162d5fec3160a6f858758216772d9075629c1cea",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "lantern-b34b/20261123-193449-3c7b/2026-11-23T19:34:49Z",
+        "id": "20261123-193449-3c7b",
+        "box": "lantern-b34b",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T19:34:49Z",
+        "endedAt": "2026-11-23T19:48:35Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "49fa2b079179bd96c5d085a3b6db4e3f7a384265",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n"
+      },
+      {
+        "key": "sparrow-ml/20261123-191336-eb54/2026-11-23T19:13:36Z",
+        "id": "20261123-191336-eb54",
+        "box": "sparrow-ml",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T19:13:36Z",
+        "endedAt": "2026-11-23T19:23:41Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "exp/lora-rank",
+        "commit": "afb337d9ee3845ff99d365eccf5e4ab9e5dba61c",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ................................... [  9%]\ntests/test_data.py ................................ [ 18%]\ntests/test_model.py ........................ [ 27%]\ntests/test_schedule.py .............. [ 36%]\ntests/test_tokenizer.py ......................... [ 45%]\ntests/test_data.py .......................... [ 54%]\ntests/test_model.py ................................... [ 63%]\ntests/test_schedule.py .............................. [ 72%]\ntests/test_tokenizer.py ......................... [ 81%]\ntests/test_data.py ................................ [ 90%]\ntests/test_model.py ...................... [100%]\n======== 318 passed in 412.80s ========\n"
+      },
+      {
+        "key": "lantern-94af/20261123-185225-9f3e/2026-11-23T18:52:25Z",
+        "id": "20261123-185225-9f3e",
+        "box": "lantern-94af",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T18:52:25Z",
+        "endedAt": "2026-11-23T18:59:33Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "5d561d7e4bb0416ad7aec8535a3de0f7d9ac5e14",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t6.382s\nok  \tgithub.com/acme/lantern/internal/sync\t1.534s\nok  \tgithub.com/acme/lantern/internal/api\t6.211s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t4.648s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.894s\nok  \tgithub.com/acme/lantern/internal/wire\t2.928s\nok  \tgithub.com/acme/lantern/internal/cache\t7.559s\nok  \tgithub.com/acme/lantern/internal/store\t1.120s\nok  \tgithub.com/acme/lantern/internal/sync\t1.303s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.600s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.944s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.937s\n"
+      },
+      {
+        "key": "tidepool-9085/20261123-173444-a44f/2026-11-23T17:34:44Z",
+        "id": "20261123-173444-a44f",
+        "box": "tidepool-9085",
+        "machine": "pc",
+        "state": "done",
+        "exit": 130,
+        "startedAt": "2026-11-23T17:34:44Z",
+        "endedAt": "2026-11-23T17:37:53Z",
+        "reason": "Whole vitest suite after the router refactor; locally it spawns a worker per core.",
+        "command": "npx vitest run",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "fix/hydration-flash",
+        "commit": "6deba9af531b107835e41686903ae180eaec7829",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (26 tests) 677ms\n ✓ src/store/session.test.ts (29 tests) 526ms\n ✓ src/ui/Button.test.tsx (23 tests) 544ms\n ✓ src/api/client.test.ts (25 tests) 286ms\n ✓ src/hydrate.test.ts (3 tests) 78ms\n ✓ src/router/cache.test.ts (29 tests) 537ms\n ✓ src/store/session.test.ts (13 tests) 793ms\n ✓ src/ui/Button.test.tsx (25 tests) 546ms\n ✓ src/api/client.test.ts (30 tests) 360ms\n^C\nbox: cancelled\n"
+      }
+    ],
+    "now": "2026-11-24T17:30:00Z"
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "key": "orbit-android/20261124-170740-f48d/2026-11-24T17:07:40Z",
+        "id": "20261124-170740-f48d",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T17:07:40Z",
+        "endedAt": "2026-11-24T17:12:27Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "54bdf96c62348bbfe7fe21993638cb02fb5665f6",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "orbit-android-9eb0/20261124-132249-f743/2026-11-24T13:22:49Z",
+        "id": "20261124-132249-f743",
+        "box": "orbit-android-9eb0",
+        "machine": "pc",
+        "state": "done",
+        "exit": 1,
+        "startedAt": "2026-11-24T13:22:49Z",
+        "endedAt": "2026-11-24T13:32:01Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "cf72a08c09e93d49061114bf46f2c4b5ef1e41f6",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n"
+      },
+      {
+        "key": "orbit-android-5c92/20261124-112647-c98f/2026-11-24T11:26:47Z",
+        "id": "20261124-112647-c98f",
+        "box": "orbit-android-5c92",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T11:26:47Z",
+        "endedAt": "2026-11-24T11:32:49Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "88842c33bfc0a921efef95b5bc6da39e3e70ce00",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "lantern/20261124-074927-f1c2/2026-11-24T07:49:27Z",
+        "id": "20261124-074927-f1c2",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T07:49:27Z",
+        "endedAt": "2026-11-24T07:50:32Z",
+        "reason": "",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "fix/store-lock-order",
+        "commit": "581a19b27837a78c5890093159e1a97af77de673",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\n"
+      },
+      {
+        "key": "sparrow-ml-c5de/20261124-073710-adbe/2026-11-24T07:37:10Z",
+        "id": "20261124-073710-adbe",
+        "box": "sparrow-ml-c5de",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T07:37:10Z",
+        "endedAt": "2026-11-24T08:09:04Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "fix/tokenizer-pad",
+        "commit": "0f36e641284dff301a26b9d667685984f03fa0d7",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    4/200  loss 2.8210  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep    8/200  loss 2.7786  lr 2.0e-4  3.9 it/s  gpu mem 6.3 GiB\nstep   13/200  loss 2.7372  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   17/200  loss 2.7032  lr 2.0e-4  3.7 it/s  gpu mem 6.5 GiB\nstep   22/200  loss 2.6619  lr 2.0e-4  3.6 it/s  gpu mem 6.4 GiB\nstep   26/200  loss 2.6101  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   31/200  loss 2.5866  lr 2.0e-4  3.9 it/s  gpu mem 6.4 GiB\nstep   35/200  loss 2.5473  lr 2.0e-4  3.9 it/s  gpu mem 6.0 GiB\nstep   40/200  loss 2.5132  lr 2.0e-4  3.1 it/s  gpu mem 6.4 GiB\nstep   44/200  loss 2.4700  lr 2.0e-4  3.2 it/s  gpu mem 6.0 GiB\nstep   48/200  loss 2.4139  lr 2.0e-4  3.8 it/s  gpu mem 6.6 GiB\nstep   53/200  loss 2.3725  lr 2.0e-4  3.9 it/s  gpu mem 6.0 GiB\nstep   57/200  loss 2.3532  lr 2.0e-4  3.7 it/s  gpu mem 6.8 GiB\nstep   62/200  loss 2.3175  lr 2.0e-4  3.5 it/s  gpu mem 6.1 GiB\nstep   66/200  loss 2.2421  lr 2.0e-4  3.4 it/s  gpu mem 6.3 GiB\n"
+      },
+      {
+        "key": "sparrow-ml-48ef/20261124-072755-8246/2026-11-24T07:27:55Z",
+        "id": "20261124-072755-8246",
+        "box": "sparrow-ml-48ef",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T07:27:55Z",
+        "endedAt": "2026-11-24T07:56:33Z",
+        "reason": "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.",
+        "command": "uv run python train.py --smoke --steps 200",
+        "kind": "gpu",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "fix/tokenizer-pad",
+        "commit": "38ef3c62fe293201c6ae1504d02a33c1726b0ed0",
+        "agent": {
+          "client": "claude-code",
+          "session": "still-pine",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-ml"
+        },
+        "size": "gpu",
+        "gpu": true,
+        "tail": "$ uv run python train.py --smoke --steps 200\nstep    6/200  loss 2.8277  lr 2.0e-4  3.1 it/s  gpu mem 6.1 GiB\nstep   12/200  loss 2.7998  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   18/200  loss 2.7675  lr 2.0e-4  3.4 it/s  gpu mem 6.7 GiB\nstep   24/200  loss 2.6978  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep   30/200  loss 2.6424  lr 2.0e-4  3.2 it/s  gpu mem 6.2 GiB\nstep   36/200  loss 2.6497  lr 2.0e-4  3.8 it/s  gpu mem 6.8 GiB\nstep   42/200  loss 2.5622  lr 2.0e-4  3.3 it/s  gpu mem 6.0 GiB\nstep   48/200  loss 2.5470  lr 2.0e-4  3.5 it/s  gpu mem 6.8 GiB\nstep   54/200  loss 2.4831  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   60/200  loss 2.4873  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep   66/200  loss 2.4116  lr 2.0e-4  3.4 it/s  gpu mem 6.4 GiB\n"
+      },
+      {
+        "key": "lantern-851f/20261124-050225-554e/2026-11-24T05:02:25Z",
+        "id": "20261124-050225-554e",
+        "box": "lantern-851f",
+        "machine": "pc",
+        "state": "done",
+        "exit": 2,
+        "startedAt": "2026-11-24T05:02:25Z",
+        "endedAt": "2026-11-24T05:04:28Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "83baf97d2890f97853d9256a77566afe528aabe1",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\nerror: process exited with status 1\n"
+      },
+      {
+        "key": "lantern-57b9/20261124-033210-f823/2026-11-24T03:32:10Z",
+        "id": "20261124-033210-f823",
+        "box": "lantern-57b9",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T03:32:10Z",
+        "endedAt": "2026-11-24T03:41:13Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "e6cad963772950b36189b76ccdefb6c8cfd92749",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n"
+      },
+      {
+        "key": "sparrow-ml-a8d9/20261124-023424-66b2/2026-11-24T02:34:24Z",
+        "id": "20261124-023424-66b2",
+        "box": "sparrow-ml-a8d9",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-24T02:34:24Z",
+        "endedAt": "2026-11-24T02:40:18Z",
+        "reason": "",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "exp/lora-rank",
+        "commit": "61e715cb75ea8d940200c2484e8852d58f69ef33",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ...................... [ 12%]\ntests/test_data.py ..................................... [ 25%]\ntests/test_model.py ............................. [ 37%]\ntests/test_schedule.py ............................. [ 50%]\ntests/test_tokenizer.py ................... [ 62%]\ntests/test_data.py ......................... [ 75%]\ntests/test_model.py ........................... [ 87%]\ntests/test_schedule.py ................................. [100%]\n======== 318 passed in 412.80s ========\n"
+      },
+      {
+        "key": "orbit-android-500f/20261124-011749-529b/2026-11-24T01:17:49Z",
+        "id": "20261124-011749-529b",
+        "box": "orbit-android-500f",
+        "machine": "pc",
+        "state": "lost",
+        "exit": null,
+        "startedAt": "2026-11-24T01:17:49Z",
+        "endedAt": "2026-11-24T01:29:59Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "feat/offline-queue",
+        "commit": "b81af8199560dcb1efb9b00c3a94e77e4236571d",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n"
+      },
+      {
+        "key": "sparrow-ml-f148/20261124-000242-839c/2026-11-24T00:02:42Z",
+        "id": "20261124-000242-839c",
+        "box": "sparrow-ml-f148",
+        "machine": "pc",
+        "state": "done",
+        "exit": 1,
+        "startedAt": "2026-11-24T00:02:42Z",
+        "endedAt": "2026-11-24T00:06:52Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "main",
+        "commit": "02cf5c938cec8a5381eeaedc2723e99bf57a0b8f",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [ 12%]\ntests/test_data.py ............... [ 25%]\ntests/test_model.py ................................... [ 37%]\ntests/test_schedule.py ................................. [ 50%]\ntests/test_tokenizer.py .................................... [ 62%]\ntests/test_data.py ..................... [ 75%]\ntests/test_model.py .............................. [ 87%]\ntests/test_schedule.py ................... [100%]\nerror: process exited with status 1\n"
+      },
+      {
+        "key": "lantern/20261123-233854-a56f/2026-11-23T23:38:54Z",
+        "id": "20261123-233854-a56f",
+        "box": "lantern",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T23:38:54Z",
+        "endedAt": "2026-11-23T23:40:39Z",
+        "reason": "Cross-compiling the release binaries for two platforms at once.",
+        "command": "go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "8aa53ec11367d7510ae976f47d49bba074405e72",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\n"
+      },
+      {
+        "key": "orbit-android/20261123-224411-86d5/2026-11-23T22:44:11Z",
+        "id": "20261123-224411-86d5",
+        "box": "orbit-android",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T22:44:11Z",
+        "endedAt": "2026-11-23T22:49:49Z",
+        "reason": "Lint and a release build, so the PR's CI isn't the first to see them.",
+        "command": "./gradlew lint assembleRelease",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "fix/sync-retry",
+        "commit": "1a047c1908401b84c21ebed70a93af533ef76085",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "tidepool/20261123-223032-264c/2026-11-23T22:30:32Z",
+        "id": "20261123-223032-264c",
+        "box": "tidepool",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T22:30:32Z",
+        "endedAt": "2026-11-23T22:35:06Z",
+        "reason": "Whole vitest suite after the router refactor; locally it spawns a worker per core.",
+        "command": "npx vitest run",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "feat/router-cache",
+        "commit": "57d2f022f6807efd45463b0a30025eb920c25eb9",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (25 tests) 727ms\n ✓ src/store/session.test.ts (22 tests) 324ms\n ✓ src/ui/Button.test.tsx (21 tests) 463ms\n ✓ src/api/client.test.ts (3 tests) 700ms\n ✓ src/hydrate.test.ts (3 tests) 312ms\n ✓ src/router/cache.test.ts (17 tests) 805ms\n ✓ src/store/session.test.ts (12 tests) 869ms\n ✓ src/ui/Button.test.tsx (7 tests) 89ms\n ✓ src/api/client.test.ts (10 tests) 642ms\n ✓ src/hydrate.test.ts (5 tests) 216ms\n ✓ src/router/cache.test.ts (26 tests) 856ms\n ✓ src/store/session.test.ts (13 tests) 636ms\n ✓ src/ui/Button.test.tsx (25 tests) 182ms\n ✓ src/api/client.test.ts (27 tests) 657ms\n ✓ src/hydrate.test.ts (5 tests) 682ms\n ✓ src/router/cache.test.ts (24 tests) 576ms\n ✓ src/store/session.test.ts (29 tests) 241ms\n ✓ src/ui/Button.test.tsx (30 tests) 737ms\n ✓ src/api/client.test.ts (31 tests) 756ms\n ✓ src/hydrate.test.ts (20 tests) 535ms\n ✓ src/router/cache.test.ts (11 tests) 837ms\n ✓ src/store/session.test.ts (23 tests) 615ms\n ✓ src/ui/Button.test.tsx (13 tests) 157ms\n ✓ src/api/client.test.ts (9 tests) 246ms\n ✓ src/hydrate.test.ts (19 tests) 505ms\n ✓ src/router/cache.test.ts (15 tests) 45ms\n ✓ src/store/session.test.ts (11 tests) 44ms\n ✓ src/ui/Button.test.tsx (20 tests) 605ms\n ✓ src/api/client.test.ts (19 tests) 803ms\n ✓ src/hydrate.test.ts (3 tests) 333ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n"
+      },
+      {
+        "key": "lantern-f58d/20261123-200509-2e83/2026-11-23T20:05:09Z",
+        "id": "20261123-200509-2e83",
+        "box": "lantern-f58d",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T20:05:09Z",
+        "endedAt": "2026-11-23T20:12:55Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "e5f898e45c89c7fc2ce4a7f52999ea41474db2a5",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.004s\nok  \tgithub.com/acme/lantern/internal/sync\t1.733s\nok  \tgithub.com/acme/lantern/internal/api\t9.214s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t7.814s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.186s\nok  \tgithub.com/acme/lantern/internal/wire\t4.916s\nok  \tgithub.com/acme/lantern/internal/cache\t1.061s\nok  \tgithub.com/acme/lantern/internal/store\t5.974s\n"
+      },
+      {
+        "key": "orbit-android-a3fc/20261123-195341-6218/2026-11-23T19:53:41Z",
+        "id": "20261123-195341-6218",
+        "box": "orbit-android-a3fc",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T19:53:41Z",
+        "endedAt": "2026-11-23T19:59:55Z",
+        "reason": "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.",
+        "command": "./gradlew :app:testDebugUnitTest",
+        "kind": "gradle",
+        "repo": "https://github.com/acme/orbit-android",
+        "branch": "main",
+        "commit": "162d5fec3160a6f858758216772d9075629c1cea",
+        "agent": {
+          "client": "claude-code",
+          "session": "amber-fox",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\orbit-android\\.claude\\worktrees\\agent-9b20"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n"
+      },
+      {
+        "key": "lantern-b34b/20261123-193449-3c7b/2026-11-23T19:34:49Z",
+        "id": "20261123-193449-3c7b",
+        "box": "lantern-b34b",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T19:34:49Z",
+        "endedAt": "2026-11-23T19:48:35Z",
+        "reason": "Release build with the full test matrix, about 20 minutes on the laptop.",
+        "command": "make release",
+        "kind": "build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "49fa2b079179bd96c5d085a3b6db4e3f7a384265",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "large",
+        "gpu": false,
+        "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n"
+      },
+      {
+        "key": "sparrow-ml/20261123-191336-eb54/2026-11-23T19:13:36Z",
+        "id": "20261123-191336-eb54",
+        "box": "sparrow-ml",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T19:13:36Z",
+        "endedAt": "2026-11-23T19:23:41Z",
+        "reason": "Property tests take 12 minutes here; running them on a box while I write the docs.",
+        "command": "uv run pytest -x tests/",
+        "kind": "py-test",
+        "repo": "https://github.com/acme/sparrow-ml",
+        "branch": "exp/lora-rank",
+        "commit": "afb337d9ee3845ff99d365eccf5e4ab9e5dba61c",
+        "agent": {
+          "client": "cli",
+          "session": "sparrow-wt-2",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\sparrow-wt-2"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ................................... [  9%]\ntests/test_data.py ................................ [ 18%]\ntests/test_model.py ........................ [ 27%]\ntests/test_schedule.py .............. [ 36%]\ntests/test_tokenizer.py ......................... [ 45%]\ntests/test_data.py .......................... [ 54%]\ntests/test_model.py ................................... [ 63%]\ntests/test_schedule.py .............................. [ 72%]\ntests/test_tokenizer.py ......................... [ 81%]\ntests/test_data.py ................................ [ 90%]\ntests/test_model.py ...................... [100%]\n======== 318 passed in 412.80s ========\n"
+      },
+      {
+        "key": "lantern-94af/20261123-185225-9f3e/2026-11-23T18:52:25Z",
+        "id": "20261123-185225-9f3e",
+        "box": "lantern-94af",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-23T18:52:25Z",
+        "endedAt": "2026-11-23T18:59:33Z",
+        "reason": "Full -race suite before opening the PR; it starves the laptop.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/metrics-export",
+        "commit": "5d561d7e4bb0416ad7aec8535a3de0f7d9ac5e14",
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\lantern\\.claude\\worktrees\\agent-3f1c"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t6.382s\nok  \tgithub.com/acme/lantern/internal/sync\t1.534s\nok  \tgithub.com/acme/lantern/internal/api\t6.211s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t4.648s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.894s\nok  \tgithub.com/acme/lantern/internal/wire\t2.928s\nok  \tgithub.com/acme/lantern/internal/cache\t7.559s\nok  \tgithub.com/acme/lantern/internal/store\t1.120s\nok  \tgithub.com/acme/lantern/internal/sync\t1.303s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t8.600s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.944s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.937s\n"
+      },
+      {
+        "key": "tidepool-9085/20261123-173444-a44f/2026-11-23T17:34:44Z",
+        "id": "20261123-173444-a44f",
+        "box": "tidepool-9085",
+        "machine": "pc",
+        "state": "done",
+        "exit": 130,
+        "startedAt": "2026-11-23T17:34:44Z",
+        "endedAt": "2026-11-23T17:37:53Z",
+        "reason": "Whole vitest suite after the router refactor; locally it spawns a worker per core.",
+        "command": "npx vitest run",
+        "kind": "js-test",
+        "repo": "https://github.com/acme/tidepool",
+        "branch": "fix/hydration-flash",
+        "commit": "6deba9af531b107835e41686903ae180eaec7829",
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "C:\\Users\\dev\\src\\tidepool"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (26 tests) 677ms\n ✓ src/store/session.test.ts (29 tests) 526ms\n ✓ src/ui/Button.test.tsx (23 tests) 544ms\n ✓ src/api/client.test.ts (25 tests) 286ms\n ✓ src/hydrate.test.ts (3 tests) 78ms\n ✓ src/router/cache.test.ts (29 tests) 537ms\n ✓ src/store/session.test.ts (13 tests) 793ms\n ✓ src/ui/Button.test.tsx (25 tests) 546ms\n ✓ src/api/client.test.ts (30 tests) 360ms\n^C\nbox: cancelled\n"
+      }
+    ],
+    "more": false
+  },
+  "day": {
+    "range": "day",
+    "buckets": [
+      {
+        "start": "2026-11-23T18:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "go-test": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.14
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 428
+          }
+        },
+        "memUsed": 228399957,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-23T19:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 3
+          },
+          "byKind": {
+            "build": 1,
+            "gradle": 1,
+            "py-test": 1
+          },
+          "byRepo": {
+            "lantern": 1,
+            "orbit-android": 1,
+            "sparrow-ml": 1
+          },
+          "byAgent": {
+            "amber-fox": 1,
+            "quiet-otter": 1,
+            "sparrow-wt-2": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.37,
+            "medium": 0.79
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 826,
+            "orbit-android": 374,
+            "sparrow-ml": 605
+          }
+        },
+        "memUsed": 3904915451,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-23T20:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "go-test": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1.15
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 466
+          }
+        },
+        "memUsed": 2668402596,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-23T21:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.39
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 941588032,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-23T22:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 2
+          },
+          "byKind": {
+            "gradle": 1,
+            "js-test": 1
+          },
+          "byRepo": {
+            "orbit-android": 1,
+            "tidepool": 1
+          },
+          "byAgent": {
+            "amber-fox": 1,
+            "brisk-heron": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.79
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 338,
+            "tidepool": 274
+          }
+        },
+        "memUsed": 1840760397,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-23T23:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "go-build": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 2.37
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 105
+          }
+        },
+        "memUsed": 5102559076,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 1
+          },
+          "byKind": {
+            "py-test": 1
+          },
+          "byRepo": {
+            "sparrow-ml": 1
+          },
+          "byAgent": {
+            "sparrow-wt-2": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 2.51
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "sparrow-ml": 250
+          }
+        },
+        "memUsed": 4931272456,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T01:00:00Z",
+        "jobs": {
+          "byResult": {
+            "lost": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.22,
+            "medium": 0.68
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 1780590316,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T02:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "py-test": 1
+          },
+          "byRepo": {
+            "sparrow-ml": 1
+          },
+          "byAgent": {
+            "sparrow-wt-2": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.12
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "sparrow-ml": 354
+          }
+        },
+        "memUsed": 191910449,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T03:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "build": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.17
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 543
+          }
+        },
+        "memUsed": 703963069,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T04:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T05:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 1
+          },
+          "byKind": {
+            "go-build": 1
+          },
+          "byRepo": {
+            "lantern": 1
+          },
+          "byAgent": {
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.05
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 123
+          }
+        },
+        "memUsed": 134987958,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T06:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T07:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 3
+          },
+          "byKind": {
+            "go-build": 1,
+            "gpu": 2
+          },
+          "byRepo": {
+            "lantern": 1,
+            "sparrow-ml": 2
+          },
+          "byAgent": {
+            "quiet-otter": 1,
+            "still-pine": 2
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.89,
+            "medium": 0.19
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 65,
+            "sparrow-ml": 1816
+          }
+        },
+        "memUsed": 4762492765,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T08:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.15,
+            "medium": 1
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 2947641423,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T09:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 0.84
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 1880508055,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T10:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T11:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.12
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 362
+          }
+        },
+        "memUsed": 595694985,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T12:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T13:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.17
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 552
+          }
+        },
+        "memUsed": 932798522,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T14:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T15:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T16:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 2104533975,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T17:00:00Z",
+        "jobs": {
+          "byResult": {
+            "pass": 1
+          },
+          "byKind": {
+            "gradle": 1
+          },
+          "byRepo": {
+            "orbit-android": 1
+          },
+          "byAgent": {
+            "amber-fox": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "medium": 1.39
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "orbit-android": 287
+          }
+        },
+        "memUsed": 3285262957,
+        "memCap": 12884901888
+      }
+    ],
+    "segments": [
+      {
+        "start": "2026-11-23T18:00:00Z",
+        "end": "2026-11-24T17:30:00Z",
+        "mode": "shared",
+        "reason": ""
+      }
+    ]
+  },
+  "week": {
+    "range": "week",
+    "buckets": [
+      {
+        "start": "2026-11-18T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-19T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-20T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-21T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-22T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-23T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 1,
+            "pass": 8
+          },
+          "byKind": {
+            "build": 1,
+            "go-build": 1,
+            "go-test": 2,
+            "gradle": 2,
+            "js-test": 2,
+            "py-test": 1
+          },
+          "byRepo": {
+            "lantern": 4,
+            "orbit-android": 2,
+            "sparrow-ml": 1,
+            "tidepool": 2
+          },
+          "byAgent": {
+            "amber-fox": 2,
+            "brisk-heron": 2,
+            "quiet-otter": 4,
+            "sparrow-wt-2": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.37,
+            "medium": 5.7
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 447,
+            "orbit-android": 356,
+            "sparrow-ml": 605,
+            "tidepool": 232
+          }
+        },
+        "memUsed": 535908957,
+        "memCap": 12884901888
+      },
+      {
+        "start": "2026-11-24T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 3,
+            "lost": 1,
+            "pass": 7
+          },
+          "byKind": {
+            "build": 1,
+            "go-build": 2,
+            "gpu": 2,
+            "gradle": 4,
+            "py-test": 2
+          },
+          "byRepo": {
+            "lantern": 3,
+            "orbit-android": 4,
+            "sparrow-ml": 4
+          },
+          "byAgent": {
+            "amber-fox": 4,
+            "quiet-otter": 3,
+            "sparrow-wt-2": 2,
+            "still-pine": 2
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 1.04,
+            "large": 0.68,
+            "medium": 8.99
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 123,
+            "orbit-android": 362,
+            "sparrow-ml": 1036
+          }
+        },
+        "memUsed": 992801768,
+        "memCap": 12884901888
+      }
+    ],
+    "segments": [
+      {
+        "start": "2026-11-23T17:30:00Z",
+        "end": "2026-11-24T17:30:00Z",
+        "mode": "shared",
+        "reason": ""
+      }
+    ]
+  },
+  "logs": {
+    "tidepool/20261123-223032-264c/2026-11-23T22:30:32Z": "$ npx vitest run\n ✓ src/router/cache.test.ts (25 tests) 727ms\n ✓ src/store/session.test.ts (22 tests) 324ms\n ✓ src/ui/Button.test.tsx (21 tests) 463ms\n ✓ src/api/client.test.ts (3 tests) 700ms\n ✓ src/hydrate.test.ts (3 tests) 312ms\n ✓ src/router/cache.test.ts (17 tests) 805ms\n ✓ src/store/session.test.ts (12 tests) 869ms\n ✓ src/ui/Button.test.tsx (7 tests) 89ms\n ✓ src/api/client.test.ts (10 tests) 642ms\n ✓ src/hydrate.test.ts (5 tests) 216ms\n ✓ src/router/cache.test.ts (26 tests) 856ms\n ✓ src/store/session.test.ts (13 tests) 636ms\n ✓ src/ui/Button.test.tsx (25 tests) 182ms\n ✓ src/api/client.test.ts (27 tests) 657ms\n ✓ src/hydrate.test.ts (5 tests) 682ms\n ✓ src/router/cache.test.ts (24 tests) 576ms\n ✓ src/store/session.test.ts (29 tests) 241ms\n ✓ src/ui/Button.test.tsx (30 tests) 737ms\n ✓ src/api/client.test.ts (31 tests) 756ms\n ✓ src/hydrate.test.ts (20 tests) 535ms\n ✓ src/router/cache.test.ts (11 tests) 837ms\n ✓ src/store/session.test.ts (23 tests) 615ms\n ✓ src/ui/Button.test.tsx (13 tests) 157ms\n ✓ src/api/client.test.ts (9 tests) 246ms\n ✓ src/hydrate.test.ts (19 tests) 505ms\n ✓ src/router/cache.test.ts (15 tests) 45ms\n ✓ src/store/session.test.ts (11 tests) 44ms\n ✓ src/ui/Button.test.tsx (20 tests) 605ms\n ✓ src/api/client.test.ts (19 tests) 803ms\n ✓ src/hydrate.test.ts (3 tests) 333ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
+    "tidepool/20261124-172755-8ec1/2026-11-24T17:27:55Z": "$ npx vitest run\n ✓ src/router/cache.test.ts (6 tests) 361ms\n ✓ src/store/session.test.ts (18 tests) 911ms\n ✓ src/ui/Button.test.tsx (15 tests) 481ms\n ✓ src/api/client.test.ts (31 tests) 486ms\n ✓ src/hydrate.test.ts (22 tests) 224ms\n ✓ src/router/cache.test.ts (8 tests) 838ms\n ✓ src/store/session.test.ts (20 tests) 909ms\n ✓ src/ui/Button.test.tsx (15 tests) 665ms\n ✓ src/api/client.test.ts (4 tests) 570ms\n ✓ src/hydrate.test.ts (3 tests) 729ms\n ✓ src/router/cache.test.ts (9 tests) 155ms\n ✓ src/store/session.test.ts (9 tests) 625ms\n ✓ src/ui/Button.test.tsx (25 tests) 326ms\n ✓ src/api/client.test.ts (23 tests) 664ms\n ✓ src/hydrate.test.ts (20 tests) 421ms\n ✓ src/router/cache.test.ts (12 tests) 382ms\n ✓ src/store/session.test.ts (4 tests) 51ms\n ✓ src/ui/Button.test.tsx (7 tests) 519ms\n ✓ src/api/client.test.ts (31 tests) 304ms\n ✓ src/hydrate.test.ts (13 tests) 132ms\n ✓ src/router/cache.test.ts (28 tests) 165ms\n ✓ src/store/session.test.ts (5 tests) 204ms\n ✓ src/ui/Button.test.tsx (30 tests) 863ms\n ✓ src/api/client.test.ts (6 tests) 465ms\n ✓ src/hydrate.test.ts (29 tests) 816ms\n ✓ src/router/cache.test.ts (11 tests) 217ms\n ✓ src/store/session.test.ts (4 tests) 928ms\n ✓ src/ui/Button.test.tsx (11 tests) 245ms\n ✓ src/api/client.test.ts (31 tests) 477ms\n ✓ src/hydrate.test.ts (10 tests) 166ms\n ✓ src/router/cache.test.ts (3 tests) 213ms\n ✓ src/store/session.test.ts (21 tests) 306ms\n ✓ src/ui/Button.test.tsx (9 tests) 61ms\n ✓ src/api/client.test.ts (26 tests) 89ms\n ✓ src/hydrate.test.ts (16 tests) 468ms\n ✓ src/router/cache.test.ts (32 tests) 743ms\n ✓ src/store/session.test.ts (31 tests) 926ms\n ✓ src/ui/Button.test.tsx (22 tests) 346ms\n ✓ src/api/client.test.ts (27 tests) 164ms\n ✓ src/hydrate.test.ts (28 tests) 896ms\n ✓ src/router/cache.test.ts (31 tests) 860ms\n ✓ src/store/session.test.ts (23 tests) 421ms\n ✓ src/ui/Button.test.tsx (16 tests) 469ms\n ✓ src/api/client.test.ts (13 tests) 797ms\n ✓ src/hydrate.test.ts (4 tests) 131ms\n ✓ src/router/cache.test.ts (20 tests) 210ms\n ✓ src/store/session.test.ts (19 tests) 73ms\n ✓ src/ui/Button.test.tsx (20 tests) 742ms\n ✓ src/api/client.test.ts (18 tests) 585ms\n ✓ src/hydrate.test.ts (21 tests) 378ms\n ✓ src/router/cache.test.ts (19 tests) 231ms\n ✓ src/store/session.test.ts (6 tests) 134ms\n ✓ src/ui/Button.test.tsx (31 tests) 396ms\n ✓ src/api/client.test.ts (10 tests) 394ms\n ✓ src/hydrate.test.ts (17 tests) 802ms\n ✓ src/router/cache.test.ts (6 tests) 292ms\n ✓ src/store/session.test.ts (11 tests) 805ms\n ✓ src/ui/Button.test.tsx (4 tests) 222ms\n ✓ src/api/client.test.ts (18 tests) 658ms\n ✓ src/hydrate.test.ts (31 tests) 534ms\n ✓ src/router/cache.test.ts (13 tests) 711ms\n ✓ src/store/session.test.ts (20 tests) 83ms\n ✓ src/ui/Button.test.tsx (22 tests) 200ms\n ✓ src/api/client.test.ts (7 tests) 257ms\n ✓ src/hydrate.test.ts (24 tests) 271ms\n ✓ src/router/cache.test.ts (32 tests) 626ms\n ✓ src/store/session.test.ts (25 tests) 330ms\n ✓ src/ui/Button.test.tsx (22 tests) 327ms\n ✓ src/api/client.test.ts (32 tests) 77ms\n ✓ src/hydrate.test.ts (28 tests) 301ms\n ✓ src/router/cache.test.ts (22 tests) 149ms\n ✓ src/store/session.test.ts (17 tests) 466ms\n ✓ src/ui/Button.test.tsx (32 tests) 710ms\n ✓ src/api/client.test.ts (29 tests) 482ms\n ✓ src/hydrate.test.ts (9 tests) 406ms\n ✓ src/router/cache.test.ts (9 tests) 377ms\n ✓ src/store/session.test.ts (17 tests) 442ms\n ✓ src/ui/Button.test.tsx (16 tests) 836ms\n ✓ src/api/client.test.ts (24 tests) 633ms\n ✓ src/hydrate.test.ts (17 tests) 256ms\n ✓ src/router/cache.test.ts (5 tests) 41ms\n"
+  }
+}

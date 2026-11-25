@@ -23,19 +23,26 @@ func cancelText(job string, cancelled bool, code int) string {
 
 const usage = `usage:
   box status                                is offloading worth it now? (PC, mode, room, this repo's box)
-  box run [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
+  box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m] -- <cmd...>
                                             sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
   box jobs [--box name]                     list jobs, newest first
   box cancel <id>                           stop a running job
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
-  box new [name] [--ttl 2h] [--size S | --gpu]
+  box new [name] [--ttl 2h] [--size S | --gpu] [--reason "why"]
                                             launch a box with a positive TTL
   box rm <name>                             delete a box
   box ls                                    list boxes
-  box mcp                                   serve MCP on stdio
+  box mcp                                   serve MCP on stdio: box_status, box_run, box_job, box_cancel, box_pull
+  box watch [--state dir] <id>              follow a job and push its result into this session's T3 thread
+                                            (box_run starts it detached; not for people)
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
+  box ui [--url U]                          open the PC's dashboard in the browser
+  box app [--url U] [--wait]                open the dashboard in a window of its own
+
+--reason (required for run): one or two sentences, 10 to 300 characters, on
+why this needs a box. The PC's owner sees it on the dashboard.
 
 Sizes (CPUs in Shared/Full mode, RAM, disk):
   %s.
@@ -49,6 +56,7 @@ when the PC or box is paused, there is no room, or the GPU is taken or was
 stopped. A job paused mid-run resumes if the PC's owner switches back within
 15 minutes (4 hours once its memory is moved to swap), else it is lost; box job
 reattaches. A relative remote path in box pull starts at the job's checkout.
+The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
@@ -109,13 +117,19 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires")
 		size := fs.String("size", "", mode.SizeNames()+" (default "+mode.DefaultSize+")")
 		gpu := fs.Bool("gpu", false, "same as --size gpu")
+		reason := fs.String("reason", "", "why this needs a box (optional; 10 to 300 characters)")
 		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 1 {
 			return 2
 		}
 		if !gpuSize(a, size, *gpu) {
 			return 2
 		}
-		name, err := a.New(ctx, fs.Arg(0), *ttl, *size)
+		why, err := checkReason(*reason, false, "--reason")
+		if err != nil {
+			fmt.Fprintln(a.Err, "box:", err)
+			return 2
+		}
+		name, err := a.New(ctx, fs.Arg(0), *ttl, *size, why)
 		if isTempFail(err) {
 			fmt.Fprintln(a.Err, "box:", err)
 			return exitPaused
@@ -134,6 +148,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		gpu := fs.Bool("gpu", false, "same as --size gpu: run in a throwaway GPU box")
 		envs := envFlags{}
 		fs.Var(envs, "env", "K=V passed to the command (repeatable; no secrets)")
+		reason := fs.String("reason", "", "required: one or two sentences (10 to 300 characters) on why this run needs a box")
 		if fs.Parse(args[1:]) != nil {
 			return 2
 		}
@@ -144,11 +159,16 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if !gpuSize(a, size, *gpu) {
 			return 2
 		}
+		why, err := checkReason(*reason, true, "--reason")
+		if err != nil {
+			fmt.Fprintln(a.Err, "box:", err)
+			return 2
+		}
 		dir, err := os.Getwd()
 		if err != nil {
 			return fail(err)
 		}
-		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size}))
+		return code(a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why}))
 	case "job":
 		offset := fs.Int64("offset", 0, "print the log from this byte, without waiting")
 		limit := fs.Int64("limit", 0, "print at most this many bytes of the log (default 32KiB)")
@@ -246,6 +266,21 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "mcp":
 		if err := serveMCP(ctx, a, stdin, a.Out); err != nil {
+			return fail(err)
+		}
+		return 0
+	case "ui":
+		return runUI(ctx, a, fs, args[1:])
+	case "app":
+		return runApp(ctx, a, fs, args[1:])
+	case "watch":
+		state := fs.String("state", a.StateDir, "directory of per-job push state")
+		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() != 1 {
+			fmt.Fprint(a.Err, usageText())
+			return 2
+		}
+		a.StateDir = *state
+		if err := a.Watch(ctx, fs.Arg(0)); err != nil {
 			return fail(err)
 		}
 		return 0

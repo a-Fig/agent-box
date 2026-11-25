@@ -17,10 +17,10 @@ func TestNewSetsSize(t *testing.T) {
 	if code := run(context.Background(), a, []string{"new", "big", "--size", "large"}, nil); code != 0 {
 		t.Fatalf("box new = %d\n%s", code, out)
 	}
-	if _, err := a.New(context.Background(), "plain", time.Hour, ""); err != nil {
+	if _, err := a.New(context.Background(), "plain", time.Hour, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.New(context.Background(), "little", time.Hour, "small"); err != nil {
+	if _, err := a.New(context.Background(), "little", time.Hour, "small", ""); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []string{
@@ -32,7 +32,7 @@ func TestNewSetsSize(t *testing.T) {
 			t.Errorf("launch %d = %s\nwant %s", i, got, want)
 		}
 	}
-	if _, err := a.New(context.Background(), "odd", time.Hour, "huge"); err == nil || !strings.Contains(err.Error(), "small, medium, large") {
+	if _, err := a.New(context.Background(), "odd", time.Hour, "huge", ""); err == nil || !strings.Contains(err.Error(), "small, medium, large") {
 		t.Errorf("unknown size: %v", err)
 	}
 	if len(f.launches) != 3 {
@@ -68,7 +68,7 @@ func TestLaunchDistinguishesQuotaFromOrdinaryErrors(t *testing.T) {
 	} {
 		f := &fakePC{t: t, refuse: tc.message}
 		a, _ := testApp(f)
-		_, err := a.New(context.Background(), "quota-worker", time.Hour, "small")
+		_, err := a.New(context.Background(), "quota-worker", time.Hour, "small", "")
 		if err == nil || isNoRoom(err) != tc.noRoom {
 			t.Errorf("%s: error = %v, want no room = %t", tc.message, err, tc.noRoom)
 		}
@@ -213,7 +213,7 @@ func TestMCPSize(t *testing.T) {
 		} `json:"properties"`
 	}
 	for _, tl := range tools {
-		if tl.Name != "box_new" && tl.Name != "box_run" {
+		if tl.Name != "box_run" {
 			continue
 		}
 		b, _ := json.Marshal(tl.InputSchema)
@@ -224,8 +224,7 @@ func TestMCPSize(t *testing.T) {
 	}
 	f := &fakePC{t: t}
 	a, _ := testApp(f)
-	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_new","arguments":{"name":"s","size":"small"}}`), nil)
-	if res["isError"] != false || len(f.launches) != 1 || !strings.Contains(strings.Join(f.launches[0], " "), "limits.memory=2GiB") {
-		t.Errorf("box_new = %v, launches %q", res, f.launches)
+	if code := run(context.Background(), a, []string{"new", "s", "--size", "small"}, nil); code != 0 || len(f.launches) != 1 || !strings.Contains(strings.Join(f.launches[0], " "), "limits.memory=2GiB") {
+		t.Errorf("box new = %d, launches %q", code, f.launches)
 	}
 }

@@ -60,10 +60,35 @@ type App struct {
 	PollTimeout, ProbeTimeout time.Duration
 	// JoinConfig says where box join registers and installs; tests replace it.
 	JoinConfig func(out io.Writer) (joinConfig, error)
+	// Client is the MCP client box mcp serves (empty for the CLI), and
+	// Thread a T3 thread a tool call named in _meta; both go in a job's .meta.
+	Client clientInfo
+	Thread string
+	// Getenv reads the agent's environment (nil is os.Getenv).
+	Getenv func(string) string
+	// Post sends a refusal to boxd; nil sends none. Errors are ignored.
+	Post func(ctx context.Context, url string, body []byte) error
+	// Browse opens an address in the person's browser; tests replace it.
+	Browse func(url string) error
+	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
+	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
+	// per-job files. Any of them nil or empty means no push.
+	Push     Pusher
+	Spawn    func(stateDir, job string) error
+	StateDir string
+	// InlineWait is how long box_run follows a job (zero is inlineWait);
+	// WatchPoll replaces the watcher's waits, for tests.
+	InlineWait time.Duration
+	WatchPoll  time.Duration
+	// KeepEnded, when set, keeps a throwaway box for this long after its
+	// job ended (its user.expires moves to now plus this, and the reaper
+	// deletes it) instead of deleting it, so box_pull and the full log still
+	// work after the result was pushed.
+	KeepEnded time.Duration
 }
 
 func newApp() *App {
-	return &App{
+	a := &App{
 		R:       execRunner{},
 		Remote:  env("BOX_REMOTE", "pc"),
 		Project: env("BOX_PROJECT", "agents"),
@@ -74,7 +99,15 @@ func newApp() *App {
 		Rand:    randHex,
 
 		JoinConfig: defaultJoinConfig,
+		Post:       postJSON,
+		Browse:     browse,
+		Spawn:      spawnWatcher,
+		StateDir:   defaultStateDir(),
 	}
+	if p := findT3(os.Getenv); p != "" {
+		a.Push = t3CLI{path: p}
+	}
+	return a
 }
 
 func (a *App) warn(message string) {
@@ -201,8 +234,8 @@ var validBox = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 const throwawayKey = "user.box.throwaway"
 
 // New launches a box of the given size ("" is medium) with a TTL. An empty
-// name gets a random one.
-func (a *App) New(ctx context.Context, name string, ttl time.Duration, size string) (string, error) {
+// name gets a random one. A reason, if given, is stored as user.box.reason.
+func (a *App) New(ctx context.Context, name string, ttl time.Duration, size, reason string) (string, error) {
 	sz, err := lookupSize(size)
 	if err != nil {
 		return "", err
@@ -219,7 +252,11 @@ func (a *App) New(ctx context.Context, name string, ttl time.Duration, size stri
 			return "", err
 		}
 	}
-	if err := a.launch(ctx, name, ttl, false, sz); err != nil {
+	var extra []string
+	if reason != "" {
+		extra = []string{"-c", reasonKey + "=" + reason}
+	}
+	if err := a.launch(ctx, name, ttl, false, sz, extra...); err != nil {
 		return name, err
 	}
 	return name, a.confirmGPU(ctx, name, sz)
@@ -426,15 +463,16 @@ func (a *App) reclaim(ctx context.Context) bool {
 
 // launch creates box name. Refused for the project's caps, it deletes
 // reclaimable boxes and tries once more.
-func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
-	err := a.launchOnce(ctx, name, ttl, throwaway, sz)
+// extra are more launch flags, like box new's reason.
+func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra ...string) error {
+	err := a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	if isNoRoom(err) && a.reclaim(ctx) {
-		err = a.launchOnce(ctx, name, ttl, throwaway, sz)
+		err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	}
 	return err
 }
 
-func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size) error {
+func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra []string) error {
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
 	}
@@ -452,6 +490,7 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	if throwaway {
 		args = append(args, "-c", throwawayKey+"=true")
 	}
+	args = append(args, extra...)
 	var stdin io.Reader
 	if sz.GPU {
 		args = append(args, gpuConfigArgs()...)
@@ -536,6 +575,9 @@ type RunOpts struct {
 	Env  map[string]string // passed to the command; no secrets (see checkEnv)
 	// Timeout makes the box kill the command after this long (exit 124).
 	Timeout time.Duration
+	// Reason is the agent's why, for the .meta and refusals. The CLI and MCP
+	// require it; Run doesn't check it.
+	Reason string
 }
 
 // exitTimeout is the exit code of a command the box killed at its timeout,
@@ -572,6 +614,12 @@ const (
 	statePaused   = "paused"   // the PC or the box is paused or out of reach
 )
 
+// States the MCP tools report instead of detached and a paused refusal.
+const (
+	stateRunning = "running"
+	stateRefused = "refused"
+)
+
 // JobResult is what Run and Job report. Code is the job's own exit code when
 // State is done; otherwise it is exitDetached, exitPaused, or 1 or 2 with an
 // error.
@@ -580,6 +628,9 @@ type JobResult struct {
 	Box   string `json:"box,omitempty"`
 	State string `json:"state,omitempty"`
 	Code  int    `json:"exitCode"`
+	// Push is set on a box_run that returned a running job: whether its
+	// result will arrive as a turn in the agent's T3 thread.
+	Push *bool `json:"push,omitempty"`
 }
 
 // Run syncs the worktree to a box, runs the command there and follows its
@@ -616,6 +667,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		return JobResult{Code: 2}, fmt.Errorf("bad box name %q", box)
 	}
 	a.warnSubmodules(ctx, rp.Top)
+	info := a.runInfo(ctx, rp, o, sz)
 
 	insts, paused := a.reach(ctx)
 	var inst *instance
@@ -632,7 +684,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			except = box
 		}
 		if err := a.claimGPU(ctx, insts, except); err != nil {
-			fmt.Fprintf(a.Err, "box: %v\n", err)
+			a.refuseErr(ctx, err, info)
 			return JobResult{State: statePaused, Code: exitPaused}, nil
 		}
 	}
@@ -652,7 +704,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 	if paused != "" {
-		fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+		a.refusePaused(ctx, paused, info)
 		return JobResult{State: statePaused, Code: exitPaused}, nil
 	}
 
@@ -672,12 +724,12 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
 		case isTempFail(err):
-			fmt.Fprintf(a.Err, "box: %v\n", err)
+			a.refuseErr(ctx, err, info)
 			return JobResult{State: statePaused, Code: exitPaused}, nil
 		case err != nil:
 			return JobResult{Code: 1}, err
 		case paused != "":
-			fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
+			a.refusePaused(ctx, paused, info)
 			return JobResult{State: statePaused, Code: exitPaused}, nil
 		}
 	}
@@ -688,7 +740,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
 			if isTempFail(err) {
-				fmt.Fprintf(a.Err, "box: %v\n", err)
+				a.refuseErr(ctx, err, info)
 				return JobResult{State: statePaused, Code: exitPaused}, nil
 			}
 			return JobResult{Box: box, Code: 1}, err
@@ -706,6 +758,9 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	remote := workRoot + "/.box/" + job
 	if _, err := a.incusOK(ctx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
 		return r, err
+	}
+	if err := a.pushMeta(ctx, box, remote, filepath.Dir(bundle), info); err != nil {
+		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
 	}
 	if err := a.setExpiry(ctx, box, jobTTL); err != nil {
 		return r, fmt.Errorf("set job expiry: %w", err)
@@ -841,6 +896,12 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	}
 	if running := strings.Fields(out); len(running) > 0 {
 		fmt.Fprintf(a.Err, "box: keeping %s: still running %s\n", box, strings.Join(running, " "))
+		return
+	}
+	if a.KeepEnded > 0 {
+		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
+			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+		}
 		return
 	}
 	a.removeQuietly(ctx, box)
@@ -1062,7 +1123,12 @@ func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFun
 		if err != nil {
 			continue
 		}
-		if in := find(insts, box); in != nil && in.Status == "Frozen" {
+		in := find(insts, box)
+		if in == nil {
+			stop() // the box was deleted: the follow can't end by itself
+			return
+		}
+		if in.Status == "Frozen" {
 			gpu.Store(mode.IsGPU(in.Config))
 			hit.Store(true)
 			stop()
@@ -1095,9 +1161,10 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	// pipe, so serialize the writes.
 	var wmu sync.Mutex
 	ef := &exitFilter{w: &lockedWriter{&wmu, a.Err}}
+	tail := &tailWriter{w: &lockedWriter{&wmu, a.Out}}
 	res, err := a.incus(run, Cmd{
 		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
-		Stdout: &lockedWriter{&wmu, a.Out}, Stderr: ef,
+		Stdout: tail, Stderr: ef,
 	})
 	stop()
 	<-watched
@@ -1107,7 +1174,9 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		if cerr != nil {
 			return "", 1, fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
+		ended := a.Now()
 		a.markIdle(ctx, box)
+		a.reportEnded(ctx, job, code, ended, tail.String())
 		return stateDone, code, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

@@ -76,16 +76,19 @@ It shells out to the `incus` CLI, using the `pc` remote and the `agents` project
 
 ```
 box status                       # box_status: advice line, reachability, mode + yield reason, free slots, room per size, this repo's box (and size) and running jobs
-box run [--box name|--new] [--size S|--gpu] [--env K=V] [--timeout d] -- <cmd...>   # box_run
+box run --reason "why" [--box name|--new] [--size S|--gpu] [--env K=V] [--timeout d] -- <cmd...>   # box_run
 box job <id> [--offset N --limit N]   # box_job: follow a job, or page through its log
-box jobs [--box name]            # box_jobs: jobs from /work/.box (*.pid, *.exit, *.log), newest first
+box jobs [--box name]            # box_job without an id: jobs from /work/.box (*.pid, *.exit, *.log), newest first
 box cancel <id>                  # box_cancel: kill the job's session (setsid), write .exit 130
 box pull <id|box> <path> <dir>   # box_pull: incus file pull -r into a staging dir inside <dir>
-box new [name] [--ttl 8h] [--size S|--gpu]  # box_new: incus launch agent-base pc:<name> --project agents, with user.expires and the size
-box rm <name>                    # box_rm
-box ls                           # box_ls
-box mcp                          # serve the tools on stdio
+box new [name] [--ttl 8h] [--size S|--gpu]  # CLI only: incus launch agent-base pc:<name> --project agents, with user.expires and the size
+box rm <name>                    # CLI only
+box ls                           # CLI only
+box mcp                          # serve the tools on stdio: box_status, box_run, box_job (also lists jobs), box_cancel, box_pull
+box watch [--state dir] <job>    # follow a job and push its end into the session's T3 thread (box_run starts it detached)
 box join [--leave]               # register box mcp with claude/codex (user scope) and install skills/box/SKILL.md
+box ui [--url U]                 # the dashboard (docs/ui.md) in the browser: https://<host>/ of the pc remote
+box app [--url U] [--wait]       # the same page in a window of its own (internal/desktop); for people, so not an MCP tool
 ```
 
 `box status` reads `user.agent-box.mode` and `user.agent-box.reason` (set by the tray while it yields to a game) and the caps from the project, counts slots as `limits.instances` minus existing boxes, and says how many of each size fit (see Box sizes). `box join` uses the agents' own CLIs and never edits their config files. Env names that look like secrets are refused, since boxes are shared.
@@ -96,6 +99,25 @@ box join [--leave]               # register box mcp with claude/codex (user scop
 3. Exits with the remote exit code, or 75 when the PC is paused, so callers can fall back to running locally.
 
 By default it reuses one box per repo, which keeps caches and `node_modules` warm. `--new` creates a throwaway box. `--size` sets the size of a box the run launches (medium by default); when the repo's box exists in another size, the run uses a throwaway of the requested size and says so.
+
+`box app` is a window around the page `box ui` opens, as `mur app` is in Murmur: the system's web view (WebView2 on Windows) through [glaze](https://github.com/crgimenes/glaze), which loads it at run time with purego, so there is no cgo and `box` still cross-compiles. glaze (and purego under it) is box's one dependency beyond `golang.org/x/sys`. The reason is the same as Murmur's app: a native window needs the platform's web view, and glaze is the cgo-free way to it that Murmur already runs on Windows; it raised `go.mod` to Go 1.27.1. Linux builds get the window only with `-tags desktop`, because purego makes the binary link glibc dynamically; macOS has none yet. When the PC doesn't answer, the window shows the page's "PC unreachable" screen from the copy of `internal/dash/static` built into `box`, served on loopback, whose `/api/state` checks the PC each time the page retries (every 10s) and sends the window there once it answers. Every 10s the window asks its document where it is; one that doesn't answer (an error page has no bindings), a 5xx, or another site sends the window back to the loopback page. In another site's document the init script cuts the bridge to the window before that page's own scripts run.
+
+#### Pushing results to the agent
+
+Claude Code and Codex can't background an MCP call, so an agent that waits on `box_run` sits idle (Tyler, 2026-11-24: "blocking for 10mins is crazy"). Instead `box_run` waits 30 seconds, counted from the command's start, and a job still running comes back as `state: running` (`exitCode: null`) with `push: true|false` and its ID. `box_run` takes no `box` or `wait`; naming a box is for the CLI. It takes `push: false`, which subagents pass.
+
+**The rule: a duplicate notice is fine, a lost one is not.** Every choice below leans that way. A duplicate costs the agent a line to skim; a lost result leaves it waiting on a job that ended.
+
+- **`push: true`** means box knows a T3 thread for the session (`T3CODE_THREAD_ID`, or `_meta.threadId` on the call, which is where Codex's bare-environment MCP servers get it) and could start a watcher. box starts `box watch --state <dir> <job>` detached (Windows: its own process group and a hidden console, breaking away from the MCP server's job object). If breakaway is denied, Windows would kill the watcher with the MCP server, so the run reports `push: false`. The watcher outlives the MCP server, follows the job and, when it ends, runs `t3 thread send <thread> -` with the message on stdin. T3's CLI is at `T3CODE_CLI_PATH`, else `~/.t3/bin/t3.cmd`; the send goes behind the `Pusher` interface. A busy thread gets the message as its next turn. Every command the watcher runs (`t3.cmd`, incus) is started with a hidden window.
+- **`push: false`** (no T3 thread, no `t3` CLI, `push: false` asked for, or no breakaway): the agent calls `box_job`, which waits up to 10 minutes.
+- **The message** is `box: job <id> ended, exit N, after 6m12s. From box, not your user.`, the run's reason, `<command>  in  <worktree>`, the last 20 lines, and where to read the full log and pull artifacts. T3 keeps what it is sent, so the reason, command and tail go through the same secret masking boxd's history uses (`internal/mask`, shared). A throwaway box and its log are kept 30 minutes after the job ends, not deleted: the watcher and `box_job` set `user.expires` to now plus 30 minutes and the reaper deletes it, so `box_pull` and the full log still work after the push, and the message says so. The end report to boxd is unchanged. A job paused mid-run is pushed once ("paused: ... resumes if they switch back within 15 minutes (4 hours once its memory is moved to swap), else it is lost ... box_cancel this job"), then watched on. A command that itself exits 75 is a `done` result, and its message says so; "exit 75, run it locally" applies only to `state: refused`, a paused push that the agent can't wait for, and a `lost` push.
+- **Lost is confirmed.** A broken follow (a dropped connection, the PC out of reach) is retried with backoff, and nothing is pushed while the PC can't be reached. The watcher pushes `lost, exit 75` only after it looks: the box is gone or stopped, or `box job`'s state for the job is `died` (its process is dead and left no `.exit`). The pause probe also notices a deleted box and ends the follow.
+- **Cancelled is quiet.** `box_cancel` records `.notified` locally, and `cancelScript` writes a `.cancelled` mark on the box before the exit file, so a cancel from anywhere (`box cancel` on another machine) is skipped by the watcher too.
+- **State** is in `%LOCALAPPDATA%\agent-box\jobs` on the laptop, per job. `.json` is the record: the recipient thread, reason, command, worktree. `.watch` and `.sending` are leases: `<token> <expiry>`, made with an exclusive create, taken over only after they expire, renewed by their holder every 20 s (the watch lease lasts 90 s, the send lease 2 minutes). So two watchers can't run, and a restarted one can't send alongside one mid-send. `.ended` holds the job's end (exit code or lost, how long, the tail) and is written before anything is sent. `.notified` means the end reached the agent. Markers and temporary files are created exclusively under unique names (a hard link for markers, so they are never seen empty), filesystem errors are told apart from "already there", and orphaned temporary files older than an hour are deleted. Records older than 7 days are deleted.
+- **Delivery.** The watcher makes `.notified` only after `t3 thread send` succeeded, with up to four tries. A send that fails, or a watcher that dies mid-send, leaves `.ended` without `.notified`: the end is still owed. `box_job` always returns the full result, tail included, and then makes `.notified` so the watcher stays quiet. If the watcher and `box_job` race, the agent may get it twice; it never gets it zero times.
+- **Safety net.** Every `box_*` call first looks at the records for this session's thread. For each job without `.notified`: if it has ended, the result starts with `finished since you last looked: <job> exit N`, and keeps starting with it until `.notified` exists; if it has no live watcher (a laptop sleep or reboot kills them) or, once ended, nobody is sending it, a watcher is started to follow it or retry the send. Only the recipient thread's session sees the line.
+
+Known limits. Subagents share their parent's thread, so a push wakes the parent: the skill tells subagents to pass `push: false` and call `box_job`. T3 may hold a pushed turn queued behind a running turn; the safety net line covers that. Outside T3 there is no push.
 
 ### 2. Tray app (Windows): mode switch + gaming yield
 
