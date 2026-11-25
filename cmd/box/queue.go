@@ -161,7 +161,13 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, ms
 		return r, false, "boxd's answer to the queue: " + string(b)
 	}
 	box, _, _ := strings.Cut(rep.Job, ".")
-	fmt.Fprintf(a.Err, "box: queued job %s, %s (%s); it starts when it can\n", rep.Job, place(rep.Position), waitText(rep.Why))
+	// The launch above, if any, was refused: say which box the job will be
+	// on, since boxd names a throwaway of its own (#89).
+	on := "on " + box
+	if q.new {
+		on = "on a new box, " + box + ","
+	}
+	fmt.Fprintf(a.Err, "box: queued job %s, %s (%s); it starts %s when it can\n", rep.Job, place(rep.Position), waitText(rep.Why), on)
 	return JobResult{Job: rep.Job, Box: box, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new}, true, ""
 }
 
