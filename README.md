@@ -8,6 +8,18 @@ Turns a Windows gaming PC on the tailnet into on-demand, disposable Linux boxes 
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 
+## How fast
+
+Measured runs, through `box run`:
+
+| Run | Box | Time | Date |
+|---|---|---|---|
+| Murmur's `go test -race ./internal/daemon` (913 tests) | large | 420s, against 1,013s on the laptop | 2026-11-25 |
+| pi-vi's daemon, UI and vm/provision suites (5,716 tests) | medium | about 4 min | 2026-11-25 |
+| pi-vi's `:vi:testDebugUnitTest --rerun` (Android, Robolectric), caches cold | medium | 6m18s | 2026-11-24 |
+| the same, caches warm, in a new throwaway box | medium | 1m05s (80s with launch and sync) | 2026-11-24 |
+| PyTorch 4096×4096 matmul, CPU against the RTX 3070 | gpu | 590ms against 10ms | 2026-11-25 |
+
 ## Using `box`
 
 Build it with `go build ./cmd/box`. It needs the Windows `incus` client with a remote named `pc` that can reach the `agents` project.
