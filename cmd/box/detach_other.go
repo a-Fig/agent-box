@@ -14,3 +14,6 @@ func hideWindow(cmd *exec.Cmd) {}
 func detach(cmd *exec.Cmd, breakaway bool) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
+
+// breakawayDenied is Windows only: elsewhere detach has no breakaway to deny.
+func breakawayDenied(err error) bool { return false }
