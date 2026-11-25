@@ -548,7 +548,7 @@ func TestMCPAgentTools(t *testing.T) {
 	dir, _ := json.Marshal(newRepo(t))
 	in := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_status","arguments":{"dir":` + string(dir) + `}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"box_jobs","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"box_job","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"box_job","arguments":{"id":"my-repo.20261123-120000-0001","offset":0}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(dir) + `,"command":"true","reason":"Run the tests in a box for this change.","env":{"GH_TOKEN":"x"}}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"box_pull","arguments":{"from":"my-repo","remotePath":"x","localDir":"relative"}}}`,
@@ -582,9 +582,9 @@ func TestMCPAgentTools(t *testing.T) {
 		t.Errorf("box_status structured = %v", s)
 	}
 	if l := first(2); l != "1 job(s), 1 running" {
-		t.Errorf("box_jobs first line = %q", l)
+		t.Errorf("box_job list first line = %q", l)
 	}
-	if r := got[3].Result; r.IsError || r.Structured["nextOffset"] != 6.0 || r.Structured["exitCode"] != 130.0 || !strings.HasSuffix(r.Content[0].Text, "\nhello\n") {
+	if r := got[3].Result; r.IsError || r.Structured["nextOffset"] != 6.0 || r.Structured["exitCode"] != nil || !strings.HasSuffix(r.Content[0].Text, "\nhello\n") {
 		t.Errorf("box_job page = %+v", r)
 	}
 	if r := got[4].Result; !r.IsError || !strings.Contains(r.Content[0].Text, "GH_TOKEN looks like a secret") {

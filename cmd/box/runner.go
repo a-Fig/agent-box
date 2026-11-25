@@ -37,6 +37,7 @@ type execRunner struct{}
 func (execRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Dir = c.Dir
+	hideWindow(cmd)
 	cmd.Stdin = c.Stdin
 	if len(c.Env) > 0 {
 		cmd.Env = append(os.Environ(), c.Env...)

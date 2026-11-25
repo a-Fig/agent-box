@@ -70,10 +70,25 @@ type App struct {
 	Post func(ctx context.Context, url string, body []byte) error
 	// Browse opens an address in the person's browser; tests replace it.
 	Browse func(url string) error
+	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
+	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
+	// per-job files. Any of them nil or empty means no push.
+	Push     Pusher
+	Spawn    func(stateDir, job string) error
+	StateDir string
+	// InlineWait is how long box_run follows a job (zero is inlineWait);
+	// WatchPoll replaces the watcher's waits, for tests.
+	InlineWait time.Duration
+	WatchPoll  time.Duration
+	// KeepEnded, when set, keeps a throwaway box for this long after its
+	// job ended (its user.expires moves to now plus this, and the reaper
+	// deletes it) instead of deleting it, so box_pull and the full log still
+	// work after the result was pushed.
+	KeepEnded time.Duration
 }
 
 func newApp() *App {
-	return &App{
+	a := &App{
 		R:       execRunner{},
 		Remote:  env("BOX_REMOTE", "pc"),
 		Project: env("BOX_PROJECT", "agents"),
@@ -86,7 +101,13 @@ func newApp() *App {
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
 		Browse:     browse,
+		Spawn:      spawnWatcher,
+		StateDir:   defaultStateDir(),
 	}
+	if p := findT3(os.Getenv); p != "" {
+		a.Push = t3CLI{path: p}
+	}
+	return a
 }
 
 func (a *App) warn(message string) {
@@ -593,6 +614,12 @@ const (
 	statePaused   = "paused"   // the PC or the box is paused or out of reach
 )
 
+// States the MCP tools report instead of detached and a paused refusal.
+const (
+	stateRunning = "running"
+	stateRefused = "refused"
+)
+
 // JobResult is what Run and Job report. Code is the job's own exit code when
 // State is done; otherwise it is exitDetached, exitPaused, or 1 or 2 with an
 // error.
@@ -601,6 +628,9 @@ type JobResult struct {
 	Box   string `json:"box,omitempty"`
 	State string `json:"state,omitempty"`
 	Code  int    `json:"exitCode"`
+	// Push is set on a box_run that returned a running job: whether its
+	// result will arrive as a turn in the agent's T3 thread.
+	Push *bool `json:"push,omitempty"`
 }
 
 // Run syncs the worktree to a box, runs the command there and follows its
@@ -868,6 +898,12 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 		fmt.Fprintf(a.Err, "box: keeping %s: still running %s\n", box, strings.Join(running, " "))
 		return
 	}
+	if a.KeepEnded > 0 {
+		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
+			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+		}
+		return
+	}
 	a.removeQuietly(ctx, box)
 }
 
@@ -1087,7 +1123,12 @@ func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFun
 		if err != nil {
 			continue
 		}
-		if in := find(insts, box); in != nil && in.Status == "Frozen" {
+		in := find(insts, box)
+		if in == nil {
+			stop() // the box was deleted: the follow can't end by itself
+			return
+		}
+		if in.Status == "Frozen" {
 			gpu.Store(mode.IsGPU(in.Config))
 			hit.Store(true)
 			stop()

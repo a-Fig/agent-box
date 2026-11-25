@@ -89,9 +89,9 @@ func TestGPUFlagsDontMixWithOtherSizes(t *testing.T) {
 	}
 	f := &fakePC{t: t}
 	a, _ := testApp(f)
-	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_new","arguments":{"gpu":true,"size":"small"}}`), nil)
+	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_run","arguments":{"dir":"/x","command":"true","reason":"Check that gpu and size don't mix.","gpu":true,"size":"small"}}`), nil)
 	if res["isError"] != true || len(f.launches) != 0 {
-		t.Errorf("box_new gpu+small = %v", res)
+		t.Errorf("box_run gpu+small = %v", res)
 	}
 }
 
@@ -105,16 +105,15 @@ func TestGPUNewAndMCP(t *testing.T) {
 		t.Errorf("launch = %s", got)
 	}
 	// A second GPU box is refused while the first holds the GPU.
-	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_new","arguments":{"gpu":true}}`), nil)
-	text := res["content"].([]map[string]any)[0]["text"].(string)
-	if res["isError"] != true || !strings.Contains(text, "the GPU box is in use (box trainer); run on CPU or wait") || len(f.launches) != 1 {
-		t.Errorf("second box_new = %v", res)
+	out.Reset()
+	if code := run(context.Background(), a, []string{"new", "--gpu"}, nil); code == 0 || !strings.Contains(out.String(), "the GPU box is in use (box trainer); run on CPU or wait") || len(f.launches) != 1 {
+		t.Errorf("second box new --gpu = %d\n%s", code, out)
 	}
 	var schema struct {
 		Properties map[string]map[string]any `json:"properties"`
 	}
 	for _, tl := range tools {
-		if tl.Name == "box_new" || tl.Name == "box_run" {
+		if tl.Name == "box_run" {
 			b, _ := json.Marshal(tl.InputSchema)
 			json.Unmarshal(b, &schema)
 			if schema.Properties["gpu"]["type"] != "boolean" {
@@ -145,10 +144,12 @@ func TestGPUInUseExits75(t *testing.T) {
 	a, _ = testApp(f)
 	dir := newRepo(t)
 	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_run","arguments":{"dir":`+jsonString(dir)+`,"command":"true","gpu":true,"reason":"Run the tests in a box for this change."}}`), nil)
-	if sc := res["structuredContent"].(struct {
-		JobResult
-		Warnings []string `json:"warnings,omitempty"`
-	}); sc.Code != exitPaused {
+	var sc struct {
+		State    string
+		ExitCode int
+	}
+	raw, _ := json.Marshal(res["structuredContent"])
+	if json.Unmarshal(raw, &sc); sc.ExitCode != exitPaused || sc.State != stateRefused {
 		t.Errorf("box_run gpu = %v", res)
 	}
 
