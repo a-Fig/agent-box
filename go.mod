@@ -1,6 +1,6 @@
 module github.com/a-Fig/agent-box
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/crgimenes/glaze v0.0.83

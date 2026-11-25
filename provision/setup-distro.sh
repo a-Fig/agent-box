@@ -368,6 +368,14 @@ fi
 # rerun), is the staged copy deleted.
 rm -f "$HERE/boxd"
 
+step "boxd updates (the latest stable release, checked hourly; docs/releasing.md)"
+# After the boxd step: the timer runs at once when started, and must see the boxd this run installed.
+install -m 0755 "$HERE/update-boxd.sh" /usr/local/sbin/agent-box-update-boxd
+install -m 0644 "$HERE/systemd/agent-box-update.service" "$HERE/systemd/agent-box-update.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agent-box-update.timer >/dev/null 2>&1
+note "agent-box-update.timer enabled; a boxd that isn't a release is left alone (AGENT_BOX_NO_UPDATE=1 in /etc/agent-box/update.env turns it off)"
+
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then
   note "/dev/kvm present: Incus VMs (incus launch --vm) are possible."

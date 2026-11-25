@@ -40,13 +40,19 @@ A release is a pushed tag `vX.Y.Z` on `main`, as in Murmur.
    - `boxtray-windows-amd64.exe`
    - `boxd-linux-amd64`
    - `agent-box-boxd.service`, `install-boxd.sh`
-3. The version is the tag, built in with `-X` (the `internal/version` package from #52). A plain
-   `go build` says `-dev` and never updates itself, as in Murmur.
+3. The version is the tag, built in with `-X` (`version.Tag`). Each binary's `--version` says it
+   as its second word, `box v0.3.0 (e823842, 2026-11-25 07:12 UTC)`, and a plain `go build` says
+   only its commit and never updates itself, as in Murmur. The release checks that box and boxd
+   say the tag before it publishes.
+4. `govulncheck` stops a release that reaches a known vulnerability. Its first run (2026-11-25)
+   found twelve in Go 1.27.1's standard library, so `go.mod` moved to 1.27.4.
 
 **Nightlies are automatic, stable releases are by hand** (Tyler, 2026-11-25).
 - A push to `main` that passes CI is tagged `vX.Y.Z-nightly.YYYYMMDD.N` and published as a
-  prerelease. X.Y.Z is the latest stable release with its patch raised by one. Pruning keeps the
-  newest seven, as in Murmur.
+  prerelease (`.github/workflows/nightly.yml`, on test.yml's run; it fires only from `main`'s copy
+  of the file). X.Y.Z is the latest stable release with its patch raised by one, `v0.0.1` while
+  there is none, and N counts that day's nightlies. A commit already out is not tagged again.
+  Pruning keeps the newest seven, as in Murmur.
 - A stable `vX.Y.Z` is tagged by hand, on a commit a nightly already ran.
 
 **Channels.** Every part follows **stable** (Tyler, 2026-11-25): it takes GitHub's latest
@@ -80,9 +86,12 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
 
   The mutex hand-over that already exists between the tray and the headless enforcer covers the
   gap. Not while a game runs: yield wins.
-- **boxd.** An `agent-box-update.timer` in the distro runs hourly. It fetches the release's
-  `boxd`, unit and `install-boxd.sh`, and runs it. That script already checks the checksums,
-  health-checks the new boxd and rolls back.
+- **boxd.** An `agent-box-update.timer` in the distro runs `update-boxd.sh` hourly. It fetches the
+  release's `boxd`, unit and `install-boxd.sh`, checks them and probes the new boxd, and runs that
+  `install-boxd.sh`, which health-checks the new boxd and rolls back. A boxd that isn't a release
+  (`deploy-boxd.sh`'s, or one from before `-version`) is left alone, so a boxd first goes onto
+  releases by hand: `agent-box-update-boxd <tag>` as root in the distro. Tried on the PC on
+  2026-11-25 against a test prerelease (provision/README.md).
 
 ## Safety
 
