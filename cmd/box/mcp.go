@@ -101,7 +101,7 @@ var sizeArg = map[string]any{"type": "string", "enum": sizeEnum(),
 
 // gpuArg is the gpu property of box_new and box_run.
 var gpuArg = map[string]any{"type": "boolean",
-	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; while it's taken, a run with push waits for it in the queue, otherwise exit 75. It is stopped in My PC, and a GPU run doesn't wait out My PC (exit 75)."}
+	"description": "Same as size gpu: the PC's GPU (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; while it's taken, a run with push waits for it in the queue, otherwise exit 75. It is stopped in My PC, and a GPU run doesn't wait out My PC (exit 75)."}
 
 func sizeEnum() []string {
 	var n []string
