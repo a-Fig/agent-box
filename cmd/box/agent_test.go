@@ -817,7 +817,7 @@ func TestJoinSetsUpOnlyInstalledAgents(t *testing.T) {
 		}
 	}
 	if s := out.String(); !strings.Contains(s, "codex isn't on PATH") ||
-		!strings.Contains(s, "set up: codex; skipped, not installed: claude, antigravity") {
+		!strings.Contains(s, "set up: codex (skill only); skipped, not installed: claude, antigravity") {
 		t.Errorf("report =\n%s", s)
 	}
 
@@ -843,6 +843,88 @@ func TestJoinSetsUpOnlyInstalledAgents(t *testing.T) {
 	}
 	if !agents.registered["claude"] {
 		t.Error("claude mcp add didn't run")
+	}
+}
+
+// With ~/.claude present and CLAUDE_CONFIG_DIR not made yet, the folder the
+// CLI reads still gets the skill and hook; a Claude folder without the CLI gets
+// them too, but no MCP server.
+func TestJoinClaudeFolders(t *testing.T) {
+	home := isolateHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(home, "claude-alt")
+	agents := &fakeAgents{registered: map[string]bool{}}
+	c := joinConfig{
+		R: agents, Home: home, ClaudeConfigDir: configDir, Exe: filepath.Join(home, "box.exe"), Out: io.Discard,
+		LookPath: func(name string) (string, error) {
+			if name == "claude" {
+				return filepath.Join(home, "bin", "claude.exe"), nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	if err := join(context.Background(), c, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{filepath.Join(home, ".claude"), configDir} {
+		for _, f := range []string{filepath.Join("skills", "box", "SKILL.md"), "settings.json"} {
+			if _, err := os.Stat(filepath.Join(d, f)); err != nil {
+				t.Errorf("%s: %v", f, err)
+			}
+		}
+	}
+
+	home2 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home2, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	c = joinConfig{
+		R:    runnerFunc(func(Cmd) Result { t.Error("ran an agent CLI"); return Result{} }),
+		Home: home2, Exe: filepath.Join(home2, "box.exe"), Out: &out,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	if err := join(context.Background(), c, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{filepath.Join("skills", "box", "SKILL.md"), "settings.json"} {
+		if _, err := os.Stat(filepath.Join(home2, ".claude", f)); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
+	}
+	if s := out.String(); !strings.Contains(s, "claude isn't on PATH") || !strings.Contains(s, "set up: claude (skill only)") {
+		t.Errorf("report =\n%s", s)
+	}
+}
+
+// Leave removes the skill from every place one could be, even a home join
+// would no longer count as installed.
+func TestLeaveLooksEverywhere(t *testing.T) {
+	home := isolateHome(t)
+	configDir := filepath.Join(home, "claude-alt")
+	c := joinConfig{
+		Home: home, ClaudeConfigDir: configDir, Exe: filepath.Join(home, "box.exe"), Out: io.Discard,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	paths := c.skillPaths()
+	if len(paths) != 3 {
+		t.Fatalf("skillPaths = %v, want ~/.claude, CLAUDE_CONFIG_DIR, ~/.codex", paths)
+	}
+	for _, p := range paths {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, p, skills.Box)
+	}
+	if err := join(context.Background(), c, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s after leave: %v", p, err)
+		}
 	}
 }
 

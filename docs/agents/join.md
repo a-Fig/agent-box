@@ -58,10 +58,10 @@ Your shell may not see the new PATH yet: use the full path the installer printed
 
 It is safe to run twice. It ends by saying which agents it set up and which it skipped. If it found
 none, it changed nothing and printed the server entry to add by hand, as below. Then run
-`box status`: its first line says whether the host has room now. Tell your user what join printed, and that a session already running may not load the new
-tools: in T3 Code, stop and send any message, or open a new thread; in a terminal, start a new
-session (`claude --continue` keeps the conversation). Don't say the tools are there until they show
-up in your list.
+`box status`: its first line says whether the host has room now. Tell your user what join printed,
+and that a session already running may not load the new tools: in T3 Code, stop and send any
+message, or open a new thread; in a terminal, start a new session (`claude --continue` keeps the
+conversation). Don't say the tools are there until they show up in your list.
 
 ## Cursor and other agents
 

@@ -117,18 +117,16 @@ func (c joinConfig) findAgents() installed {
 			}
 		}
 	}
+	// The CLI's own folder counts even before it exists: Claude Code reads
+	// $CLAUDE_CONFIG_DIR when set, else ~/.claude.
+	inUse := filepath.Join(c.Home, ".claude")
+	if c.ClaudeConfigDir != "" {
+		inUse = filepath.Clean(c.ClaudeConfigDir)
+	}
 	for _, d := range c.claudeDirs() {
-		if isDir(d) {
+		if isDir(d) || f.cli["claude"] != "" && strings.EqualFold(d, inUse) {
 			f.claudeDirs = append(f.claudeDirs, d)
 		}
-	}
-	if len(f.claudeDirs) == 0 && f.cli["claude"] != "" {
-		// A CLI that hasn't run yet: its config goes where Claude Code will look.
-		d := filepath.Join(c.Home, ".claude")
-		if c.ClaudeConfigDir != "" {
-			d = filepath.Clean(c.ClaudeConfigDir)
-		}
-		f.claudeDirs = []string{d}
 	}
 	if h := c.codexHome(); isDir(h) || f.cli["codex"] != "" {
 		f.codexHome = h
@@ -159,7 +157,7 @@ func manualMCP(exe string) string {
 }
 
 // antigravityHomes returns each Antigravity home directory that is configured
-// or installed: $GEMINI_HOME, standalone ~/.gemini (if present or `agy` is on
+// or installed: $GEMINI_HOME (if present), standalone ~/.gemini (if present or `agy` is on
 // PATH), and every initialized T3 Code Antigravity provider directory under
 // ~/.t3/userdata/providers/antigravity/ (or $T3CODE_HOME).
 func (c joinConfig) antigravityHomes() []string {
@@ -176,7 +174,7 @@ func (c joinConfig) antigravityHomes() []string {
 		}
 		homes = append(homes, clean)
 	}
-	if c.GeminiHome != "" {
+	if c.GeminiHome != "" && isDir(c.GeminiHome) {
 		add(c.GeminiHome)
 	}
 	if c.Home != "" {
@@ -317,13 +315,15 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			skipped = append(skipped, a.name)
 			continue
 		}
-		setUp = append(setUp, a.name)
 		if !onPath {
+			setUp = append(setUp, a.name+" (skill only)")
 			if !leave {
-				fmt.Fprintf(c.Out, "%s: %s isn't on PATH, so the MCP server isn't registered; add it by hand (docs/agents/join.md)\n", a.name, a.name)
+				fmt.Fprintf(c.Out, "%s: %s isn't on PATH, so the MCP server isn't registered; with it on PATH, run box join again or %s %s\n",
+					a.name, a.name, a.name, strings.Join(a.add, " "))
 			}
 			continue
 		}
+		setUp = append(setUp, a.name)
 		// Removing first makes join repeatable: add refuses an existing name.
 		rm, err := c.R.Run(ctx, Cmd{Name: bin, Args: a.remove})
 		if err != nil {
