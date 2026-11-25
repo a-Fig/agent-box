@@ -366,7 +366,7 @@ func (a *App) safetyNet(skip string) string {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".watchlog"} {
+			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog"} {
 				os.Remove(a.statePath(job, ext))
 			}
 			continue
@@ -462,7 +462,7 @@ func endedMessage(r jobRecord, e jobEnd) string {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
 	if r.New {
-		msg += fmt.Sprintf("Box and log kept %d minutes. ", int(endedKeep.Minutes()))
+		msg += fmt.Sprintf("Box and log kept up to %d minutes (a launch short of room may take them sooner). ", int(endedKeep.Minutes()))
 	}
 	return msg + fmt.Sprintf("Full log: box_job id %s offset 0. Artifacts: box_pull, before this repo's next run.", r.Job)
 }
@@ -591,14 +591,14 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines)}, true
 	}
 	if rec.Queued {
-		started, dropped, ok := w.waitQueued(ctx, rec)
+		out, ok := w.waitQueued(ctx, rec)
 		switch {
 		case !ok:
 			return jobEnd{}, false
-		case dropped:
-			return jobEnd{Code: exitPaused, Lost: true, Dropped: true, Took: took()}, true
-		case !started.IsZero():
-			start = started // took counts the run, not the wait
+		case out.end != nil:
+			return *out.end, true
+		case !out.started.IsZero():
+			start = out.started // took counts the run, not the wait
 		}
 	}
 	var pauseDeadline time.Time

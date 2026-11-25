@@ -316,7 +316,7 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	if r.State == stateRunning {
 		head = "running" // no exit code yet
 	} else if r.State == stateQueued {
-		head = fmt.Sprintf("queued, %s in line, %s", ordinal(r.Position), waitText(r.Why))
+		head = fmt.Sprintf("queued, %s, %s", place(r.Position), waitText(r.Why))
 	} else if r.State != "" {
 		head = r.State + ", " + head
 	}
@@ -419,14 +419,15 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		return res
 	case "box_cancel":
 		if a.wasQueued(args.ID) {
-			switch err := a.cancelQueued(ctx, args.ID); {
-			case err == nil:
+			removed, err := a.cancelQueuedOrStarted(ctx, args.ID)
+			if err != nil {
+				return textResult("cancel "+args.ID+": "+err.Error(), true)
+			}
+			if removed {
 				a.markNotified(args.ID, "cancel")
 				res := textResult("removed "+args.ID+" from the queue; it never ran", false)
 				res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": true, "exitCode": exitDetached}
 				return res
-			case !errors.Is(err, errNotQueued):
-				return textResult("cancel "+args.ID+": "+err.Error(), true)
 			} // it has started: stop it in its box
 		}
 		cancelled, c, err := a.Cancel(ctx, args.ID)

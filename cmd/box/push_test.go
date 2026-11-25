@@ -521,7 +521,7 @@ func TestThrowawayKeptAfterItsPushedJob(t *testing.T) {
 	if got := f.inst(box).Config[expiresKey]; got != want {
 		t.Errorf("expiry = %q, want %q", got, want)
 	}
-	if !strings.Contains(e.push.sent[0].msg, "Box and log kept 30 minutes") {
+	if !strings.Contains(e.push.sent[0].msg, "Box and log kept up to 30 minutes") {
 		t.Errorf("message = %q", e.push.sent[0].msg)
 	}
 }

@@ -497,7 +497,9 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 			exp.After(a.Now().Add(endedKeep+time.Minute)) {
 			continue
 		}
-		res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
+		look, cancel := a.probeCtx(ctx) // a box frozen since the list would hold the exec
+		res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
+		cancel()
 		if err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept" {
 			out = append(out, in)
 		}
@@ -707,10 +709,13 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	a.warnSubmodules(ctx, rp.Top)
 	info := a.runInfo(ctx, rp, o, sz)
 	var id, bundle string
-	// qr is the run as the queue takes it, from where Run has got to.
-	qr := func() queueRun {
+	// qr is the run as the queue takes it, from where Run has got to. A run
+	// turned away by a pause gets a throwaway: the checks below on the repo's
+	// box (its size, that it isn't a throwaway) haven't run, and the tray may
+	// stop a frozen box, which the queue doesn't start again.
+	qr := func(paused bool) queueRun {
 		q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: info, bundle: bundle, ref: id}
-		if o.New || sz.GPU {
+		if o.New || sz.GPU || paused {
 			q.box, q.new = rp.Name, true
 		}
 		return q
@@ -731,7 +736,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			except = box
 		}
 		if err := a.claimGPU(ctx, insts, except); err != nil {
-			return a.turnAway(ctx, qr(), err.Error(), errCause(err)), nil
+			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
 		}
 	}
 	if paused == "" && !o.New {
@@ -750,7 +755,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 	if paused != "" {
-		return a.turnAway(ctx, qr(), paused+"; run it locally", a.pausedCause(paused)), nil
+		return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
 	}
 
 	id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
@@ -769,11 +774,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
 		case isTempFail(err):
-			return a.turnAway(ctx, qr(), err.Error(), errCause(err)), nil
+			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
 		case err != nil:
 			return JobResult{Code: 1}, err
 		case paused != "":
-			return a.turnAway(ctx, qr(), paused+"; run it locally", a.pausedCause(paused)), nil
+			return a.turnAway(ctx, qr(true), paused+"; run it locally", a.pausedCause(paused)), nil
 		}
 	}
 	if o.New {
@@ -783,7 +788,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
 			if isTempFail(err) {
-				return a.turnAway(ctx, qr(), err.Error(), errCause(err)), nil
+				return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
 			}
 			return JobResult{Box: box, Code: 1}, err
 		}

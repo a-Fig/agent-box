@@ -161,8 +161,16 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, ms
 		return r, false, "boxd's answer to the queue: " + string(b)
 	}
 	box, _, _ := strings.Cut(rep.Job, ".")
-	fmt.Fprintf(a.Err, "box: queued job %s, %s in line (%s); it starts when it can\n", rep.Job, ordinal(rep.Position), waitText(rep.Why))
+	fmt.Fprintf(a.Err, "box: queued job %s, %s (%s); it starts when it can\n", rep.Job, place(rep.Position), waitText(rep.Why))
 	return JobResult{Job: rep.Job, Box: box, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new}, true, ""
+}
+
+// place says where a queued job is in line.
+func place(n int) string {
+	if n < 1 {
+		return "starting now"
+	}
+	return ordinal(n) + " in line"
 }
 
 // ordinal is 1st, 2nd, 3rd, 4th...
@@ -257,32 +265,64 @@ func droppedMessage(r jobRecord) string {
 		r.Job, elapsed(dash.QueueMaxAge), fromBox, r.context())
 }
 
-// waitQueued follows a queued job until it starts. started is when it did;
-// ended is set when it left the queue without running. It nudges once at
-// dash.QueueNudge. ok is false when ctx ended or the agent cancelled it.
-func (a *App) waitQueued(ctx context.Context, rec jobRecord) (started time.Time, dropped bool, ok bool) {
+// queueOutcome is how a queued job left the queue: started is when it began
+// running in its box (zero when only the box can say), or end is how it ended
+// when boxd already knows: its exit code, or that it never ran.
+type queueOutcome struct {
+	started time.Time
+	end     *jobEnd
+}
+
+// jobInBox says whether the job's log exists in its box: it started there.
+func (a *App) jobInBox(ctx context.Context, job string) bool {
+	look, cancel := a.probeCtx(ctx)
+	defer cancel()
+	_, err := a.LogPage(look, job, 0, 1)
+	return err == nil
+}
+
+// waitQueued follows a queued job until it leaves the queue, nudging the
+// agent once at dash.QueueNudge. ok is false when ctx ended or the agent
+// cancelled the job.
+func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, ok bool) {
 	queuedAt := jobStart(rec.Job) // boxd names a queued job by when it was queued
+	dropped := func() (queueOutcome, bool) {
+		return queueOutcome{end: &jobEnd{Code: exitPaused, Lost: true, Dropped: true, Took: int64(a.Now().Sub(queuedAt) / time.Second)}}, true
+	}
 	backoff := 15 * time.Second
+	seen, gone := false, 0 // boxd has answered queued; 404s in a row since
 	for ctx.Err() == nil {
 		if a.exists(rec.Job, ".notified") {
-			return time.Time{}, false, false // box_cancel took it off the queue
+			return out, false // box_cancel took it off the queue
 		}
 		j, found, err := a.queuedJob(ctx, rec.Job)
 		switch {
 		case err != nil:
 			// Out of reach: keep waiting, but not past the queue's own limit.
 			if a.Now().Sub(queuedAt) > dash.QueueMaxAge+time.Hour {
-				return time.Time{}, true, true
+				if a.jobInBox(ctx, rec.Job) {
+					return out, true
+				}
+				return dropped()
 			}
 			a.sleep(ctx, backoff)
 			backoff = min(backoff*2, 2*time.Minute)
 			continue
 		case !found:
-			// Not boxd's to report (a restart forgets a start it hasn't
-			// scanned yet): the box itself says the rest.
-			return time.Time{}, false, true
+			// Before boxd has answered queued, or for a job in its box (a
+			// restart forgets a start it hasn't scanned yet), the box says the
+			// rest. A job boxd had queued that is in no box was taken off the
+			// queue (from the page): it never ran.
+			if !seen || a.jobInBox(ctx, rec.Job) {
+				return out, true
+			}
+			if gone++; gone >= 2 {
+				return dropped()
+			}
+			a.sleep(ctx, backoff)
+			continue
 		case j.State == dash.JobQueued:
-			backoff = 15 * time.Second
+			seen, gone, backoff = true, 0, 15*time.Second
 			if j.QueuedAt != nil {
 				queuedAt = *j.QueuedAt
 			}
@@ -294,9 +334,51 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (started time.Time,
 			a.sleep(ctx, backoff)
 			continue
 		case j.State == dash.JobLost && (j.QueuedAt == nil || !j.StartedAt.After(*j.QueuedAt)):
-			return time.Time{}, true, true
+			return dropped()
+		case j.State == dash.JobDone && j.Exit != nil:
+			// It ran and ended while nobody watched: boxd has the result, and
+			// its kept box may be gone already.
+			e := &jobEnd{Code: *j.Exit, Tail: lastLines(j.Tail, tailLines)}
+			if j.EndedAt != nil {
+				e.Took = int64(j.EndedAt.Sub(j.StartedAt) / time.Second)
+			}
+			return queueOutcome{end: e}, true
 		}
-		return j.StartedAt, false, true // running, paused or ended: the box has it
+		return queueOutcome{started: j.StartedAt}, true // running or paused: the box has it
 	}
-	return time.Time{}, false, false
+	return out, false
+}
+
+// lastLines is the last n lines of s.
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// cancelQueuedOrStarted cancels a job this laptop queued. A job boxd is
+// starting right now can't be taken off the queue, nor stopped in its box
+// yet, so it waits for the start, up to a minute, then stops it there.
+// cancelled is false when the job wasn't boxd's to cancel; the caller then
+// stops it in its box.
+func (a *App) cancelQueuedOrStarted(ctx context.Context, job string) (removed bool, err error) {
+	deadline := a.Now().Add(time.Minute)
+	for {
+		err := a.cancelQueued(ctx, job)
+		switch {
+		case err == nil:
+			return true, nil
+		case !errors.Is(err, errNotQueued):
+			return false, nil // boxd out of reach: try the box
+		}
+		j, found, qerr := a.queuedJob(ctx, job)
+		if qerr != nil || !found || j.State != dash.JobQueued || a.Now().After(deadline) {
+			return false, nil // started, or gone: the box has it
+		}
+		if !a.sleep(ctx, 2*time.Second) { // still starting
+			return false, ctx.Err()
+		}
+	}
 }

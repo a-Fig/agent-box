@@ -153,12 +153,54 @@ func TestRunsThatAreNotQueued(t *testing.T) {
 	}
 }
 
+// A run turned away by My PC waits for a throwaway: the repo's box wasn't
+// checked, and the tray may stop it while it is frozen.
 func TestQueuedRunInMyPCIsQueued(t *testing.T) {
 	e, b := newQueueEnv(t, &fakePC{mode: "mypc"})
 	b.reply.Why = dash.RefusedMyPC
-	_, st := e.call(t, "box_run", e.runArgs(nil, "true"))
-	if st["state"] != "queued" || st["why"] != "mypc" || b.req.New || b.req.Box != "my-repo" {
+	_, st := e.call(t, "box_run", e.runArgs(map[string]any{"size": "large"}, "true"))
+	if st["state"] != "queued" || st["why"] != "mypc" || !b.req.New || b.req.Box != "my-repo" || b.req.Size != "large" {
 		t.Fatalf("structured = %v, request %+v", st, b.req)
+	}
+}
+
+// A job boxd had queued that leaves the queue with no box (cancelled from
+// the page) never ran, and is pushed as such.
+func TestWatchReportsAJobTakenOffTheQueue(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{scriptRC: 3})
+	queued := time.Date(2026, 11, 23, 11, 55, 0, 0, time.UTC)
+	b.views = []dash.Job{{State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued, Position: 1, Why: dash.RefusedFull}}
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Thread: "thread-1", Queued: true})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		b.mu.Lock()
+		b.gone = true
+		b.mu.Unlock()
+	}()
+	if err := e.a.Watch(context.Background(), queuedJobName); err != nil {
+		t.Fatal(err)
+	}
+	if e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, "left the queue without running") {
+		t.Fatalf("pushed %+v", e.push.sent)
+	}
+}
+
+// A job that ran and ended while nobody watched gets boxd's result, though
+// its kept box is gone.
+func TestWatchTakesAQueuedJobsEndFromBoxd(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{})
+	queued := time.Date(2026, 11, 23, 11, 0, 0, 0, time.UTC)
+	started, ended, exit := queued.Add(10*time.Minute), queued.Add(25*time.Minute), 3
+	b.views = []dash.Job{{State: dash.JobDone, QueuedAt: &queued, StartedAt: started, EndedAt: &ended, Exit: &exit, Tail: "a\nFAIL b\n"}}
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Thread: "thread-1", Queued: true})
+	if err := e.a.Watch(context.Background(), queuedJobName); err != nil {
+		t.Fatal(err)
+	}
+	if e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, "ended, exit 3, after 15m00s") || !strings.Contains(e.push.sent[0].msg, "FAIL b") {
+		t.Fatalf("pushed %+v", e.push.sent)
+	}
+	if strings.Contains(e.f.callList(), "exec") {
+		t.Errorf("looked in the box: %s", e.f.callList())
 	}
 }
 
@@ -269,4 +311,18 @@ func mustSize(t *testing.T, name string) mode.Size {
 		t.Fatal(err)
 	}
 	return sz
+}
+
+// A job boxd is starting can't leave the queue, nor be stopped in a box yet:
+// box_cancel waits for the start, then stops it there.
+func TestCancelAJobBeingStarted(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{script: "cancelled 130\n", insts: []instance{{Name: "my-repo-ab12", Status: "Running", Config: map[string]string{throwawayKey: "true"}}}})
+	queued := time.Date(2026, 11, 23, 11, 55, 0, 0, time.UTC)
+	b.cancel = 409
+	b.views = []dash.Job{{State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued}, {State: dash.JobRunning, QueuedAt: &queued, StartedAt: queued.Add(time.Minute)}}
+	writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Thread: "thread-1", Queued: true})
+	text, _ := e.call(t, "box_cancel", map[string]any{"id": queuedJobName})
+	if !strings.Contains(text, "cancelled "+queuedJobName+" (exit 130)") || strings.Count(b.callList(), "/cancel") != 2 {
+		t.Fatalf("%q, boxd calls %s", text, b.callList())
+	}
 }
