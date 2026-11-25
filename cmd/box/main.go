@@ -37,7 +37,10 @@ const usage = `usage:
   box mcp                                   serve MCP on stdio: box_status, box_run, box_job, box_cancel, box_pull
   box watch [--state dir] <id>              follow a job and push its result into this session's T3 thread
                                             (box_run starts it detached; not for people)
+  box hook                                  Claude Code's PostToolUse hook: this session's ended jobs,
+                                            mid-turn (box join adds it; not for people)
   box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
+                                            and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
 
@@ -283,6 +286,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if err := a.Watch(ctx, fs.Arg(0)); err != nil {
 			return fail(err)
 		}
+		return 0
+	case "hook":
+		// Claude Code's PostToolUse hook: never an error, never a delay.
+		a.Hook(stdin, a.Out)
 		return 0
 	case "-h", "--help", "help":
 		fmt.Fprint(a.Out, usageText())
