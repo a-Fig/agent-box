@@ -192,6 +192,17 @@ func TestRunPushFalseSkipsTheWatcher(t *testing.T) {
 	}
 }
 
+// A watcher that had to start inside the client's job object still pushes,
+// and the result says how long the push lasts.
+func TestRunWatcherInJobPushesWithNotice(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t, block: true}, "thread-1")
+	e.a.Spawn = func(dir, job string) error { return errWatcherInJob }
+	text, st := e.run(t, "sleep 600")
+	if st["push"] != true || !strings.Contains(text, "this push lasts only as long as box's MCP server") || !e.a.exists(st["job"].(string), ".json") {
+		t.Errorf("structured = %v\n%s", st, text)
+	}
+}
+
 func TestRunSpawnFailureReportsNoPush(t *testing.T) {
 	e := newPushEnv(t, &fakePC{t: t, block: true}, "thread-1")
 	e.a.Spawn = func(dir, job string) error { return errors.New("access denied: no breakaway from the job object") }
@@ -440,6 +451,26 @@ func TestSafetyNetRestartsLostWatchers(t *testing.T) {
 	}
 }
 
+// A follow after a broken one (or a pause) prints the log from its start
+// again; the pushed tail has each line once. Seen live 2026-11-25 after a
+// pause: "pause-smoke-start" twice.
+func TestWatchTailAfterRefollowIsNotDoubled(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	e := newPushEnv(t, f, "thread-1")
+	_, st := e.call(t, "box_run", e.runArgs(nil, "go test ./..."))
+	job := st["job"].(string)
+	f.finish("0", "only-once\n")
+	f.mu.Lock()
+	f.followErr = 1
+	f.mu.Unlock()
+	if err := e.a.Watch(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if e.push.count() != 1 || strings.Count(e.push.sent[0].msg, "only-once") != 1 {
+		t.Errorf("pushed:\n%v", e.push.sent)
+	}
+}
+
 func TestWatcherLeaseIsExclusive(t *testing.T) {
 	f := &fakePC{t: t, block: true}
 	e := newPushEnv(t, f, "thread-1")
@@ -681,5 +712,60 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "box_status,box_run,box_job,box_cancel,box_pull" {
 		t.Errorf("tools = %v", names)
+	}
+}
+
+// reset drops the last follow's output only once the next one prints: a
+// follow that prints nothing (a frozen box, a gone one) keeps it, for the
+// tail of a lost push.
+func TestLineTailResetIsLazy(t *testing.T) {
+	var l lineTail
+	l.Write([]byte("last-words\n"))
+	l.reset()
+	if got := l.lastLines(5); got != "last-words" {
+		t.Errorf("after a reset with no output = %q", got)
+	}
+	l.Write([]byte("again\n"))
+	if got := l.lastLines(5); got != "again" {
+		t.Errorf("after the next follow printed = %q", got)
+	}
+}
+
+// A watcher that dies with its MCP server (Codex keeps it inside its job
+// object) leaves leases that expire: the safety net restarts it once they
+// have, within sendLease of a death mid-send, and the end is pushed once.
+func TestSafetyNetRecoversAWatcherKilledMidSend(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	e := newPushEnv(t, f, "thread-1")
+	_, st := e.run(t, "go test ./...")
+	job := st["job"].(string)
+	now := e.a.Now()
+	e.a.Now = func() time.Time { return now }
+	// Killed while sending: its .ended written, its leases left behind.
+	if err := writeJSON(e.a.statePath(job, ".ended"), jobEnd{Code: 1, Tail: "FAIL x"}); err != nil {
+		t.Fatal(err)
+	}
+	for ext, ttl := range map[string]time.Duration{".sending": sendLease, ".watch": watchLease} {
+		if won, err := e.a.claimBy(job, ext, e.a.leaseText("dead", ttl)); !won || err != nil {
+			t.Fatal(ext, won, err)
+		}
+	}
+	*e.spawns = nil
+	if line := e.a.safetyNet(""); !strings.Contains(line, job+" exit 1") || len(*e.spawns) != 0 {
+		t.Errorf("while the leases hold: %q, spawns %v", line, *e.spawns)
+	}
+	now = now.Add(watchLease + time.Second) // .watch gone, .sending still held
+	if e.a.safetyNet(""); len(*e.spawns) != 0 {
+		t.Errorf("restarted while .sending holds: %v", *e.spawns)
+	}
+	now = now.Add(sendLease - watchLease)
+	if e.a.safetyNet(""); len(*e.spawns) != 1 {
+		t.Fatalf("after the leases expired, spawns = %v", *e.spawns)
+	}
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, "ended, exit 1") {
+		t.Errorf("restarted watcher: %v, %+v", err, e.push.sent)
+	}
+	if line := e.a.safetyNet(""); line != "" {
+		t.Errorf("after delivery: %q", line)
 	}
 }

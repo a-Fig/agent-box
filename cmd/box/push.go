@@ -108,9 +108,12 @@ func defaultStateDir() string {
 	return filepath.Join(d, "agent-box", "jobs")
 }
 
-// spawnWatcher starts `box watch` detached, so it outlives this process. It
-// fails, and the run reports push false, when it can't get out of this
-// process's job object: Windows would kill the watcher with the MCP server.
+// spawnWatcher starts `box watch` detached, so it outlives this process. On
+// Windows it first tries to break away from this process's job object, which
+// would kill the watcher with the MCP server. Codex starts MCP servers in a
+// job that forbids that (access denied, seen 2026-11-25), so the watcher then
+// starts inside it: it lives as long as the MCP server, which Codex keeps for
+// its session, and if it dies the safety net restarts it (safetyNet).
 func spawnWatcher(stateDir, job string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -124,13 +127,35 @@ func spawnWatcher(stateDir, job string) error {
 		return err
 	}
 	defer logf.Close()
-	cmd := exec.Command(exe, "watch", "--state", stateDir, job)
-	cmd.Stdout, cmd.Stderr = logf, logf
-	detach(cmd, true)
-	if err := cmd.Start(); err != nil {
+	return startDetached(func(breakaway bool) error {
+		cmd := exec.Command(exe, "watch", "--state", stateDir, job)
+		cmd.Stdout, cmd.Stderr = logf, logf
+		detach(cmd, breakaway)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		return cmd.Process.Release()
+	})
+}
+
+// errWatcherInJob is the success of a watcher started inside the MCP
+// client's job object: it dies with the MCP server, so the push is only as
+// good as the server's life, and the agent is told so.
+var errWatcherInJob = errors.New("the watcher runs inside the MCP client's job object")
+
+// startDetached starts a process with breakaway, and again without it when
+// the job object refuses breakaway (then errWatcherInJob).
+func startDetached(start func(breakaway bool) error) error {
+	err := start(true)
+	if err != nil && breakawayDenied(err) {
+		if err = start(false); err == nil {
+			return errWatcherInJob
+		}
+	}
+	if err != nil {
 		return fmt.Errorf("can't start a detached watcher: %w", err)
 	}
-	return cmd.Process.Release()
+	return nil
 }
 
 // jobRecord is <job>.json.
@@ -329,7 +354,12 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	if err := a.Spawn(a.StateDir, job); err != nil {
+	err := a.Spawn(a.StateDir, job)
+	if errors.Is(err, errWatcherInJob) {
+		a.warn("box: notice: this push lasts only as long as box's MCP server, which can't outlive your client here; if your session restarts before it arrives, call box_job " + job + ".")
+		err = nil
+	}
+	if err != nil {
 		os.Remove(a.statePath(job, ".json"))
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
@@ -401,7 +431,7 @@ func (a *App) safetyNet(skip string) string {
 		}
 		// Running with no watcher, or ended with nobody sending it: start one.
 		if a.Spawn != nil {
-			if err := a.Spawn(a.StateDir, job); err != nil {
+			if err := a.Spawn(a.StateDir, job); err != nil && !errors.Is(err, errWatcherInJob) {
 				a.warn("box: warning: restarting the watcher for " + job + ": " + err.Error())
 			}
 		}
@@ -465,13 +495,27 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 
 // lineTail keeps the end of what it is written, for the last lines of a log.
 type lineTail struct {
-	mu  sync.Mutex
-	buf []byte
+	mu    sync.Mutex
+	buf   []byte
+	stale bool // reset was called: the next write replaces buf
+}
+
+// reset is called before a follow that prints the log again from its start:
+// what was written goes at that follow's first write, so a follow that
+// prints nothing (a frozen box, a box gone) keeps the last one's tail for a
+// lost push.
+func (l *lineTail) reset() {
+	l.mu.Lock()
+	l.stale = true
+	l.mu.Unlock()
 }
 
 func (l *lineTail) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.stale && len(p) > 0 {
+		l.buf, l.stale = l.buf[:0], false
+	}
 	l.buf = append(l.buf, p...)
 	if len(l.buf) > 64<<10 {
 		l.buf = append(l.buf[:0], l.buf[len(l.buf)-64<<10:]...)
@@ -678,6 +722,9 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 	var pauseDeadline time.Time
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
+		// Each follow prints the whole log from its start, so a follow after
+		// a pause or a broken connection mustn't add to the last one's.
+		tail.reset()
 		res, err := w.Job(ctx, job, 0)
 		if ctx.Err() != nil {
 			return jobEnd{}, false

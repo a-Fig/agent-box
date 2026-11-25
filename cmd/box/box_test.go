@@ -206,6 +206,7 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			case isScript(c, "# follow"):
 				if f.followErr > 0 {
 					f.followErr--
+					io.WriteString(c.Stdout, f.log) // what it printed before the connection went
 					return Result{}, errors.New("connection reset")
 				}
 				if f.stopFor != "" {
