@@ -93,8 +93,15 @@ type sample struct {
 }
 
 type boxSpan struct {
-	rec boxRec
-	end *time.Time
+	rec   boxRec
+	start time.Time
+	end   *time.Time
+}
+
+// unsetTime reports a zero or Unix-epoch timestamp that Incus reports while
+// an instance is still being created.
+func unsetTime(t time.Time) bool {
+	return t.IsZero() || t.Unix() <= 0
 }
 
 type modeAt struct {
@@ -190,7 +197,11 @@ func (h *History) apply(r record) {
 		h.jobs[j.Key] = &j
 	case recBoxCreate:
 		if r.Box != nil {
-			h.boxes[r.Box.id()] = &boxSpan{rec: *r.Box}
+			start := r.Box.CreatedAt
+			if unsetTime(start) {
+				start = r.At
+			}
+			h.boxes[r.Box.id()] = &boxSpan{rec: *r.Box, start: start}
 		}
 	case recBoxDelete:
 		if r.Box != nil {
@@ -520,13 +531,16 @@ func (h *History) Range(rng string, live Live) dash.History {
 		}
 	}
 	for _, s := range h.boxes {
+		if unsetTime(s.start) {
+			continue
+		}
 		to := now
 		if s.end != nil {
 			to = *s.end
 		}
 		for i := range out.Buckets {
 			bs := out.Buckets[i].Start
-			lo, hi := later(s.rec.CreatedAt, bs), earlier(to, bs.Add(step))
+			lo, hi := later(s.start, bs), earlier(to, bs.Add(step))
 			if hi.After(lo) {
 				out.Buckets[i].BoxHours.BySize[s.rec.Size] = round2(out.Buckets[i].BoxHours.BySize[s.rec.Size] + hi.Sub(lo).Hours())
 			}
@@ -702,4 +716,21 @@ func (h *History) JobByID(box, id string) (dash.Job, bool) {
 		return dash.Job{}, false
 	}
 	return *best, true
+}
+
+// BoxRepo returns the repo of the newest recorded job on the box created at
+// created, or "".
+func (h *History) BoxRepo(box string, created time.Time) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var best *dash.Job
+	for _, j := range h.jobs {
+		if j.Box == box && j.Repo != "" && holds(created, j.StartedAt) && (best == nil || j.StartedAt.After(best.StartedAt)) {
+			best = j
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.Repo
 }

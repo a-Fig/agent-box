@@ -185,7 +185,8 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	page := dash.JobsPage{Jobs: []dash.Job{}}
 	for _, j := range s.done {
-		short := j.Repo[strings.LastIndex(j.Repo, "/")+1:]
+		u := strings.TrimSuffix(strings.TrimSuffix(j.Repo, "/"), ".git")
+		short := u[strings.LastIndex(u, "/")+1:]
 		switch {
 		case q.Get("repo") != "" && q.Get("repo") != j.Repo && q.Get("repo") != short,
 			q.Get("agent") != "" && q.Get("agent") != j.Agent.Session,

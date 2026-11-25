@@ -151,3 +151,49 @@ func TestHistoryReadsOldModeRecordsWithAReason(t *testing.T) {
 		t.Fatalf("segments %s", got)
 	}
 }
+
+// Existing history files may hold box-create records whose CreatedAt was zero
+// or Unix epoch 0 while Incus was still creating the instance. Their span
+// starts at the record's At time so they don't add phantom box-hours to every
+// earlier hour and day.
+func TestHistoryUnsetBoxCreatedAtAndBoxRepo(t *testing.T) {
+	dir := t.TempDir()
+	lines := `{"v":1,"at":"2026-11-24T16:10:00Z","type":"box-create","box":{"name":"zero","size":"medium","gpu":false,"createdAt":"0001-01-01T00:00:00Z"}}
+{"v":1,"at":"2026-11-24T16:40:00Z","type":"box-delete","box":{"name":"zero","size":"medium","gpu":false,"createdAt":"0001-01-01T00:00:00Z"}}
+{"v":1,"at":"2026-11-24T16:00:00Z","type":"box-create","box":{"name":"epoch-at","size":"medium","gpu":false,"createdAt":"1970-01-01T00:00:00Z"}}
+{"v":1,"at":"2026-11-24T16:30:00Z","type":"box-delete","box":{"name":"epoch-at","size":"medium","gpu":false,"createdAt":"1970-01-01T00:00:00Z"}}
+{"v":1,"at":"1970-01-01T00:00:00Z","type":"box-create","box":{"name":"epoch-raw","size":"medium","gpu":false,"createdAt":"1970-01-01T00:00:00Z"}}
+{"v":1,"at":"2026-11-24T16:30:00Z","type":"box-delete","box":{"name":"epoch-raw","size":"medium","gpu":false,"createdAt":"1970-01-01T00:00:00Z"}}
+`
+	if err := os.WriteFile(filepath.Join(dir, "events-2026-11-24.jsonl"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := OpenHistory(dir, func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := h.Range(dash.RangeDay, Live{})
+	if got := r.Buckets[0].BoxHours.BySize["medium"]; got != 0 {
+		t.Fatalf("earliest bucket got phantom box-hours: %v", got)
+	}
+	if got := r.Buckets[21].BoxHours.BySize["medium"]; got != 1 {
+		t.Fatalf("16:00 bucket box-hours = %v, want 1 (two 30m spans)", got)
+	}
+	w := h.Range(dash.RangeWeek, Live{})
+	if got := w.Buckets[0].BoxHours.BySize["medium"]; got != 0 {
+		t.Fatalf("week's first day got phantom box-hours: %v", got)
+	}
+
+	// BoxRepo recovers the newest job's repo for a box generation and ignores
+	// jobs from an older generation of the same box name.
+	old := dash.Job{Key: "b/1/x", ID: "1", Box: "b", State: dash.JobDone, StartedAt: t0.Add(-2 * time.Hour), Repo: "https://x/old/repo.git"}
+	cur := dash.Job{Key: "b/2/x", ID: "2", Box: "b", State: dash.JobDone, StartedAt: t0.Add(-10 * time.Minute), Repo: "https://x/new/repo.git"}
+	h.Record(record{Type: recJobEnd, At: old.StartedAt, Job: &old})
+	h.Record(record{Type: recJobEnd, At: cur.StartedAt, Job: &cur})
+	if got := h.BoxRepo("b", t0.Add(-15*time.Minute)); got != cur.Repo {
+		t.Fatalf("BoxRepo current gen = %q, want %q", got, cur.Repo)
+	}
+	if got := h.BoxRepo("b", t0.Add(30*time.Minute)); got != "" {
+		t.Fatalf("BoxRepo newer gen = %q, want empty", got)
+	}
+}

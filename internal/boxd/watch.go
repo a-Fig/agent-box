@@ -427,8 +427,15 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 	if cfg == nil {
 		cfg = in.Config
 	}
+	repo := w.repoOf[in.Name]
+	if repo == "" && w.Hist != nil && !unsetTime(in.CreatedAt) {
+		if r := w.Hist.BoxRepo(in.Name, in.CreatedAt.UTC()); r != "" {
+			w.repoOf[in.Name] = r
+			repo = r
+		}
+	}
 	b := dash.Box{Name: in.Name, Machine: w.MachineID, Size: sz.Name, GPU: sz.GPU, State: strings.ToLower(in.Status),
-		Throwaway: in.Config[keyThrowaway] == "true", Repo: w.repoOf[in.Name], CreatedAt: in.CreatedAt.UTC()}
+		Throwaway: in.Config[keyThrowaway] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC()}
 	if t, err := time.Parse(time.RFC3339, in.Config[keyExpires]); err == nil {
 		t = t.UTC()
 		b.ExpiresAt = &t
@@ -452,6 +459,9 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]dash.Box) {
 	ids := map[string]bool{}
 	for _, in := range ins {
+		if unsetTime(in.CreatedAt) {
+			continue
+		}
 		sz := mode.SizeOf(in.Config)
 		rec := boxRec{Name: in.Name, Size: sz.Name, GPU: sz.GPU, CreatedAt: in.CreatedAt.UTC()}
 		ids[rec.id()] = true
