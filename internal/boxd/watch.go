@@ -409,10 +409,12 @@ func fillMeta(j *dash.Job, m *meta) {
 		session = lastElem(m.Agent.Worktree)
 	}
 	j.Agent = dash.Agent{Client: m.Agent.Client, Session: session, Host: m.Agent.Host, Worktree: m.Agent.Worktree}
-	if m.Size != "" {
-		j.Size = m.Size
+	if j.Size == "" {
+		if m.Size != "" {
+			j.Size = m.Size
+		}
+		j.GPU = j.GPU || m.GPU
 	}
-	j.GPU = j.GPU || m.GPU
 	j.Kind = dash.Classify(j.Command, j.GPU)
 }
 
