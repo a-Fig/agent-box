@@ -16,7 +16,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
 4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; a snapshot waits, its result is pushed; `box_cancel` drops it.
 5. **`state: refused` (exit 75)**: nothing started (PC busy, paused or unreachable). Retry later, or smaller `size` if no room. A pushed "lost" job didn't finish; a "paused" one may resume (its end is pushed). `done` with exit 75 is the command's own.
 6. `go test`/vitest results lead with failures (file:line); `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
-7. `box_pull` fetches reports or build output before the repo's next run replaces it. Parallel runs: `new: true`.
+7. `box_pull` fetches reports and builds before a later or queued run replaces them. Parallel runs: `new: true`.
 
 Boxes are throwaway; `/cache` survives.
 

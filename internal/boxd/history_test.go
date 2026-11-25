@@ -197,3 +197,27 @@ func TestHistoryUnsetBoxCreatedAtAndBoxRepo(t *testing.T) {
 		t.Fatalf("BoxRepo newer gen = %q, want empty", got)
 	}
 }
+
+// The queue's eviction of a kept throwaway is in its jobs' lookup, also after
+// boxd reopens the history; a job started later on a reused name isn't (#143).
+func TestHistoryEvictedJob(t *testing.T) {
+	dir := t.TempDir()
+	h, err := OpenHistory(dir, func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := dash.Job{Key: "b/1/x", ID: "1", Box: "b", State: dash.JobDone, StartedAt: t0.Add(-10 * time.Minute)}
+	h.Record(record{Type: recJobEnd, At: t0.Add(-5 * time.Minute), Job: &ended})
+	h.Record(record{Type: recControl, At: t0, Control: &controlRec{Action: actionEvict, Target: "b", By: "q.20261124-160000-ab12"}})
+	later := dash.Job{Key: "b/2/y", ID: "2", Box: "b", State: dash.JobDone, StartedAt: t0.Add(time.Minute)}
+	h.Record(record{Type: recJobEnd, At: t0.Add(2 * time.Minute), Job: &later})
+	if h, err = OpenHistory(dir, func() time.Time { return t0 }); err != nil {
+		t.Fatal(err)
+	}
+	if j, ok := h.JobByID("b", "1"); !ok || j.Evicted != "q.20261124-160000-ab12" {
+		t.Errorf("evicted job = %+v, %v", j, ok)
+	}
+	if j, _ := h.JobByID("b", "2"); j.Evicted != "" {
+		t.Errorf("a later job on the name was marked evicted: %q", j.Evicted)
+	}
+}
