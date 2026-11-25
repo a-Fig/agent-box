@@ -177,12 +177,14 @@ func TestRunRefusedHasNoPush(t *testing.T) {
 	}
 }
 
-func TestRunRejectsObsoleteParameters(t *testing.T) {
+// A session holding an older tool list still sends these (#34): the run goes
+// ahead, with a notice.
+func TestRunIgnoresObsoleteParameters(t *testing.T) {
 	e := newPushEnv(t, &fakePC{t: t}, "thread-1")
 	for _, extra := range []map[string]any{{"box": "mine"}, {"wait": "10m"}} {
-		text, _ := e.call(t, "box_run", e.runArgs(extra, "true"))
-		if !strings.Contains(text, "no longer takes") || e.f.callList() != "" {
-			t.Errorf("%v = %q (calls %q)", extra, text, e.f.callList())
+		text, st := e.call(t, "box_run", e.runArgs(extra, "true"))
+		if !strings.Contains(text, "no longer takes") || !strings.Contains(text, "ignored") || st["job"] == nil {
+			t.Errorf("%v = %q", extra, text)
 		}
 	}
 }

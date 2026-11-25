@@ -86,8 +86,8 @@ func TestRunReasonRequired(t *testing.T) {
 	f := &fakePC{t: t}
 	a, _ := testApp(f)
 	dir := jsonString(newRepo(t))
+	// A missing reason gets a default instead (TestMCPOldShapedRun, #34).
 	for _, args := range []string{
-		`{"dir":` + dir + `,"command":"true"}`,
 		`{"dir":` + dir + `,"command":"true","reason":"short"}`,
 	} {
 		res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_run","arguments":`+args+`}`), nil)
