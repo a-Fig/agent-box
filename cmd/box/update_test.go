@@ -226,22 +226,29 @@ func TestRollbackSwapsBackAndSkipsThatRelease(t *testing.T) {
 
 func TestSkillSyncLeavesEditedSkillsAlone(t *testing.T) {
 	home := t.TempDir()
+	ag := filepath.Join(home, ".t3", "userdata", "providers", "antigravity", "inst1")
+	os.MkdirAll(filepath.Join(ag, "config"), 0o755)
 	var out bytes.Buffer
 	c := joinConfig{Home: home, Out: &out}
 	paths := c.skillPaths()
+	if len(paths) != 3 {
+		t.Fatalf("skillPaths = %v, want 3 (claude, codex, antigravity)", paths)
+	}
 	old := "old skill\n"
 	os.MkdirAll(filepath.Dir(paths[0]), 0o755)
 	os.WriteFile(paths[0], []byte(old), 0o644) // the old release's: updated
 	os.MkdirAll(filepath.Dir(paths[1]), 0o755)
 	os.WriteFile(paths[1], []byte("old skill, edited\n"), 0o644) // edited: left alone
+	os.MkdirAll(filepath.Dir(paths[2]), 0o755)
+	os.WriteFile(paths[2], []byte(old), 0o644) // antigravity old release's: updated
 	sum := sha256.Sum256([]byte(old))
 	if err := skillSync(c, "1111", hex.EncodeToString(sum[:])); err != nil { // any remembered skill
 		t.Fatal(err)
 	}
-	if read(t, paths[0]) != skills.Box || read(t, paths[1]) != "old skill, edited\n" {
-		t.Fatalf("skills: %q / %q", read(t, paths[0])[:20], read(t, paths[1]))
+	if read(t, paths[0]) != skills.Box || read(t, paths[1]) != "old skill, edited\n" || read(t, paths[2]) != skills.Box {
+		t.Fatalf("skills: %q / %q / %q", read(t, paths[0])[:20], read(t, paths[1]), read(t, paths[2])[:20])
 	}
-	if !strings.Contains(out.String(), "skill: updated "+paths[0]) || strings.Contains(out.String(), paths[1]) {
+	if !strings.Contains(out.String(), "skill: updated "+paths[0]) || strings.Contains(out.String(), paths[1]) || !strings.Contains(out.String(), "skill: updated "+paths[2]) {
 		t.Fatalf("out %q", out.String())
 	}
 }

@@ -13,11 +13,13 @@ package digest
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
 // JobVar names the job's file prefix in the job's shell. The wrappers write
-// <prefix>.gotest.json and <prefix>.vitest.json; unset, they do nothing.
+// <prefix>.gotest.json and <prefix>.vitest.json (plus .vitest.<n>.json for
+// extra runs in the same job); unset, they do nothing.
 const JobVar = "BOX_JOB_FILES"
 
 // goRender is jq that prints go test -json's events as go test prints
@@ -58,13 +60,14 @@ foreach inputs as $l ({b: {}, n: {}, t: {}, o: null};
   .o // empty)`
 
 // Wrappers is shell that defines go, vitest and the launchers that run
-// vitest (npx, pnpm, yarn, npm test) as functions for the job's command.
+// vitest (npx, pnpm, yarn, npm) as functions for the job's command.
 // Each adds the machine-readable report and otherwise runs the real command
 // with the same arguments and returns its exit code. A run whose shape it
 // doesn't handle runs untouched: benchmarks (their result lines are a passing
-// test's output), vitest after -- or with reporters in its config, an npm test
-// script that isn't plain vitest or that runs in a workspace, and anything
-// without jq. tee -p keeps the report and go test's exit code even if jq dies.
+// test's output), vitest after -- or with reporters in its config, an npm
+// script that isn't plain vitest or that targets multiple workspaces, and
+// anything without jq. tee -p keeps the report and go test's exit code even if
+// jq dies.
 var Wrappers = fmt.Sprintf(`__box_gojq=%s
 go() {
   if [ "${1-}" != test ] || [ -z "${%[2]s-}" ] || ! command -v jq >/dev/null 2>&1; then command go "$@"; return; fi
@@ -83,33 +86,63 @@ go() {
   return "${PIPESTATUS[0]}"
 }
 __box_vargs() {
+  local dir=$1; shift
   __box_va=()
   [ -n "${%[2]s-}" ] || return 1
-  grep -qsE 'reporters|outputFile' vitest.config.* vite.config.* vitest.workspace.* && return 1
-  local a r=--reporter=default
+  local d cfg
+  for d in "$dir" .; do
+    for cfg in "$d"/vitest.config.* "$d"/vite.config.* "$d"/vitest.workspace.*; do
+      [ -f "$cfg" ] || continue
+      if sed 's|^[[:space:]]*//.*||; s|[[:space:]]//.*||' "$cfg" | grep -sE 'reporters|outputFile' >/dev/null; then
+        return 1
+      fi
+    done
+    [ "$dir" = . ] && break
+  done
+  local a r=--reporter=default n=0 out="$%[2]s.vitest.json"
   for a in "$@"; do case $a in --) return 1 ;; --reporter|--reporter=*) r= ;; esac; done
+  while [ -e "$out" ]; do n=$((n+1)); out="$%[2]s.vitest.$n.json"; done
   [ -n "$r" ] && __box_va+=("$r")
-  __box_va+=(--reporter=json "--outputFile.json=$%[2]s.vitest.json")
+  __box_va+=(--reporter=json "--outputFile.json=$out")
 }
-vitest() { if __box_vargs "$@"; then command vitest "$@" "${__box_va[@]}"; else command vitest "$@"; fi; }
+vitest() { if __box_vargs . "$@"; then command vitest "$@" "${__box_va[@]}"; else command vitest "$@"; fi; }
 __box_vrun() {
   local l=$1 p=()
   shift
   if [ "${1-}" = exec ]; then p=(exec); shift; fi
-  if [ "${1-}" = vitest ] && __box_vargs "${@:2}"; then command "$l" "${p[@]}" "$@" "${__box_va[@]}"; else command "$l" "${p[@]}" "$@"; fi
+  if [ "${1-}" = vitest ] && __box_vargs . "${@:2}"; then command "$l" "${p[@]}" "$@" "${__box_va[@]}"; else command "$l" "${p[@]}" "$@"; fi
 }
 npx() { __box_vrun npx "$@"; }
 pnpm() { __box_vrun pnpm "$@"; }
 yarn() { __box_vrun yarn "$@"; }
 npm() {
-  local s w a dd=-- re='^vitest([[:space:]][^;&|<>$%[3]s(){}]*)?$'
-  if [ "${1-}" = test ] || [ "${1-}" = t ] || { [ "${1-}" = run ] && [ "${2-}" = test ]; }; then
-    for a in "$@"; do case $a in -w|--workspace*|--workspaces|--prefix*|-ws) command npm "$@"; return ;; esac; done
-    s=$(jq -r '.scripts.test // empty' package.json 2>/dev/null)
+  local s w a dir=. script= dd=-- in_dd=0 expect= dirs=0 extra=() pos=()
+  local re='^vitest([[:space:]][^;&|<>$%[3]s(){}]*)?$'
+  for a in "$@"; do
+    if [ "$in_dd" -eq 1 ]; then extra+=("$a"); continue; fi
+    if [ -n "$expect" ]; then dir=$a; dirs=$((dirs+1)); expect=; continue; fi
+    case $a in
+      --) in_dd=1; dd= ;;
+      -ws|--workspaces|--workspaces=*) command npm "$@"; return ;;
+      -w|--workspace|--prefix) expect=dir ;;
+      --workspace=*|--prefix=*) dir=${a#*=}; dirs=$((dirs+1)) ;;
+      -*) ;;
+      *) pos+=("$a") ;;
+    esac
+  done
+  if [ -n "$expect" ] || [ "$dirs" -gt 1 ]; then command npm "$@"; return; fi
+  case "${pos[0]-}" in
+    test|t) script=test ;;
+    run) script=${pos[1]-} ;;
+  esac
+  if [ -n "$script" ] && [ -f "$dir/package.json" ]; then
+    s=$(jq -r --arg k "$script" '.scripts[$k] // empty' "$dir/package.json" 2>/dev/null)
     if [[ $s =~ $re ]]; then
       read -ra w <<<"$s"
-      for a in "$@"; do [ "$a" = -- ] && dd=; done
-      if __box_vargs "${w[@]:1}"; then command npm "$@" $dd "${__box_va[@]}"; return; fi
+      if __box_vargs "$dir" "${w[@]:1}" "${extra[@]}"; then
+        command npm "$@" ${dd:+"$dd"} "${__box_va[@]}"
+        return
+      fi
     fi
   fi
   command npm "$@"
@@ -118,14 +151,20 @@ npm() {
 
 // goReduce is jq that cuts a go test -json report down to what Parse uses,
 // smallest and most important first, so a cut loses only output lines:
-// box-start, each failed test, package and build ends, pass and skip counts
+// box-start, each failed test and each test still running when its package
+// failed (a timeout: its run event), package and build ends, pass and skip counts
 // per package, then the first lines of output of what failed, then box-end,
 // which says nothing was cut.
 const goReduce = `[inputs | fromjson? | objects] as $e
 | ([$e[] | select(.Test != null and .Action == "fail") | (.Package // "") + " " + .Test] | INDEX(.)) as $f
 | ([$e[] | select(.Test == null and .Action == "fail") | .Package // ""] | INDEX(.)) as $fp
+| ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "skip" or .Action == "fail")) | (.Package // "") + " " + .Test] | INDEX(.)) as $ended
+| ([$e[] | select(.Test != null and .Action == "run" and $fp[.Package // ""] != null and $ended[(.Package // "") + " " + .Test] == null)
+    | (.Package // "") + " " + .Test] | INDEX(.)) as $hung
+| ($f + $hung) as $f
 | {Action: "box-start"},
   ($e[] | select(.Test != null and .Action == "fail") | {Action, Package, Test}),
+  ($e[] | select(.Test != null and .Action == "run" and $hung[(.Package // "") + " " + .Test] != null) | {Action, Package, Test}),
   ($e[] | select(.Test == null and (.Action == "pass" or .Action == "skip" or .Action == "fail" or .Action == "build-fail")) | {Action, Package, ImportPath, FailedBuild}),
   ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "skip"))] | group_by(.Package // "") | .[]
     | {Action: "box-count", Package: .[0].Package, Pass: (map(select(.Action == "pass")) | length), Skip: (map(select(.Action == "skip")) | length)}),
@@ -136,14 +175,20 @@ const goReduce = `[inputs | fromjson? | objects] as $e
   ([$e[] | select(.Action == "build-output")] | group_by(.ImportPath) | .[] | .[:20][] | {Action, ImportPath, Output: (.Output // "")[:300]}),
   {Action: "box-end"}`
 
-// vitestReduce keeps vitest's counts and the first of what failed. A digest
-// shows only a message's first line, and its JSON must stay whole under
-// maxReport.
-const vitestReduce = `{numTotalTests, numPassedTests, numFailedTests, numPendingTests, numTodoTests,
-  testResults: [.testResults[]? | select(.status != "passed" or any(.assertionResults[]?; .status == "failed"))
-    | {name, status, message: (.message // "")[:1000],
-       assertionResults: [.assertionResults[]? | select(.status == "failed")
-         | {fullName: (.fullName // "")[:300], status, location, failureMessages: [(.failureMessages // [])[:1][] | .[:1000]]}][:20]}][:20]}`
+// vitestReduce merges one or more vitest JSON reports (jq -sc) and keeps the
+// combined counts and the first of what failed. A digest shows only a
+// message's first line, and its JSON must stay whole under maxReport.
+const vitestReduce = `map(select(type == "object" and .numTotalTests != null))
+| select(length > 0)
+| {numTotalTests: (map(.numTotalTests // 0) | add),
+   numPassedTests: (map(.numPassedTests // 0) | add),
+   numFailedTests: (map(.numFailedTests // 0) | add),
+   numPendingTests: (map(.numPendingTests // 0) | add),
+   numTodoTests: (map(.numTodoTests // 0) | add),
+   testResults: ([.[].testResults[]? | select(.status != "passed" or any(.assertionResults[]?; .status == "failed"))
+     | {name, status, message: (.message // "")[:1000],
+        assertionResults: [.assertionResults[]? | select(.status == "failed")
+          | {fullName: (.fullName // "")[:300], status, location, failureMessages: [(.failureMessages // [])[:1][] | .[:1000]]}][:20]}][:20])}`
 
 // Section heads in Script's output.
 const (
@@ -155,15 +200,25 @@ const (
 const maxReport = 1 << 20
 
 // Script is bash for the job's box that prints the job's reports, cut down,
-// each under its section head. It prints nothing when there are none.
+// each under its section head. It prints nothing when there are none. The go
+// report ends with a box-module event naming the module in the checkout's
+// go.mod (<root>/<repo>, the repo from <prefix>.repo), so Parse can make an
+// assertion's package-relative file:line relative to the checkout.
 func Script(prefix string) string {
 	p := shq(prefix)
+	root := shq(path.Dir(path.Dir(prefix))) // <root>/.box/<job>
 	return fmt.Sprintf(`# digest
 command -v jq >/dev/null 2>&1 || exit 0
-if [ -s %[1]s.gotest.json ]; then echo %[2]s; jq -nRc %[4]s %[1]s.gotest.json | head -c %[6]d; echo; fi
-if [ -s %[1]s.vitest.json ]; then echo %[3]s; jq -c %[5]s %[1]s.vitest.json | head -c %[6]d; echo; fi
+if [ -s %[1]s.gotest.json ]; then
+  echo %[2]s; jq -nRc %[4]s %[1]s.gotest.json | head -c %[6]d; echo
+  m=$(sed -n 's/^module[[:space:]]\{1,\}//p' %[7]s/"$(cat %[1]s.repo 2>/dev/null)"/go.mod 2>/dev/null | head -n1 | tr -d '\r"')
+  [ -n "$m" ] && jq -nc --arg m "$m" '{Action: "box-module", Package: $m}'
+fi
+v=()
+for f in %[1]s.vitest.json %[1]s.vitest.*.json; do [ -s "$f" ] && jq -e . "$f" >/dev/null 2>&1 && v+=("$f"); done
+if [ "${#v[@]}" -gt 0 ]; then echo %[3]s; jq -sc %[5]s "${v[@]}" | head -c %[6]d; echo; fi
 exit 0
-`, p, shq(goHead), shq(vitestHead), shq(goReduce), shq(vitestReduce), maxReport)
+`, p, shq(goHead), shq(vitestHead), shq(goReduce), shq(vitestReduce), maxReport, root)
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

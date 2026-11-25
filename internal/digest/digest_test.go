@@ -131,7 +131,8 @@ func TestReduceKeepsDigest(t *testing.T) {
 		parse             func(string) string
 	}{
 		{"go.json", goReduce, "-nRc", Go},
-		{"vitest.json", vitestReduce, "-c", Vitest},
+		{"racetimeout.json", goReduce, "-nRc", Go},
+		{"vitest.json", vitestReduce, "-sc", Vitest},
 	} {
 		out, err := exec.Command("jq", c.flags, c.prog, filepath.Join("testdata", c.file)).Output()
 		if err != nil {

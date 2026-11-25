@@ -69,6 +69,9 @@ func goDigest(report string, max int) string {
 		buildSeen  = map[string]bool{}
 		buildOut   = map[string][]string{}
 		pass, skip int
+		ran        []test            // tests that started (run)
+		ended      = map[test]bool{} // and passed, skipped or failed
+		module     string            // the checkout's module path (box-module)
 		any        bool
 		reduced    bool // the report is goReduce's (box-start)
 		whole      bool // and it ends with box-end: nothing was cut off
@@ -91,6 +94,8 @@ func goDigest(report string, max int) string {
 			pass, skip = pass+c.Pass, skip+c.Skip
 		case e.Action == "box-end":
 			whole = true
+		case e.Action == "box-module":
+			module = e.Package
 		case e.Action == "build-output":
 			buildOut[e.ImportPath] = append(buildOut[e.ImportPath], e.Output)
 		case e.Action == "build-fail" && !buildSeen[e.ImportPath]:
@@ -109,12 +114,17 @@ func goDigest(report string, max int) string {
 		case e.Test == "" && e.Action == "output":
 			pkgOut[e.Package] = append(pkgOut[e.Package], e.Output)
 		case e.Test == "":
+		case e.Action == "run":
+			ran = append(ran, t)
 		case e.Action == "pass":
 			pass++
+			ended[t] = true
 		case e.Action == "skip":
 			skip++
+			ended[t] = true
 		case e.Action == "fail" && !seen[t]:
 			seen[t] = true
+			ended[t] = true
 			failed = append(failed, t)
 		case e.Action == "output" && e.OutputType != "frame":
 			out[t] = append(out[t], e.Output)
@@ -122,6 +132,14 @@ func goDigest(report string, max int) string {
 	}
 	if !any {
 		return ""
+	}
+	// A test still running when its package failed (a timeout, a crash) gets
+	// no end of its own; its output says what happened (#110).
+	for _, t := range ran {
+		if !ended[t] && pkgSeen[t.pkg] && !seen[t] {
+			seen[t] = true
+			failed = append(failed, t)
+		}
 	}
 	// A test that failed only because a subtest did isn't a failure of its
 	// own: list and count the subtest. One with a message of its own is.
@@ -179,7 +197,7 @@ func goDigest(report string, max int) string {
 			pkg = t.pkg
 			d.line(pkg)
 		}
-		loc, msg, more := goProblem(out[t])
+		loc, msg, more := goProblem(out[t], t.pkg, module)
 		s := "  " + t.name
 		if loc != "" {
 			s += "  " + loc + ":"
@@ -191,6 +209,11 @@ func goDigest(report string, max int) string {
 	}
 	for _, p := range pkgFailed {
 		if failedIn[p] {
+			continue
+		}
+		// A panic outside any test (in TestMain, say) is named by its frame.
+		if loc, msg, _ := goProblem(pkgOut[p], p, module); loc != "" && strings.HasPrefix(msg, "panic: ") {
+			d.item("FAIL " + p + "  " + loc + ": " + msg)
 			continue
 		}
 		var lines []string
@@ -207,6 +230,24 @@ func goDigest(report string, max int) string {
 	return d.String()
 }
 
+// inPackage makes a file:line that go test printed relative to its
+// package's directory (an assertion's) relative to the checkout, as a
+// panic's or a build error's is, when the package is in the checkout's
+// module (#110).
+func inPackage(loc, pkg, module string) string {
+	if module == "" || loc == "" || strings.Contains(loc, "/") {
+		return loc
+	}
+	dir, ok := strings.CutPrefix(pkg, module)
+	if !ok || (dir != "" && !strings.HasPrefix(dir, "/")) {
+		return loc
+	}
+	if dir = strings.TrimPrefix(dir, "/"); dir == "" {
+		return loc
+	}
+	return dir + "/" + loc
+}
+
 // hasOwn says whether a test's output has a line of its own, not just the
 // "--- FAIL" frames of its subtests.
 func hasOwn(lines []string) bool {
@@ -221,13 +262,16 @@ func hasOwn(lines []string) bool {
 var (
 	goAssert = regexp.MustCompile(`^\s*([\w.@+/-]+\.go):(\d+): ?(.*)$`)
 	goFrame  = regexp.MustCompile(`^\t(\S+\.go):(\d+)(?: \+0x[0-9a-f]+)?$`)
+	// raceFrame is a frame in a race report, indented with spaces.
+	raceFrame = regexp.MustCompile(`^\s+(/\S+\.go):(\d+)(?: \+0x[0-9a-f]+)?$`)
 )
 
 // goProblem finds a failed test's first problem in its output: a panic and
-// the frame it came from, else its first file:line message (t.Error,
-// t.Fatal and the like), else its first line. more is up to two lines that
-// continue the message.
-func goProblem(lines []string) (loc, msg string, more []string) {
+// the frame it came from, else a data race, else its first file:line message
+// (t.Error, t.Fatal and the like; its package-relative file is made
+// checkout-relative with pkg and module), else its first line. more is up to
+// two lines that continue the message.
+func goProblem(lines []string, pkg, module string) (loc, msg string, more []string) {
 	for i, l := range lines {
 		l = strings.TrimRight(l, "\n")
 		if !strings.HasPrefix(l, "panic: ") {
@@ -250,6 +294,19 @@ func goProblem(lines []string) (loc, msg string, more []string) {
 		}
 		return "", msg, nil
 	}
+	// A data race fails its test through the testing package's own line: the
+	// race report's first frame in the checkout is where it is (#110).
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "WARNING: DATA RACE" {
+			continue
+		}
+		for _, f := range lines[i+1:] {
+			if m := raceFrame.FindStringSubmatch(strings.TrimRight(f, "\n")); m != nil && !goroot(m[1]) {
+				return rel(m[1]) + ":" + m[2], "data race", nil
+			}
+		}
+		return "", "data race", nil
+	}
 	for i, l := range lines {
 		m := goAssert.FindStringSubmatch(strings.TrimRight(l, "\n"))
 		if m == nil {
@@ -264,7 +321,7 @@ func goProblem(lines []string) (loc, msg string, more []string) {
 			}
 			more = append(more, "      "+c)
 		}
-		return rel(m[1]) + ":" + m[2], m[3], more
+		return inPackage(rel(m[1])+":"+m[2], pkg, module), m[3], more
 	}
 	for _, l := range lines {
 		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "--- ") && !strings.HasPrefix(l, "=== ") {
@@ -276,7 +333,8 @@ func goProblem(lines []string) (loc, msg string, more []string) {
 
 // goroot says whether a frame's file is Go's own (the runtime, testing).
 func goroot(file string) bool {
-	return strings.Contains(file, "/go/src/") || strings.HasPrefix(file, "/usr/local/go/") || strings.HasPrefix(file, "/usr/lib/go")
+	return strings.Contains(file, "/go/src/") || strings.HasPrefix(file, "/usr/local/go/") || strings.HasPrefix(file, "/usr/lib/go") ||
+		file == "_testmain.go" // go test's generated main, in a timeout's stacks
 }
 
 // rel makes a path in a box's checkout (/work/<repo>/...) relative to it.
