@@ -933,14 +933,12 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 // failed try but leaves the old name's empty container dir poisoned on disk.
 func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
 	retriedMeta := false
+	// Unnamed: if there's no room, boxd's queue names a box of its own (#143).
+	fmt.Fprintln(a.Err, "box: launching a throwaway box")
 	for try := 0; try < 8; try++ {
 		name := base + "-" + a.Rand()
 		if find(insts, name) != nil {
 			continue
-		}
-		// Unnamed: if there's no room, boxd's queue names a box of its own (#143).
-		if try == 0 {
-			fmt.Fprintln(a.Err, "box: launching a throwaway box")
 		}
 		a.notify(jobNotice{Event: "launching_box", Box: name})
 		err := a.launch(ctx, name, ttl, true, sz)
