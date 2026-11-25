@@ -50,7 +50,7 @@ const GPUSize = "gpu"
 // its user-space libraries (libcuda, libnvidia-ml, nvidia-smi) in
 // /usr/lib/wsl/lib, and Windows' driver store in /usr/lib/wsl/drivers,
 // without which nvidia-smi can't reach the driver. The project must allow
-// unix-char devices and these two host paths (provision/setup-distro.sh).
+// unix-char devices and these two host paths (provision/setup-host.sh).
 var GPUDevices = map[string]map[string]string{
 	"dxg":        {"type": "unix-char", "path": "/dev/dxg", "mode": "0666"},
 	"wsllib":     {"type": "disk", "source": "/usr/lib/wsl/lib", "path": "/usr/lib/wsl/lib", "readonly": "true"},

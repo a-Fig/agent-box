@@ -1,8 +1,20 @@
 # provision
 
-Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here touches disks, partitions or boot config; everything runs on top of Windows. Every script is safe to re-run.
+Setup scripts for the host that runs the boxes: a Linux server, or a Windows gaming PC through WSL2. Read `../docs/DESIGN.md` first. Nothing here touches disks, partitions or boot config. Every script is safe to re-run.
 
-## Order
+## A Linux server
+
+Ubuntu or Debian with Linux 6.12 or newer (Incus 7.x's minimum; Ubuntu 24.04 gets it from `linux-generic-hwe-24.04`, Debian 13 ships it), systemd, and no Incus or one whose `default` pool is btrfs and whose `incusbr0` is a managed bridge. As root, from a checkout:
+
+```sh
+sudo provision/setup-host.sh --build-base        # add --tailscale (and TS_AUTHKEY) for the dashboard and queue
+```
+
+It ends by printing the line a client runs, such as `incus remote add pc https://<host>:8443 --token <token> --project agents`. The token is single-use and pins the host's self-signed certificate. `--remote NAME` names the remote (default `pc`, which `box` uses unless `BOX_REMOTE` is set), and `--host ADDR` sets the address in it (default the tailnet name with `--tailscale`, else the address of the default route).
+
+With no tray, the mode is Shared for good: each box runs on its size's Shared CPUs. Caps are sized from the machine unless set: `limits.cpu` 2 x `nproc` (a box counts at its Full CPUs but runs on half), `limits.memory` 3/4 of RAM (set once), `limits.instances` that divided by 2GiB (at most 10), `limits.disk` 18GiB a box plus the 30GiB cache, and a btrfs pool of 80% of the free disk under `/var/lib` (at most 200GiB). `AGENTS_CPU_CAP`, `AGENTS_MEM_CAP`, `AGENTS_MAX_BOXES`, `AGENTS_DISK_CAP` and `AGENTS_POOL_SIZE` override them. GPU boxes need WSL, so they don't start here. Incus listens on `:8443` on every interface, guarded by client certificates.
+
+## A Windows gaming PC: order
 
 1. **`bootstrap-ssh.ps1`** (Admin PowerShell on the PC, once). Gives the laptop SSH over the tailnet.
    ```powershell
@@ -15,8 +27,8 @@ Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here to
    .\install-pc.ps1 -AcceptVmp [-InstallDir D:\agent-box\wsl\agents] [-BoxtrayPath C:\...\boxtray.exe] [-BuildBase]
    ```
    If Windows features had to be enabled, it asks for a reboot; run it again afterwards.
-3. **`setup-distro.sh`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-distro.sh [--build-base]`.
-4. Add client certs (commands are printed at the end of `setup-distro.sh`), then `incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token ...` on the laptop. Use the tailnet name, not an IP: Incus serves a Let's Encrypt certificate for that name (`https-cert.sh`, needs HTTPS certificates enabled in the tailnet's DNS settings), so the client trusts it without pinning and renewals need no client change.
+3. **`setup-host.sh --tailscale`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-host.sh [--build-base]`; a host already on the tailnet keeps its Tailscale steps without the flag. On WSL it keeps the PC's caps and the GPU keys.
+4. Add client certs (setup prints the agents' `incus remote add` line and the tray's commands), then `incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token ...` on the laptop. Use the tailnet name, not an IP: Incus serves a Let's Encrypt certificate for that name (`https-cert.sh`, needs HTTPS certificates enabled in the tailnet's DNS settings), so the client trusts it without pinning and renewals need no client change.
 
 ## Updating boxd
 
@@ -49,7 +61,7 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 | | Scheduled Task `agent-box-tray` (only with `-BoxtrayPath`) | `Unregister-ScheduledTask agent-box-tray -Confirm:$false` |
 | | Scheduled Task `agent-box-enforcer` (only with `-BoxtrayPath`) | `Unregister-ScheduledTask agent-box-enforcer -Confirm:$false` |
 | | `%TEMP%\agent-box-dl` (rootfs download) | delete it |
-| `setup-distro.sh` | Zabbly apt repo + key, `incus`, `incus-ui-canonical`, Tailscale (all inside the distro) | `apt remove` them; `rm /etc/apt/sources.list.d/zabbly-incus-stable.sources` |
+| `setup-host.sh` | Zabbly apt repo + key, `incus`, `incus-ui-canonical`, Tailscale (all inside the distro) | `apt remove` them; `rm /etc/apt/sources.list.d/zabbly-incus-stable.sources` |
 | | Incus: storage pool `default`, bridge `incusbr0`, HTTPS `:8443`, project `agents` (restricted, caps, `cache` volume), its `default` profile, image `agent-base` | `incus project delete agents` after removing its instances and volume; or just `wsl --unregister agents` |
 | | Tailscale node `agent-box` | `tailscale logout` in the distro and remove the node in the admin console |
 | | With `-BoxdPath`: `boxd` in `/opt/agent-box/bin`, `agent-box-boxd.service`, `/etc/agent-box/boxd.json` (owners: this node's tailnet login), and `tailscale serve` on 443 to `127.0.0.1:7766` | `tailscale serve --https=443 off`, `systemctl disable --now agent-box-boxd`, delete those files |
@@ -59,11 +71,11 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 ## Details
 
 - **Secrets.** The Tailscale auth key travels only through the environment (`WSLENV`) and `tailscale up --authkey`. It's never written to disk by these scripts. Client-cert tokens are printed by Incus and expire.
-- **Re-running** `install-pc.ps1` skips what exists: features, distro, `.wslconfig` keys, `/etc/wsl.conf`, tasks (re-registered with `-Force`). `setup-distro.sh` installs a `boxd` that `-BoxdPath` staged in this run, never over a newer installed one (by mtime), and deletes the staged copy once the step succeeds; `deploy-boxd.sh` updates boxd after setup. With any boxd installed, it (re)applies `boxd.json`, `tailscale serve` and a missing unit. It skips the preseed when the `default` pool exists and re-applies project caps (all but `limits.memory`, which the tray owns), the `restricted.*` keys and the profile every time. `features.profiles` and `features.images` can't change after a project exists: if `agents` has the wrong ones, the script stops and prints how to recreate the project.
+- **Re-running** `install-pc.ps1` skips what exists: features, distro, `.wslconfig` keys, `/etc/wsl.conf`, tasks (re-registered with `-Force`). `setup-host.sh` installs a `boxd` that `-BoxdPath` staged in this run, never over a newer installed one (by mtime), and deletes the staged copy once the step succeeds; `deploy-boxd.sh` updates boxd after setup. With any boxd installed, it (re)applies `boxd.json`, `tailscale serve` and a missing unit. It skips the preseed when the `default` pool exists and re-applies project caps (all but `limits.memory`, which the tray owns), the `restricted.*` keys and the profile every time. `features.profiles` and `features.images` can't change after a project exists: if `agents` has the wrong ones, the script stops and prints how to recreate the project.
 - **Modes and limits.** Setup sets `limits.instances=10` (`AGENTS_MAX_BOXES`), `limits.cpu=24` (`AGENTS_CPU_CAP`) and `limits.disk=210GiB` (`AGENTS_DISK_CAP`), and `limits.memory=12GiB` (`AGENTS_MEM_CAP`) only on a new project. From then on the tray sets `limits.memory` by mode (24GiB in Full, 12GiB otherwise, never below what boxes hold), sets each box's `limits.cpu` from its size and the mode, and re-enforces both every tick. A mode check in `box` is advisory; the tray's per-tick enforcement is what holds the limits. Per-box `limits.memory` is set by size at launch (2/4/8GiB). The VM ceiling is installed RAM minus 6 GB (`-MemoryGB`, 26 on the PC) with 24GB of swap (`-SwapGB`), which the tray uses to hand frozen boxes' RAM back to Windows. Why these numbers: `../docs/DESIGN.md` (Box sizes, Memory).
-- **Kernel.** Incus 7.x needs Linux 6.12+. `install-pc.ps1` runs `wsl --update`; `setup-distro.sh` fails if `uname -r` is older (then `wsl --shutdown` and re-run). Changing `.wslconfig` applies after `wsl --shutdown`, which stops every WSL distro.
+- **Kernel.** Incus 7.x needs Linux 6.12+. `install-pc.ps1` runs `wsl --update`; `setup-host.sh` fails if `uname -r` is older (then `wsl --shutdown` and re-run). Changing `.wslconfig` applies after `wsl --shutdown`, which stops every WSL distro.
 - **Two client identities.** Agents (restricted cert) and the tray (admin) must be different certs, so give the tray its own `INCUS_CONF` directory.
-- **VMs.** `setup-distro.sh` reports whether `/dev/kvm` exists. If not, `nestedVirtualization=true` under `[wsl2]` in `.wslconfig` is the usual fix on Windows 11.
+- **VMs.** `setup-host.sh` reports whether `/dev/kvm` exists. If not, `nestedVirtualization=true` under `[wsl2]` in `.wslconfig` is the usual fix on Windows 11.
 
 ## Boxes are compute, not storage
 

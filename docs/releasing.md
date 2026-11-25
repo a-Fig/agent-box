@@ -27,7 +27,7 @@ There are four parts, on two machines. Each one updates itself.
 | `boxd` and its systemd unit | PC, `agents` distro | systemd | a timer in the distro, through `install-boxd.sh` (#46) |
 
 The `agent-base` image changes rarely and takes minutes to rebuild. It stays manual
-(`setup-distro.sh --rebuild-base`), and a release says when it needs a rebuild.
+(`setup-host.sh --rebuild-base`), and a release says when it needs a rebuild.
 
 ## Cutting a release
 

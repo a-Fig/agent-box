@@ -15,7 +15,7 @@ import (
 	"github.com/a-Fig/agent-box/internal/dash/static"
 )
 
-// Config is /etc/agent-box/boxd.json, written by provision/setup-distro.sh.
+// Config is /etc/agent-box/boxd.json, written by provision/setup-host.sh.
 type Config struct {
 	// Owners are the tailnet logins (Tailscale-User-Login) allowed in. Empty
 	// lets nobody in: the check fails closed.
