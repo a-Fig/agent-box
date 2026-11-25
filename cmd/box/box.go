@@ -104,7 +104,10 @@ func newApp() *App {
 		Out:     os.Stdout,
 		Err:     os.Stderr,
 		Now:     time.Now,
-		Rand:    randHex,
+		// The CLI keeps a throwaway as box mcp does, so box pull can fetch
+		// a build's output after the run (#78).
+		KeepEnded: endedKeep,
+		Rand:      randHex,
 
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
@@ -611,7 +614,7 @@ type RunOpts struct {
 	Dir string   // local git worktree
 	Cmd []string // one shell string, or argv to quote
 	Box string   // box to use; "" is the repo's own box
-	New bool     // use a throwaway box, deleted afterwards
+	New bool     // use a throwaway box, kept KeepEnded after the job, else deleted
 	// Size of a box launched for this run: "" is medium for a new box and
 	// any size for an existing one.
 	Size string
@@ -846,7 +849,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			}
 		}
 		if o.New {
-			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 		}
 		return r, err
 	}
@@ -863,7 +866,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true)
 	default:
-		fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 	}
 	return r, err
 }
@@ -977,7 +980,9 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	if a.KeepEnded > 0 {
 		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
 			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+			return
 		}
+		fmt.Fprintf(a.Err, "box: kept %s for %d minutes, for box pull; box rm %s deletes it now\n", box, int(a.KeepEnded.Minutes()), box)
 		return
 	}
 	a.removeQuietly(ctx, box)
