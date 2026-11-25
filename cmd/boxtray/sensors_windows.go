@@ -43,11 +43,13 @@ const (
 )
 
 // wslIncus runs `incus <args>` inside the agents distro. Inside WSL the
-// default (root) user talks to Incus over the local socket, which is admin.
+// root user talks to Incus over the local socket, which is admin. It runs
+// with --exec, without a shell: a shell ate the quotes of a JSON project
+// value (the chosen mode and the mode request), found live on 2026-11-24.
 func wslIncus(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, wslIncusTimeout)
 	defer cancel()
-	full := append([]string{"-d", distro, "--", "incus"}, args...)
+	full := append([]string{"-d", distro, "-u", "root", "--exec", "incus"}, args...)
 	return hidden(exec.CommandContext(ctx, "wsl.exe", full...)).Output()
 }
 

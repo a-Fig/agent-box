@@ -25,9 +25,26 @@ const (
 // Modes lists the modes a person can ask for, in the switch's order.
 var Modes = []string{ModeFull, ModeShared, ModeMyPC}
 
-// TrayStaleAfter is how old Machine.TrayLastSeen may be before the tray counts
-// as down. The tray writes user.agent-box.tray-seen every 30s.
+// TrayStaleAfter is how old Machine.TrayLastSeen may be before the enforcer
+// counts as down. The active enforcer writes user.agent-box.tray-seen every 30s.
 const TrayStaleAfter = 90 * time.Second
+
+// Enforcers: which process applies the mode, Machine.Enforcer, from
+// user.agent-box.enforcer as boxtray writes it. The tray runs while someone is
+// logged on to the PC; the headless enforcer (boxtray --headless) runs while
+// nobody is, and has no game detection.
+const (
+	EnforcerTray     = "tray"
+	EnforcerHeadless = "headless"
+)
+
+// ChosenMode is the mode the enforcers act on, the project key user.agent-box.chosen
+// ({mode, at} JSON): the last pick, a tray click or an adopted request, and At when it was made.
+// While a game makes the PC yield, it is the mode that comes back when the game ends.
+type ChosenMode struct {
+	Mode string    `json:"mode"`
+	At   time.Time `json:"at"`
+}
 
 // ModeRequest is a mode someone asked for from the page, waiting for the tray
 // to apply it (user.agent-box.mode-request). By is the asking device.
@@ -63,15 +80,18 @@ type Machine struct {
 	Mode          string       `json:"mode"`
 	ModeReason    string       `json:"modeReason"` // why, while yielding: "gaming: steam:570"
 	ModeRequested *ModeRequest `json:"modeRequested"`
+	Chosen        *ChosenMode  `json:"chosen"` // null until a pick is stored
 	Yielding      bool         `json:"yielding"`
-	TrayLastSeen  *time.Time   `json:"trayLastSeen"` // null: never seen
+	TrayLastSeen  *time.Time   `json:"trayLastSeen"` // the active enforcer's heartbeat; null: never seen
+	Enforcer      string       `json:"enforcer"`     // who wrote it: EnforcerTray, EnforcerHeadless, or "" if unknown
 	Caps          Resources    `json:"caps"`
 	Allocated     Resources    `json:"allocated"`
 	Room          Room         `json:"room"`
 	WSLMemory     int64        `json:"wslMemory"` // bytes the distro's VM holds now
 }
 
-// TrayAlive reports whether the tray has written its heartbeat lately.
+// TrayAlive reports whether the active enforcer, tray or headless, has written its heartbeat
+// lately.
 func (m Machine) TrayAlive(now time.Time) bool {
 	return m.TrayLastSeen != nil && now.Sub(*m.TrayLastSeen) < TrayStaleAfter
 }
@@ -106,6 +126,7 @@ const (
 	JobDone    = "done"
 	JobPaused  = "paused" // its box is frozen
 	JobLost    = "lost"   // its box went before an exit code was read
+	JobQueued  = "queued" // waiting in boxd's queue (docs/queue.md)
 )
 
 // Results are what filters and the history group finished jobs by.
@@ -150,6 +171,13 @@ type Job struct {
 	Size    string `json:"size"`
 	GPU     bool   `json:"gpu"`
 	Tail    string `json:"tail"` // the log's last TailBytes, kept after the box goes
+	// QueuedAt is when a job that went through the queue was queued; null
+	// for one box started at once. While it waits, StartedAt is QueuedAt
+	// too, Position is its place in line from 1, and Why is what it waits
+	// for, one of the Refused* causes.
+	QueuedAt *time.Time `json:"queuedAt"`
+	Position int        `json:"position"`
+	Why      string     `json:"why"`
 }
 
 // TailBytes is how much of a job's log its Tail keeps.
@@ -247,6 +275,14 @@ type Bucket struct {
 	MedianSeconds Medians       `json:"medianSeconds"`
 	MemUsed       int64         `json:"memUsed"`
 	MemCap        int64         `json:"memCap"`
+	Queued        QueueCounts   `json:"queued"`
+}
+
+// QueueCounts is a bucket's jobs queued (by when they were queued) and the
+// median wait of those that started in it.
+type QueueCounts struct {
+	Jobs              int     `json:"jobs"`
+	MedianWaitSeconds float64 `json:"medianWaitSeconds"`
 }
 
 // Segment is a stretch of one effective mode, for the timeline. A yield is a
@@ -353,10 +389,18 @@ const (
 	CodeNotRunning = "not-running" // 409: the job has already ended
 	CodeGone       = "gone"        // 409: the box of that name is another one now
 	CodeIncus      = "incus"       // 502: Incus failed
+	CodeQueueFull  = "queue-full"  // 507: the queue's snapshots would pass QueueBytes
 )
 
 // SSE event names on GET /api/events. The first event is EventState; each
 // after it carries one whole object that replaces the old one.
+//
+// The queue rides on these: a job's queuing, and every change to a waiting
+// job's Position or Why, is an EventJob with the whole job, so the page can
+// keep the line from events alone. When it starts or is cancelled, an
+// EventJobGone takes its waiting key away; a started job then comes as an
+// EventJob under its running key (its StartedAt is the start), with the same
+// ID and QueuedAt.
 const (
 	EventState   = "state"    // State
 	EventMachine = "machine"  // Machine
@@ -393,3 +437,45 @@ func (e Event) WriteTo(w io.Writer) (int64, error) {
 	n, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Name, b)
 	return int64(n), err
 }
+
+// QueueRequest is the "request" part of POST /api/queue (multipart/form-data);
+// the "bundle" part is the snapshot: box's git bundle of the worktree, with
+// the commit at refs/agent-box/<Ref>. boxd starts the job as box run would
+// (internal/jobrun) when it can, on that snapshot (docs/queue.md).
+type QueueRequest struct {
+	// Box is the repo's box, or with New the base of a throwaway's name,
+	// which boxd completes with a random suffix.
+	Box      string            `json:"box"`
+	New      bool              `json:"new"`
+	Size     string            `json:"size"` // "" is medium for a new box, any size for an existing one
+	GPU      bool              `json:"gpu"`
+	Checkout string            `json:"checkout"` // the repo's name: /work/<checkout> in the box
+	Ref      string            `json:"ref"`
+	Command  []string          `json:"command"` // as box run takes it: one string runs as shell
+	Env      map[string]string `json:"env"`
+	Timeout  int               `json:"timeout"` // seconds; 0 is none
+	// Meta is the .meta box would write (cmd/box). boxd sets its queuedAt
+	// and startedAt and writes it next to the job's log.
+	Meta json.RawMessage `json:"meta"`
+}
+
+// QueueReply answers POST /api/queue (201). Job is "<box>.<id>", as box
+// names jobs; Key the job's key while it waits.
+type QueueReply struct {
+	Job      string `json:"job"`
+	Key      string `json:"key"`
+	Position int    `json:"position"`
+	Why      string `json:"why"`
+}
+
+// QueuePage is GET /api/queue: the waiting jobs in the order they start.
+type QueuePage struct {
+	Jobs []Job `json:"jobs"`
+}
+
+// The queue's limits (docs/queue.md).
+const (
+	QueueBytes  = 2 << 30          // all waiting snapshots together
+	QueueMaxAge = 24 * time.Hour   // a job waiting longer is dropped
+	QueueNudge  = 20 * time.Minute // when box watch nudges the agent
+)

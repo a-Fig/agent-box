@@ -35,6 +35,7 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 | | `/etc/wsl.conf` in the distro | goes with the distro |
 | | Scheduled Task `agent-box-wsl-keepalive` | `Unregister-ScheduledTask agent-box-wsl-keepalive -Confirm:$false` |
 | | Scheduled Task `agent-box-tray` (only with `-BoxtrayPath`) | `Unregister-ScheduledTask agent-box-tray -Confirm:$false` |
+| | Scheduled Task `agent-box-enforcer` (only with `-BoxtrayPath`) | `Unregister-ScheduledTask agent-box-enforcer -Confirm:$false` |
 | | `%TEMP%\agent-box-dl` (rootfs download) | delete it |
 | `setup-distro.sh` | Zabbly apt repo + key, `incus`, `incus-ui-canonical`, Tailscale (all inside the distro) | `apt remove` them; `rm /etc/apt/sources.list.d/zabbly-incus-stable.sources` |
 | | Incus: storage pool `default`, bridge `incusbr0`, HTTPS `:8443`, project `agents` (restricted, caps, `cache` volume), its `default` profile, image `agent-base` | `incus project delete agents` after removing its instances and volume; or just `wsl --unregister agents` |

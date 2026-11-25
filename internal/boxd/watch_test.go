@@ -20,12 +20,15 @@ import (
 
 // fakeIncus is a project whose boxes and job files a test sets.
 type fakeIncus struct {
-	mu    sync.Mutex
-	ins   []Instance
-	cfg   map[string]string
-	jobs  map[string][]fakeJob // box -> its job files
-	err   error
-	execs int
+	mu     sync.Mutex
+	ins    []Instance
+	cfg    map[string]string
+	jobs   map[string][]fakeJob // box -> its job files
+	err    error
+	execs  int
+	cli    []string
+	cliErr func(args []string) error
+	cancel string // the last cancel script
 }
 
 type fakeJob struct {
@@ -61,6 +64,16 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 	for _, a := range args {
 		skip[a] = true
 	}
+	if strings.HasPrefix(script, "# cancel") {
+		f.cancel = script
+		for i, j := range f.jobs[box] {
+			if strings.Contains(script, "\nj='"+j.name+"'\n") {
+				f.jobs[box][i].state, f.jobs[box][i].exit = "done", "130"
+				return []byte("cancelled 130\n"), nil
+			}
+		}
+		return nil, &ExitError{Code: 3}
+	}
 	if strings.HasPrefix(script, "# boxd scan") {
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
@@ -85,6 +98,14 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if strings.HasPrefix(script, "test -e ") { // startedInBox, and startJob's own check
+		for _, j := range f.jobs[box] {
+			if strings.Contains(script, "/"+j.name+".log") {
+				return nil, nil
+			}
+		}
+		return nil, &ExitError{Code: 1}
+	}
 	for _, j := range f.jobs[box] {
 		if strings.Contains(script, j.name+".log") {
 			var off int
@@ -95,6 +116,36 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 	}
 	return nil, &ExitError{Code: 3}
+}
+
+// CLI records the commands a queued job's start runs; a launch adds the box.
+func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cli = append(f.cli, strings.Join(args, " "))
+	if f.cliErr != nil {
+		return nil, f.cliErr(args)
+	}
+	switch args[0] {
+	case "launch":
+		size := "medium"
+		for i, a := range args {
+			if strings.HasPrefix(a, "user.box.size=") && i > 0 {
+				size = strings.TrimPrefix(a, "user.box.size=")
+			}
+		}
+		in := inst(args[2], "Running", size, t0)
+		in.CreatedAt = time.Now().UTC()
+		f.ins = append(f.ins, in)
+	case "delete":
+		for i, in := range f.ins {
+			if in.Name == args[1] {
+				f.ins = append(f.ins[:i], f.ins[i+1:]...)
+				break
+			}
+		}
+	}
+	return nil, nil
 }
 
 func (f *fakeIncus) set(fn func()) {

@@ -22,6 +22,21 @@ const ProjectModeKey = "user.agent-box.mode"
 // ProjectReasonKey says why the tray is yielding (e.g. "gaming: steam:570"); empty otherwise.
 const ProjectReasonKey = "user.agent-box.reason"
 
+// ProjectTraySeenKey is when the active enforcer last ticked (RFC3339, UTC),
+// written at most every 30s. The dashboard counts the enforcer as down once
+// it is stale.
+const ProjectTraySeenKey = "user.agent-box.tray-seen"
+
+// ProjectEnforcerKey says which enforcer is active: EnforcerTray or EnforcerHeadless.
+const ProjectEnforcerKey = "user.agent-box.enforcer"
+
+// The two enforcers: the interactive tray, and boxtray --headless, which
+// runs Full while nobody is logged on.
+const (
+	EnforcerTray     = "tray"
+	EnforcerHeadless = "headless"
+)
+
 // Parse turns a stored string into a Mode.
 func Parse(s string) (Mode, bool) {
 	for _, m := range All {

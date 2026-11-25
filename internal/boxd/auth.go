@@ -24,6 +24,8 @@ type Config struct {
 	Listen string `json:"listen"`
 	// HistoryDir holds the JSON-lines history.
 	HistoryDir string `json:"historyDir"`
+	// QueueDir holds the queued jobs and their snapshots.
+	QueueDir string `json:"queueDir"`
 	// MachineID and MachineName are this PC on the page: "pc" and "PC"
 	// unless set.
 	MachineID   string `json:"machineId"`
@@ -49,6 +51,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if c.HistoryDir == "" {
 		c.HistoryDir = "/var/lib/agent-box/history"
+	}
+	if c.QueueDir == "" {
+		c.QueueDir = "/var/lib/agent-box/queue"
 	}
 	if c.MachineID == "" {
 		c.MachineID = "pc"

@@ -346,6 +346,8 @@ func (s *server) handleCancel(r *http.Request, body []byte) (int, any, error) {
 	switch {
 	case j == nil:
 		return 0, nil, fail(http.StatusNotFound, dash.CodeNotFound, "no job %s", key)
+	case j.State == dash.JobQueued:
+		return 0, nil, fail(http.StatusConflict, dash.CodeNotRunning, "job %s.%s is waiting in the queue, not running: cancel it with /api/queue/%s.%s/cancel", j.Box, j.ID, j.Box, j.ID)
 	case !live || j.State == dash.JobDone || j.State == dash.JobLost:
 		return 0, nil, fail(http.StatusConflict, dash.CodeNotRunning, "job %s has already ended", j.ID)
 	case j.State == dash.JobPaused && s.machine().Yielding:

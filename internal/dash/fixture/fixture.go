@@ -44,6 +44,7 @@ var scenarios = []struct {
 	{"yielding", "A game is running, so every box is frozen and a job paused; a request for Full waits for the game to end.", buildYielding},
 	{"full", "The caps are full (a GPU box and a medium box), and runs were turned away today.", buildFull},
 	{"tray-down", "The tray hasn't been seen for 14 minutes, so a mode request from a phone isn't being picked up.", buildTrayDown},
+	{"headless", "Nobody is logged on to the PC: the headless enforcer holds Full, and a request for Shared from a phone waits for the tray.", buildHeadless},
 	{"lost", "boxd restarted and found a job's box gone: the job is lost.", buildLost},
 	{"week", "A week of history: jobs, box-hours, yields and refusals.", buildWeek},
 }
@@ -172,9 +173,9 @@ func newWorld(name string, now time.Time) *world {
 		rnd: rand.New(rand.NewPCG(h.Sum64(), 0x5eed)),
 		machine: dash.Machine{
 			ID: machineID, Name: machineName, Reachable: true, Mode: dash.ModeShared,
-			TrayLastSeen: &seen,
-			Caps:         dash.Resources{CPU: 24, Memory: 12 << 30, Instances: 6, Disk: 150 << 30},
-			WSLMemory:    3 << 30,
+			TrayLastSeen: &seen, Enforcer: dash.EnforcerTray,
+			Caps:      dash.Resources{CPU: 24, Memory: 12 << 30, Instances: 6, Disk: 150 << 30},
+			WSLMemory: 3 << 30,
 		},
 		logs:  map[string]string{},
 		since: now.Add(-24 * time.Hour),
@@ -241,6 +242,31 @@ func (w *world) running(b *dash.Box, r *repo, ri int, branch string, ago time.Du
 	log := w.log(j, 60+w.rnd.IntN(40), true)
 	w.logs[j.Key] = log
 	j.Tail = tail(log)
+	w.jobs = append(w.jobs, j)
+	return &w.jobs[len(w.jobs)-1]
+}
+
+// queued adds a job that has waited in the queue since ago, for why, at the end of the line.
+func (w *world) queued(r *repo, ri int, branch, why string, ago time.Duration) *dash.Job {
+	rn := r.runs[ri]
+	at := w.now.Add(-ago)
+	id := at.Format("20060102-150405") + "-" + w.hex(4)
+	n := 1
+	for _, j := range w.jobs {
+		if j.State == dash.JobQueued {
+			n++
+		}
+	}
+	// Its box, as box run names it: the repo's own for a medium run, else a throwaway.
+	box := r.short
+	if rn.size != "medium" || rn.gpu {
+		box = r.short + "-" + w.hex(4)
+	}
+	j := dash.Job{
+		Key: dash.JobKey(box, id, at), ID: id, Box: box, Machine: machineID, State: dash.JobQueued, StartedAt: at, QueuedAt: &at, Position: n, Why: why,
+		Reason: rn.reason, Command: rn.command, Kind: dash.Classify(rn.command, rn.gpu),
+		Repo: r.url, Branch: branch, Commit: w.hex(40), Agent: agentFor(r, w.rnd), Size: rn.size, GPU: rn.gpu,
+	}
 	w.jobs = append(w.jobs, j)
 	return &w.jobs[len(w.jobs)-1]
 }
@@ -410,6 +436,10 @@ func Allot(m *dash.Machine, boxes []dash.Box) {
 // state's job list, the jobs page and the history.
 func (w *world) finish(name, about string) Scenario {
 	m := &w.machine
+	if m.Chosen == nil && m.Enforcer != dash.EnforcerHeadless {
+		// The pick the enforcers act on; the headless enforcer's Full default is never stored.
+		m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: w.now.Add(-2 * time.Hour)}
+	}
 	Allot(m, w.boxes)
 	var used int64
 	for _, b := range w.boxes {
@@ -417,15 +447,20 @@ func (w *world) finish(name, about string) Scenario {
 	}
 	m.WSLMemory = max(m.WSLMemory, used+900<<20)
 
-	var live, done []dash.Job
+	var live, queue, done []dash.Job
 	for _, j := range w.jobs {
-		if j.State == dash.JobRunning || j.State == dash.JobPaused {
+		switch j.State {
+		case dash.JobRunning, dash.JobPaused:
 			live = append(live, j)
-		} else {
+		case dash.JobQueued:
+			queue = append(queue, j)
+		default:
 			done = append(done, j)
 		}
 	}
 	slices.SortFunc(live, func(a, b dash.Job) int { return b.StartedAt.Compare(a.StartedAt) })
+	slices.SortFunc(queue, func(a, b dash.Job) int { return a.Position - b.Position })
+	live = append(live, queue...)
 	slices.SortFunc(done, func(a, b dash.Job) int { return b.StartedAt.Compare(a.StartedAt) })
 	// The newest finished job on a box that still exists keeps its whole log.
 	for _, j := range done {
@@ -653,6 +688,7 @@ func buildYielding(w *world) {
 	w.machine.Mode = dash.ModeMyPC
 	w.machine.Yielding = true
 	w.machine.ModeReason = "gaming: steam:570"
+	w.machine.Chosen = &dash.ChosenMode{Mode: dash.ModeFull, At: w.now.Add(-7 * time.Hour)}
 	w.machine.ModeRequested = &dash.ModeRequest{Mode: dash.ModeFull, At: w.now.Add(-3 * time.Minute), By: host}
 	lb := w.box("lantern", "medium", lantern, dash.BoxFrozen, false, 2*time.Hour, 23*time.Hour+10*time.Minute)
 	w.load(lb, 0.66, 0)
@@ -665,6 +701,8 @@ func buildYielding(w *world) {
 	w.segment(w.now.Add(-18*time.Minute), w.now, dash.ModeMyPC, "gaming: steam:570")
 	w.refuse()
 	w.refuseRecent(dash.RefusedYielding, 3, 15*time.Minute)
+	w.queued(lantern, 1, "fix/store-lock-order", dash.RefusedYielding, 4*time.Minute+10*time.Second)
+	w.queued(tidepool, 2, "main", dash.RefusedYielding, 55*time.Second)
 }
 
 func buildFull(w *world) {
@@ -680,6 +718,9 @@ func buildFull(w *world) {
 	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull, "")
 	w.refuseRecent(dash.RefusedFull, 9, 3*time.Hour)
 	w.refuseRecent(dash.RefusedGPUBusy, 4, 25*time.Minute)
+	w.queued(tidepool, 1, "feat/router-cache", dash.RefusedFull, 14*time.Minute+20*time.Second)
+	w.queued(sparrow, 1, "fix/tokenizer-pad", dash.RefusedGPUBusy, 6*time.Minute+5*time.Second)
+	w.queued(orbit, 0, "fix/sync-retry", dash.RefusedFull, 2*time.Minute+40*time.Second)
 }
 
 func buildTrayDown(w *world) {
@@ -691,6 +732,18 @@ func buildTrayDown(w *world) {
 	w.running(tb, tidepool, 0, "fix/hydration-flash", 2*time.Minute+5*time.Second, dash.JobRunning)
 	w.history(w.now.Add(-24*time.Hour), 22)
 	w.segment(w.now.Add(-24*time.Hour), w.now, dash.ModeShared, "")
+}
+
+func buildHeadless(w *world) {
+	w.machine.Mode = dash.ModeFull
+	w.machine.Enforcer = dash.EnforcerHeadless
+	w.machine.ModeRequested = &dash.ModeRequest{Mode: dash.ModeShared, At: w.now.Add(-7 * time.Minute), By: "phone"}
+	lb := w.box("lantern", "large", lantern, dash.BoxRunning, false, 35*time.Minute, 23*time.Hour+40*time.Minute)
+	w.load(lb, 0.55, 0.96)
+	w.running(lb, lantern, 3, "main", 12*time.Minute, dash.JobRunning)
+	w.history(w.now.Add(-24*time.Hour), 18)
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-9*time.Hour), dash.ModeShared, "")
+	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull, "")
 }
 
 func buildLost(w *world) {
@@ -822,6 +875,22 @@ func (p *Player) Start(now time.Time, taken func(name string) bool) (dash.Box, d
 	b := w.box(name, rn.size, r, dash.BoxRunning, name != r.short, 0, 24*time.Hour)
 	w.load(b, 0.2+0.3*w.rnd.Float64(), 0.6+0.35*w.rnd.Float64())
 	j := *w.running(b, r, ri, r.branches[w.rnd.IntN(len(r.branches))], 0, dash.JobRunning)
+	return *b, j
+}
+
+// StartQueued makes the running job a queued q becomes, as boxd's starter does: a new key and
+// start, the same ID, box and QueuedAt. The box is q's, made now; the devserver reuses one that
+// exists instead.
+func (p *Player) StartQueued(now time.Time, q dash.Job) (dash.Box, dash.Job) {
+	w := p.w
+	w.now = now.UTC().Truncate(time.Second)
+	r := slices.IndexFunc(repos, func(r *repo) bool { return r.url == q.Repo })
+	rp := repos[max(r, 0)]
+	w.boxes = nil
+	b := w.box(q.Box, q.Size, rp, dash.BoxRunning, q.Box != rp.short, 0, 24*time.Hour)
+	w.load(b, 0.2+0.3*w.rnd.Float64(), 0.6+0.35*w.rnd.Float64())
+	j := q
+	j.Key, j.State, j.StartedAt, j.Position, j.Why = dash.JobKey(q.Box, q.ID, w.now), dash.JobRunning, w.now, 0, ""
 	return *b, j
 }
 

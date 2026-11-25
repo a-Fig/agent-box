@@ -70,10 +70,15 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s.Mode = a.mode(ctx)
 	s.Reason = a.projectKey(ctx, mode.ProjectReasonKey)
 	s.Yielding = s.Reason != ""
+	kept := map[string]bool{}
+	for _, in := range a.keptThrowaways(ctx, insts) {
+		kept[in.Name] = true
+	}
+	evictable := func(in instance) bool { return reclaimable(in) || kept[in.Name] } // the next launch deletes it first
 	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
 		free := n - len(insts)
 		for _, in := range insts {
-			if reclaimable(in) { // the next launch deletes it first
+			if evictable(in) {
 				free++
 			}
 		}
@@ -86,7 +91,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	case s.Mode == "": // no tray: boxes keep the Shared CPUs they launched with
 		now = mode.Shared
 	}
-	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes)
+	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
 	s.GPU = a.gpuStatus(ctx, s, insts)
 	var repoBox *instance
 	if s.Repo != "" {
@@ -146,18 +151,18 @@ func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) s
 // second case the memory cap is the one the tray applies to the boxes left,
 // max(the mode's budget, what they hold), since a tick can lower it to that
 // between the delete and the retry.
-func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxes int) ([]SizeRoom, string) {
+func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxes int, evictable func(instance) bool) ([]SizeRoom, string) {
 	instCap := int64(maxBoxes)
 	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
 	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
 	// held is what existing boxes allocate; evict is the reclaimable part.
-	type alloc struct{ n, cpus, mem, disk int64 }
+	type alloc struct{ n, cpus, mem, disk, gpus int64 }
 	var held, evict alloc
-	var gpus int64
 	for _, in := range insts {
 		sz := mode.SizeOf(in.Config)
+		var gpu int64
 		if sz.GPU && in.Status != "Stopped" {
-			gpus++
+			gpu = 1
 		}
 		cfg := in.ExpandedConfig
 		if cfg == nil {
@@ -169,10 +174,10 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 			m, _ = mode.ParseBytes(sz.Memory)
 		}
 		d, _ := mode.ParseBytes(sz.Disk)
-		one := alloc{1, max(int64(sz.FullCPUs), cpu), m, d}
-		held = alloc{held.n + one.n, held.cpus + one.cpus, held.mem + one.mem, held.disk + one.disk}
-		if reclaimable(in) { // the next launch deletes it first
-			evict = alloc{evict.n + one.n, evict.cpus + one.cpus, evict.mem + one.mem, evict.disk + one.disk}
+		one := alloc{1, max(int64(sz.FullCPUs), cpu), m, d, gpu}
+		held = alloc{held.n + one.n, held.cpus + one.cpus, held.mem + one.mem, held.disk + one.disk, held.gpus + one.gpus}
+		if evictable(in) {
+			evict = alloc{evict.n + one.n, evict.cpus + one.cpus, evict.mem + one.mem, evict.disk + one.disk, evict.gpus + one.gpus}
 		}
 	}
 	resources := a.projectResources(ctx)
@@ -213,7 +218,7 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 				limit(diskFree+gone.disk, szDisk)
 			}
 			if sz.GPU { // one at a time
-				limit(1-gpus, 1)
+				limit(1-held.gpus+gone.gpus, 1)
 			}
 			return fits
 		}

@@ -24,6 +24,9 @@ type Incus interface {
 	// Exec runs a bash script in a running instance and returns its stdout.
 	// A non-zero exit is an *ExitError.
 	Exec(ctx context.Context, name, script string, args ...string) ([]byte, error)
+	// CLI runs `incus <args...>` in the project, with stdin (often ""), for
+	// what starting a queued job takes: launch, file push, config set, exec.
+	CLI(ctx context.Context, stdin string, args ...string) ([]byte, error)
 }
 
 // Instance is the part of GET /1.0/instances?recursion=2 boxd reads.
@@ -165,4 +168,21 @@ func (c *capped) Write(p []byte) (int, error) {
 		c.Buffer.Write(p[:min(len(p), room)])
 	}
 	return len(p), nil
+}
+
+func (s *Socket) CLI(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errors.New("no incus command")
+	}
+	argv := append([]string{args[0], "--project", s.Proj}, args[1:]...)
+	cmd := exec.CommandContext(ctx, "incus", argv...)
+	stdout, stderr := &capped{max: maxExecOut}, &capped{max: 64 << 10}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin) // else /dev/null, so incus never waits on YAML
+	}
+	if err := cmd.Run(); err != nil {
+		return stdout.Bytes(), fmt.Errorf("incus %s: %v: %s", args[0], err, strings.TrimSpace(string(stderr.Bytes())))
+	}
+	return stdout.Bytes(), nil
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -53,7 +54,7 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var pausedHint = "state refused (exit 75) means nothing started because the PC is busy or paused: run the command locally. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
+var pausedHint = "state refused (exit 75) means nothing started because the PC is busy or paused and the run wasn't queued: run the command locally. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
 
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
@@ -63,7 +64,7 @@ var tools = []tool{
 	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC or a game) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; the output tail follows. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
@@ -72,6 +73,7 @@ var tools = []tool{
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
 		"push":    map[string]any{"type": "boolean", "description": "Default true: a job still running after 30 seconds is pushed into your thread when it ends. Pass false if you are a subagent (the push would wake your parent) and call box_job instead."},
+		"queue":   map[string]any{"type": "boolean", "description": "Default true: with push, a run that can't start now waits in the PC's queue. Pass false when you need the answer now and would rather run locally: you get exit 75 at once."},
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
 	}, "dir", "command", "reason"), jobOutput},
@@ -81,7 +83,7 @@ var tools = []tool{
 		"offset": integer("Read the log from this byte offset, without waiting. Default 0."),
 		"limit":  integer("Read at most this many bytes of the log (default 32768, at most 1048576)."),
 	}), jobOutput},
-	{"box_cancel", "Stop a running job's process session. A cancelled job exits 130.", obj(map[string]any{
+	{"box_cancel", "Stop a running job's process session, or take a queued job off the queue. A cancelled job exits 130.", obj(map[string]any{
 		"id": str("Job ID."),
 	}, "id"), nil},
 	{"box_pull", "Copy a file or directory (test reports, coverage, build output) from a box into a local directory, as <localDir>/<name>. It never replaces an existing file and drops symlinks. Pull right after the job: the next job on the same repo replaces the checkout.", obj(map[string]any{
@@ -109,10 +111,12 @@ func sizeEnum() []string {
 
 // jobOutput is the structuredContent of box_run and box_job (a JobResult).
 var jobOutput = obj(map[string]any{
-	"job":   str("Job ID, for box_job."),
-	"box":   str("Box the job runs in."),
-	"state": str("done (exitCode is the command's), running, paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
-	"push":  map[string]any{"type": "boolean", "description": "box_run, state running: the result will arrive as a turn in your thread."},
+	"job":      str("Job ID, for box_job."),
+	"box":      str("Box the job runs in."),
+	"state":    str("done (exitCode is the command's), running, queued (waiting in the PC's queue), paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
+	"push":     map[string]any{"type": "boolean", "description": "box_run, state running or queued: the result will arrive as a turn in your thread."},
+	"position": map[string]any{"type": "integer", "description": "State queued: place in line, from 1."},
+	"why":      str("State queued: what it waits for: full (room), gpu-busy, mypc or yielding (a game)."),
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -269,6 +273,7 @@ type toolArgs struct {
 	Local   string            `json:"localDir"`
 	Reason  string            `json:"reason"`
 	Push    *bool             `json:"push"`
+	Queue   *bool             `json:"queue"`
 }
 
 // pageResult reports a box_job log page: the summary line, then the bytes.
@@ -310,6 +315,8 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	head := "exit code: " + strconv.Itoa(r.Code)
 	if r.State == stateRunning {
 		head = "running" // no exit code yet
+	} else if r.State == stateQueued {
+		head = fmt.Sprintf("queued, %s, %s", place(r.Position), waitText(r.Why))
 	} else if r.State != "" {
 		head = r.State + ", " + head
 	}
@@ -335,9 +342,11 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		State    string   `json:"state,omitempty"`
 		ExitCode *int     `json:"exitCode"` // null while the job is running
 		Push     *bool    `json:"push,omitempty"`
+		Position int      `json:"position,omitempty"`
+		Why      string   `json:"why,omitempty"`
 		Warnings []string `json:"warnings,omitempty"`
-	}{r.Job, r.Box, r.State, &r.Code, r.Push, warnings}
-	if r.State == stateRunning {
+	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings}
+	if r.State == stateRunning || r.State == stateQueued {
 		out.ExitCode = nil
 	}
 	res["structuredContent"] = out
@@ -409,6 +418,18 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		res["structuredContent"] = st
 		return res
 	case "box_cancel":
+		if a.wasQueued(args.ID) {
+			removed, err := a.cancelQueuedOrStarted(ctx, args.ID)
+			if err != nil {
+				return textResult("cancel "+args.ID+": "+err.Error(), true)
+			}
+			if removed {
+				a.markNotified(args.ID, "cancel")
+				res := textResult("removed "+args.ID+" from the queue; it never ran", false)
+				res["structuredContent"] = map[string]any{"job": args.ID, "cancelled": true, "exitCode": exitDetached}
+				return res
+			} // it has started: stop it in its box
+		}
 		cancelled, c, err := a.Cancel(ctx, args.ID)
 		if err != nil {
 			return textResult(err.Error(), true)
@@ -447,16 +468,31 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if wait == 0 {
 			wait = inlineWait
 		}
-		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason})
+		push := args.Push == nil || *args.Push
+		// Only a run whose result can be pushed is queued: nothing else
+		// would hear when it starts (docs/queue.md).
+		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
+		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
+		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
 		switch {
 		case err != nil:
 		case r.Job == "" && r.State == statePaused:
 			r.State = stateRefused
+		case r.State == stateQueued:
+			if !a.startWatch(info, r.Job, args.Size == mode.GPUSize, r.throwaway, true) {
+				// Nobody would hear when it runs: take it back, and refuse.
+				if cerr := a.cancelQueued(ctx, r.Job); cerr == nil {
+					job := r.Job
+					r = JobResult{State: stateRefused, Code: exitPaused}
+					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; run it locally\n", job)
+					break
+				}
+				push = false
+			}
+			r.Push = &push
 		case r.Job != "" && (r.State == stateDetached || r.State == statePaused):
-			info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
-			push := args.Push == nil || *args.Push
 			if push {
-				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New)
+				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New, false)
 			}
 			r.Push = &push
 		}
@@ -499,6 +535,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		wait, err := dur(args.Wait, 10*time.Minute)
 		if err != nil {
 			return textResult(err.Error(), true)
+		}
+		if a.wasQueued(args.ID) { // still waiting: there is nothing in a box to wait on
+			if j, found, err := a.queuedJob(ctx, args.ID); err == nil && found && j.State == dash.JobQueued {
+				return jobResult(JobResult{Job: args.ID, Box: j.Box, State: stateQueued, Position: j.Position, Why: j.Why}, nil, "", warnings)
+			}
 		}
 		r, err := a.Job(ctx, args.ID, wait)
 		if err == nil && r.State == stateDone && a.exists(args.ID, ".json") {

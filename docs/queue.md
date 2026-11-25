@@ -23,11 +23,13 @@ to sit and wait. So it can hand the run to a queue and keep working.
   - a session with no push (`push: false`): it couldn't hear when the job starts.
 - **The code is snapshotted when the job is queued.** The agent keeps editing after it hands the run
   off, so `box` sends the worktree as it is now. That covers uncommitted and untracked files, as a
-  sync does, packed as a tar of the tracked and untracked non-ignored files. It goes to `boxd`, which
-  keeps it in `/var/lib/agent-box/queue/<job>.tar` until the job starts. The job runs on that
-  snapshot. The tar is deleted when the job starts or is cancelled, and it never outlives 24 hours,
-  so the PC stays compute, not storage. The cap is 2GiB in all; a run that would exceed it isn't
-  queued and gets exit 75.
+  sync does: the snapshot is the git bundle `box run` already makes and pushes, with the commit at
+  `refs/agent-box/<ref>`. It goes to `boxd`, which keeps it in
+  `/var/lib/agent-box/queue/<job>.bundle` until the job starts, and the job checks it out the way a
+  run does. A tar was the first plan. The bundle was picked when it was built (2026-11-24), because
+  it reuses `box run`'s snapshot and checkout unchanged. The bundle is deleted when the job starts or
+  is cancelled, and it never outlives 24 hours, so the PC stays compute, not storage. The cap is
+  2GiB in all; a run that would exceed it isn't queued (507 `queue-full`) and gets exit 75.
 - **Order: first in, first out, with one rule for fairness.** When a job can start, the next one is
   the oldest job from the session with the fewest jobs running. One agent's burst of ten can't hold
   back everyone else. Size matters only in that a job starts when its size fits: a small job can
@@ -46,27 +48,64 @@ to sit and wait. So it can hand the run to a queue and keep working.
 
 `boxd` owns the queue. It already sees every box, the mode and the caps, and it is the one place every
 laptop and agent reaches.
-- The queue is a JSON file per job in `/var/lib/agent-box/queue/`, plus its tar. It is
-  crash-safe: on start, `boxd` reloads it.
-- `boxd` starts a queued job by doing what `box run` does: it launches or reuses the box, unpacks the
-  snapshot as the checkout, and starts the job with the same `.meta`. The job then looks like any
-  other.
+- The queue is a JSON file per job in `/var/lib/agent-box/queue/`, plus its bundle. It is
+  crash-safe: on start, `boxd` reloads it, and drops a job without its bundle or a bundle without its
+  job. A job's file records when a start began, before anything is launched or run. A start cut
+  short by a restart is then retried in the same box, unless the job's files are already in it, in
+  which case it has started and is not run twice.
+- **Scheduling.** Each poll (3s), `boxd` works out what each job waits for: My PC, a game, the GPU,
+  or room for its size. A job on an existing running box needs no room. `boxd` starts at most one
+  job at a time; the caps are read again on the next poll.
+- **Starting.** `boxd` starts a queued job by doing what `box run` does. It launches the box if
+  needed (a throwaway, or the repo's box with box new's 2h expiry) or reuses it, then pushes the
+  bundle and the `.meta`, sets the 24h job expiry, and runs the same start script.
+  - The start script, payload and launch flags live in `internal/jobrun`, which both `box` and
+    `boxd` use, so a queued job looks like any other.
+  - A launch the caps refuse leaves the job waiting. Any other failure drops it as `lost`, and a
+    throwaway launched for it is deleted.
+- **The job's name and key.** The name, `<box>.<id>`, is fixed when the job is queued; a
+  throwaway's name gets its random suffix then. Its key changes when it starts:
+  - while it waits, the key's time is `queuedAt`;
+  - once it runs, the key's time is its real start, which `boxd` writes into the `.meta` as
+    `startedAt`, next to `queuedAt`;
+  - so the page gets `job-gone` for the waiting key, then `job` for the running one.
+- **Throwaways.** No `box run` follows a queued job, so once that job ends and nothing else runs
+  there, `boxd` gives a throwaway it launched 30 minutes to live, as `box run` does since #23, so
+  `box pull` and the full log still work; the reaper deletes it then. Its exit code and tail are in
+  boxd by then. A queued job that needs the room of kept throwaways (its own, or `box run`'s) gets
+  it: boxd deletes them first, soonest to expire first, as `box`'s claimGPU deletes an idle GPU
+  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each.
 - `boxd` has no T3 access, so it doesn't push. The laptop's `box watch <job>` process (from the push
   design) follows the job while it is queued too, and sends the turn when it ends, or the nudge at 20
   minutes.
 
 ## API
 
-- **`POST /api/queue`** (multipart): the job's `.meta` fields, `size`, `gpu`, `new`, `timeout`,
-  `env`, plus the tar. It returns `{job, position, why}`.
-- **`GET /api/queue`:** the queued jobs, in order.
-- **`POST /api/queue/{job}/cancel`** and **`/front`:** controls.
-- Queued jobs appear in `/api/state` as `Job.state: queued` with `queuedAt`, `position` and `why`.
+The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Every POST needs
+`X-Agent-Box: 1`.
+- **`POST /api/queue`** (multipart/form-data): a `request` part, then a `bundle` part.
+  - `request` is `{box, new, size, gpu, checkout, ref, command, env, timeout, meta}`. `meta` is the
+    `.meta` box would write.
+  - It returns 201 with `{job, key, position, why}`.
+  - A GPU run while the PC is in My PC or yielding gets 409 (`frozen` or `yielding`).
+- **`GET /api/queue`:** `{jobs}`, the waiting jobs in the order they start.
+- **`GET /api/queue/{job}`:** one job by its name, whether it is waiting, running or finished. This
+  is so `box watch` can follow it through its start.
+- **`POST /api/queue/{job}/cancel`** (204) and **`/front`** (200, the `Job`): controls. Both get 409
+  `not-running` once the job has started.
+- Queued jobs appear in `/api/state` as `Job.state: queued` with `queuedAt`, `position` and `why`
+  (one of the refusal causes).
+- `/api/history` buckets carry `queued: {jobs, medianWaitSeconds}`.
 
 ## Order of work
 
 It is built after the push design and `boxd`'s read side, both of which it depends on.
 1. `boxd`: the queue store, the scheduler, the starter and the API.
 2. `box`: queue on no room or pause, the snapshot upload, `box watch` following queued jobs, the
-   nudge, and `queue: false`.
-3. The page: the Queue section and its controls.
+   nudge, and `queue: false`. Built in `cmd/box/queue.go`: only `box_run` queues, since only it
+   can push. The CLI's `box run` still exits 75, because nothing would follow its job.
+3. The page: the Queue section and its controls. Overview and Jobs show the line in order, with
+   each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
+   **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
+   says where it is in line. The `full` and `yielding` fixtures hold queued jobs, and the devserver
+   plays the queue. Counting queued jobs in History is still to do.

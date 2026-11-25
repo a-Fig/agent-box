@@ -46,6 +46,8 @@ const shapes = {
   menu: [["path", { d: "M4 6h16M4 12h16M4 18h16" }]],
   back: [["path", { d: "m12 19-7-7 7-7" }], ["path", { d: "M19 12H5" }]],
   user: [["circle", { cx: 12, cy: 8, r: 4 }], ["path", { d: "M20 21a8 8 0 0 0-16 0" }]],
+  hourglass: [["path", { d: "M5 22h14M5 2h14" }], ["path", { d: "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" }], ["path", { d: "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" }]],
+  front: [["path", { d: "M5 3h14" }], ["path", { d: "m18 13-6-6-6 6" }], ["path", { d: "M12 7v14" }]],
 };
 
 function icon(name, cls = "") {
@@ -100,6 +102,11 @@ function tickTimes(root) {
   for (const el of root.querySelectorAll("[data-time]")) {
     const text = el.dataset.pre + fmtTime(el.dataset.time, el.dataset.t) + el.dataset.post;
     if (el.textContent !== text) el.textContent = text;
+  }
+  // Something that shows from a time on, such as a queued job's nudged badge.
+  for (const el of root.querySelectorAll("[data-show-after]")) {
+    const hide = clock.now() < Date.parse(el.dataset.showAfter);
+    if (el.hidden !== hide) el.hidden = hide;
   }
 }
 

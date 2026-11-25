@@ -131,7 +131,10 @@ func TestRunSkipsIncusWhileHostDownAndHoldsAwake(t *testing.T) {
 	wake := make(chan struct{})
 	results := make(chan mode.Status, 8)
 	done := make(chan struct{})
-	go func() { run(ctx, m, s, time.Hour, wake, func(st mode.Status) { results <- st }); close(done) }()
+	go func() {
+		run(ctx, loopCfg{Manager: func() *mode.Manager { return m }}, s, time.Hour, wake, func(st mode.Status) { results <- st })
+		close(done)
+	}()
 
 	if st := <-results; !st.Down || inc.calls != 0 {
 		t.Fatalf("down: %+v calls=%d", st, inc.calls)

@@ -34,6 +34,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/history", s.history)
 	mux.Handle("POST /api/refusals", control(http.HandlerFunc(s.refusal)))
 	mux.Handle("POST /api/jobs/ended", control(http.HandlerFunc(s.ended)))
+	s.queueRoutes(mux)
+	s.controlRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "no such endpoint")
 	})
