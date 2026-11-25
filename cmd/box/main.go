@@ -314,6 +314,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			err = skillSync(c, args[1])
 		}
 		if err != nil {
+			return fail(err)
+		}
+		return 0
 	case "mcp-call": // one request from box mcp, through the newest box.exe (mcpexe.go)
 		if err := runMCPCall(ctx, stdin, a.Out, callInProcess(a)); err != nil {
 			return fail(err)

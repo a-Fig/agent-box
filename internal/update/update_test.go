@@ -29,6 +29,9 @@ func TestAfter(t *testing.T) {
 		{"", "v0.3.0", false}, // a dev build never comes after
 		{"", "", false},
 		{"v0.3", "v0.2.0", false},
+		{"v0.0.0-test.6", "v0.0.0-test.5", true},
+		{"v0.0.0-test.6", "v0.0.0", false},
+		{"v0.3.1-test.9", "v0.3.1-nightly.20261125.1", false},
 	} {
 		if got := After(c.a, c.b); got != c.want {
 			t.Errorf("After(%q, %q) = %t", c.a, c.b, got)

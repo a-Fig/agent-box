@@ -41,7 +41,7 @@ func (c Client) Latest(ctx context.Context) (Release, error) {
 // ByTag is the release with that tag, a nightly included.
 func (c Client) ByTag(ctx context.Context, tag string) (Release, error) {
 	if !ValidTag(tag) {
-		return Release{}, fmt.Errorf("%q isn't a release tag like v0.3.0 or v0.3.1-nightly.20261125.1", tag)
+		return Release{}, fmt.Errorf("%q isn't a release tag like v0.3.0, v0.3.1-nightly.20261125.1 or v0.0.0-test.1", tag)
 	}
 	return c.release(ctx, "/repos/"+Repo+"/releases/tags/"+tag)
 }
@@ -130,9 +130,10 @@ func (c Client) get(ctx context.Context, url string, limit int64) ([]byte, error
 	return b, err
 }
 
-var tagRE = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d{8})\.(\d+))?$`)
+var tagRE = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d{8})\.(\d+)|-test\.(\d+))?$`)
 
-// ValidTag says tag is a release tag: vX.Y.Z, or vX.Y.Z-nightly.YYYYMMDD.N.
+// ValidTag says tag is a release tag: vX.Y.Z, vX.Y.Z-nightly.YYYYMMDD.N, or a test prerelease
+// vX.Y.Z-test.N (docs/releasing.md), which only installs by hand.
 func ValidTag(tag string) bool { return tagRE.MatchString(tag) }
 
 // After says release a comes after b. A tag that isn't a release's (a dev build's "") never
@@ -166,11 +167,14 @@ func key(tag string) ([6]int, bool) {
 	for i, s := range []string{m[1], m[2], m[3]} {
 		k[i], _ = strconv.Atoi(s)
 	}
-	if m[4] == "" {
-		k[3] = 1
-	} else {
+	switch {
+	case m[4] != "":
 		k[4], _ = strconv.Atoi(m[4])
 		k[5], _ = strconv.Atoi(m[5])
+	case m[6] != "": // a test prerelease: before any nightly of the same X.Y.Z
+		k[5], _ = strconv.Atoi(m[6])
+	default:
+		k[3] = 1
 	}
 	return k, true
 }
