@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -79,12 +80,23 @@ func runBox(ctx context.Context, exe string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// stamp is update.json: when GitHub was last asked, what it said, and a release rolled back from,
-// which isn't installed again until a newer one comes out.
+// stamp is update.json: when GitHub was last asked, what it said, a release not to install until
+// a newer one comes out (rolled back from, or left by hand), and the SHA-256 of every skill an
+// update replaced.
 type stamp struct {
 	Checked time.Time `json:"checked"`
 	Latest  string    `json:"latest,omitempty"`
 	Skip    string    `json:"skip,omitempty"`
+	Skills  []string  `json:"skills,omitempty"`
+}
+
+// rememberSkill adds the SHA-256 of a skill an update replaced to the stamp.
+func (u *updater) rememberSkill(sum string) {
+	s := u.readStamp()
+	if !slices.Contains(s.Skills, sum) {
+		s.Skills = append(s.Skills, sum)
+		u.writeStamp(s)
+	}
 }
 
 func (u *updater) stampPath() string { return filepath.Join(u.Dir, "update.json") }
@@ -141,6 +153,8 @@ func (u *updater) installed(ctx context.Context) string {
 // auto is box mcp's check: at most hourly across sessions, stable releases only, never older,
 // never a release rolled back from, and never a dev build.
 func (u *updater) auto(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute) // a stalled download mustn't hold the lock
+	defer cancel()
 	unlock, ok := u.lock()
 	if !ok {
 		return
@@ -205,10 +219,21 @@ func (u *updater) Update(ctx context.Context, tag string) error {
 	if err := u.install(ctx, rel, cur); err != nil {
 		return err
 	}
-	if s.Skip != "" { // installing by hand ends a rollback's pin
-		s.Skip = ""
-		u.writeStamp(s)
+	// Installing by hand ends a rollback's pin, and makes one of its own when it leaves the
+	// latest stable release, so the hourly check doesn't undo it.
+	latest := rel.Tag
+	if tag != "" {
+		if l, err := u.GitHub.Latest(ctx); err == nil {
+			latest = l.Tag
+		}
 	}
+	s = u.readStamp()
+	s.Skip = ""
+	if update.After(latest, rel.Tag) {
+		s.Skip = latest
+		fmt.Fprintf(u.Out, "box: %s won't be installed by the hourly check; box update installs it\n", latest)
+	}
+	u.writeStamp(s)
 	return nil
 }
 
@@ -238,7 +263,8 @@ func (u *updater) install(ctx context.Context, rel update.Release, from string) 
 	if err := u.swap(staged); err != nil {
 		return err
 	}
-	u.syncSkill(ctx, was)
+	u.rememberSkill(was)
+	u.syncSkill(ctx)
 	if from == "" {
 		from = "a dev build"
 	}
@@ -304,10 +330,11 @@ func (u *updater) Rollback(ctx context.Context) error {
 	if err := os.Rename(tmp, old); err != nil {
 		return err
 	}
+	u.rememberSkill(was)
 	s := u.readStamp()
 	s.Skip = from
 	u.writeStamp(s)
-	u.syncSkill(ctx, was)
+	u.syncSkill(ctx)
 	to := u.installed(ctx)
 	if to == "" {
 		to = "a dev build"
@@ -332,19 +359,24 @@ func skillSHA() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// syncSkill has the box now on disk install its skill wherever the installed skill is the one
-// with SHA-256 was, the replaced box's; an edited skill is left alone.
-func (u *updater) syncSkill(ctx context.Context, was string) {
-	if out, err := u.Run(ctx, u.Exe, "skill-sync", was); err != nil {
+// syncSkill has the box now on disk install its skill wherever the installed skill is one an
+// update replaced; an edited skill matches none and is left alone. It runs after each update and
+// hourly in every box mcp, since each session sees only its own configs ($CLAUDE_CONFIG_DIR).
+func (u *updater) syncSkill(ctx context.Context) {
+	known := u.readStamp().Skills
+	if len(known) == 0 {
+		return
+	}
+	if out, err := u.Run(ctx, u.Exe, append([]string{"skill-sync"}, known...)...); err != nil {
 		fmt.Fprintf(u.Out, "box: skill not updated: %v\n", err)
 	} else if out = strings.TrimSpace(out); out != "" {
 		fmt.Fprintln(u.Out, out)
 	}
 }
 
-// skillSync is `box skill-sync <sha256>`: writes this binary's skill over each installed copy
-// whose SHA-256 is the given one.
-func skillSync(c joinConfig, was string) error {
+// skillSync is `box skill-sync <sha256>...`: writes this binary's skill over each installed copy
+// whose SHA-256 is one of the given ones.
+func skillSync(c joinConfig, was ...string) error {
 	var errs []error
 	for _, p := range c.skillPaths() {
 		b, err := os.ReadFile(p)
@@ -352,7 +384,7 @@ func skillSync(c joinConfig, was string) error {
 			continue // not installed there
 		}
 		sum := sha256.Sum256(b)
-		if hex.EncodeToString(sum[:]) != was || string(b) == skills.Box {
+		if !slices.Contains(was, hex.EncodeToString(sum[:])) || string(b) == skills.Box {
 			continue
 		}
 		tmp := p + ".tmp"
@@ -380,6 +412,7 @@ func autoUpdate(ctx context.Context, a *App) {
 	}
 	for {
 		u.auto(ctx)
+		u.syncSkill(ctx)
 		select {
 		case <-ctx.Done():
 			return

@@ -79,11 +79,15 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
     takes its name. A `box.old.exe` that a session still runs is renamed aside and removed by
     a later update. `box mcp` runs each tool call through the box on disk (#70), so running
     sessions get the new code at their next call;
-  - the new box then installs its skill into each config whose skill is still the replaced
-    box's (`box skill-sync`), and leaves a skill someone edited alone. The configs are the ones
-    the updating process sees (`~/.claude`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME` or `~/.codex`);
+  - the new box then installs its skill wherever the installed skill is one an update replaced
+    (`box skill-sync`; `update.json` keeps their SHA-256s), and leaves a skill someone edited
+    alone. A session sees only its own configs (`~/.claude`, `$CLAUDE_CONFIG_DIR`,
+    `$CODEX_HOME` or `~/.codex`), and T3 and Codex sessions here use different ones, so every
+    `box mcp` also runs that sync hourly;
   - by hand: `box update` checks now, `box update --version <tag>` installs a release, a
     nightly or a test prerelease, and `box status` says when a newer stable release is out.
+    Installing one older than the latest stable release pins it like a rollback, until
+    `box update` or a newer release.
 - **boxtray.exe.** The tray checks hourly. To swap itself it:
   1. stops the `agent-box-enforcer` task;
   2. renames itself to `.old` and moves the new file into its place;

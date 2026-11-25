@@ -235,7 +235,7 @@ func TestSkillSyncLeavesEditedSkillsAlone(t *testing.T) {
 	os.MkdirAll(filepath.Dir(paths[1]), 0o755)
 	os.WriteFile(paths[1], []byte("old skill, edited\n"), 0o644) // edited: left alone
 	sum := sha256.Sum256([]byte(old))
-	if err := skillSync(c, hex.EncodeToString(sum[:])); err != nil {
+	if err := skillSync(c, "1111", hex.EncodeToString(sum[:])); err != nil { // any remembered skill
 		t.Fatal(err)
 	}
 	if read(t, paths[0]) != skills.Box || read(t, paths[1]) != "old skill, edited\n" {
@@ -261,5 +261,48 @@ func TestBehind(t *testing.T) {
 	u.writeStamp(stamp{Latest: "v0.3.1", Skip: "v0.3.1"}) // rolled back from: not nagged about
 	if got := behind(stateDir, "v0.3.0"); got != "" {
 		t.Errorf("skipped: %q", got)
+	}
+}
+
+// Installing an older release by hand pins it: the hourly check leaves it until a newer release.
+func TestUpdateByHandToAnOlderReleaseStays(t *testing.T) {
+	gh := &fakeReleases{latest: "v0.3.1"}
+	u, _, out := newTestUpdater(t, "box v0.3.1 (e823842)\n", gh)
+	if err := u.Update(context.Background(), "v0.3.0"); err != nil {
+		t.Fatal(err)
+	}
+	if s := u.readStamp(); s.Skip != "v0.3.1" || !strings.Contains(out.String(), "v0.3.1 won't be installed by the hourly check") {
+		t.Fatalf("stamp %+v, out %q", s, out)
+	}
+	start := u.Now()
+	u.Now = func() time.Time { return start.Add(2 * checkEvery) }
+	u.auto(context.Background())
+	if !strings.HasPrefix(read(t, u.Exe), "box v0.3.0") {
+		t.Fatalf("the hourly check undid it: %q", read(t, u.Exe))
+	}
+	if err := u.Update(context.Background(), ""); err != nil || !strings.HasPrefix(read(t, u.Exe), "box v0.3.1") {
+		t.Fatalf("box update didn't take the latest: %v %q", err, read(t, u.Exe))
+	}
+	if s := u.readStamp(); s.Skip != "" {
+		t.Fatalf("pin left after box update: %+v", s)
+	}
+}
+
+// Each update remembers the skill it replaced, and every sync passes all of them, so a config
+// that one session can't see is caught up by a session that can.
+func TestSkillSyncPassesEveryReplacedSkill(t *testing.T) {
+	gh := &fakeReleases{latest: "v0.3.1"}
+	u, fb, _ := newTestUpdater(t, "box v0.3.0 (e823842)\n", gh)
+	u.Update(context.Background(), "")
+	gh.latest = "v0.3.2"
+	u.Update(context.Background(), "")
+	s := u.readStamp()
+	if len(s.Skills) != 2 {
+		t.Fatalf("skills %v", s.Skills)
+	}
+	fb.calls = nil
+	u.syncSkill(context.Background())
+	if len(fb.calls) != 1 || fb.calls[0] != "box.exe skill-sync "+strings.Join(s.Skills, " ") {
+		t.Fatalf("calls %v", fb.calls)
 	}
 }
