@@ -923,7 +923,7 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 	}
 	if now == nil {
 		if jobrun.IsDisallowedMetadata(err) {
-			return "", fmt.Errorf("%w (a prior failed launch left an empty dir on the PC; remove /var/lib/incus/storage-pools/default/containers/%s_%s or run with --new)", err, a.Project, box)
+			return "", fmt.Errorf("%w (this or an earlier failed launch left an empty dir on the PC: /var/lib/incus/storage-pools/default/containers/%s_%s; use a new box (--new / new: true) until it is removed)", err, a.Project, box)
 		}
 		return "", err
 	}

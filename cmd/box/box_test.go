@@ -530,7 +530,7 @@ func TestLaunchThrowawayRetriesOnceOnDisallowedMetadata(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "Instance metadata contained disallowed entries") {
 			t.Fatalf("err = %v, want disallowed metadata error", err)
 		}
-		if !strings.Contains(err.Error(), "/var/lib/incus/storage-pools/default/containers/agents_my-repo") {
+		if !strings.Contains(err.Error(), "/var/lib/incus/storage-pools/default/containers/agents_my-repo") || !strings.Contains(err.Error(), "new: true") {
 			t.Errorf("err missing recovery hint: %v", err)
 		}
 		if len(f.launches) != 1 {

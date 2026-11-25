@@ -283,13 +283,18 @@ warm_image() {
       note "absorbed Incus 7.6 btrfs first-launch metadata race while warming $img; retrying once"
       incus delete --force "$name" --project default >/dev/null 2>&1 || true
       rmdir "$dir" 2>/dev/null || true
-      incus init "$img" "$name" --project default >/dev/null
+      if ! out=$(incus init "$img" "$name" --project default 2>&1); then
+        out=${out##*$'\n'}
+        if (( ${#out} > 400 )); then out="${out:0:400}..."; fi
+        printf '%s\n' "$out" >&2
+        return 1
+      fi
     else
       printf '%s\n' "$out" >&2
       return 1
     fi
   fi
-  incus delete --force "$name" --project default >/dev/null
+  incus delete --force "$name" --project default >/dev/null || return 1
   rmdir "$dir" 2>/dev/null || true
 }
 
