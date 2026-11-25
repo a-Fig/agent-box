@@ -52,14 +52,19 @@ func (s *server) step() {
 	// The mode: a request the tray picks up, and a game that starts and ends.
 	if !m.Yielding && m.ModeRequested != nil && !s.applyAt.IsZero() && now.After(s.applyAt) {
 		m.Mode, m.ModeRequested, s.applyAt = m.ModeRequested.Mode, nil, time.Time{}
+		m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: now.UTC().Truncate(time.Second)}
 		s.setFrozen(m.Mode == dash.ModeMyPC)
 		s.reallot()
 	}
 	switch {
 	case m.Yielding && now.After(s.yieldEnd):
 		m.Yielding, m.ModeReason, m.Mode = false, "", s.before
+		if m.Chosen != nil {
+			m.Mode = m.Chosen.Mode // the pick comes back after the game
+		}
 		if m.ModeRequested != nil {
 			m.Mode, m.ModeRequested = m.ModeRequested.Mode, nil
+			m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: now.UTC().Truncate(time.Second)}
 		}
 		s.yieldEnd = time.Time{}
 		s.setFrozen(m.Mode == dash.ModeMyPC)
@@ -108,6 +113,8 @@ func (s *server) step() {
 			s.removeBox(b.Name)
 		}
 	}
+	// The queue: the next job that fits starts.
+	s.stepQueue()
 	// Now and then a new job, if the PC has room and isn't frozen.
 	if m.Mode != dash.ModeMyPC && s.tick%20 == 8 && s.running() < 3 {
 		s.startJob()

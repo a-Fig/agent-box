@@ -116,6 +116,8 @@ The same set everywhere, since everywhere is the same page.
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
 | Delete a box | `incus delete --force`, after a confirm on the page |
 | Extend a box | adds 1h, 4h or 24h to `user.expires` |
+| Move a queued job to the front | reorders boxd's queue (docs/queue.md) |
+| Cancel a queued job | takes it out of the queue and deletes its snapshot, after a confirm on the page |
 
 - **Not in the first version:** stop or start a box (a stopped box still holds the caps), creating
   boxes or running commands. Agents run work; the page watches and steers.
@@ -302,7 +304,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 | Method and path | Returns or does |
 |---|---|
-| `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running jobs plus the last 50 finished. |
+| `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
@@ -314,16 +316,27 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
+| `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
+| `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
+| `GET /api/queue`, `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |
 
 ### Shapes
 
 - **`Machine`:** `{id, name, reachable, mode, modeReason, modeRequested: {mode, at, by} | null,
-  yielding, trayLastSeen, caps: {cpu, memory, instances, disk}, allocated: {cpu, memory, instances,
-  disk}, room: {small, medium, large, gpu}, wslMemory}`
+  chosen: {mode, at} | null, yielding, trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
+  memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
+  gpu}, wslMemory}`.
+  `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
+  boxd from before the key. `chosen` is `user.agent-box.chosen`, the mode the enforcers act on: while
+  a game makes the PC yield, the mode that comes back afterwards ("Shared when the game ends").
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
   memLimit, cpus, cpuPct}`
-- **`Job`:** `{key, id, box, machine, state: running|done|paused|lost, exit, startedAt, endedAt,
-  reason, command, kind, repo, branch, commit, agent: {client, session, host, worktree}, size, gpu, tail}`
+- **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
+  reason, command, kind, repo, branch, commit, agent: {client, session, host, worktree}, size, gpu, tail,
+  queuedAt, position, why}`. `queuedAt` is set on a job that went through the queue. While it waits,
+  `startedAt` is `queuedAt`, `position` is its place from 1, and `why` is one of the refusal causes;
+  every change to either comes as a `job` event. When it starts, `job-gone` takes its waiting key and
+  the running job comes under its own key with the same box and ID.
 
 ### The contract and the devserver
 
@@ -333,9 +346,11 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   `internal/dash/testdata/<scenario>.json`, built at 2026-11-24T17:30:00Z):
   - empty;
   - busy (three boxes, two running jobs);
-  - yielding to a game, with a mode request pending;
-  - full, with refusals;
+  - yielding to a game, with a mode request pending and two jobs queued;
+  - full, with refusals and three jobs queued;
   - tray down;
+  - headless: nobody logged on, the headless enforcer holding Full, a mode request waiting for the
+    tray;
   - a lost job;
   - a week of history.
 - **The devserver** is `internal/dash/devserver`, like Murmur's `internal/web/devserver`. It serves

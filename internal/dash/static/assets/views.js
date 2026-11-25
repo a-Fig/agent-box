@@ -201,11 +201,108 @@ function extendBox(b, hours) {
   act("ext-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/extend", { hours, createdAt: b.createdAt }), (box) => box?.name && S.boxes.set(box.machine + "/" + box.name, box));
 }
 
+// The queue (docs/queue.md): runs that couldn't start yet wait in boxd's line and start when their
+// size fits. A waiting job's key is box/id/queuedAt; when it starts, job-gone takes that key and the
+// running job comes under its own key with the same box and ID. Controls name the job as box does,
+// "<box>.<id>".
+
+const WHY = {
+  full: (j) => "no room for a " + j.size + " box",
+  "gpu-busy": () => "the GPU is in use",
+  yielding: () => "a game is running",
+  mypc: () => "the PC is in My PC",
+};
+// After dash.QueueNudge in line the agent is told once that it can run the job locally instead.
+const NUDGE_MS = 20 * 60 * 1000;
+
+function jobName(j) {
+  return j.box + "." + j.id;
+}
+
+// The nudged badge, shown by the 1s ticker once its time comes (dom.js tickTimes).
+function nudgedBadge(j) {
+  const at = new Date(Date.parse(j.queuedAt) + NUDGE_MS).toISOString();
+  return h("span", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at), title: "The agent was told it can run this locally and cancel it here" }, "nudged");
+}
+
+function whyText(j) {
+  return (WHY[j.why] || (() => j.why || "waiting"))(j);
+}
+
+function queued() {
+  return [...S.jobs.values()].filter((j) => j.state === "queued").sort((a, b) => a.position - b.position);
+}
+
+function stillQueued(j) {
+  return S.jobs.get(j.key)?.state === "queued";
+}
+
+function dequeueJob(j) {
+  confirmDialog({
+    valid: () => stillQueued(j),
+    goneText: "The job left the queue.",
+    title: "Take this job out of the queue?",
+    body: "It won't run, and its snapshot of the worktree is deleted. The agent that queued it is told it was cancelled.",
+    action: "Cancel job",
+    run: () => act("dequeue-" + j.key, () => post("/api/queue/" + encodeURIComponent(jobName(j)) + "/cancel"), () => S.jobs.delete(j.key)),
+  });
+}
+
+function frontJob(j) {
+  act("front-" + j.key, () => post("/api/queue/" + encodeURIComponent(jobName(j)) + "/front"), (job) => job?.key && S.jobs.set(job.key, job));
+}
+
+function queueRow(j) {
+  const why = whyText(j);
+  return h(
+    "div",
+    { class: "row row-grid" },
+    h(
+      "div",
+      { class: "queue-item" },
+      h("span", { class: "queue-pos num", title: "Place in line" }, String(j.position)),
+      h(
+        "div",
+        null,
+        h("a", { class: "row-title-link", href: jobLink(j), "data-key": "qlink-" + j.key }, reasonEl(j)),
+        h("code", { class: "cmd" }, j.command),
+        h(
+          "div",
+          { class: "meta" },
+          h("span", null, icon("user"), j.agent?.session || "unknown agent", j.agent?.client ? h("span", { class: "muted" }, "· " + j.agent.client) : null),
+          h("span", null, icon("branch"), shortRepo(j.repo), j.branch ? "@" + j.branch : ""),
+          h("span", null, icon("box"), j.box + " · " + j.size + (j.gpu && j.size !== "gpu" ? " GPU" : "")),
+          h("span", { title: "Queued " + stamp(j.queuedAt) }, icon("hourglass"), timeEl("elapsed", j.queuedAt, "waiting "), h("span", { class: "muted" }, " · " + why)),
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { class: "row-control" },
+      nudgedBadge(j),
+      j.position > 1 ? control("front-" + j.key, { class: "btn btn-xs btn-outline", title: "Run this next", onclick: () => frontJob(j) }, icon("front"), "Move to front") : h("span", { class: "badge" }, "next"),
+      control("dequeue-" + j.key, { class: "btn btn-xs btn-danger-ghost", onclick: () => dequeueJob(j) }, "Cancel"),
+    ),
+  );
+}
+
+function queueSection(q) {
+  return section("Queue", plural(q.length, "job") + " waiting", h("div", { class: "group" }, q.map(queueRow)));
+}
+
 // Overview: what is happening on the PC right now.
+
+// Who applies the mode (dash.Machine.enforcer): the tray while someone is logged on to the PC, or
+// the headless enforcer while nobody is, which has no game detection. "" is a boxd from before the
+// key, when the tray was the only one.
+function enforcerName(m) {
+  return m.enforcer === "headless" ? "headless enforcer" : "tray";
+}
 
 function machineCard(m) {
   const now = clock.now();
   const alive = trayAlive(m);
+  const headless = alive && m.enforcer === "headless";
   const req = m.modeRequested;
   const switcher = h(
     "div",
@@ -218,13 +315,15 @@ function machineCard(m) {
   let state;
   if (m.yielding) state = h("span", { class: "badge badge-warn" }, icon("game"), "Yielding: " + (m.modeReason || "gaming").replace(/^gaming:\s*/, ""));
   else state = h("span", { class: "badge " + (m.mode === "mypc" ? "" : "badge-on") }, modeLabel(m.mode));
+  const enforcerBadge = headless ? h("span", { class: "badge badge-outline", title: "Nobody is logged on to the PC, so the headless enforcer applies the mode, with no game detection" }, "headless") : null;
   let note = null;
   if (req) {
     const what = modeLabel(req.mode);
     if (m.yielding) note = h("p", { class: "mode-note pending" }, what + " when the game ends. Asked ", timeEl("ago", req.at), " from " + req.by + ".");
-    else if (!alive) note = h("p", { class: "mode-note pending" }, what + " is waiting for the tray, which was last seen ", m.trayLastSeen ? timeEl("ago", m.trayLastSeen) : "never", ".");
-    else note = h("p", { class: "mode-note pending" }, "Switching to " + what + ": the tray applies it within a few seconds.");
-  } else if (m.yielding) note = h("p", { class: "mode-note" }, "A game is running, so every box is frozen until it ends. Games always win.");
+    else if (!alive) note = h("p", { class: "mode-note pending" }, what + " is waiting: nothing is applying requests. The " + enforcerName(m) + " was last seen ", m.trayLastSeen ? timeEl("ago", m.trayLastSeen) : "never", ".");
+    else note = h("p", { class: "mode-note pending" }, "Switching to " + what + ": the " + enforcerName(m) + " applies it within a few seconds.");
+  } else if (headless) note = h("p", { class: "mode-note" }, "Nobody is logged on to the PC, so the headless enforcer applies the mode, with no game detection. The tray takes over at logon.");
+  else if (m.yielding) note = h("p", { class: "mode-note" }, (m.chosen ? modeLabel(m.chosen.mode) + " when the game ends. " : "") + "A game is running, so every box is frozen until it ends. Games always win.");
   else if (m.mode === "mypc") note = h("p", { class: "mode-note" }, "Boxes are frozen. Pick Shared or Full to let agents run.");
   else note = h("p", { class: "mode-note" }, m.mode === "full" ? "Boxes get their size's Full CPUs." : "Boxes get their size's Shared CPUs, so the PC stays smooth.");
 
@@ -246,7 +345,7 @@ function machineCard(m) {
     h(
       "div",
       { class: "row" },
-      h("div", { class: "machine-head" }, h("span", { class: "machine-name" }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name), state, switcher),
+      h("div", { class: "machine-head" }, h("span", { class: "machine-name" }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name), state, enforcerBadge, switcher),
       note,
     ),
     h("div", { class: "row" }, h("div", { class: "meters" }, meter("CPUs", m.allocated.cpu, m.caps.cpu, n), meter("Memory", m.allocated.memory, m.caps.memory, bytes), meter("Boxes", m.allocated.instances, m.caps.instances, n), meter("Disk", m.allocated.disk, m.caps.disk, bytes))),
@@ -256,7 +355,7 @@ function machineCard(m) {
       h("span", null, "Room now:"),
       fits.map(([size, k]) => h("span", { class: "badge " + (k > 0 ? "badge-on" : "") }, k + " " + size)),
       h("span", { class: "badge " + (r.gpu > 0 ? "badge-on" : "") }, r.gpu > 0 ? "GPU free" : gpuBox ? "GPU in use" : "no room for GPU"),
-      h("span", { class: "section-aside room-aside" }, h("span", { class: "conn" }, h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? timeEl("ago", m.trayLastSeen, "tray seen ") : m.trayLastSeen ? timeEl("ago", m.trayLastSeen, "tray down, last seen ") : "tray down"), h("span", null, "WSL holds " + bytes(m.wslMemory))),
+      h("span", { class: "section-aside room-aside" }, h("span", { class: "conn" }, h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? timeEl("ago", m.trayLastSeen, enforcerName(m) + " seen ") : m.trayLastSeen ? timeEl("ago", m.trayLastSeen, "nothing enforcing, " + enforcerName(m) + " last seen ") : "nothing enforcing"), h("span", null, "WSL holds " + bytes(m.wslMemory))),
     ),
   );
 }
@@ -264,7 +363,14 @@ function machineCard(m) {
 function banners(m) {
   const out = [];
   if (!trayAlive(m))
-    out.push(h("div", { class: "banner banner-bad", role: "status" }, icon("alert"), h("div", null, h("strong", null, "The tray isn't running on " + m.name + ". "), "Modes and game yields aren't being enforced, and mode requests wait until it is back. Start agent-box's tray on the PC.")));
+    out.push(
+      h(
+        "div",
+        { class: "banner banner-bad", role: "status" },
+        icon("alert"),
+        h("div", null, h("strong", null, "Nothing is enforcing modes on " + m.name + ". "), "Neither the tray (while someone is logged on) nor the headless enforcer (while nobody is) has checked in for 90s, so modes and game yields aren't applied, and mode requests wait. Start agent-box's tray on the PC."),
+      ),
+    );
   return out;
 }
 
@@ -323,6 +429,7 @@ const overview = {
   update(el) {
     const ms = [...S.machines.values()];
     const running = jobsOf((j) => j.state === "running" || j.state === "paused");
+    const q = queued();
     const done = jobsOf((j) => j.state === "done" || j.state === "lost").slice(0, 5);
     const bx = [...S.boxes.values()].sort((a, b) => a.name.localeCompare(b.name));
     el.replaceChildren(
@@ -332,6 +439,7 @@ const overview = {
         ms.flatMap(banners),
         ms.length ? section(ms.length > 1 ? "Machines" : "Machine", null, ms.map(machineCard)) : null,
         section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map(runningRow) : h("p", { class: "row-empty" }, "Nothing is running. Agents start jobs with box run; they show here as they start."))),
+        q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes. One is made when an agent first runs something here."))),
         done.length ? section("Recently finished", h("a", { href: "#jobs" }, "All jobs →"), h("div", { class: "group" }, done.map(finishedRow))) : null,
       ),
@@ -473,16 +581,18 @@ const jobs = {
     if (fs.some((f, i) => this.filters.children[i] !== f) || fs.length !== this.filters.children.length) this.filters.replaceChildren(...fs);
     const shown = known.filter(matches).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
     const live = shown.filter((j) => j.state === "running" || j.state === "paused");
+    const waiting = shown.filter((j) => j.state === "queued").sort((a, b) => a.position - b.position);
     const done = shown.filter((j) => j.state === "done" || j.state === "lost");
     const filtered = Object.values(F).some(Boolean);
     const kids = [];
     if (list.error) kids.push(h("div", { class: "banner banner-bad" }, icon("alert"), h("div", null, "Couldn't load finished jobs: " + list.error + " ", h("button", { class: "btn btn-xs btn-outline", onclick: () => fetchJobs() }, "Try again"))));
     if (live.length) kids.push(section("Running", String(live.length), h("div", { class: "group" }, live.map(finishedRow))));
+    if (waiting.length) kids.push(queueSection(waiting));
     if (done.length) {
       const moreBtn = list.more ? h("button", { class: "btn btn-sm btn-outline", disabled: list.loading, onclick: () => fetchJobs(true) }, list.loading ? "Loading…" : "Show older") : null;
       kids.push(section("Finished", filtered ? plural(done.length, "match", "matches") : null, h("div", { class: "group" }, done.map(finishedRow)), moreBtn));
     }
-    if (!live.length && !done.length) {
+    if (!live.length && !waiting.length && !done.length) {
       if (list.loading) kids.push(empty("retry", "Loading jobs…", null));
       else if (filtered) kids.push(empty("search", "No jobs match", "Try another search, or clear the filters.", h("button", { class: "btn btn-sm btn-outline", onclick: clearFilters }, "Clear filters")));
       else kids.push(empty("list", "No jobs yet", "When an agent runs something with box run, it shows here with its reason."));
@@ -553,6 +663,44 @@ async function pull(j, seq) {
 const seen = new Map();
 const lookups = new Map();
 
+// A waiting job's page: where it is in line and why, or, once it has left the line, where it went.
+// The running job keeps the box and ID, so it is found by them.
+function waitingPage(j) {
+  const now = S.jobs.get(j.key);
+  const ran = now ? null : [...S.jobs.values()].find((x) => x.box === j.box && x.id === j.id && x.state !== "queued");
+  const back = h("a", { class: "btn btn-sm btn-ghost back", href: "#jobs" }, icon("back"), "Jobs");
+  if (!now) {
+    const body = ran
+      ? empty("list", "It has started", "This job left the queue and runs as " + jobName(ran) + ".", h("a", { class: "btn btn-sm btn-outline", href: jobLink(ran), "data-key": "ran-" + ran.key }, "Open the running job"))
+      : empty("list", "The job left the queue", "It was cancelled, or it started and has since left the page's list. Look for " + jobName(j) + " in Jobs.", h("a", { class: "btn btn-sm btn-outline", href: "#jobs" }, "Back to Jobs"));
+    return h("div", { class: "page" }, back, body);
+  }
+  const kv = (k, v) => h("dl", { class: "kv" }, h("dt", null, k), h("dd", null, v || "—"));
+  return h(
+    "div",
+    { class: "page" },
+    back,
+    h("div", { class: "section" }, h("div", { class: "group" }, h("div", { class: "row row-grid" }, h("div", null, reasonEl(now, "headline"), h("code", { class: "cmd" }, now.command)), h("div", { class: "row-control" }, h("span", { class: "badge" }, "queued"), nudgedBadge(now))))),
+    section(
+      "In the queue",
+      null,
+      h(
+        "div",
+        { class: "group detail-grid" },
+        kv("Place", now.position === 1 ? "next" : String(now.position) + " in line"),
+        kv("Waiting", timeEl("elapsed", now.queuedAt)),
+        kv("Why", whyText(now)),
+        kv("Queued", stamp(now.queuedAt)),
+        kv("Agent", (now.agent?.session || "unknown") + (now.agent?.client ? " · " + now.agent.client : "")),
+        kv("Repo", now.repo),
+        kv("Branch", now.branch),
+        kv("Box", now.box + " · " + now.size + (now.gpu && now.size !== "gpu" ? " GPU" : "")),
+      ),
+      h("div", { class: "row-control queue-actions" }, now.position > 1 ? control("front-" + now.key, { class: "btn btn-sm btn-outline", onclick: () => frontJob(now) }, icon("front"), "Move to front") : null, control("dequeue-" + now.key, { class: "btn btn-sm btn-danger-ghost", onclick: () => dequeueJob(now) }, "Cancel")),
+    ),
+  );
+}
+
 const jobDetail = {
   mount(el, key) {
     stopTail();
@@ -599,6 +747,11 @@ const jobDetail = {
       if (now?.state === "error")
         body = empty("alert", "Couldn't load the job", now.error, h("button", { class: "btn btn-sm btn-outline", onclick: () => ((now.state = "retry"), changed()) }, "Try again"));
       el.replaceChildren(h("div", { class: "page" }, body));
+      return;
+    }
+    if (j.state === "queued") {
+      stopTail();
+      el.replaceChildren(waitingPage(j));
       return;
     }
     if (!this.body.isConnected) el.replaceChildren(this.body);

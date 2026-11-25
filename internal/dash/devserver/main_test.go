@@ -335,3 +335,105 @@ func TestJobEnded(t *testing.T) {
 		t.Errorf("a second report for an ended job: %d", code)
 	}
 }
+
+func TestQueue(t *testing.T) {
+	s, ts := start(t, "full")
+	type entry struct {
+		name string
+		pos  int
+	}
+	line := func() []entry {
+		var out []entry
+		for _, j := range s.queue() {
+			out = append(out, entry{j.Box + "." + j.ID, j.Position})
+		}
+		return out
+	}
+	names := func(es []entry) []string {
+		var out []string
+		for _, e := range es {
+			out = append(out, e.name)
+		}
+		return out
+	}
+	q := names(line())
+	if len(q) != 3 {
+		t.Fatalf("full's queue is %q", q)
+	}
+	waitingKey := s.queue()[0].Key
+	cases := []struct {
+		name, path string
+		control    bool
+		status     int
+		code       string
+	}{
+		{"no header", "/api/queue/" + q[2] + "/front", false, 403, dash.CodeForbidden},
+		{"front", "/api/queue/" + q[2] + "/front", true, 200, ""},
+		{"cancel", "/api/queue/" + q[1] + "/cancel", true, 204, ""},
+		{"cancel again", "/api/queue/" + q[1] + "/cancel", true, 409, dash.CodeNotRunning},
+		{"cancel one never queued", "/api/queue/nope.1/cancel", true, 409, dash.CodeNotRunning},
+		{"cancel a waiting job as a running one", "/api/jobs/" + url.PathEscape(waitingKey) + "/cancel", true, 409, dash.CodeNotRunning},
+	}
+	for _, c := range cases {
+		status, e, _ := call(t, ts, "POST", c.path, `{}`, c.control)
+		if status != c.status || e.Code != c.code {
+			t.Errorf("%s: %d %q, want %d %q", c.name, status, e.Code, c.status, c.code)
+		}
+	}
+	if got := line(); !slices.Equal(got, []entry{{q[2], 1}, {q[0], 2}}) {
+		t.Fatalf("line is %v, want %s then %s", got, q[2], q[0])
+	}
+
+	// Room comes: the first job in line that fits starts with its ID, box and QueuedAt under a
+	// running key; its waiting key goes, and the one left moves up, each sent as an event.
+	events := make(chan dash.Event, 64)
+	s.mu.Lock()
+	s.subs[events] = true
+	gpu := slices.IndexFunc(s.sc.State.Boxes, func(b dash.Box) bool { return b.GPU })
+	s.removeBox(s.sc.State.Boxes[gpu].Name)
+	front := *s.queue()[0]
+	for len(events) > 0 {
+		<-events
+	}
+	s.stepQueue()
+	delete(s.subs, events)
+	s.mu.Unlock()
+	close(events)
+	if got := line(); !slices.Equal(got, []entry{{q[0], 1}}) {
+		t.Fatalf("after room came the line is %v", got)
+	}
+	var gone []string
+	sent := map[string]dash.Job{}
+	for e := range events {
+		switch d := e.Data.(type) {
+		case dash.JobGone:
+			gone = append(gone, d.Key)
+		case dash.Job:
+			if d.Key == "" {
+				t.Errorf("a job event with no job: %+v", d)
+			}
+			sent[d.Key] = d
+		}
+	}
+	if !slices.Equal(gone, []string{front.Key}) {
+		t.Errorf("job-gone for %q, want the started job's waiting key %q", gone, front.Key)
+	}
+	var started *dash.Job
+	for k, j := range sent {
+		if j.ID == front.ID && j.State == dash.JobRunning {
+			started = &j
+			if k == front.Key || j.Box != front.Box || !j.QueuedAt.Equal(*front.QueuedAt) || j.Position != 0 || j.Why != "" {
+				t.Errorf("started: %+v", j)
+			}
+		}
+	}
+	if started == nil || s.findBox(started.Box) < 0 {
+		t.Fatalf("no running job for %s among %v", front.ID, sent)
+	}
+	if left := s.queue()[0]; sent[left.Key].Position != 1 {
+		t.Errorf("the job left in line wasn't sent at its new place: %+v", sent[left.Key])
+	}
+	if status, e, _ := call(t, ts, "POST", "/api/queue/"+front.Box+"."+front.ID+"/front", `{}`, true); status != 409 || e.Code != dash.CodeNotRunning {
+		t.Errorf("front for a job that has started: %d %q", status, e.Code)
+	}
+}

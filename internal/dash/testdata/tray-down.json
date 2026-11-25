@@ -14,8 +14,13 @@
           "at": "2026-11-24T17:25:00Z",
           "by": "phone"
         },
+        "chosen": {
+          "mode": "shared",
+          "at": "2026-11-24T15:30:00Z"
+        },
         "yielding": false,
         "trayLastSeen": "2026-11-24T17:16:00Z",
+        "enforcer": "tray",
         "caps": {
           "cpu": 24,
           "memory": 12884901888,

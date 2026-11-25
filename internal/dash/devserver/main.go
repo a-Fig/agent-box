@@ -102,6 +102,8 @@ func (s *server) routes() http.Handler {
 	api("POST /api/boxes/{name}/extend", s.control(s.handleExtend))
 	api("POST /api/refusals", s.control(s.handleRefusal))
 	api("POST /api/jobs/ended", s.control(s.handleJobEnded))
+	api("POST /api/queue/{job}/cancel", s.control(s.handleQueueCancel))
+	api("POST /api/queue/{job}/front", s.control(s.handleQueueFront))
 	api("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, dash.CodeNotFound, "no such endpoint")
 	})
