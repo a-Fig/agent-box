@@ -16,8 +16,8 @@ const RESULT_COLORS = { pass: "var(--success)", fail: "var(--destructive)", canc
 const SIZES = ["small", "medium", "large", "gpu"];
 const KINDS = ["go-test", "go-build", "js-test", "py-test", "gradle", "build", "gpu", "other"];
 const slot = (i) => "var(--s" + (i < 0 ? 8 : (i % 8) + 1) + ")"; // -1, a kind the table lacks, is drawn as other
-const MODE_COLORS = { full: "var(--s1)", shared: "var(--s3)", mypc: "var(--muted-foreground)", yield: "var(--s2)" };
-const WHY = { yielding: "yielding to a game", mypc: "My PC", full: "caps full", "gpu-busy": "GPU busy" };
+const MODE_COLORS = { full: "var(--s1)", shared: "var(--s3)", mypc: "var(--muted-foreground)" };
+const WHY = { mypc: "My PC", full: "caps full", "gpu-busy": "GPU busy" };
 
 async function load(range, force) {
   if (!force && H.data[range] && Date.now() - H.at[range] < 60000) return;
@@ -131,8 +131,8 @@ function memory(buckets, range) {
   return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": "Memory in use against the cap" }, kids);
 }
 
-// The mode timeline: a strip of the effective mode, yields in their own color, and under it the
-// runs turned away and the runs queued in each bucket, so it is plain what games cost agents.
+// The mode timeline: a strip of the mode, and under it the runs turned away and the runs queued in
+// each bucket, so it is plain what My PC costs agents.
 function timeline(d, range) {
   const buckets = d.buckets;
   const t0 = Date.parse(buckets[0].start);
@@ -143,9 +143,7 @@ function timeline(d, range) {
   for (const seg of d.segments || []) {
     const a = x(Date.parse(seg.start)), b = x(Date.parse(seg.end));
     if (b - a < 0.5) continue;
-    const key = seg.mode === "mypc" && seg.reason ? "yield" : seg.mode;
-    const what = key === "yield" ? "Yielding: " + seg.reason.replace(/^gaming:\s*/, "") : modeLabel(seg.mode);
-    kids.push(s("rect", { x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[key] }, s("title", null, what + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")")));
+    kids.push(s("rect", { x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] }, s("title", null, modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")")));
   }
   const max = Math.max(1, ...buckets.map((b) => sum(b.refusals.byWhy)));
   const step = (W - left) / buckets.length;
@@ -232,7 +230,7 @@ const history = {
       ),
     );
     const d = H.data[H.range];
-    const head = h("div", { class: "page-head machine-head" }, h("div", null, h("h2", null, "History"), h("p", null, "What agents used the PC for, and what games cost them.")), seg);
+    const head = h("div", { class: "page-head machine-head" }, h("div", null, h("h2", null, "History"), h("p", null, "What agents used the PC for, and what My PC cost them.")), seg);
     let body;
     if (!d && H.loading[H.range]) body = empty("retry", "Loading history…", null);
     else if (!d && H.error[H.range]) body = empty("alert", "Couldn't load the history", H.error[H.range], h("button", { class: "btn btn-sm btn-outline", onclick: () => load(H.range, true) }, "Try again"));
@@ -270,7 +268,7 @@ const history = {
       }
     const medians = Object.keys(med).map((r) => [r, med[r] / wt[r]]);
     const sizesSeen = SIZES.filter((k) => B.some((b) => b.boxHours.bySize[k]));
-    const modeKeys = ["full", "shared", "mypc", "yield"];
+    const modeKeys = ["full", "shared", "mypc"];
     const per = range === "day" ? "an hour" : "a day";
     return [
       h(
@@ -287,7 +285,7 @@ const history = {
       h(
         "div",
         { class: "charts" },
-        chart("Mode and yields", "The PC's mode, the games it yielded to, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], (k) => (k === "yield" ? "Yielding to a game" : modeLabel(k))), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", null, h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
+        chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", null, h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
         chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])], true),
         chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),

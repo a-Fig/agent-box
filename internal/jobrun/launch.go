@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -13,6 +14,18 @@ import (
 // LimitRefusal matches Incus refusing a launch over a project cap
 // (limits.memory and the like, or limits.instances).
 var LimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
+
+// IsDisallowedMetadata reports whether err is the Incus 7.6 (2026-11-24) btrfs
+// launch failure where a concurrent config write while EnsureImage unpacks an
+// image creates containers/<project>_<inst> as a plain directory before `btrfs
+// subvolume snapshot`, nesting the snapshot inside it so GHSA-5pgx-q9xx-j3qv's
+// stripInstanceMetadata rejects the launch and leaves that empty directory
+// behind. Because that name stays poisoned on disk, only a retry under a fresh
+// instance name can recover (used by cmd/box's launchThrowaway; boxd binds the
+// box name in the queue and drops a failed start).
+func IsDisallowedMetadata(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Instance metadata contained disallowed entries")
+}
 
 // EndedKeep is how long a throwaway box and its log outlive a job that
 // ended, so box pull and the full log still work after the result was pushed.

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/version"
 )
 
 // StatusReport says whether offloading to the PC is worth it now.
@@ -19,18 +20,17 @@ type StatusReport struct {
 	Reachable bool       `json:"reachable"`
 	Error     string     `json:"error,omitempty"` // why the PC can't be reached
 	Mode      string     `json:"mode"`            // mypc, shared, full, or "" if unknown
-	Yielding  bool       `json:"yielding"`        // the tray has paused boxes for a game
-	Reason    string     `json:"reason,omitempty"`
 	Boxes     int        `json:"boxes"`
 	MaxBoxes  int        `json:"maxBoxes"`  // -1: no limit
 	SlotsFree int        `json:"slotsFree"` // -1: no limit
 	Sizes     []SizeRoom `json:"sizes"`
 	Room      string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
 	// GPU is "free", "free, but no room ...", "in use: job X" or
-	// "unavailable: ..." (a game or My PC).
+	// "unavailable: ..." (My PC).
 	GPU     string   `json:"gpu"`
 	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
 	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
+	Update  string   `json:"update,omitempty"`  // a newer stable release is out than this box
 }
 
 // SizeRoom is one box size, what a box of it gets now, and how many more
@@ -52,8 +52,9 @@ type RepoBox struct {
 
 // Status reports the PC's state and, when dir is in a git repo, the repo's
 // box and its running jobs. An unreachable PC is included in the report.
-func (a *App) Status(ctx context.Context, dir string) StatusReport {
-	s := StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1}
+func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
+	s = StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1}
+	defer func() { s.Update = behind(a.StateDir, version.Tag) }()
 	if dir != "" {
 		if rp, err := openRepo(ctx, a.R, dir); err == nil {
 			s.Repo = rp.Name
@@ -68,8 +69,6 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 	s.Reachable = true
 	s.Boxes = len(insts)
 	s.Mode = a.mode(ctx)
-	s.Reason = a.projectKey(ctx, mode.ProjectReasonKey)
-	s.Yielding = s.Reason != ""
 	kept := map[string]bool{}
 	for _, in := range a.keptThrowaways(ctx, insts) {
 		kept[in.Name] = true
@@ -85,10 +84,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 		s.MaxBoxes, s.SlotsFree = n, max(free, 0)
 	}
 	now := mode.Mode(s.Mode)
-	switch {
-	case s.Yielding:
-		now = mode.MyPC
-	case s.Mode == "": // no tray: boxes keep the Shared CPUs they launched with
+	if s.Mode == "" { // no tray: boxes keep the Shared CPUs they launched with
 		now = mode.Shared
 	}
 	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
@@ -117,10 +113,7 @@ func (a *App) Status(ctx context.Context, dir string) StatusReport {
 
 // gpuStatus says whether a GPU box could run now.
 func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) string {
-	switch {
-	case s.Yielding:
-		return "unavailable: the PC is yielding to a game"
-	case s.Mode == string(mode.MyPC):
+	if s.Mode == string(mode.MyPC) {
 		return "unavailable: the PC is in My PC mode"
 	}
 	for _, in := range insts {
@@ -284,8 +277,6 @@ func advice(s StatusReport, repoBox *instance) (string, bool) {
 	switch {
 	case s.Mode == string(mode.MyPC):
 		return "unavailable: PC is in My PC mode: run locally", false
-	case s.Yielding:
-		return fmt.Sprintf("unavailable: PC is yielding to a game (%s): run locally", s.Reason), false
 	case repoBox != nil && repoBox.Status == "Frozen":
 		return fmt.Sprintf("unavailable: this repo's box %s is frozen: run locally", repoBox.Name), false
 	case repoBox != nil && repoBox.Config[throwawayKey] != "true":
@@ -335,15 +326,15 @@ func firstLine(s string) string {
 // writeStatus prints a report: the advice first, then the details.
 func writeStatus(w io.Writer, s StatusReport) {
 	fmt.Fprintln(w, s.Advice)
+	if s.Update != "" {
+		fmt.Fprintln(w, s.Update)
+	}
 	if !s.Reachable {
 		return
 	}
 	m := s.Mode
 	if m == "" {
 		m = "unknown"
-	}
-	if s.Yielding {
-		m += ", yielding: " + s.Reason
 	}
 	fmt.Fprintf(w, "mode: %s\n", m)
 	if s.MaxBoxes >= 0 {

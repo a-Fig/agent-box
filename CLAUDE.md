@@ -1,10 +1,10 @@
 # agent-box: notes for Claude Code
 
 agent-box turns Tyler's Windows gaming PC into on-demand Linux boxes that coding agents on the
-laptop use for heavy compute (test suites, `-race`, builds), and games always win. Incus, in a
-WSL2 distro on the PC, does the boxes, API, auth and web UI; this repo is the glue: `box` (CLI and
-MCP server for agents), `boxtray` (modes and gaming yield on the PC) and `provision/`. Live on the
-PC since 2026-11-24. `docs/DESIGN.md` is how it works and why; read it before changing
+laptop use for heavy compute (test suites, `-race`, builds); the owner picks how much of the PC
+they get. Incus, in a WSL2 distro on the PC, does the boxes, API, auth and web UI; this repo is the
+glue: `box` (CLI and MCP server for agents), `boxtray` (modes on the PC) and `provision/`. Live on
+the PC since 2026-11-24. `docs/DESIGN.md` is how it works and why; read it before changing
 architecture. `go test ./...` runs everything; CI runs it on Linux and Windows (`docs/testing.md`).
 
 ## Writing for whoever comes next
@@ -24,9 +24,8 @@ this file loads into every session, so it stays short and points into `docs/` fo
 - **box.** One Incus container in project `agents`: throwaway compute, never storage. Also the CLI.
 - **size.** small, medium (default) or large, in `user.box.size`; the table is
   `internal/mode/size.go`, explained in `docs/DESIGN.md`.
-- **mode, yield.** The tray's choice: My PC (boxes frozen), Shared, Full (twice Shared's CPUs).
-  Yield is My PC forced while a game runs. The tray writes `user.agent-box.mode` and
-  `user.agent-box.reason` on the project; `box` only reads them.
+- **mode.** The owner's choice: My PC (boxes frozen), Shared, Full (twice Shared's CPUs). The
+  tray writes `user.agent-box.mode` on the project; `box` only reads it.
 
 ## Traps
 
@@ -43,14 +42,20 @@ this file loads into every session, so it stays short and points into `docs/` fo
 - WSL's ext4 has no project quotas, so the storage pool is btrfs: only it enforces disk sizes.
 - systemd in WSL counts as a container, so units with `ConditionVirtualization=!container` (such
   as `incus-lxcfs`) are skipped unless a drop-in clears the condition.
-- On the laptop, run Go only through `.scratch/golock.sh` (one Go run at a time) and never with
-  `-race`: the laptop starves. CI runs `-race`.
+- Run Go tests, vet and builds on a box (`box_run`), not the laptop. Only when box refuses (exit
+  75) run Go locally, through `.scratch/golock.sh` (one Go run at a time) and never with `-race`:
+  the laptop starves.
 
 ## Workflow
 
 Tyler's rules:
 
 - Reuse existing tools and open source before writing code; keep custom code thin.
+- Dogfood (2026-11-25): we use box ourselves, harder than other agents do: every test run and
+  build, parallel runs, the queue, cancel, pull and sizes. Each friction or bug we hit becomes an
+  issue with its job ID, and we fix it in the next release.
+- Simple first (2026-11-25): build the simplest version that works and keep it until it causes
+  a real problem, then fix it only there. No guards or schemes for failures nobody has hit.
 - Go: standard library first; a dependency needs a written reason. `gofmt`, `go vet ./...` and
   `go test ./...` pass. Code that needs Incus, WSL or Windows sits behind an interface, so the
   rest is tested with fakes.

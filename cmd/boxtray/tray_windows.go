@@ -128,7 +128,7 @@ var theTray *tray
 func newTray(chosen func() mode.Mode, act trayActions) (*tray, error) {
 	t := &tray{chosen: chosen, act: act, icons: map[mode.Mode]uintptr{}}
 	theTray = t
-	t.status = mode.Status{Chosen: chosen(), Effective: chosen()}
+	t.status = mode.Status{Chosen: chosen()}
 	for m, rgb := range map[mode.Mode][3]byte{
 		mode.MyPC: {0x80, 0x80, 0x88}, mode.Shared: {0xE0, 0xA0, 0x20}, mode.Full: {0x30, 0xA0, 0x50},
 	} {
@@ -226,7 +226,7 @@ func (t *tray) render() {
 	t.mu.Lock()
 	st := t.status
 	t.mu.Unlock()
-	icon := t.icons[st.Effective]
+	icon := t.icons[st.Chosen]
 	if st.Down || icon == 0 {
 		icon = t.icons[mode.MyPC]
 	}

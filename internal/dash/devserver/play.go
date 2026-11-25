@@ -10,8 +10,7 @@ import (
 
 // play moves the scenario on every tick, as the PC would: running jobs write to their logs and
 // finish when their time comes, a new job starts now and then (on a new box when it needs one),
-// an idle throwaway box goes, the tray applies a mode request, and a game starts and ends. The
-// tray-down scenario changes no mode, since nothing would apply one.
+// an idle throwaway box goes, and the tray applies a mode request. The tray-down scenario changes no mode, since nothing would apply one.
 func (s *server) play(every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -49,31 +48,11 @@ func (s *server) step() {
 		m.TrayLastSeen = &seen
 	}
 
-	// The mode: a request the tray picks up, and a game that starts and ends.
-	if !m.Yielding && m.ModeRequested != nil && !s.applyAt.IsZero() && now.After(s.applyAt) {
+	// The mode: a request the tray picks up.
+	if m.ModeRequested != nil && !s.applyAt.IsZero() && now.After(s.applyAt) {
 		m.Mode, m.ModeRequested, s.applyAt = m.ModeRequested.Mode, nil, time.Time{}
 		m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: now.UTC().Truncate(time.Second)}
 		s.setFrozen(m.Mode == dash.ModeMyPC)
-		s.reallot()
-	}
-	switch {
-	case m.Yielding && now.After(s.yieldEnd):
-		m.Yielding, m.ModeReason, m.Mode = false, "", s.before
-		if m.Chosen != nil {
-			m.Mode = m.Chosen.Mode // the pick comes back after the game
-		}
-		if m.ModeRequested != nil {
-			m.Mode, m.ModeRequested = m.ModeRequested.Mode, nil
-			m.Chosen = &dash.ChosenMode{Mode: m.Mode, At: now.UTC().Truncate(time.Second)}
-		}
-		s.yieldEnd = time.Time{}
-		s.setFrozen(m.Mode == dash.ModeMyPC)
-		s.reallot()
-	case !m.Yielding && trayUp && s.tick%45 == 30:
-		s.before = m.Mode
-		m.Yielding, m.Mode, m.ModeReason = true, dash.ModeMyPC, "gaming: steam:570"
-		s.yieldEnd = now.Add(30 * time.Second)
-		s.setFrozen(true)
 		s.reallot()
 	}
 
@@ -155,7 +134,7 @@ func (s *server) startJob() {
 }
 
 // setFrozen freezes or resumes every box, and pauses or resumes the jobs on them, as the tray
-// does when the mode or a game says so.
+// does when the mode says so.
 func (s *server) setFrozen(frozen bool) {
 	for i := range s.sc.State.Boxes {
 		b := &s.sc.State.Boxes[i]

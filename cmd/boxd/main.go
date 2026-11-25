@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -28,7 +29,12 @@ func main() {
 	cfgPath := flag.String("config", "/etc/agent-box/boxd.json", "config file")
 	socket := flag.String("socket", "/var/lib/incus/unix.socket", "Incus's unix socket")
 	page := flag.String("static", "", "serve the page from this folder instead of the embedded copy")
+	showVersion := flag.Bool("version", false, "print the release and commit this boxd was built from, and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version.Text("boxd", version.Get()))
+		return
+	}
 	cfg, err := boxd.LoadConfig(*cfgPath)
 	if err != nil {
 		log.Fatalf("boxd: %v", err)

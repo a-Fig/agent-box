@@ -99,8 +99,8 @@ function sidebar(r) {
         h(
           "div",
           { class: "side-machine" },
-          h("span", { class: "side-machine-name" }, h("span", { class: "dot " + (m.yielding ? "dot-warn" : m.mode === "mypc" ? "dot-off" : "dot-on") }), m.name),
-          h("span", { class: "side-machine-line" }, m.yielding ? "Yielding to a game" : modeLabel(m.mode), m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) + " pending" : ""),
+          h("span", { class: "side-machine-name" }, h("span", { class: "dot " + (m.mode === "mypc" ? "dot-off" : "dot-on") }), m.name),
+          h("span", { class: "side-machine-line" }, modeLabel(m.mode), m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) + " pending" : ""),
           trayAlive(m) ? (m.enforcer === "headless" ? h("span", { class: "side-machine-line" }, "Headless: nobody logged on") : null) : h("span", { class: "side-machine-line" }, "Nothing enforcing"),
         ),
       ),

@@ -196,7 +196,6 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 		job = *j
 		box = w.boxes[j.Box]
 	}
-	m := w.machine
 	w.mu.Unlock()
 	if !live {
 		if _, ok := w.Hist.Job(key); ok {
@@ -205,9 +204,6 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 		return dash.Job{}, errJobGone
 	}
 	if box.State == dash.BoxFrozen {
-		if m.Yielding {
-			return dash.Job{}, &controlError{http.StatusConflict, dash.CodeYielding, "the box is frozen for a game; it can't run the kill"}
-		}
 		return dash.Job{}, &controlError{http.StatusConflict, dash.CodeFrozen, "the box is frozen for My PC; it can't run the kill"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
@@ -270,7 +266,7 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	if _, err := w.checkCreated(ctx, name, createdAt); err != nil {
 		return err
 	}
-	if _, err := w.Incus.CLI(ctx, "", "delete", name, "--force"); err != nil {
+	if err := w.delete(ctx, name); err != nil {
 		return err
 	}
 	w.mu.Lock()
@@ -337,3 +333,12 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+// delete deletes a box, running or not, waiting out another operation on
+// it such as the tray's limit write (#71).
+func (w *Watcher) delete(ctx context.Context, name string) error {
+	return jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", "delete", name, "--force")
+		return err
+	})
+}

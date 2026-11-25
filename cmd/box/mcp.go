@@ -63,14 +63,14 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, gaming yield, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
+	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC or a game) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail." + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail." + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
-		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, deleted after the run. Use it for parallel runs on one repo, which otherwise take turns."},
+		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept 30 minutes after the run for box_pull, then deleted. Use it for parallel runs on one repo, which otherwise take turns."},
 		"size":    sizeArg,
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
@@ -101,7 +101,7 @@ var sizeArg = map[string]any{"type": "string", "enum": sizeEnum(),
 
 // gpuArg is the gpu property of box_new and box_run.
 var gpuArg = map[string]any{"type": "boolean",
-	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; exit 75 if it's taken. It is stopped if the PC's owner starts a game."}
+	"description": "Same as size gpu: the PC's RTX 3070 (CUDA, PyTorch, GPU builds). One GPU box at a time, always a throwaway; exit 75 if it's taken. It is stopped in My PC."}
 
 func sizeEnum() []string {
 	var n []string
@@ -118,7 +118,7 @@ var jobOutput = obj(map[string]any{
 	"state":    str("done (exitCode is the command's), running, queued (waiting in the PC's queue), paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
 	"push":     map[string]any{"type": "boolean", "description": "box_run, state running or queued: the result will arrive as a turn in your thread."},
 	"position": map[string]any{"type": "integer", "description": "State queued: place in line, from 1."},
-	"why":      str("State queued: what it waits for: full (room), gpu-busy, mypc or yielding (a game)."),
+	"why":      str("State queued: what it waits for: full (room), gpu-busy, or mypc."),
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -156,6 +156,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 	calls := map[string]context.CancelCauseFunc{} // by request id
 	var suppressInfo atomic.Bool
 	var client clientInfo // from initialize; read and written only in this loop
+	call := mcpCaller(a, a.MCPExe)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -219,7 +220,7 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			}
 			send(rpcMsg{ID: req.ID, Result: map[string]any{}})
 		case "tools/list":
-			send(rpcMsg{ID: req.ID, Result: map[string]any{"tools": tools}})
+			send(rpcMsg{ID: req.ID, Result: call(ctx, mcpCall{Method: req.Method}, func(jobNotice) {})})
 		case "tools/call":
 			// Registered before the goroutine starts, so a cancel that
 			// follows the call on the wire always finds it.
@@ -228,15 +229,14 @@ func serveMCP(ctx context.Context, a *App, in io.Reader, out io.Writer) error {
 			callsMu.Lock()
 			calls[key] = cancel
 			callsMu.Unlock()
-			ca := *a // with the client, for the job's .meta
-			ca.Client = client
-			if ca.Client.Name == "" {
-				ca.Client.Name = "mcp"
+			cl := client // for the job's .meta
+			if cl.Name == "" {
+				cl.Name = "mcp"
 			}
 			wg.Add(1)
 			go func(req rpcMsg) {
 				defer wg.Done()
-				res := callTool(callCtx, &ca, req.Params, func(note jobNotice) {
+				res := call(callCtx, mcpCall{Method: req.Method, Params: req.Params, Client: cl}, func(note jobNotice) {
 					if suppressInfo.Load() || callCtx.Err() != nil {
 						return
 					}
@@ -583,11 +583,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 		}
 		r, err := a.Job(ctx, args.ID, wait)
-		if err == nil && r.State == stateDone && a.exists(args.ID, ".json") {
-			// The agent has the full result now, so the watcher needn't push it.
-			// If the watcher pushed it in the same moment, the agent gets it twice.
-			a.markNotified(args.ID, "box_job")
-		}
+		a.markRead(args.ID, r, err, "box_job")
 		return jobResult(r, err, out.String(), warnings)
 	}
 	return textResult("unknown tool "+p.Name, true)

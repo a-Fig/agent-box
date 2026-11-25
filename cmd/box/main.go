@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
 )
@@ -45,7 +44,10 @@ const usage = `usage:
                                             and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
-  box --version                             the commit this box was built from
+  box --version                             the release and commit this box was built from
+  box update [--version <tag>] [--rollback] update box to the latest stable release now, install
+                                            a release or nightly by tag, or swap box.old back
+                                            (box mcp checks hourly; AGENT_BOX_NO_UPDATE=1 stops it)
 
 --reason (required for run): one or two sentences, 10 to 300 characters, on
 why this needs a box. The PC's owner sees it on the dashboard.
@@ -55,7 +57,7 @@ Sizes (CPUs in Shared/Full mode, RAM, disk):
 --size sets the size of a box that box new or box run launches (default
 medium). A reused box of another size isn't resized: the run gets a throwaway.
 --gpu is --size gpu: the PC's RTX 3070, one GPU box at a time. box run --gpu
-uses a throwaway. The tray stops a GPU box when a game starts or in My PC.
+uses a throwaway. The tray stops a GPU box in My PC.
 
 box run exits with the command's exit code, 124 when --timeout fired, or 75
 when the PC or box is paused, there is no room, or the GPU is taken or was
@@ -65,14 +67,6 @@ reattaches. A relative remote path in box pull starts at the job's checkout.
 The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
-
-// versionText is box --version: "box 1378501 (2026-11-24 22:42 UTC)", "+" for a modified build.
-func versionText(v dash.Version) string {
-	if v.Time == nil {
-		return "box " + v.String()
-	}
-	return "box " + v.String() + " (" + v.Time.Format("2006-01-02 15:04 MST") + ")"
-}
 
 // usageText is usage with the size table filled in.
 func usageText() string {
@@ -109,7 +103,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 2
 	}
 	if args[0] == "--version" || args[0] == "version" {
-		fmt.Fprintln(a.Out, versionText(version.Get()))
+		fmt.Fprintln(a.Out, version.Text("box", version.Get()))
 		return 0
 	}
 	fs := flag.NewFlagSet("box "+args[0], flag.ContinueOnError)
@@ -162,7 +156,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "run":
 		box := fs.String("box", "", "box to use (default: the repo's own box)")
-		isNew := fs.Bool("new", false, "use a throwaway box, deleted afterwards")
+		isNew := fs.Bool("new", false, "use a throwaway box, kept 30 minutes after the job for box pull")
 		ttl := fs.Duration("ttl", idleTTL, "initial lifetime of a --new box before the job starts")
 		timeout := fs.Duration("timeout", 0, "kill the command after this long (exit 124)")
 		size := fs.String("size", "", "size of a box this run launches: "+mode.SizeNames()+" (default "+mode.DefaultSize+")")
@@ -200,7 +194,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		paged := false
 		fs.Visit(func(f *flag.Flag) { paged = paged || f.Name == "offset" || f.Name == "limit" })
 		if !paged {
-			return code(a.Job(ctx, fs.Arg(0), 0))
+			r, err := a.Job(ctx, fs.Arg(0), 0)
+			a.markRead(fs.Arg(0), r, err, "box job")
+			return code(r, err)
 		}
 		p, err := a.LogPage(ctx, fs.Arg(0), *offset, *limit)
 		if err != nil {
@@ -286,7 +282,49 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		return 0
 	case "mcp":
+		go autoUpdate(ctx, a)
+		if exe, err := os.Executable(); err == nil {
+			a.MCPExe = exe
+		}
 		if err := serveMCP(ctx, a, stdin, a.Out); err != nil {
+			return fail(err)
+		}
+		return 0
+	case "update":
+		tag := fs.String("version", "", "install this release tag, a nightly included")
+		rollback := fs.Bool("rollback", false, "swap box.old back in")
+		if parseInterspersed(fs, args[1:]) != nil || fs.NArg() > 0 || *rollback && *tag != "" {
+			fmt.Fprint(a.Err, usageText())
+			return 2
+		}
+		u, err := newUpdater(a, a.Out)
+		if err == nil {
+			if *rollback {
+				err = u.Rollback(ctx)
+			} else {
+				err = u.Update(ctx, *tag)
+			}
+		}
+		if err != nil {
+			return fail(err)
+		}
+		return 0
+	case "skill-sync": // from an updater (update.go): print the skill's SHA-256, or update copies of an old one
+		if len(args) == 1 {
+			fmt.Fprintln(a.Out, skillSHA())
+			return 0
+		}
+		home, err := os.UserHomeDir()
+		if err == nil { // not box join's config: that refuses a box under the temp folder
+			err = skillSync(joinConfig{Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+				CodexHome: os.Getenv("CODEX_HOME"), Out: a.Out}, args[1:]...)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		return 0
+	case "mcp-call": // one request from box mcp, through the newest box.exe (mcpexe.go)
+		if err := runMCPCall(ctx, stdin, a.Out, callInProcess(a)); err != nil {
 			return fail(err)
 		}
 		return 0

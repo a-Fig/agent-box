@@ -66,7 +66,7 @@ var GPUEnv = map[string]string{
 }
 
 // StoppedKey is the instance key the tray sets on a GPU box just before it
-// stops it, saying why ("mypc", or the yield reason like "gaming: steam:570"),
+// stops it in My PC (the value is "mypc"),
 // so `box` can tell the agent its job was killed on purpose.
 const StoppedKey = "user.box.stopped"
 

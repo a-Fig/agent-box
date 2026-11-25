@@ -52,13 +52,9 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, err.Error())
 		return
 	}
-	// A GPU run doesn't wait out a game or My PC (docs/queue.md).
-	if m := s.W.Machine(); req.GPU && (m.Yielding || m.Mode == dash.ModeMyPC) {
-		code := dash.CodeFrozen
-		if m.Yielding {
-			code = dash.CodeYielding
-		}
-		writeError(w, http.StatusConflict, code, "a GPU run isn't queued while the PC is in My PC or yielding to a game")
+	// A GPU run doesn't wait out My PC (docs/queue.md).
+	if m := s.W.Machine(); req.GPU && m.Mode == dash.ModeMyPC {
+		writeError(w, http.StatusConflict, dash.CodeFrozen, "a GPU run isn't queued while the PC is in My PC")
 		return
 	}
 	part, err = mr.NextPart()

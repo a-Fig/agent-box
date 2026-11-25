@@ -209,7 +209,6 @@ function extendBox(b, hours) {
 const WHY = {
   full: (j) => "no room for a " + j.size + " box",
   "gpu-busy": () => "the GPU is in use",
-  yielding: () => "a game is running",
   mypc: () => "the PC is in My PC",
 };
 // After dash.QueueNudge in line the agent is told once that it can run the job locally instead.
@@ -293,8 +292,8 @@ function queueSection(q) {
 // Overview: what is happening on the PC right now.
 
 // Who applies the mode (dash.Machine.enforcer): the tray while someone is logged on to the PC, or
-// the headless enforcer while nobody is, which has no game detection. "" is a boxd from before the
-// key, when the tray was the only one.
+// the headless enforcer while nobody is. "" is a boxd from before the key, when the tray was the
+// only one.
 function enforcerName(m) {
   return m.enforcer === "headless" ? "headless enforcer" : "tray";
 }
@@ -309,21 +308,17 @@ function machineCard(m) {
     { class: "segmented segmented-lg", role: "group", "aria-label": "Mode" },
     MODES.map(([id, label]) => {
       const pending = req?.mode === id;
-      return control("mode-" + m.id + "-" + id, { "aria-pressed": !m.yielding && !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, title: pending ? "Asked from " + req.by : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }, label, pending ? h("span", { class: "muted" }, "· pending") : null);
+      return control("mode-" + m.id + "-" + id, { "aria-pressed": !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, title: pending ? "Asked from " + req.by : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }, label, pending ? h("span", { class: "muted" }, "· pending") : null);
     }),
   );
-  let state;
-  if (m.yielding) state = h("span", { class: "badge badge-warn" }, icon("game"), "Yielding: " + (m.modeReason || "gaming").replace(/^gaming:\s*/, ""));
-  else state = h("span", { class: "badge " + (m.mode === "mypc" ? "" : "badge-on") }, modeLabel(m.mode));
-  const enforcerBadge = headless ? h("span", { class: "badge badge-outline", title: "Nobody is logged on to the PC, so the headless enforcer applies the mode, with no game detection" }, "headless") : null;
+  const state = h("span", { class: "badge " + (m.mode === "mypc" ? "" : "badge-on") }, modeLabel(m.mode));
+  const enforcerBadge = headless ? h("span", { class: "badge badge-outline", title: "Nobody is logged on to the PC, so the headless enforcer applies the mode" }, "headless") : null;
   let note = null;
   if (req) {
     const what = modeLabel(req.mode);
-    if (m.yielding) note = h("p", { class: "mode-note pending" }, what + " when the game ends. Asked ", timeEl("ago", req.at), " from " + req.by + ".");
-    else if (!alive) note = h("p", { class: "mode-note pending" }, what + " is waiting: nothing is applying requests. The " + enforcerName(m) + " was last seen ", m.trayLastSeen ? timeEl("ago", m.trayLastSeen) : "never", ".");
+    if (!alive) note = h("p", { class: "mode-note pending" }, what + " is waiting: nothing is applying requests. The " + enforcerName(m) + " was last seen ", m.trayLastSeen ? timeEl("ago", m.trayLastSeen) : "never", ".");
     else note = h("p", { class: "mode-note pending" }, "Switching to " + what + ": the " + enforcerName(m) + " applies it within a few seconds.");
-  } else if (headless) note = h("p", { class: "mode-note" }, "Nobody is logged on to the PC, so the headless enforcer applies the mode, with no game detection. The tray takes over at logon.");
-  else if (m.yielding) note = h("p", { class: "mode-note" }, (m.chosen ? modeLabel(m.chosen.mode) + " when the game ends. " : "") + "A game is running, so every box is frozen until it ends. Games always win.");
+  } else if (headless) note = h("p", { class: "mode-note" }, "Nobody is logged on to the PC, so the headless enforcer applies the mode. The tray takes over at logon.");
   else if (m.mode === "mypc") note = h("p", { class: "mode-note" }, "Boxes are frozen. Pick Shared or Full to let agents run.");
   else note = h("p", { class: "mode-note" }, m.mode === "full" ? "Boxes get their size's Full CPUs." : "Boxes get their size's Shared CPUs, so the PC stays smooth.");
 
@@ -368,7 +363,7 @@ function banners(m) {
         "div",
         { class: "banner banner-bad", role: "status" },
         icon("alert"),
-        h("div", null, h("strong", null, "Nothing is enforcing modes on " + m.name + ". "), "Neither the tray (while someone is logged on) nor the headless enforcer (while nobody is) has checked in for 90s, so modes and game yields aren't applied, and mode requests wait. Start agent-box's tray on the PC."),
+        h("div", null, h("strong", null, "Nothing is enforcing modes on " + m.name + ". "), "Neither the tray (while someone is logged on) nor the headless enforcer (while nobody is) has checked in for 90s, so modes aren't applied, and mode requests wait. Start agent-box's tray on the PC."),
       ),
     );
   return out;

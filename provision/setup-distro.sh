@@ -262,14 +262,55 @@ else
   note "(or re-run install-pc.ps1 / this script with TS_AUTHKEY set)"
 fi
 
+# Warm an image in the btrfs pool's images/<fp> cache so later launches copy from it quickly.
+# On Incus 7.6 (2026-11-24, btrfs + GHSA-5pgx-q9xx-j3qv), a concurrent `incus config set`
+# (e.g. from boxtray's 5s tick in Full, or in Shared for instances launched without Shared's
+# limits.cpu/limits.cpu.priority keys) while EnsureImage is still unpacking the tarball runs
+# UpdateInstanceBackupFile -> btrfs MountVolume -> EnsureMountPath, creating
+# containers/<project>_<name> as a plain directory before `btrfs subvolume snapshot` runs.
+# btrfs then nests the snapshot inside that directory (<name>/<fp>/rootfs), which
+# stripInstanceMetadata rejects with "Instance metadata contained disallowed entries" and leaves
+# the empty plain directory behind.
+# Warm in the default project: `agents` has features.images=false so both share storage pool
+# `default` and its images/<fp> cache, while avoiding `agents`'s caps and boxtray's ticks.
+# Still absorb that exact error once and rmdir any leftover plain dir in case of a race.
+warm_image() {
+  local img=$1 name=$2 dir="/var/lib/incus/storage-pools/default/containers/$2" out
+  incus delete --force "$name" --project default >/dev/null 2>&1 || true
+  rmdir "$dir" 2>/dev/null || true
+  if ! out=$(incus init "$img" "$name" --project default 2>&1); then
+    if [[ $out == *"Instance metadata contained disallowed entries"* ]]; then
+      note "absorbed Incus 7.6 btrfs first-launch metadata race while warming $img; retrying once"
+      incus delete --force "$name" --project default >/dev/null 2>&1 || true
+      rmdir "$dir" 2>/dev/null || true
+      if ! out=$(incus init "$img" "$name" --project default 2>&1); then
+        out=${out##*$'\n'}
+        if (( ${#out} > 400 )); then out="${out:0:400}..."; fi
+        printf '%s\n' "$out" >&2
+        return 1
+      fi
+    else
+      printf '%s\n' "$out" >&2
+      return 1
+    fi
+  fi
+  incus delete --force "$name" --project default >/dev/null || return 1
+  rmdir "$dir" 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------- agent-base
 if [ "$BUILD_BASE" -eq 1 ]; then
   step "Building image 'agent-base'"
   if incus image alias list --format csv | cut -d, -f1 | grep -qx agent-base && [ "$REBUILD" -eq 0 ]; then
     note "alias exists; pass --rebuild-base to build again"
+    warm_image agent-base agent-base-warm \
+      || note "warning: couldn't warm agent-base; the first box launch will unpack it"
   else
     builder=agent-base-build
     incus delete --force "$builder" --project "$PROJECT" >/dev/null 2>&1 || true
+    rmdir "/var/lib/incus/storage-pools/default/containers/${PROJECT}_${builder}" 2>/dev/null || true
+    warm_image images:ubuntu/24.04/cloud agent-base-build-warm \
+      || note "warning: couldn't warm base Ubuntu image; continuing"
     incus launch images:ubuntu/24.04/cloud "$builder" --project "$PROJECT"
     note "waiting for cloud-init (installs Go, Node, JDK, ...); this takes a few minutes"
     until incus exec "$builder" --project "$PROJECT" -- true >/dev/null 2>&1; do sleep 2; done
@@ -277,9 +318,13 @@ if [ "$BUILD_BASE" -eq 1 ]; then
       || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
-      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh"
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
     incus delete "$builder" --project "$PROJECT"
-    note "published as 'agent-base' (images are shared via the default project)"
+    if warm_image agent-base agent-base-warm; then
+      note "published and warmed 'agent-base' (images are shared via the default project)"
+    else
+      note "published 'agent-base'; warning: couldn't warm it, so the first box launch will unpack it"
+    fi
   fi
 else
   step "Image 'agent-base'"
@@ -367,6 +412,14 @@ fi
 # Only now, with the step done (set -e stops the script on a failure above, keeping it for a
 # rerun), is the staged copy deleted.
 rm -f "$HERE/boxd"
+
+step "boxd updates (the latest stable release, checked hourly; docs/releasing.md)"
+# After the boxd step: the timer runs at once when started, and must see the boxd this run installed.
+install -m 0755 "$HERE/update-boxd.sh" /usr/local/sbin/agent-box-update-boxd
+install -m 0644 "$HERE/systemd/agent-box-update.service" "$HERE/systemd/agent-box-update.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agent-box-update.timer >/dev/null 2>&1
+note "agent-box-update.timer enabled; a boxd that isn't a release is left alone (AGENT_BOX_NO_UPDATE=1 in /etc/agent-box/update.env turns it off)"
 
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then

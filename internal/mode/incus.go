@@ -39,7 +39,7 @@ type Incus interface {
 	UnsetInstanceConfig(ctx context.Context, name, key string) error
 	// ProjectConfig reads one key of the project's config ("" when unset).
 	ProjectConfig(ctx context.Context, key string) (string, error)
-	// SetProjectConfig sets the mode label, the yield reason and the memory
+	// SetProjectConfig sets the mode label, the handshake keys and the memory
 	// cap (MemoryCapKey). Incus refuses to lower a cap below what existing
 	// instances already hold, so the Manager never asks it to.
 	SetProjectConfig(ctx context.Context, key, value string) error

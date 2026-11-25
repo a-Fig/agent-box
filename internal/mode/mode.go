@@ -19,9 +19,6 @@ var All = []Mode{MyPC, Shared, Full}
 // ProjectModeKey is the Incus project key `box` reads to learn the mode.
 const ProjectModeKey = "user.agent-box.mode"
 
-// ProjectReasonKey says why the tray is yielding (e.g. "gaming: steam:570"); empty otherwise.
-const ProjectReasonKey = "user.agent-box.reason"
-
 // ProjectTraySeenKey is when the active enforcer last ticked (RFC3339, UTC),
 // written at most every 30s. The dashboard counts the enforcer as down once
 // it is stale.

@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,6 +92,9 @@ type App struct {
 	// deletes it) instead of deleting it, so box_pull and the full log still
 	// work after the result was pushed.
 	KeepEnded time.Duration
+	// MCPExe, when set, is the box.exe that box mcp hands each tools/list and tools/call to,
+	// so a long-lived server runs the newest code (mcpexe.go). Empty answers in process.
+	MCPExe string
 }
 
 func newApp() *App {
@@ -103,7 +106,10 @@ func newApp() *App {
 		Out:     os.Stdout,
 		Err:     os.Stderr,
 		Now:     time.Now,
-		Rand:    randHex,
+		// The CLI keeps a throwaway as box mcp does, so box pull can fetch
+		// a build's output after the run (#78).
+		KeepEnded: endedKeep,
+		Rand:      randHex,
 
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
@@ -402,8 +408,8 @@ func (a *App) confirmGPU(ctx context.Context, name string, sz mode.Size) error {
 }
 
 // gpuStopped is what to tell an agent whose job's GPU box isn't running
-// (the tray stops GPU boxes for games and My PC), or "" when box isn't a GPU
-// box or is running.
+// (the tray stops GPU boxes in My PC), or "" when box isn't a GPU box or is
+// running.
 func (a *App) gpuStopped(ctx context.Context, box string) string {
 	insts, err := a.list(ctx)
 	if err != nil {
@@ -413,11 +419,7 @@ func (a *App) gpuStopped(ctx context.Context, box string) string {
 	if in == nil || !mode.IsGPU(in.Config) || in.Status == "Running" {
 		return ""
 	}
-	why := in.Config[mode.StoppedKey]
-	switch {
-	case strings.HasPrefix(why, "gaming"):
-		return "the GPU box was stopped because the PC's owner started a game; rerun later or on CPU"
-	case why == string(mode.MyPC):
+	if in.Config[mode.StoppedKey] == string(mode.MyPC) {
 		return "the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU"
 	}
 	return "the GPU box " + box + " is " + strings.ToLower(in.Status) + "; rerun later or on CPU"
@@ -442,8 +444,8 @@ func reusableBox(in *instance, requestedSize string) error {
 // "agents"` or `Reached maximum number of instances in project "agents"`.
 var projectLimitRefusal = jobrun.LimitRefusal
 
-// reclaimable says whether in is a throwaway GPU box the tray stopped for a
-// game or My PC. It is kept for GPUStoppedTTL so box job can say why its job
+// reclaimable says whether in is a throwaway GPU box the tray stopped in My
+// PC. It is kept for GPUStoppedTTL so box job can say why its job
 // died, but it still holds a GPU box's memory and disk against the project's
 // caps, so any launch that would not fit deletes it first.
 // Only the tray's mark counts: Incus creates a box stopped before starting
@@ -485,7 +487,9 @@ exit 0
 
 // keptThrowaways lists the throwaway boxes kept after their job ended
 // (endedKeep: box run and boxd move a throwaway's expiry to then, for box
-// pull and the full log), the first to expire first. They hold their room
+// pull and the full log), the first to expire first. A throwaway whose exit
+// nobody read has idleTTL from boxd and isn't one of these: its result is
+// only in the box until box reads it. They hold their room
 // until the reaper deletes them, so a launch short of room deletes them, as
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
 // kept box is a running throwaway whose expiry is within the keep window,
@@ -576,10 +580,13 @@ func isConflict(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already exists")
 }
 
-// Rm deletes a box, running or not.
+// Rm deletes a box, running or not, waiting out another operation on it
+// such as the tray's limit write (#71).
 func (a *App) Rm(ctx context.Context, name string) error {
-	_, err := a.incusOK(ctx, "delete", a.target(name), "--force")
-	return err
+	return jobrun.RetryETag(ctx, func() error {
+		_, err := a.incusOK(ctx, "delete", a.target(name), "--force")
+		return err
+	})
 }
 
 // Ls prints the boxes in the project.
@@ -605,7 +612,7 @@ type RunOpts struct {
 	Dir string   // local git worktree
 	Cmd []string // one shell string, or argv to quote
 	Box string   // box to use; "" is the repo's own box
-	New bool     // use a throwaway box, deleted afterwards
+	New bool     // use a throwaway box, kept KeepEnded after the job, else deleted
 	// Size of a box launched for this run: "" is medium for a new box and
 	// any size for an existing one.
 	Size string
@@ -831,7 +838,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 	started = true
 	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
-		// The tray stops GPU boxes for games, and another run may then
+		// The tray stops GPU boxes in My PC, and another run may then
 		// delete one. Only then does the job surely not run: a frozen box's
 		// job may resume, so it keeps its job ID below.
 		if sz.GPU {
@@ -844,12 +851,13 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			}
 		}
 		if o.New {
-			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 		}
 		return r, err
 	}
 	// Again now that the job runs: another job finishing in between may have
-	// shortened the expiry before this one was visible to its running check.
+	// shortened the expiry before this one was visible to its running check,
+	// from box's markIdle or boxd's reapEnded.
 	if err := a.setExpiry(context.WithoutCancel(ctx), box, jobTTL); err != nil {
 		a.warn(fmt.Sprintf("box: warning: setting job expiry on %s: %v", box, err))
 	}
@@ -860,14 +868,18 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true)
 	default:
-		fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 	}
 	return r, err
 }
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
-// existing box: a taken name means another try with a new suffix.
+// existing box: a taken name means another try with a new suffix. It also
+// retries once under a fresh suffix on Incus's btrfs first-launch metadata
+// error (jobrun.IsDisallowedMetadata), which warms the image cache on the
+// failed try but leaves the old name's empty container dir poisoned on disk.
 func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
+	retriedMeta := false
 	for try := 0; try < 8; try++ {
 		name := base + "-" + a.Rand()
 		if find(insts, name) != nil {
@@ -878,6 +890,14 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		err := a.launch(ctx, name, ttl, true, sz)
 		if err == nil {
 			return name, a.confirmGPU(ctx, name, sz)
+		}
+		if jobrun.IsDisallowedMetadata(err) && !retriedMeta && try < 7 {
+			// Guard try < 7 so a metadata error on the final slot returns the
+			// real Incus error rather than "no free name for a throwaway box".
+			retriedMeta = true
+			fmt.Fprintf(a.Err, "box: %s hit Incus's first-launch metadata error; retrying once with a fresh box\n", name)
+			insts = append(insts, instance{Name: name})
+			continue
 		}
 		if !isConflict(err) {
 			return name, err
@@ -907,6 +927,9 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 		return paused, nil
 	}
 	if now == nil {
+		if jobrun.IsDisallowedMetadata(err) {
+			return "", fmt.Errorf("%w (this or an earlier failed launch left an empty dir on the PC: /var/lib/incus/storage-pools/default/containers/%s_%s; use a new box (--new / new: true) until it is removed)", err, a.Project, box)
+		}
 		return "", err
 	}
 	if err := reusableBox(now, requestedSize); err != nil {
@@ -959,7 +982,9 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	if a.KeepEnded > 0 {
 		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
 			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+			return
 		}
+		fmt.Fprintf(a.Err, "box: kept %s for %d minutes, for box pull; box rm %s deletes it now\n", box, int(a.KeepEnded.Minutes()), box)
 		return
 	}
 	a.removeQuietly(ctx, box)
@@ -1023,17 +1048,7 @@ const (
 )
 
 // runningScript prints the jobs still running in a box.
-func runningScript() string {
-	return "# running jobs\n" + aliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
-for p in *.pid; do
-  [ -e "$p" ] || continue
-  j=${p%%.pid}
-  [ -e "$j.exit" ] && continue
-  alive "$(cat "$p" 2>/dev/null)" "$j" && echo "$j"
-done
-exit 0
-`, workRoot)
-}
+func runningScript() string { return jobrun.RunningScript(workRoot) }
 
 // followScript prints a job's log, as it grows, until the job's .exit file
 // appears. It exits 3 for an unknown job and 4 for a job that died without
@@ -1100,8 +1115,8 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 // exitFilter passes writes through except lines that start with exitMarker,
 // which it keeps.
 type exitFilter struct {
-	w    io.Writer
-	mu   sync.Mutex
+	w      io.Writer
+	mu     sync.Mutex
 	buf    []byte
 	code   string
 	seen   bool
@@ -1274,7 +1289,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	if err != nil {
 		return "", 1, "", err
 	}
-	// The tray stops a GPU box for games. Its job may look dead (4) or the
+	// The tray stops a GPU box in My PC. Its job may look dead (4) or the
 	// exec may just end; either way the agent should hear why.
 	if res.Code != 0 && res.Code != 3 {
 		if msg := a.gpuStopped(ctx, box); msg != "" {

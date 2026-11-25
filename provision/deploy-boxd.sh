@@ -5,8 +5,9 @@
 #
 #   provision/deploy-boxd.sh user@pc-host
 #
-# The target can also come from AGENT_BOX_PC. It needs go, ssh and scp, and
-# key-based SSH to the PC (bootstrap-ssh.ps1), whose shell is PowerShell.
+# The target can also come from AGENT_BOX_PC. It needs box (BOX names another
+# box.exe), ssh and scp, and key-based SSH to the PC (bootstrap-ssh.ps1),
+# whose shell is PowerShell.
 #
 # Why a script: boxd and its unit were copied by hand, and on 2026-11-25 the
 # PC's unit was found older than provision/systemd's (no INCUS_CONF), so every
@@ -41,8 +42,17 @@ ldflags="-X $v.Commit=$(git rev-parse HEAD) -X $v.Time=$(git log -1 --format=%cI
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/boxd-deploy.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
-echo "== building boxd at $commit$dirty"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$STAGE/boxd" ./cmd/boxd
+echo "== building boxd at $commit$dirty, on a box"
+# On a box, not the laptop (#80): box run sends this checkout, uncommitted
+# changes included, and box pull fetches the build. The repo's own box stays
+# after the run, so the pull finds it whichever box.exe runs this.
+BOX=${BOX:-box}
+job=$("$BOX" run --reason "deploy-boxd.sh: build boxd at $commit to deploy it to the PC" -- \
+  "mkdir -p .deploy && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$ldflags' -o .deploy/boxd ./cmd/boxd" 2>&1 |
+  tee /dev/stderr | sed -n 's/^box: job \([^ ]*\) on .*/\1/p')
+[ -n "$job" ] || { echo "== the build on a box didn't start" >&2; exit 1; }
+"$BOX" pull "$job" .deploy/boxd "$STAGE"
+[ -s "$STAGE/boxd" ] || { echo "== box pull brought back no boxd from $job" >&2; exit 1; }
 # The scripts and unit go as LF, whatever the checkout did to them.
 tr -d '\r' < provision/systemd/agent-box-boxd.service > "$STAGE/agent-box-boxd.service"
 tr -d '\r' < provision/install-boxd.sh > "$STAGE/install-boxd.sh"

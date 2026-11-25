@@ -164,7 +164,7 @@ func jsonString(s string) string { b, _ := json.Marshal(s); return string(b) }
 
 func TestGPUClaimRemovesDeadThrowaways(t *testing.T) {
 	for name, in := range map[string]instance{
-		"stopped by the tray": {Name: "old-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "gaming: steam:570")},
+		"stopped by the tray": {Name: "old-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")},
 		"no job left":         {Name: "old-1234", Status: "Running", Config: gpuConfig(throwawayKey, "true")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -219,8 +219,7 @@ func TestGPURunWithBox(t *testing.T) {
 
 func TestGPUBoxStoppedByTrayTellsTheAgent(t *testing.T) {
 	for why, want := range map[string]string{
-		"gaming: steam:570": "box: the GPU box was stopped because the PC's owner started a game; rerun later or on CPU\n",
-		"mypc":              "box: the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU\n",
+		"mypc": "box: the GPU box was stopped because the PC's owner switched it to My PC; rerun later or on CPU\n",
 	} {
 		t.Run(why, func(t *testing.T) {
 			f := &fakePC{t: t, mode: "mypc", stopFor: why,
@@ -234,12 +233,12 @@ func TestGPUBoxStoppedByTrayTellsTheAgent(t *testing.T) {
 			}
 		})
 	}
-	// After the game, in Shared, the stopped box still explains itself.
+	// Back in Shared, the stopped box still explains itself.
 	f := &fakePC{t: t, mode: "shared",
-		insts: []instance{{Name: "my-repo-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "gaming")}}}
+		insts: []instance{{Name: "my-repo-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")}}}
 	a, out := testApp(f)
 	r, err := a.Job(context.Background(), "my-repo-1234.20261123-110000-beef", time.Minute)
-	if err != nil || r.Code != exitPaused || !strings.Contains(out.String(), "started a game") {
+	if err != nil || r.Code != exitPaused || !strings.Contains(out.String(), "switched it to My PC") {
 		t.Errorf("Job = %+v, %v\n%s", r, err, out)
 	}
 }
@@ -257,8 +256,6 @@ func TestStatusGPU(t *testing.T) {
 			insts: []instance{{Name: "g-1", Status: "Stopped", Config: gpuConfig()}}}, "free"},
 		"no room": {&fakePC{mode: "shared", project: caps,
 			insts: []instance{{Name: "a", Config: map[string]string{mode.SizeKey: "large"}}}}, "free, but no room for a gpu box now"},
-		"game": {&fakePC{mode: "mypc", project: map[string]string{"user.agent-box.reason": "gaming: steam:570"}},
-			"unavailable: the PC is yielding to a game"},
 		"my pc": {&fakePC{mode: "mypc", project: caps}, "unavailable: the PC is in My PC mode"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -283,7 +280,7 @@ func TestStatusGPU(t *testing.T) {
 // A GPU box the tray stopped still holds its memory and disk against the
 // caps, so a CPU run that doesn't fit deletes it and tries once more.
 func TestNoRoomReclaimsStoppedGPUThrowaways(t *testing.T) {
-	stopped := instance{Name: "gpu-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "gaming: steam:570")}
+	stopped := instance{Name: "gpu-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc")}
 	f := &fakePC{t: t, mode: "shared", refuse: memoryRefusal, insts: []instance{stopped}}
 	a, out := testApp(f)
 	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true})

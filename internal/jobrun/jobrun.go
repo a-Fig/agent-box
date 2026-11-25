@@ -163,3 +163,17 @@ test -f "$j.exit" || exit 4
 echo "$verdict $(cat "$j.exit")"
 `, root, Shq(job), before, code)
 }
+
+// RunningScript prints the jobs still running in a box, one name a line.
+// box and boxd both use it.
+func RunningScript(root string) string {
+	return "# running jobs\n" + AliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
+for p in *.pid; do
+  [ -e "$p" ] || continue
+  j=${p%%.pid}
+  [ -e "$j.exit" ] && continue
+  alive "$(cat "$p" 2>/dev/null)" "$j" && echo "$j"
+done
+exit 0
+`, root)
+}
