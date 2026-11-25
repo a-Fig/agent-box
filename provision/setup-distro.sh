@@ -306,10 +306,29 @@ else
 fi
 
 step "Dashboard server (boxd, docs/ui.md)"
-# boxd is copied in by install-pc.ps1 -BoxdPath; without it this step only reports.
+# boxd is copied in by install-pc.ps1 -BoxdPath, which empties this folder first, so a boxd here
+# is one this run staged. It is used once and deleted: on 2026-11-25 a rerun of this script by
+# hand found the copy staged at the first install still here and put it over the newer boxd that
+# deploy-boxd.sh had installed. It never downgrades either: a staged boxd older (by mtime) than
+# the installed one is skipped. deploy-boxd.sh is how boxd is updated after setup.
+# The mtime check gates only the binary: the unit (when new or missing), boxd.json and tailscale
+# serve are applied whenever a boxd is installed, so a rerun repairs a setup that stopped
+# halfway. To put an older build in on purpose, use deploy-boxd.sh, or delete the installed one.
+boxd_new=no
 if [ -f "$HERE/boxd" ]; then
-  install -D -m 0755 "$HERE/boxd" /opt/agent-box/bin/boxd
-  install -m 0644 "$HERE/systemd/agent-box-boxd.service" /etc/systemd/system/
+  # The same file counts as new, so a rerun after a failure below installs and restarts it.
+  if [ -f /opt/agent-box/bin/boxd ] && ! cmp -s "$HERE/boxd" /opt/agent-box/bin/boxd && [ "$HERE/boxd" -ot /opt/agent-box/bin/boxd ]; then
+    note "the staged boxd is older than the installed one: kept the installed one (deploy-boxd.sh updates boxd)"
+  else
+    install -D -m 0755 "$HERE/boxd" /opt/agent-box/bin/boxd
+    boxd_new=yes
+  fi
+fi
+if [ -f /opt/agent-box/bin/boxd ]; then
+  # A unit deploy-boxd.sh installed is kept unless this run brings a new boxd with it.
+  if [ "$boxd_new" = yes ] || [ ! -f /etc/systemd/system/agent-box-boxd.service ]; then
+    install -m 0644 "$HERE/systemd/agent-box-boxd.service" /etc/systemd/system/
+  fi
   install -d -m 0755 /etc/agent-box
   # The owner is the tailnet login this node belongs to (Tyler's). It is read here, never
   # written into the repo, which is public. A tagged node has no login: the list stays empty
@@ -325,17 +344,29 @@ print(u.get("LoginName", "") if not d["Self"].get("Tags") else "")' 2>/dev/null 
   fi
   systemctl daemon-reload
   systemctl enable agent-box-boxd.service >/dev/null 2>&1
-  systemctl restart agent-box-boxd.service
+  if [ "$boxd_new" = yes ]; then
+    systemctl restart agent-box-boxd.service
+  else
+    systemctl start agent-box-boxd.service # a no-op when it runs
+  fi
   note "boxd: $(systemctl is-active agent-box-boxd.service || true), owners in /etc/agent-box/boxd.json"
   if tailscale status >/dev/null 2>&1; then
-    tailscale serve --bg --https=443 http://127.0.0.1:7766 >/dev/null
-    note "tailscale serve: https://<this node>.<tailnet>.ts.net/ -> 127.0.0.1:7766 (tailnet only)"
+    # It runs on every rerun now, so a failure (HTTPS certificates off in the tailnet's DNS
+    # settings) is a note rather than the end of setup; timeout in case it waits for a consent.
+    if timeout 30 tailscale serve --bg --https=443 http://127.0.0.1:7766 >/dev/null </dev/null; then
+      note "tailscale serve: https://<this node>.<tailnet>.ts.net/ -> 127.0.0.1:7766 (tailnet only)"
+    else
+      note "tailscale serve failed (HTTPS certificates off in the tailnet's DNS settings?): run 'tailscale serve --bg --https=443 http://127.0.0.1:7766' once they are on"
+    fi
   else
     note "Tailscale is not up: run 'tailscale serve --bg --https=443 http://127.0.0.1:7766' once it is"
   fi
 else
   note "not installed (pass -BoxdPath to install-pc.ps1)"
 fi
+# Only now, with the step done (set -e stops the script on a failure above, keeping it for a
+# rerun), is the staged copy deleted.
+rm -f "$HERE/boxd"
 
 step "Virtual machines (/dev/kvm)"
 if [ -e /dev/kvm ]; then
