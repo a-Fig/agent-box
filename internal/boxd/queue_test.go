@@ -162,10 +162,10 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.poll()
 	time.Sleep(50 * time.Millisecond)
 	r.f.mu.Lock()
-	last := r.f.cli[len(r.f.cli)-1]
+	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	if want := "config set " + box + " user.expires=" + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); last != want {
-		t.Fatalf("throwaway's expiry: %s, want %s", last, want)
+	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 1 || sets[0] != want {
+		t.Fatalf("throwaway's expiry: %v, want %s", sets, want)
 	}
 	var h dash.History
 	resp, _ := http.Get(r.srv.URL + "/api/history?range=day")
@@ -362,8 +362,20 @@ func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
 		t.Fatalf("made room from a box with a job running: %v", r.f.cli)
 	}
 
-	// fresh's job ended: box run keeps it for 30 minutes.
-	r.f.set(func() { r.f.jobs["fresh-0001"][0].state, r.f.jobs["fresh-0001"][0].exit = "done", "0" })
+	// fresh's job ended, but nobody read it: boxd gives it 2 hours, and its
+	// result is only there, so its room isn't spare.
+	r.f.set(func() {
+		r.f.jobs["fresh-0001"][0].state, r.f.jobs["fresh-0001"][0].exit = "done", "0"
+		r.f.ins[1].Config["user.expires"] = r.c.now().Add(2 * time.Hour).Format(time.RFC3339)
+	})
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a box nobody read: %v", r.f.cli)
+	}
+
+	// box run read it: it keeps the box for 30 minutes.
+	r.f.set(func() { r.f.ins[1].Config["user.expires"] = r.c.now().Add(30 * time.Minute).Format(time.RFC3339) })
 	r.c.add(3 * time.Second)
 	r.poll()
 	r.c.add(3 * time.Second)

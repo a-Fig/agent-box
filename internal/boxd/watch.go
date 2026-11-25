@@ -380,7 +380,7 @@ func (w *Watcher) settle(key string, j *dash.Job, before dash.Job) {
 		}
 		w.record(r)
 		delete(w.live, key)
-		w.reapQueuedThrowaway(j)
+		w.reapEnded(j)
 	}
 	if ended || !reflect.DeepEqual(before, *j) {
 		w.emit(dash.Event{Name: dash.EventJob, Data: *j})

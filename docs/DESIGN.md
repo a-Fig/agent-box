@@ -169,7 +169,7 @@ code-on-incus (local only; profile and egress ideas), pixels (remote Incus backe
 
 Boxes are throwaway compute. Push work to git before a box goes.
 
-- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h).
+- **Expiry.** `box` stamps every box with `user.expires` (RFC3339 UTC): 24h from now while a job runs, 2h after the job finishes (so an idle box lives 2h). A job whose exit box never reads (no push, no `box_job`) would keep its 24h, so boxd, which sees every job end, sets the same 2h once nothing else runs there, in a write Incus refuses if the box changed since boxd read it, and only over the job's own 24h (#53).
 - **Reaper.** On every tick, in every mode (My PC too, since deleting frees RAM and disk), the tray runs `incus delete --force` on each instance in project `agents` whose `user.expires` is in the past. An instance with no `user.expires`, or one that isn't RFC3339, is skipped (the bad value is reported once). A failed delete is retried next tick.
 - **Disk caps.** Root disk 18/30/40GiB per box by size, set at launch. Project `limits.disk=210GiB` over all boxes and volumes, including the 30GiB cache.
 - **Only `/cache` survives**, and it is a cache: it can be wiped at any time (Go, npm, Gradle, Android SDK, Robolectric and uv rebuild it).
