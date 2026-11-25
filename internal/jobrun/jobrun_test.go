@@ -6,15 +6,17 @@ import (
 )
 
 // The agent's own cancel marks the job so its watcher stays quiet; the page's
-// doesn't, so the agent hears that its job ended.
+// doesn't, and says in the log who cancelled it, so the agent hears it ended
+// and why.
 func TestCancelScriptMarks(t *testing.T) {
-	agent := CancelScript("/work", "b.20261124-010203-abcd", 130, true)
-	page := CancelScript("/work", "b.20261124-010203-abcd", 130, false)
-	if !strings.Contains(agent, `if true; then : > "$j.cancelled"; fi`) {
-		t.Fatalf("agent's cancel doesn't mark:\n%s", agent)
+	agent := CancelScript("/work", "b.20261124-010203-abcd", 130, "")
+	page := CancelScript("/work", "b.20261124-010203-abcd", 130, "tyler's laptop")
+	if !strings.Contains(agent, "\n: > \"$j.cancelled\"\n") || strings.Contains(agent, "dashboard") {
+		t.Fatalf("agent's cancel:\n%s", agent)
 	}
-	if !strings.Contains(page, `if false; then : > "$j.cancelled"; fi`) {
-		t.Fatalf("page's cancel marks:\n%s", page)
+	if strings.Contains(page, `: > "$j.cancelled"`) ||
+		!strings.Contains(page, `echo 'box: cancelled from the dashboard by tyler'\''s laptop' >> "$j.log"`) {
+		t.Fatalf("page's cancel:\n%s", page)
 	}
 	if !strings.Contains(agent, "\nj='b.20261124-010203-abcd'\n") || !strings.Contains(agent, "echo 130 >") {
 		t.Fatalf("job or code missing:\n%s", agent)

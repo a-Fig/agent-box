@@ -82,6 +82,10 @@ func TestControls(t *testing.T) {
 	if code != 200 || j.Result() != dash.ResultCancelled {
 		t.Fatalf("cancel: %d %s", code, b)
 	}
+	// The agent hears of it, and why: no .cancelled mark, a line in the log.
+	if s := r.f.cancel; strings.Contains(s, `: > "$j.cancelled"`) || !strings.Contains(s, "cancelled from the dashboard by owner@example.com") {
+		t.Fatalf("cancel script:\n%s", s)
+	}
 	if code, b := r.post("/api/jobs/"+key+"/cancel", `{}`); code != 409 || !strings.Contains(string(b), `"not-running"`) {
 		t.Fatalf("cancel again: %d %s", code, b)
 	}

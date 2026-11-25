@@ -113,13 +113,15 @@ func Shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 // .exit if the wrapper didn't, so followers stop. It prints "cancelled" or
 // "finished", then the exit code, and exits 3 for an unknown job.
 //
-// With mark, it leaves a .cancelled file before the kill: box's watchers read
-// it to stay quiet about a job the agent itself cancelled. A cancel from the
-// page doesn't mark, so the agent hears that its job ended.
-func CancelScript(root, job string, code int, mark bool) string {
-	marked := "false"
-	if mark {
-		marked = "true"
+// by is empty for box cancel, the agent's own: the script then leaves a
+// .cancelled file before the kill, and box's watchers stay quiet about the
+// job. From the page, by names the device that asked: the script leaves no
+// mark, so the agent hears that its job ended, and it adds a line saying who
+// cancelled it to the log, so the agent can see it was on purpose.
+func CancelScript(root, job string, code int, by string) string {
+	before := `: > "$j.cancelled"`
+	if by != "" {
+		before = "echo " + Shq("box: cancelled from the dashboard by "+by) + ` >> "$j.log"`
 	}
 	return "# cancel\n" + AliveFn + JobPIDFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
 j=%s
@@ -132,9 +134,9 @@ if ! alive "$pid" "$j" || [ "$(ps -o sid= -p "$pid" | tr -d ' ')" != "$pid" ]; t
   echo "cannot identify the session for job $j" >&2
   exit 4
 fi
-# Watchers read this to stay quiet about a job the agent cancelled; it is
-# there before the exit file can be.
-if %s; then : > "$j.cancelled"; fi
+# Before the exit file can be there: the agent's .cancelled mark, which its
+# watcher reads to stay quiet, or the page's line in the log.
+%s
 if ! pkill -TERM -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
 for i in $(seq 50); do pgrep -s "$pid" >/dev/null || break; sleep 0.1; done
 if ! pkill -KILL -s "$pid" && pgrep -s "$pid" >/dev/null; then rm -f "$j.cancelled"; exit 4; fi
@@ -144,5 +146,5 @@ if echo %d > "$j.cancel.$$" && ln "$j.cancel.$$" "$j.exit" 2>/dev/null; then ver
 rm -f "$j.cancel.$$"
 test -f "$j.exit" || exit 4
 echo "$verdict $(cat "$j.exit")"
-`, root, Shq(job), marked, code)
+`, root, Shq(job), before, code)
 }

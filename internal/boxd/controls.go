@@ -208,7 +208,11 @@ func (w *Watcher) CancelJob(ctx context.Context, key, by string) (dash.Job, erro
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
-	out, err := w.Incus.Exec(ctx, job.Box, jobrun.CancelScript(workRoot, job.Box+"."+job.ID, 130, false))
+	who := by
+	if who == "" {
+		who = "an unknown device" // never empty: empty is box cancel's own
+	}
+	out, err := w.Incus.Exec(ctx, job.Box, jobrun.CancelScript(workRoot, job.Box+"."+job.ID, 130, who))
 	var ee *ExitError
 	if errors.As(err, &ee) && ee.Code == 3 {
 		return dash.Job{}, errJobGone

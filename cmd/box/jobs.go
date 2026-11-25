@@ -74,7 +74,7 @@ tail -c +%[3]d %[2]s.log | head -c %[4]d
 // cancelScript stops a job's session and writes 130 to its .exit if the
 // wrapper didn't (jobrun.CancelScript). It marks the job .cancelled: the agent
 // asked, so its watcher stays quiet.
-func cancelScript(job string) string { return jobrun.CancelScript(workRoot, job, exitDetached, true) }
+func cancelScript(job string) string { return jobrun.CancelScript(workRoot, job, exitDetached, "") }
 
 // jobStart reads the start time from a job ID (box.YYYYMMDD-HHMMSS-xxxx, UTC).
 func jobStart(job string) time.Time {
