@@ -581,11 +581,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 		}
 		r, err := a.Job(ctx, args.ID, wait)
-		if err == nil && r.State == stateDone && a.exists(args.ID, ".json") {
-			// The agent has the full result now, so the watcher needn't push it.
-			// If the watcher pushed it in the same moment, the agent gets it twice.
-			a.markNotified(args.ID, "box_job")
-		}
+		a.markRead(args.ID, r, err, "box_job")
 		return jobResult(r, err, out.String(), warnings)
 	}
 	return textResult("unknown tool "+p.Name, true)
