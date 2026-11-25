@@ -440,6 +440,26 @@ func TestSafetyNetRestartsLostWatchers(t *testing.T) {
 	}
 }
 
+// A follow after a broken one (or a pause) prints the log from its start
+// again; the pushed tail has each line once. Seen live 2026-11-25 after a
+// pause: "pause-smoke-start" twice.
+func TestWatchTailAfterRefollowIsNotDoubled(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	e := newPushEnv(t, f, "thread-1")
+	_, st := e.call(t, "box_run", e.runArgs(nil, "go test ./..."))
+	job := st["job"].(string)
+	f.finish("0", "only-once\n")
+	f.mu.Lock()
+	f.followErr = 1
+	f.mu.Unlock()
+	if err := e.a.Watch(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if e.push.count() != 1 || strings.Count(e.push.sent[0].msg, "only-once") != 1 {
+		t.Errorf("pushed:\n%v", e.push.sent)
+	}
+}
+
 func TestWatcherLeaseIsExclusive(t *testing.T) {
 	f := &fakePC{t: t, block: true}
 	e := newPushEnv(t, f, "thread-1")

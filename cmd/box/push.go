@@ -469,6 +469,14 @@ type lineTail struct {
 	buf []byte
 }
 
+// reset forgets what was written, before a follow that prints the log again
+// from its start.
+func (l *lineTail) reset() {
+	l.mu.Lock()
+	l.buf = l.buf[:0]
+	l.mu.Unlock()
+}
+
 func (l *lineTail) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -678,6 +686,9 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 	var pauseDeadline time.Time
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
+		// Each follow prints the whole log from its start, so a follow after
+		// a pause or a broken connection mustn't add to the last one's.
+		tail.reset()
 		res, err := w.Job(ctx, job, 0)
 		if ctx.Err() != nil {
 			return jobEnd{}, false
