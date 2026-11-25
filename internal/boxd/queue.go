@@ -49,6 +49,7 @@ type queued struct {
 
 	view     dash.Job // the job as the page sees it, from Meta
 	starting bool
+	restored bool     // loaded with Starting set, and no start has looked in its box since
 	evict    []string // kept throwaways to delete for its room (spareThrowaways)
 }
 
@@ -81,6 +82,7 @@ func OpenQueue(dir string) (*Queue, error) {
 			continue
 		}
 		it.view = viewOf(&it)
+		it.restored = it.Starting != nil
 		q.items[it.Job] = &it
 	}
 	bundles, _ := filepath.Glob(filepath.Join(dir, "*.bundle"))
@@ -303,6 +305,21 @@ func (q *Queue) markStarting(it *queued, t time.Time) error {
 	defer q.mu.Unlock()
 	it.Starting = &t
 	return q.save(it)
+}
+
+// looked clears restored: a start has looked in the box, or found none.
+func (q *Queue) looked(it *queued) {
+	q.mu.Lock()
+	it.restored = false
+	q.mu.Unlock()
+}
+
+// wasRestored says whether it came back from disk mid-start and no start has
+// looked in its box since.
+func (q *Queue) wasRestored(it *queued) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return it.restored
 }
 
 // startMark is when a start of it last began, or nil. The starter writes it

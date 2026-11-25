@@ -161,7 +161,7 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	var pick *queued
 	pos := 0
 	for _, it := range w.Queue.list() {
-		if now.Sub(it.QueuedAt) > dash.QueueMaxAge && !w.Queue.isStarting(it) && !w.mayHaveStarted(it, byName) {
+		if now.Sub(it.QueuedAt) > dash.QueueMaxAge && !w.Queue.isStarting(it) && !w.mayHaveStarted(it, byName, true) {
 			w.dropQueued(it, now, "waited over 24 hours")
 			continue
 		}
@@ -189,13 +189,19 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	go w.startQueued(pick, exists && (!pick.New || w.Queue.startMark(pick) != nil), slices.Clone(pick.evict))
 }
 
-// mayHaveStarted says whether a start cut short by a restart may have
-// started the job: the mark is set and its box is there. Until a start looks
-// in the box, the job isn't cancelled or dropped as if it were only waiting.
-// A box that never runs again is reaped at its expiry, which ends this.
-func (w *Watcher) mayHaveStarted(it *queued, byName map[string]Instance) bool {
+// mayHaveStarted says whether a start that a restart cut short may have
+// started the job: it came back from disk marked, no start has looked in its
+// box since, and the box is there, or boxd hasn't listed the boxes yet (known
+// is false). Until a start looks, the job isn't cancelled or dropped as if it
+// were only waiting. A box that never runs again is reaped at its expiry,
+// which ends this. A start that fails within one boxd isn't one: it found the
+// job absent, as box run would.
+func (w *Watcher) mayHaveStarted(it *queued, byName map[string]Instance, known bool) bool {
+	if !w.Queue.wasRestored(it) {
+		return false
+	}
 	_, ok := byName[it.Box]
-	return ok && w.Queue.startMark(it) != nil
+	return ok || !known
 }
 
 // QueuedView is a waiting job with its place and wait, if it is waiting.
@@ -276,7 +282,7 @@ func (w *Watcher) CancelQueued(job, by string) bool {
 	for _, in := range w.lastIns {
 		byName[in.Name] = in
 	}
-	if w.mayHaveStarted(it, byName) {
+	if w.mayHaveStarted(it, byName, w.listed) {
 		return false
 	}
 	w.Queue.Remove(job)
@@ -330,6 +336,10 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 	}
 	started := w.Now().UTC()
 	mark := w.Queue.startMark(it)
+	if err == nil {
+		// Whatever comes of it, this start looks in the box (or found none).
+		defer w.Queue.looked(it)
+	}
 	switch {
 	case err != nil:
 	case mark != nil && reuse && w.startedInBox(ctx, it):
