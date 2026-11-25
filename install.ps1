@@ -25,7 +25,8 @@
 
     # A 32-bit PowerShell on 64-bit Windows reports x86 here; PROCESSOR_ARCHITEW6432 has the real one.
     $machine = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-    if ($machine -ne 'AMD64') { throw "box install: unsupported architecture $machine; box has a Windows binary for amd64 only." }
+    # Windows on ARM runs the amd64 build under emulation.
+    if ($machine -ne 'AMD64' -and $machine -ne 'ARM64') { throw "box install: unsupported architecture $machine; box has a Windows binary for amd64 (which ARM64 runs too)." }
     $asset = 'box-windows-amd64.exe'
 
     $dir = if ($env:BOX_INSTALL_DIR) { $env:BOX_INSTALL_DIR } else { Join-Path $env:USERPROFILE '.local\bin' }
@@ -51,6 +52,11 @@
         $got = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $tmp $asset)).Hash.ToLower()
         if ($got -ne $want) { throw "box install: the checksum of $asset does not match SHA256SUMS (wanted $want, got $got); nothing was installed." }
         Write-Host 'Checksum OK.'
+        # Run before it replaces anything, so a binary that can't run here (blocked by Smart App
+        # Control, say) leaves the installed one alone.
+        $ok = $false
+        try { & (Join-Path $tmp $asset) --version | Out-Null; $ok = $LASTEXITCODE -eq 0 } catch { }
+        if (-not $ok) { throw "box install: the downloaded $asset did not run on this machine; nothing was installed." }
 
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         # Agents' box mcp servers keep box.exe running, and Windows won't replace a running exe but

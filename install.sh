@@ -37,7 +37,8 @@ fi
 asset=box-$os-$arch
 dir=${BOX_INSTALL_DIR:-$HOME/.local/bin}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/box-install.XXXXXX") || die 'could not make a temporary folder.'
-trap 'rm -rf "$tmp"; rm -f "$dir/.box.new.$$"' EXIT INT TERM
+trap 'rm -rf "$tmp"; rm -f "$dir/.box.new.$$"' EXIT
+trap 'exit 1' INT TERM
 
 if [ -n "${BOX_VERSION:-}" ]; then
   case $BOX_VERSION in v*) tag=$BOX_VERSION ;; *) tag=v$BOX_VERSION ;; esac
@@ -47,7 +48,7 @@ else
   base=https://github.com/$repo/releases/latest/download
 fi
 fetch() {
-  curl -q -fsSL --retry 2 -o "$tmp/$1" "$base/$1" || die "could not download $base/$1."
+  curl -q -fsSL --retry 2 -o "$tmp/$1" "$base/$1" || die "could not download $base/$1 (does that release have a build for $os/$arch?)."
 }
 
 say "Downloading $asset${tag:+ ($tag)} from $repo..."
@@ -69,6 +70,9 @@ mkdir -p "$dir" || die "could not create $dir."
 # process runs the old file (copying over it would fail with "text file busy").
 cp "$tmp/$asset" "$dir/.box.new.$$" || die "could not write to $dir."
 chmod 755 "$dir/.box.new.$$"
+# Run before it replaces anything (and here, not in a temp folder that may be noexec), so a binary
+# that can't run on this machine leaves the installed one alone.
+"$dir/.box.new.$$" --version >/dev/null || die "the downloaded $asset did not run on this machine; nothing was installed."
 mv -f "$dir/.box.new.$$" "$dir/box" || die "could not put box at $dir/box."
 
 "$dir/box" --version || die "installed $dir/box, but it did not run."
