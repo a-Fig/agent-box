@@ -733,7 +733,7 @@ func TestRunEndToEnd(t *testing.T) {
 	a.KeepEnded = endedKeep
 	out.Reset()
 	r, err = a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"exit 0"}, New: true})
-	if err != nil || r.Code != 0 || !strings.Contains(f.names(), r.Box) || !strings.Contains(out.String(), "box: kept "+r.Box+" for 30 minutes") {
+	if err != nil || r.Code != 0 || !strings.Contains(f.names(), r.Box) || !strings.Contains(out.String(), "box: kept "+r.Box+" for box pull for up to 30 minutes") {
 		t.Fatalf("kept --new run = %+v, %v, boxes %q\n%s", r, err, f.names(), out)
 	}
 	a.KeepEnded = 0

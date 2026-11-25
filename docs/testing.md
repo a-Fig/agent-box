@@ -143,7 +143,7 @@ if (-not ($instances | Where-Object { $_.name -eq $throwaway })) { throw "Throwa
 ```
 
 The throwaway is kept for 30 minutes after a run whose exit code was read, for `box pull`, and the
-run's last line says so (since #86). A launch short of room may take it sooner.
+run's last line says so (since #86). A queued job or a launch short of room may take it sooner.
 
 If a previous step left the named smoke box behind, use `box ls` to confirm the printed name and remove only that box.
 

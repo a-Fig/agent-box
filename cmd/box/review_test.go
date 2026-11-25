@@ -47,7 +47,7 @@ func TestInterruptedThrowawayLaunchReportsName(t *testing.T) {
 	f := &fakePC{t: t, launchErr: true}
 	a, out := testApp(f)
 	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), New: true, Cmd: []string{"true"}})
-	if err == nil || r.Box == "" || !strings.Contains(out.String(), "box: launching "+r.Box) {
+	if err == nil || r.Box == "" || !strings.Contains(out.String(), "box: launching "+r.Box+" failed") {
 		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
 	}
 	if got := f.inst(r.Box).Config[throwawayKey]; got != "true" {

@@ -354,6 +354,7 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []stri
 			break
 		}
 		w.logf("boxd: queue: deleted kept throwaway %s for %s's room", box, it.Job)
+		w.record(record{Type: recControl, Control: &controlRec{Action: actionEvict, Target: box, By: it.Job}})
 	}
 	started := w.Now().UTC()
 	mark := w.Queue.startMark(it)
