@@ -614,15 +614,18 @@ func TestJoinAndLeaveAntigravity(t *testing.T) {
 		t.Errorf("second join output =\n%s", out.String())
 	}
 
-	// Moving the binary updates the command in place.
+	// Moving the binary updates the command in place, preserving user-added keys
+	// on the box entry (e.g. disabled).
+	t3Inst2MCP := filepath.Join(t3Inst2, "config", "mcp_config.json")
+	write(t, t3Inst2MCP, "{\n  \"mcpServers\": {\n    \"box\": {\n      \"command\": \""+filepath.ToSlash(exe)+"\",\n      \"args\": [\"mcp\"],\n      \"disabled\": true\n    }\n  }\n}\n")
 	exe2 := filepath.Join(home, "bin2", "box.exe")
 	c.Exe = exe2
 	if err := join(ctx, c, false); err != nil {
 		t.Fatalf("re-join with moved exe: %v", err)
 	}
-	b, _ = os.ReadFile(filepath.Join(t3Inst2, "config", "mcp_config.json"))
-	if !strings.Contains(string(b), "bin2") {
-		t.Errorf("moved exe not updated:\n%s", b)
+	b, _ = os.ReadFile(t3Inst2MCP)
+	if !strings.Contains(string(b), "bin2") || !strings.Contains(string(b), `"disabled": true`) {
+		t.Errorf("moved exe did not preserve extra keys:\n%s", b)
 	}
 
 	// Leave removes box from every Antigravity config and removes skills,
@@ -693,6 +696,27 @@ func TestJoinAntigravityViaAgyOnPath(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".gemini", "config", "skills", "box", "SKILL.md")); err != nil {
 		t.Errorf("expected standalone ~/.gemini skill when agy is on PATH: %v", err)
+	}
+}
+
+func TestJoinSkipsBareGeminiDirWithoutAntigravity(t *testing.T) {
+	home := isolateHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	c := joinConfig{
+		Home: home, Exe: filepath.Join(home, "box.exe"), Out: &out,
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	if err := join(context.Background(), c, false); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if !strings.Contains(out.String(), "antigravity: not installed, skipped") {
+		t.Errorf("expected skip on bare ~/.gemini:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".gemini", "config")); !os.IsNotExist(err) {
+		t.Errorf("created config dir in bare ~/.gemini: %v", err)
 	}
 }
 

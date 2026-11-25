@@ -350,10 +350,10 @@ holds the push until the turn ends, unless the hook below is installed.
 binary outside `%TEMP%`. The fake `claude` keeps the real Claude config out of it:
 
 ```sh
-H="$LOCALAPPDATA/Temp/box-join-smoke"; mkdir -p "$H/bin" "$H/.claude"; printf '@exit /b 0\r\n' > "$H/bin/claude.cmd"
-J() { env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u T3CODE_THREAD_ID -u CLAUDE_CODE_SESSION_ID HOME="$H" USERPROFILE="$(cygpath -w "$H")" PATH="$H/bin:/usr/bin:/c/Windows/System32" "$BOX" join "$@"; }
-J; J; cat "$H/.claude/settings.json"   # "added the hook", then "hook already in"; one PostToolUse entry: "<box.exe>" hook
-J --leave; cat "$H/.claude/settings.json"; rm -r "$H"   # "removed the hook"; the file is {}
+H="$LOCALAPPDATA/Temp/box-join-smoke"; mkdir -p "$H/bin" "$H/.claude" "$H/.gemini/config"; printf '@exit /b 0\r\n' > "$H/bin/claude.cmd"
+J() { env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u GEMINI_HOME -u T3CODE_HOME -u T3CODE_THREAD_ID -u CLAUDE_CODE_SESSION_ID HOME="$H" USERPROFILE="$(cygpath -w "$H")" PATH="$H/bin:/usr/bin:/c/Windows/System32" "$BOX" join "$@"; }
+J; J; cat "$H/.claude/settings.json"; cat "$H/.gemini/config/mcp_config.json"   # "added the hook", then "hook already in"; one PostToolUse entry and one Antigravity box entry
+J --leave; cat "$H/.claude/settings.json"; cat "$H/.gemini/config/mcp_config.json"; rm -r "$H"   # "removed the hook" and "removed MCP server box"; both files are {}
 ```
 
 The hook itself, with a fake ended job for a made-up thread:

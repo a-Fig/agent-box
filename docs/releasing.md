@@ -82,8 +82,9 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
   - the new box then installs its skill wherever the installed skill is one an update replaced
     (`box skill-sync`; `update.json` keeps their SHA-256s), and leaves a skill someone edited
     alone. A session sees only its own configs (`~/.claude`, `$CLAUDE_CONFIG_DIR`,
-    `$CODEX_HOME` or `~/.codex`), and T3 and Codex sessions here use different ones, so every
-    `box mcp` also runs that sync hourly;
+    `$CODEX_HOME` or `~/.codex`, and Antigravity's `$GEMINI_HOME`, `~/.gemini` and T3 provider
+    homes), and T3 and Codex sessions here use different ones, so every `box mcp` also runs that
+    sync hourly;
   - by hand: `box update` checks now, `box update --version <tag>` installs a release, a
     nightly or a test prerelease, and `box status` says when a newer stable release is out.
     Installing one older than the latest stable release pins it like a rollback, until

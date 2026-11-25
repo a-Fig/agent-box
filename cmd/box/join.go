@@ -109,11 +109,14 @@ func (c joinConfig) antigravityHomes() []string {
 	}
 	if c.Home != "" {
 		standalone := filepath.Join(c.Home, ".gemini")
-		agyErr := error(os.ErrNotExist)
+		hasAgy := false
 		if c.LookPath != nil {
-			_, agyErr = c.LookPath("agy")
+			_, err := c.LookPath("agy")
+			hasAgy = err == nil
 		}
-		if isDir(standalone) || agyErr == nil {
+		if hasAgy || isDir(filepath.Join(standalone, "antigravity")) ||
+			isDir(filepath.Join(standalone, "antigravity-cli")) ||
+			isDir(filepath.Join(standalone, "config")) {
 			add(standalone)
 		}
 	}
@@ -187,10 +190,14 @@ func setAntigravityMCP(path, exe string, leave bool) (string, error) {
 		}
 		return "removed MCP server box (" + path + ")", writeOrdered(path, root, bom)
 	}
-	if cur, ok := servers.get("box").(*object); ok && sameAntigravityEntry(cur, exe) {
+	cur, ok := servers.get("box").(*object)
+	if ok && sameAntigravityEntry(cur, exe) {
 		return "MCP server box already registered (" + path + ")", nil
 	}
-	entry := &object{}
+	entry := cur
+	if entry == nil {
+		entry = &object{}
+	}
 	entry.set("command", exe)
 	entry.set("args", []any{"mcp"})
 	servers.set("box", entry)
@@ -202,9 +209,6 @@ func setAntigravityMCP(path, exe string, leave bool) (string, error) {
 }
 
 func sameAntigravityEntry(o *object, exe string) bool {
-	if len(o.keys) != 2 {
-		return false
-	}
 	cmd, ok := o.get("command").(string)
 	if !ok || cmd != exe {
 		return false
