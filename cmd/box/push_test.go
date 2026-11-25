@@ -192,6 +192,17 @@ func TestRunPushFalseSkipsTheWatcher(t *testing.T) {
 	}
 }
 
+// A watcher that had to start inside the client's job object still pushes,
+// and the result says how long the push lasts.
+func TestRunWatcherInJobPushesWithNotice(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t, block: true}, "thread-1")
+	e.a.Spawn = func(dir, job string) error { return errWatcherInJob }
+	text, st := e.run(t, "sleep 600")
+	if st["push"] != true || !strings.Contains(text, "this push lasts only as long as box's MCP server") || !e.a.exists(st["job"].(string), ".json") {
+		t.Errorf("structured = %v\n%s", st, text)
+	}
+}
+
 func TestRunSpawnFailureReportsNoPush(t *testing.T) {
 	e := newPushEnv(t, &fakePC{t: t, block: true}, "thread-1")
 	e.a.Spawn = func(dir, job string) error { return errors.New("access denied: no breakaway from the job object") }
@@ -743,7 +754,11 @@ func TestSafetyNetRecoversAWatcherKilledMidSend(t *testing.T) {
 	if line := e.a.safetyNet(""); !strings.Contains(line, job+" exit 1") || len(*e.spawns) != 0 {
 		t.Errorf("while the leases hold: %q, spawns %v", line, *e.spawns)
 	}
-	now = now.Add(sendLease + time.Second)
+	now = now.Add(watchLease + time.Second) // .watch gone, .sending still held
+	if e.a.safetyNet(""); len(*e.spawns) != 0 {
+		t.Errorf("restarted while .sending holds: %v", *e.spawns)
+	}
+	now = now.Add(sendLease - watchLease)
 	if e.a.safetyNet(""); len(*e.spawns) != 1 {
 		t.Fatalf("after the leases expired, spawns = %v", *e.spawns)
 	}

@@ -20,7 +20,7 @@ func TestStartDetachedFallsBackWithoutBreakaway(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || fmt.Sprint(tries) != "[true false]" {
+	if !errors.Is(err, errWatcherInJob) || fmt.Sprint(tries) != "[true false]" {
 		t.Errorf("denied breakaway: %v, tries %v", err, tries)
 	}
 	tries = nil

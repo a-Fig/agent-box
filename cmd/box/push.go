@@ -138,12 +138,19 @@ func spawnWatcher(stateDir, job string) error {
 	})
 }
 
+// errWatcherInJob is the success of a watcher started inside the MCP
+// client's job object: it dies with the MCP server, so the push is only as
+// good as the server's life, and the agent is told so.
+var errWatcherInJob = errors.New("the watcher runs inside the MCP client's job object")
+
 // startDetached starts a process with breakaway, and again without it when
-// the job object refuses breakaway.
+// the job object refuses breakaway (then errWatcherInJob).
 func startDetached(start func(breakaway bool) error) error {
 	err := start(true)
 	if err != nil && breakawayDenied(err) {
-		err = start(false)
+		if err = start(false); err == nil {
+			return errWatcherInJob
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("can't start a detached watcher: %w", err)
@@ -347,7 +354,12 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	if err := a.Spawn(a.StateDir, job); err != nil {
+	err := a.Spawn(a.StateDir, job)
+	if errors.Is(err, errWatcherInJob) {
+		a.warn("box: notice: this push lasts only as long as box's MCP server, which can't outlive your client here; if your session restarts before it arrives, call box_job " + job + ".")
+		err = nil
+	}
+	if err != nil {
 		os.Remove(a.statePath(job, ".json"))
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
@@ -419,7 +431,7 @@ func (a *App) safetyNet(skip string) string {
 		}
 		// Running with no watcher, or ended with nobody sending it: start one.
 		if a.Spawn != nil {
-			if err := a.Spawn(a.StateDir, job); err != nil {
+			if err := a.Spawn(a.StateDir, job); err != nil && !errors.Is(err, errWatcherInJob) {
 				a.warn("box: warning: restarting the watcher for " + job + ": " + err.Error())
 			}
 		}
