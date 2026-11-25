@@ -270,7 +270,7 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	if _, err := w.checkCreated(ctx, name, createdAt); err != nil {
 		return err
 	}
-	if _, err := w.Incus.CLI(ctx, "", "delete", name, "--force"); err != nil {
+	if err := w.delete(ctx, name); err != nil {
 		return err
 	}
 	w.mu.Lock()
@@ -337,3 +337,12 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+// delete deletes a box, running or not, waiting out another operation on
+// it such as the tray's limit write (#71).
+func (w *Watcher) delete(ctx context.Context, name string) error {
+	return jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", "delete", name, "--force")
+		return err
+	})
+}

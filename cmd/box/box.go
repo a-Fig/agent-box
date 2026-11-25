@@ -576,10 +576,13 @@ func isConflict(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already exists")
 }
 
-// Rm deletes a box, running or not.
+// Rm deletes a box, running or not, waiting out another operation on it
+// such as the tray's limit write (#71).
 func (a *App) Rm(ctx context.Context, name string) error {
-	_, err := a.incusOK(ctx, "delete", a.target(name), "--force")
-	return err
+	return jobrun.RetryETag(ctx, func() error {
+		_, err := a.incusOK(ctx, "delete", a.target(name), "--force")
+		return err
+	})
 }
 
 // Ls prints the boxes in the project.

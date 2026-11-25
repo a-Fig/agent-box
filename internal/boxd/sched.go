@@ -331,7 +331,7 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 	defer cancel()
 	var err error
 	for _, box := range evict {
-		if _, err = w.Incus.CLI(ctx, "", "delete", box, "--force"); err != nil {
+		if err = w.delete(ctx, box); err != nil {
 			err = fmt.Errorf("%w: deleting kept %s for room: %v", errNoRoom, box, err)
 			break
 		}
@@ -411,7 +411,7 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time
 		if it.New {
 			defer func() {
 				if err != nil {
-					w.Incus.CLI(context.WithoutCancel(ctx), "", "delete", box, "--force")
+					w.delete(context.WithoutCancel(ctx), box)
 				}
 			}()
 		}
