@@ -1368,6 +1368,9 @@ code {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .stats > :last-child:nth-child(odd) {
+    grid-column: 1 / -1; /* five stats: the last spans the row rather than sit alone at half width */
+  }
   .charts {
     grid-template-columns: minmax(0, 1fr);
   }
