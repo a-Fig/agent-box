@@ -32,10 +32,10 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 	}
 	h.Record(record{Type: recBoxCreate, At: t0.Add(-3 * time.Hour), Box: &boxRec{Name: "a", Size: "medium", CreatedAt: t0.Add(-3 * time.Hour)}})
 	h.Record(record{Type: recMode, At: t0.Add(-30 * time.Hour), Mode: &modeRec{Mode: "full"}})
-	h.Record(record{Type: recMode, At: t0.Add(-time.Hour), Mode: &modeRec{Mode: "mypc", Reason: "gaming: x"}})
+	h.Record(record{Type: recMode, At: t0.Add(-time.Hour), Mode: &modeRec{Mode: "mypc"}})
 	h.Samples([]sample{{At: t0.Add(-30 * time.Minute), Kind: "machine", MemUsed: 4 << 30, MemCap: 24 << 30}})
 
-	r := h.Range(dash.RangeDay, Live{Mode: modeRec{Mode: "mypc", Reason: "gaming: x"}, MemCap: 12 << 30})
+	r := h.Range(dash.RangeDay, Live{Mode: modeRec{Mode: "mypc"}, MemCap: 12 << 30})
 	b := r.Buckets[21] // 16:00, both jobs
 	if b.Jobs.ByResult["pass"] != 1 || b.Jobs.ByResult["fail"] != 1 || b.Jobs.ByRepo["widget"] != 2 || b.MedianSeconds.ByRepo["widget"] != 600 {
 		t.Fatalf("16:00 bucket: %+v", b)
@@ -45,7 +45,7 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 		t.Fatalf("buckets: %+v %+v", r.Buckets[0], r.Buckets[22])
 	}
 	if len(r.Segments) != 2 || r.Segments[0].Mode != "full" || !r.Segments[0].Start.Equal(r.Buckets[0].Start) ||
-		r.Segments[1].Reason != "gaming: x" || !r.Segments[1].End.Equal(now) {
+		r.Segments[1].Mode != "mypc" || !r.Segments[1].End.Equal(now) {
 		t.Fatalf("segments: %+v", r.Segments)
 	}
 	if p := h.Finished(Filter{Repo: "widget", Limit: 1}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" || !p.More {
@@ -122,4 +122,32 @@ func TestHistoryCountsQueuedJobsAndWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(h2)
+}
+
+// History written before game detection was removed (2026-11-25) holds mode
+// records with a reason. They still read, and a yield joins the My PC
+// stretch next to it.
+func TestHistoryReadsOldModeRecordsWithAReason(t *testing.T) {
+	dir := t.TempDir()
+	lines := `{"v":1,"at":"2026-11-24T15:00:00Z","type":"mode","mode":{"mode":"shared","reason":""}}
+{"v":1,"at":"2026-11-24T16:00:00Z","type":"mode","mode":{"mode":"mypc","reason":"gaming: steam:570"}}
+{"v":1,"at":"2026-11-24T17:00:00Z","type":"mode","mode":{"mode":"mypc","reason":""}}
+`
+	if err := os.WriteFile(filepath.Join(dir, "events-2026-11-24.jsonl"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := OpenHistory(dir, func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := h.LastMode(); m == nil || m.Mode != "mypc" {
+		t.Fatalf("last mode %+v", m)
+	}
+	var segs []string
+	for _, s := range h.Range(dash.RangeDay, Live{Mode: modeRec{Mode: "mypc"}}).Segments {
+		segs = append(segs, s.Mode+"@"+s.Start.Format("15:04"))
+	}
+	if got := strings.Join(segs, ","); !strings.HasSuffix(got, "shared@15:00,mypc@16:00") {
+		t.Fatalf("segments %s", got)
+	}
 }

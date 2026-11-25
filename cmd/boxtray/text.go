@@ -11,10 +11,8 @@ func statusText(st mode.Status) string {
 	switch {
 	case st.Down:
 		return fmt.Sprintf("%s chosen, WSL not running", st.Chosen.Label())
-	case st.Yielding:
-		return fmt.Sprintf("Paused for game (%s), %s chosen", st.Reason, st.Chosen.Label())
 	case st.Err != nil:
-		return fmt.Sprintf("%s, retrying after an error", st.Effective.Label())
+		return fmt.Sprintf("%s, retrying after an error", st.Chosen.Label())
 	}
-	return fmt.Sprintf("%s, %d running", st.Effective.Label(), st.Running)
+	return fmt.Sprintf("%s, %d running", st.Chosen.Label(), st.Running)
 }

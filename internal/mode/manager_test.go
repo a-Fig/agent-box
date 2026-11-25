@@ -137,8 +137,8 @@ func (f *fake) SetProjectConfig(_ context.Context, k, v string) error {
 
 var t0 = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
-func tick(m *Manager, at time.Duration, gaming bool) Status {
-	return m.Tick(context.Background(), t0.Add(at), gaming, "steam:570")
+func tick(m *Manager, at time.Duration) Status {
+	return m.Tick(context.Background(), t0.Add(at))
 }
 
 func equal(t *testing.T, got, want []string) {
@@ -152,24 +152,24 @@ func TestMyPCPausesRunningThenStopsAfter15Minutes(t *testing.T) {
 	f := newFake("a", "Running", "b", "Stopped", "c", "Running")
 	m := New(f, MyPC)
 
-	st := tick(m, 0, false)
+	st := tick(m, 0)
 	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "pause a", "pause c"})
 	if st.Running != 0 || st.Err != nil {
 		t.Fatalf("status %+v", st)
 	}
-	tick(m, 14*time.Minute, false)
+	tick(m, 14*time.Minute)
 	equal(t, f.take(), nil)
-	tick(m, 15*time.Minute, false)
+	tick(m, 15*time.Minute)
 	equal(t, f.take(), []string{"stop a", "stop c"})
 }
 
 func TestMyPCPausesBoxesStartedLater(t *testing.T) {
 	f := newFake("a", "Frozen")
 	m := New(f, MyPC)
-	tick(m, 0, false)
+	tick(m, 0)
 	f.take()
 	f.add("late", "Running")
-	tick(m, time.Minute, false)
+	tick(m, time.Minute)
 	equal(t, f.take(), []string{"pause late"})
 }
 
@@ -177,7 +177,7 @@ func TestSharedCapsCPUResumesAndIsIdempotent(t *testing.T) {
 	f := newFake("a", "Frozen", "b", "Running")
 	m := New(f, Shared)
 
-	st := tick(m, 0, false)
+	st := tick(m, 0)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=shared",
 		"set a limits.cpu=2", "set a limits.cpu.priority=0", "resume a",
@@ -186,11 +186,11 @@ func TestSharedCapsCPUResumesAndIsIdempotent(t *testing.T) {
 	if st.Running != 2 {
 		t.Fatalf("running = %d", st.Running)
 	}
-	tick(m, 5*time.Second, false)
+	tick(m, 5*time.Second)
 	equal(t, f.take(), nil)
 
 	f.add("new", "Running")
-	tick(m, 10*time.Second, false)
+	tick(m, 10*time.Second)
 	equal(t, f.take(), []string{"set new limits.cpu=2", "set new limits.cpu.priority=0"})
 }
 
@@ -199,8 +199,8 @@ func TestNeverWritesOtherProjectLimitsOrBoxMemory(t *testing.T) {
 	f.logCap = true
 	for _, c := range []Mode{Shared, Full, MyPC, Full} {
 		m := New(f, c)
-		tick(m, 0, false)
-		tick(m, time.Hour, false)
+		tick(m, 0)
+		tick(m, time.Hour)
 	}
 	for _, c := range f.take() {
 		if strings.HasPrefix(c, "project ") && !strings.HasPrefix(c, "project user.agent-box.mode=") &&
@@ -228,21 +228,22 @@ func TestMemoryCapFollowsModeAndOnlyChanges(t *testing.T) {
 	f := newFake("a", "Running")
 	f.logCap = true
 	m := New(f, Full)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, memSets(f.take()), []string{"project limits.memory=24GiB"})
-	tick(m, 5*time.Second, false)
+	tick(m, 5*time.Second)
 	equal(t, memSets(f.take()), nil) // already right: no write
 	m.SetChosen(Shared)
-	tick(m, 10*time.Second, false)
+	tick(m, 10*time.Second)
 	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
 	m.SetChosen(Full)
-	tick(m, 15*time.Second, false)
+	tick(m, 15*time.Second)
 	f.take()
-	tick(m, 20*time.Second, true) // a game: My PC's budget
+	m.SetChosen(MyPC)
+	tick(m, 20*time.Second) // My PC's budget
 	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
 
 	f.project[MemoryCapKey] = "12884901888" // the same value, written as bytes
-	tick(m, 25*time.Second, true)
+	tick(m, 25*time.Second)
 	equal(t, memSets(f.take()), nil)
 }
 
@@ -254,22 +255,22 @@ func TestMemoryCapNeverBelowWhatBoxesHoldAndTightensAsTheyGo(t *testing.T) {
 	f.config["small"] = map[string]string{SizeKey: "small", MemoryCapKey: "2GiB"}
 	f.project[MemoryCapKey] = "24GiB"
 	m := New(f, Full)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, memSets(f.take()), nil)
 
 	f.add("more", "Running")
 	f.config["more"] = map[string]string{SizeKey: "large", MemoryCapKey: "8GiB"}
 	m.SetChosen(Shared) // 22GiB launched, more than Shared's 12GiB
-	tick(m, 5*time.Second, false)
+	tick(m, 5*time.Second)
 	equal(t, memSets(f.take()), []string{"project limits.memory=22GiB"})
 
 	f.Delete(context.Background(), "big")
 	f.take()
-	tick(m, 10*time.Second, false)
+	tick(m, 10*time.Second)
 	equal(t, memSets(f.take()), []string{"project limits.memory=14GiB"})
 	f.Delete(context.Background(), "more")
 	f.take()
-	tick(m, 15*time.Second, false)
+	tick(m, 15*time.Second)
 	equal(t, memSets(f.take()), []string{"project limits.memory=12GiB"})
 }
 
@@ -290,22 +291,10 @@ func TestAllocatedMemoryPrefersExpandedConfig(t *testing.T) {
 	}
 }
 
-func TestStaleYieldReasonIsClearedOnStart(t *testing.T) {
-	f := newFake("a", "Running")
-	f.project[ProjectReasonKey] = "gaming: busy" // left by a tray killed mid-yield
-	m := New(f, Full)
-	tick(m, 0, false)
-	if got := only(f.take(), "project user.agent-box.reason"); len(got) != 1 || got[0] != "project user.agent-box.reason=" {
-		t.Fatalf("reason writes %q", got)
-	}
-	tick(m, time.Second, false)
-	equal(t, only(f.take(), "project user.agent-box.reason"), nil)
-}
-
 func TestMemoryCapReadFailureIsReported(t *testing.T) {
 	f := newFake("a", "Running")
 	f.failOn = "project get"
-	st := tick(New(f, Full), 0, false)
+	st := tick(New(f, Full), 0)
 	if st.Err == nil || memSets(f.take()) != nil {
 		t.Fatalf("err %v", st.Err)
 	}
@@ -315,18 +304,18 @@ func TestFullRaisesCPUAndRemovesLegacyAllowance(t *testing.T) {
 	f := newFake("a", "Frozen")
 	f.config["a"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0", "limits.cpu.allowance": "50%"}
 	m := New(f, Shared)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=shared",
 		"unset a limits.cpu.allowance", "resume a",
 	})
 	m.SetChosen(Full)
-	tick(m, time.Second, false)
+	tick(m, time.Second)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=full",
 		"set a limits.cpu=4", "set a limits.cpu.priority=10",
 	})
-	tick(m, 2*time.Second, false)
+	tick(m, 2*time.Second)
 	equal(t, f.take(), nil)
 }
 
@@ -335,32 +324,32 @@ func TestOnlyDifferingKeysAreSet(t *testing.T) {
 	f.config["a"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "10"} // already right for Full
 	f.config["b"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "0"}
 	m := New(f, Full)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, f.take(), []string{"project user.agent-box.mode=full", "set b limits.cpu.priority=10"})
 }
 
 func TestReenforcesLimitsAnAgentChanged(t *testing.T) {
 	f := newFake("a", "Running")
 	m := New(f, Shared)
-	tick(m, 0, false)
+	tick(m, 0)
 	f.take()
 
 	f.config["a"]["limits.cpu"] = "12"            // agent raised its CPUs
 	f.config["a"]["limits.cpu.allowance"] = "90%" // and added an allowance
 	delete(f.config["a"], "limits.cpu.priority")  // and dropped the priority
-	tick(m, time.Second, false)
+	tick(m, time.Second)
 	equal(t, f.take(), []string{"set a limits.cpu=2", "set a limits.cpu.priority=0", "unset a limits.cpu.allowance"})
-	tick(m, 2*time.Second, false)
+	tick(m, 2*time.Second)
 	equal(t, f.take(), nil)
 }
 
 func TestMyPCRepausesAnInstanceAnAgentResumed(t *testing.T) {
 	f := newFake("a", "Running")
 	m := New(f, MyPC)
-	tick(m, 0, false)
+	tick(m, 0)
 	f.take()
 	f.state["a"] = "Running" // agent resumed it
-	tick(m, time.Second, false)
+	tick(m, time.Second)
 	equal(t, f.take(), []string{"pause a"})
 }
 
@@ -368,7 +357,7 @@ func TestMyPCLeavesInstanceConfigAlone(t *testing.T) {
 	f := newFake("a", "Running")
 	f.config["a"] = map[string]string{"limits.cpu": "12", "limits.cpu.allowance": "50%"}
 	m := New(f, MyPC)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "pause a"})
 }
 
@@ -376,7 +365,7 @@ func TestFrozenInstanceStaysFrozenIfLimitsFail(t *testing.T) {
 	f := newFake("a", "Frozen")
 	f.failOn = "set a limits.cpu=2"
 	m := New(f, Shared)
-	st := tick(m, 0, false)
+	st := tick(m, 0)
 	if st.Err == nil || st.Running != 0 {
 		t.Fatalf("status %+v", st)
 	}
@@ -386,57 +375,18 @@ func TestFrozenInstanceStaysFrozenIfLimitsFail(t *testing.T) {
 		}
 	}
 	f.failOn = ""
-	tick(m, time.Second, false)
+	tick(m, time.Second)
 	equal(t, f.take(), []string{"set a limits.cpu=2", "resume a"})
 }
 
 func TestStoppedInstancesStayStopped(t *testing.T) {
 	f := newFake("a", "Stopped")
 	m := New(f, Full)
-	tick(m, 0, false)
+	tick(m, 0)
 	for _, c := range f.take() {
 		if strings.HasPrefix(c, "resume") {
 			t.Fatalf("resumed a stopped instance: %s", c)
 		}
-	}
-}
-
-func TestGamingYieldAndDebounce(t *testing.T) {
-	f := newFake("a", "Running")
-	m := New(f, Full)
-	tick(m, 0, false)
-	f.take()
-
-	st := tick(m, 5*time.Second, true) // game starts: freeze at once
-	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "project user.agent-box.reason=gaming: steam:570", "pause a"})
-	if !st.Yielding || st.Effective != MyPC || st.Chosen != Full || st.Reason != "steam:570" {
-		t.Fatalf("status %+v", st)
-	}
-
-	tick(m, 10*time.Second, false) // alt-tab: signal clears briefly
-	tick(m, 20*time.Second, true)  // and comes back
-	tick(m, 25*time.Second, false)
-	tick(m, 40*time.Second, false) // only 15s clear: still yielding
-	equal(t, f.take(), nil)
-
-	st = tick(m, 45*time.Second, false) // 20s clear: restore Full
-	if st.Yielding || st.Effective != Full {
-		t.Fatalf("status %+v", st)
-	}
-	equal(t, f.take(), []string{
-		"project user.agent-box.mode=full", "project user.agent-box.reason=", "resume a", // limits were never lost: nothing to reset
-	})
-}
-
-func TestYieldWinsOverModeChangeWhileGaming(t *testing.T) {
-	f := newFake("a", "Frozen")
-	m := New(f, MyPC)
-	tick(m, 0, true)
-	f.take()
-	m.SetChosen(Full)
-	st := tick(m, time.Second, true)
-	if st.Effective != MyPC || len(f.take()) != 0 {
-		t.Fatalf("status %+v", st)
 	}
 }
 
@@ -445,7 +395,7 @@ func TestFailuresAreReportedAndRetried(t *testing.T) {
 	f.failOn = "project user.agent-box.mode"
 	m := New(f, Shared)
 
-	st := tick(m, 0, false)
+	st := tick(m, 0)
 	if st.Err == nil {
 		t.Fatal("want an error")
 	}
@@ -454,7 +404,7 @@ func TestFailuresAreReportedAndRetried(t *testing.T) {
 	}
 	f.take()
 	f.failOn = ""
-	st = tick(m, time.Second, false)
+	st = tick(m, time.Second)
 	if st.Err != nil {
 		t.Fatal(st.Err)
 	}
@@ -464,9 +414,9 @@ func TestFailuresAreReportedAndRetried(t *testing.T) {
 func TestListFailureKeepsLastRunningCount(t *testing.T) {
 	f := newFake("a", "Running")
 	m := New(f, Full)
-	tick(m, 0, false)
+	tick(m, 0)
 	f.failOn = "list"
-	st := tick(m, time.Second, false)
+	st := tick(m, time.Second)
 	if st.Err == nil || st.Running != 1 {
 		t.Fatalf("status %+v", st)
 	}
@@ -475,10 +425,10 @@ func TestListFailureKeepsLastRunningCount(t *testing.T) {
 func TestFrozenTimersArePrunedForGoneInstances(t *testing.T) {
 	f := newFake("a", "Running")
 	m := New(f, MyPC)
-	tick(m, 0, false)
+	tick(m, 0)
 	delete(f.state, "a")
 	f.order = nil
-	tick(m, time.Minute, false)
+	tick(m, time.Minute)
 	if len(m.frozenSince) != 0 {
 		t.Fatalf("frozenSince = %v", m.frozenSince)
 	}
@@ -540,7 +490,7 @@ func TestReaperDeletesOnlyExpiredInEveryMode(t *testing.T) {
 		expiry(f, "fresh", t0.Add(time.Hour))
 		expiry(f, "gone", t0.Add(-24*time.Hour))
 		m := New(f, md)
-		st := tick(m, 0, false)
+		st := tick(m, 0)
 		if st.Err != nil {
 			t.Fatalf("%s: err %v", md, st.Err)
 		}
@@ -562,7 +512,7 @@ func TestReaperDeletesOnlyExpiredInEveryMode(t *testing.T) {
 func TestReaperKeepsInstanceExpiringExactlyNow(t *testing.T) {
 	f := newFake("a", "Running")
 	expiry(f, "a", t0)
-	tick(New(f, Shared), 0, false)
+	tick(New(f, Shared), 0)
 	for _, c := range f.calls {
 		if strings.HasPrefix(c, "delete") {
 			t.Fatalf("deleted at the exact expiry time: %q", f.calls)
@@ -574,14 +524,14 @@ func TestReaperReportsBadValueOnceAndSkips(t *testing.T) {
 	f := newFake("a", "Running")
 	f.setCfg("a", ExpiresKey, "tomorrow")
 	m := New(f, Shared)
-	st := tick(m, 0, false)
+	st := tick(m, 0)
 	if st.Err == nil || !strings.Contains(st.Err.Error(), "tomorrow") {
 		t.Fatalf("first tick should report the bad value: %v", st.Err)
 	}
 	if st.Running != 1 {
 		t.Fatalf("running = %d", st.Running)
 	}
-	if st = tick(m, time.Minute, false); st.Err != nil {
+	if st = tick(m, time.Minute); st.Err != nil {
 		t.Fatalf("second tick repeated the report: %v", st.Err)
 	}
 	for _, c := range f.calls {
@@ -591,14 +541,14 @@ func TestReaperReportsBadValueOnceAndSkips(t *testing.T) {
 	}
 	// A different bad value is news; so is the same one on a new instance.
 	f.setCfg("a", ExpiresKey, "next week")
-	if st = tick(m, 2*time.Minute, false); st.Err == nil {
+	if st = tick(m, 2*time.Minute); st.Err == nil {
 		t.Fatal("changed bad value should be reported")
 	}
 	// Once the instance is gone and a new one has the same bad value, report again.
 	delete(f.config, "a")
-	tick(m, 3*time.Minute, false)
+	tick(m, 3*time.Minute)
 	f.setCfg("a", ExpiresKey, "next week")
-	if st = tick(m, 4*time.Minute, false); st.Err == nil {
+	if st = tick(m, 4*time.Minute); st.Err == nil {
 		t.Fatal("bad value still reported once per instance lifetime")
 	}
 }
@@ -608,7 +558,7 @@ func TestReaperRetriesFailedDelete(t *testing.T) {
 	expiry(f, "a", t0.Add(-time.Minute))
 	m := New(f, Full)
 	f.failOn = "delete"
-	st := tick(m, 0, false)
+	st := tick(m, 0)
 	if st.Err == nil || !strings.Contains(st.Err.Error(), "boom") {
 		t.Fatalf("delete failure not reported: %v", st.Err)
 	}
@@ -617,7 +567,7 @@ func TestReaperRetriesFailedDelete(t *testing.T) {
 	}
 	f.failOn = ""
 	f.take()
-	st = tick(m, 10*time.Second, false)
+	st = tick(m, 10*time.Second)
 	if st.Err != nil {
 		t.Fatalf("retry: %v", st.Err)
 	}
@@ -636,7 +586,7 @@ func TestCPUsFollowEachBoxSize(t *testing.T) {
 	f.config["l"] = map[string]string{SizeKey: "large"}
 	f.config["odd"] = map[string]string{SizeKey: "huge"} // unknown sizes count as medium
 	m := New(f, Shared)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=shared",
 		"set s limits.cpu=1", "set s limits.cpu.priority=0", "resume s",
@@ -646,7 +596,7 @@ func TestCPUsFollowEachBoxSize(t *testing.T) {
 		"set odd limits.cpu=2", "set odd limits.cpu.priority=0", "resume odd",
 	})
 	m.SetChosen(Full)
-	tick(m, time.Second, false)
+	tick(m, time.Second)
 	equal(t, f.take(), []string{
 		"project user.agent-box.mode=full",
 		"set s limits.cpu=2", "set s limits.cpu.priority=10",
@@ -655,15 +605,15 @@ func TestCPUsFollowEachBoxSize(t *testing.T) {
 		"set old limits.cpu=4", "set old limits.cpu.priority=10",
 		"set odd limits.cpu=4", "set odd limits.cpu.priority=10",
 	})
-	tick(m, 2*time.Second, false)
+	tick(m, 2*time.Second)
 	equal(t, f.take(), nil)
 
 	f.config["l"]["limits.cpu"] = "12" // an agent raised a large box's CPUs
-	tick(m, 3*time.Second, false)
+	tick(m, 3*time.Second)
 	equal(t, f.take(), []string{"set l limits.cpu=8"})
 
 	m.SetChosen(MyPC)
-	tick(m, 4*time.Second, false)
+	tick(m, 4*time.Second)
 	for _, c := range f.take() {
 		if strings.HasPrefix(c, "set ") {
 			t.Errorf("My PC changed a limit: %s", c)
@@ -707,13 +657,13 @@ func TestSizeTable(t *testing.T) {
 func TestModeLabelIsReadBackAndRepaired(t *testing.T) {
 	f := newFake()
 	m := New(f, Full)
-	tick(m, 0, false)
+	tick(m, 0)
 	equal(t, f.take(), []string{"project user.agent-box.mode=full"})
-	tick(m, ProjectRecheck, false)
+	tick(m, ProjectRecheck)
 	equal(t, f.take(), nil) // read back, unchanged: no write
 	f.project[ProjectModeKey] = "mypc"
-	tick(m, ProjectRecheck+ProjectRecheck/2, false)
+	tick(m, ProjectRecheck+ProjectRecheck/2)
 	equal(t, f.take(), nil) // not due yet
-	tick(m, 2*ProjectRecheck, false)
+	tick(m, 2*ProjectRecheck)
 	equal(t, f.take(), []string{"project user.agent-box.mode=full"})
 }

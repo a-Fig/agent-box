@@ -57,8 +57,7 @@ A release is a pushed tag `vX.Y.Z` on `main`, as in Murmur.
 
 **Channels.** Every part follows **stable** (Tyler, 2026-11-25): it takes GitHub's latest
 release, which is never a prerelease. A nightly installs only by hand, through
-`box update --version <tag>`. The guards are the dev→main PR, the hand-tagged stable release,
-and a canary (below).
+`box update --version <tag>`. The guards are the dev→main PR and the hand-tagged stable release.
 
 ## How each part updates
 
@@ -70,22 +69,32 @@ All of them follow the same steps:
 
 A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of this off.
 
-- **box.exe.** There's no daemon on the laptop. The check runs in `box mcp`:
-  - at start, then hourly, under a lock file, with a stamp so 20 sessions don't all ask GitHub;
+- **box.exe** (`cmd/box/update.go`, `internal/update`). There's no daemon on the laptop. The
+  check runs in `box mcp`:
+  - at start, then hourly, under `update.lock` with a stamp (`update.json`, beside the jobs
+    folder in `%LOCALAPPDATA%\agent-box`), so all sessions together ask GitHub once an hour. It
+    compares the release with the box on disk (its `--version`), since another session may
+    have updated it already. A dev build never updates itself;
   - Windows lets a running exe be renamed, so `box.exe` becomes `box.old.exe` and the new file
-    takes its name; running servers keep the old code, and new sessions and spawned watchers
-    get the new one;
-  - the same step installs the release's skill into each config whose skill still matches the
-    old release's, and leaves a skill someone edited alone;
-  - #34's tolerant schema already lets a session started before an update keep calling the new
-    binary.
+    takes its name. A `box.old.exe` that a session still runs is renamed aside and removed by
+    a later update. `box mcp` runs each tool call through the box on disk (#70), so running
+    sessions get the new code at their next call;
+  - the new box then installs its skill wherever the installed skill is one an update replaced
+    (`box skill-sync`; `update.json` keeps their SHA-256s), and leaves a skill someone edited
+    alone. A session sees only its own configs (`~/.claude`, `$CLAUDE_CONFIG_DIR`,
+    `$CODEX_HOME` or `~/.codex`), and T3 and Codex sessions here use different ones, so every
+    `box mcp` also runs that sync hourly;
+  - by hand: `box update` checks now, `box update --version <tag>` installs a release, a
+    nightly or a test prerelease, and `box status` says when a newer stable release is out.
+    Installing one older than the latest stable release pins it like a rollback, until
+    `box update` or a newer release.
 - **boxtray.exe.** The tray checks hourly. To swap itself it:
   1. stops the `agent-box-enforcer` task;
   2. renames itself to `.old` and moves the new file into its place;
   3. starts the new one and exits.
 
   The mutex hand-over that already exists between the tray and the headless enforcer covers the
-  gap. Not while a game runs: yield wins.
+  gap.
 - **boxd.** An `agent-box-update.timer` in the distro runs `update-boxd.sh` hourly. It fetches the
   release's `boxd`, unit and `install-boxd.sh`, checks them and probes the new boxd, and runs that
   `install-boxd.sh`, which health-checks the new boxd and rolls back. A boxd that isn't a release
@@ -95,21 +104,20 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
 
 ## Safety
 
-- **Canary.** The PC's parts update first. `box.exe` on the laptop waits until boxd reports
-  the new version healthy on `/api/state` (#52) for 10 minutes. A release that breaks boxd then
-  never reaches the agents.
-- **Rollback.** `box update --rollback`, and the tray's menu, swap `.old` back in and pin that
-  version until the next release.
+- **No canary** (Tyler's simple-first rule, 2026-11-25): a stable tag by Tyler's hand is the
+  guard. The 10-minute wait for boxd's health was dropped before it was built.
+- **Rollback.** `box update --rollback`, and the tray's menu, swap `.old` back in. The hourly
+  check then skips the release rolled back from until a newer one comes out.
 - **What the checksum proves.** It catches a damaged download. It doesn't prove who built the
   file, as in Murmur. The repo is public, and only Tyler and his agents can push tags.
 - **Visible.** The dashboard already shows each part's commit (#52), and will show its version.
-  `box status` will say when the laptop is behind.
+  `box status` says when the laptop is behind.
 
 ## Order of work
 
 1. `release.yml` and `nightly.yml` (tag on a green main), versions from tags, `box update --version`.
 2. boxd's update timer: the easiest part, since #46 did most of it.
-3. box.exe's self-update and the skill sync, with the canary.
+3. box.exe's self-update and the skill sync.
 4. The tray's self-update, tried live with the tray running and with only the headless enforcer.
 5. Retire the manual steps in the `box-rollout` notes and in this doc.
 

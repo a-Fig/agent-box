@@ -112,8 +112,6 @@ func TestStatus(t *testing.T) {
 		"my pc":       {&fakePC{mode: "mypc", project: limits}, "unavailable: PC is in My PC mode: run locally", false},
 		"repo box frozen": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "my-repo", Status: "Frozen"}}},
 			"unavailable: this repo's box my-repo is frozen: run locally", false},
-		"yielding": {&fakePC{mode: "shared", project: map[string]string{"limits.instances": "3", "user.agent-box.reason": "Steam game running"}},
-			"unavailable: PC is yielding to a game (Steam game running): run locally", false},
 		"room": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "other", Status: "Running"}}},
 			"available: room for 1 large, or 2 medium, or 4 small", true},
 		"disk binds": {&fakePC{mode: "shared", project: diskFull},

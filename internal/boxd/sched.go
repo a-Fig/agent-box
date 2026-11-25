@@ -99,11 +99,7 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 
 // roomFor says what a job waits for with the given room, or "" when it can start.
 func (w *Watcher) roomFor(it *queued, byName map[string]Instance, room dash.Room) string {
-	m := w.machine
-	switch {
-	case m.Yielding:
-		return dash.RefusedYielding
-	case m.Mode == dash.ModeMyPC:
+	if w.machine.Mode == dash.ModeMyPC {
 		return dash.RefusedMyPC
 	}
 	// A box of a job whose start was cut short is the job's own, even a
@@ -364,8 +360,8 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 	case errors.Is(err, errNoRoom):
 		w.logf("boxd: queue: %s: no room yet: %v", it.Job, err) // it waits on
 		w.noRoom[it.Job] = w.startDone.Add(noRoomBackoff)
-	case err != nil && (w.machine.Yielding || w.machine.Mode == dash.ModeMyPC):
-		// A game or My PC froze the box mid-start: wait for it to end.
+	case err != nil && w.machine.Mode == dash.ModeMyPC:
+		// My PC froze the box mid-start: wait for it to end.
 		w.logf("boxd: queue: %s: paused mid-start: %v", it.Job, err)
 	case err != nil:
 		w.dropQueued(it, w.Now().UTC(), err.Error())

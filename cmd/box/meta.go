@@ -88,10 +88,9 @@ type jobMeta struct {
 type refusal = dash.RefusalBody
 
 const (
-	refusedYielding = dash.RefusedYielding
-	refusedMyPC     = dash.RefusedMyPC
-	refusedFull     = dash.RefusedFull
-	refusedGPUBusy  = dash.RefusedGPUBusy
+	refusedMyPC    = dash.RefusedMyPC
+	refusedFull    = dash.RefusedFull
+	refusedGPUBusy = dash.RefusedGPUBusy
 )
 
 func (a *App) getenv(k string) string {
@@ -232,9 +231,8 @@ func errCause(err error) func(context.Context) string {
 }
 
 // refusePaused reports a run turned away because of paused, a reach or
-// check result. Only My PC has a cause boxd counts: yielding when the tray
-// gives a game as the reason. An unreachable PC or a frozen box in another
-// mode sends nothing.
+// check result. Only My PC has a cause boxd counts. An unreachable PC or a
+// frozen box in another mode sends nothing.
 func (a *App) refusePaused(ctx context.Context, paused string, m jobMeta) {
 	a.refuse(ctx, paused+"; run it locally", m, a.pausedCause(paused))
 }
@@ -244,9 +242,6 @@ func (a *App) pausedCause(paused string) func(context.Context) string {
 	return func(ctx context.Context) string {
 		if !strings.HasSuffix(paused, " is in My PC mode") {
 			return ""
-		}
-		if a.projectKey(ctx, mode.ProjectReasonKey) != "" {
-			return refusedYielding
 		}
 		return refusedMyPC
 	}

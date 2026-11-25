@@ -90,8 +90,6 @@ func (s *server) handleQueueFront(r *http.Request, body []byte) (int, any, error
 // whyWaiting is why a job waits now: the PC frozen, or no room for its size.
 func whyWaiting(m *dash.Machine, gpu bool) string {
 	switch {
-	case m.Yielding:
-		return dash.RefusedYielding
 	case m.Mode == dash.ModeMyPC:
 		return dash.RefusedMyPC
 	case gpu:
@@ -115,7 +113,7 @@ func (s *server) fits(j *dash.Job) bool {
 // job's reason current.
 func (s *server) stepQueue() {
 	m := s.machine()
-	if !m.Yielding && m.Mode != dash.ModeMyPC {
+	if m.Mode != dash.ModeMyPC {
 		for _, j := range s.queue() {
 			if s.fits(j) {
 				s.startQueued(*j)

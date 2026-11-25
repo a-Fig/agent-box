@@ -4,7 +4,7 @@
 //	go run ./internal/dash/devserver -scenario busy
 //
 // It plays the scenario forward on a timer: running jobs write to their logs and finish, new boxes
-// and jobs appear, and a game starts and ends, so the stream has something to show. Its controls
+// and jobs appear, and the tray applies mode requests, so the stream has something to show. Its controls
 // answer as boxd's will, with the same status codes and errors. -unreachable starts it with the
 // API down, for the "PC unreachable" screen; GET /dev/down and /dev/up switch that while it runs.
 package main

@@ -19,7 +19,7 @@ import (
 )
 
 // The queue, box's side (docs/queue.md). A box_run that can't start now (no
-// room, the GPU taken, My PC or a game) hands the run to boxd's queue
+// room, the GPU taken, My PC) hands the run to boxd's queue
 // instead of refusing it: box sends the worktree's snapshot, the same git
 // bundle a run pushes, and boxd starts the job when it can. The watcher
 // (push.go) follows the job through the queue, nudges the agent once at
@@ -70,13 +70,13 @@ func boxdError(code int, b []byte) string {
 }
 
 // queueable says whether a run turned away for why may wait in the queue.
-// A GPU run doesn't wait out My PC or a game, which can last hours
+// A GPU run doesn't wait out My PC, which can last hours
 // (docs/queue.md); boxd refuses it too.
 func queueable(why string, sz mode.Size) bool {
 	switch why {
 	case refusedFull, refusedGPUBusy:
 		return true
-	case refusedMyPC, refusedYielding:
+	case refusedMyPC:
 		return !sz.GPU
 	}
 	return false
@@ -198,8 +198,6 @@ func waitText(why string) string {
 		return "waiting for the GPU"
 	case refusedMyPC:
 		return "waiting while the PC is in My PC mode"
-	case refusedYielding:
-		return "waiting while the PC's owner plays a game"
 	case "":
 		return "about to start"
 	}

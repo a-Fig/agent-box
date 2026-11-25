@@ -51,16 +51,6 @@ func TestHeadlessRequested(t *testing.T) {
 	}
 }
 
-func TestNoGamesNeverYields(t *testing.T) {
-	s := noGames{&fakeSensors{up: true, gaming: true}}
-	if g, _ := s.Gaming(); g {
-		t.Fatal("headless saw a game")
-	}
-	if !s.HostUp(context.Background()) {
-		t.Fatal("HostUp should pass through")
-	}
-}
-
 func TestHeartbeatThrottlesAndNamesTheEnforcer(t *testing.T) {
 	inc := &recIncus{}
 	hb := newHeartbeat(inc, mode.EnforcerHeadless, t.Logf)
@@ -93,7 +83,7 @@ func TestHeartbeatThrottlesAndNamesTheEnforcer(t *testing.T) {
 // before it.
 func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 	inc := &recIncus{}
-	s := &fakeSensors{up: true, gaming: true} // headless wraps it in noGames
+	s := &fakeSensors{up: true}
 	managers := 0
 	hb := newHeartbeat(inc, mode.EnforcerHeadless, t.Logf)
 	trayPresent := make(chan bool)
@@ -113,7 +103,7 @@ func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 	reports := make(chan mode.Status, 32)
 	done := make(chan struct{})
 	go func() {
-		run(ctx, cfg, noGames{s}, time.Hour, wake, func(st mode.Status) { reports <- st })
+		run(ctx, cfg, s, time.Hour, wake, func(st mode.Status) { reports <- st })
 		close(done)
 	}()
 	idle := func() { // one tick that sees the tray
@@ -133,8 +123,8 @@ func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 	if managers != 1 || inc.count("user.agent-box.mode=full") != 1 || inc.count("user.agent-box.enforcer=headless") != 1 || inc.count("user.agent-box.tray-seen=") != 1 {
 		t.Fatalf("enforcing: managers=%d sets=%v", managers, inc.snapshot())
 	}
-	if st.Effective != mode.Full || st.Yielding {
-		t.Fatalf("headless status = %+v (a game must not make it yield)", st)
+	if st.Chosen != mode.Full {
+		t.Fatalf("headless status = %+v", st)
 	}
 
 	before := len(inc.snapshot()) // the tray takes over
