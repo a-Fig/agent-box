@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 // fakeIncus is a project whose boxes and job files a test sets.
@@ -29,6 +31,10 @@ type fakeIncus struct {
 	cli    []string
 	cliErr func(args []string) error
 	cancel string // the last cancel script
+	// SetExpiryIf: each write made, as "<box> <expiry>", and a write that
+	// comes between a read and its PATCH (making it stale) when set.
+	expirySets []string
+	between    func(in *Instance)
 }
 
 type fakeJob struct {
@@ -37,6 +43,37 @@ type fakeJob struct {
 	log         string
 	meta        string
 	endedAt     int64
+}
+
+func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for try := 0; try < 5; try++ {
+		i := -1
+		for k := range f.ins {
+			if f.ins[k].Name == name {
+				i = k
+			}
+		}
+		if i < 0 {
+			return false, nil
+		}
+		read := f.ins[i]
+		read.Config = maps.Clone(read.Config)
+		until, ok := decide(read)
+		if !ok {
+			return false, nil
+		}
+		if f.between != nil { // another write lands first: the ETag no longer matches
+			f.between(&f.ins[i])
+			f.between = nil
+			continue
+		}
+		f.ins[i].Config[jobrun.ExpiresKey] = until.UTC().Format(time.RFC3339)
+		f.expirySets = append(f.expirySets, name+" "+f.ins[i].Config[jobrun.ExpiresKey])
+		return true, nil
+	}
+	return false, errStale
 }
 
 func (f *fakeIncus) Instances(context.Context) ([]Instance, error) {

@@ -162,10 +162,10 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.poll()
 	time.Sleep(50 * time.Millisecond)
 	r.f.mu.Lock()
-	last := r.f.cli[len(r.f.cli)-1]
+	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	if want := "config set " + box + " user.expires=" + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); last != want {
-		t.Fatalf("throwaway's expiry: %s, want %s", last, want)
+	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 1 || sets[0] != want {
+		t.Fatalf("throwaway's expiry: %v, want %s", sets, want)
 	}
 	var h dash.History
 	resp, _ := http.Get(r.srv.URL + "/api/history?range=day")
