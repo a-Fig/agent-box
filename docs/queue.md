@@ -91,7 +91,7 @@ laptop and agent reaches.
 
 ## API
 
-The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Every POST needs
+The types are in `internal/dash` (`QueueRequest`, `QueueReply`). Every POST needs
 `X-Agent-Box: 1`.
 - **`POST /api/queue`** (multipart/form-data): a `request` part, then a `bundle` part.
   - `request` is `{box, new, size, gpu, checkout, ref, command, env, timeout, meta}`. `meta` is the
