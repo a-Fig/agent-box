@@ -146,6 +146,32 @@ func TestModeRequestRetriesETagRace(t *testing.T) {
 	}
 }
 
+// An extend that loses its race to a job starting in the box (box run sets
+// 24h) counts from the new expiry, never writing back the old one.
+func TestExtendRetryReadsTheNewExpiry(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full"})
+	created := t0.Add(-time.Hour)
+	lost := false
+	r.f.set(func() {
+		r.f.ins = []Instance{inst("w", "Running", "small", created)} // expires 2026-11-25T00:00:00Z
+		r.f.cliErr = func(args []string) error {
+			if args[0] == "config" && !lost {
+				lost = true
+				r.f.ins[0].Config["user.expires"] = "2026-11-26T00:00:00Z" // the job's write got in first
+				return errors.New("incus config: exit status 1: Error: ETag doesn't match: 1 vs 2")
+			}
+			return nil
+		}
+	})
+	r.poll()
+	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 200 {
+		t.Fatalf("extend: %d %s", code, b)
+	}
+	if last := r.f.cli[len(r.f.cli)-1]; last != "config set w user.expires=2026-11-26T04:00:00Z" {
+		t.Errorf("written after the lost race: %s", last)
+	}
+}
+
 // Machine says which enforcer runs and the mode it acts on, from boxtray's
 // project keys; a value boxtray doesn't write is left out.
 func TestMachineEnforcerAndChosen(t *testing.T) {

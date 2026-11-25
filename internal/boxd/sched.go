@@ -494,7 +494,23 @@ func (w *Watcher) reapQueuedThrowaway(j *dash.Job) {
 			if in.Config[keyThrowaway] == "true" {
 				ttl = jobrun.EndedKeep
 			}
+			read := in.Config[jobrun.ExpiresKey]
+			first := true
 			err = jobrun.RetryETag(ctx, func() error {
+				// After a lost race, look again: if the expiry moved, a job
+				// started there (box run sets 24h) and it is not ours to cut.
+				if !first {
+					again, err := w.Incus.Instances(ctx)
+					if err != nil {
+						return err
+					}
+					for _, cur := range again {
+						if cur.Name == box && cur.Config[jobrun.ExpiresKey] != read {
+							return nil
+						}
+					}
+				}
+				first = false
 				_, err := w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+w.Now().UTC().Add(ttl).Format(time.RFC3339))
 				return err
 			})
