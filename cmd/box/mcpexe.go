@@ -64,6 +64,10 @@ func runMCPCall(ctx context.Context, in io.Reader, out io.Writer,
 		case n := <-notices:
 			enc.Encode(mcpCallLine{Notice: &n})
 		case res := <-done:
+			for len(notices) > 0 { // a notice sent just before the call returned
+				n := <-notices
+				enc.Encode(mcpCallLine{Notice: &n})
+			}
 			return enc.Encode(mcpCallLine{Result: res})
 		}
 	}
@@ -144,6 +148,8 @@ func mcpCaller(a *App, exe string) func(ctx context.Context, req mcpCall, notify
 		switch {
 		case err == nil:
 			return res
+		case req.Method == "tools/list": // no side effects, and a client needs its tools
+			return local(ctx, req, notify)
 		case errors.Is(err, errNoResult):
 			return textResult("box: "+err.Error(), true)
 		default: // it never ran: mid-update, or the file is gone

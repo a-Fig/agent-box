@@ -88,11 +88,16 @@ func TestMCPCallerFallsBack(t *testing.T) {
 	if res := call(context.Background(), mcpCall{Method: "tools/list"}, nil); res["tools"] == nil {
 		t.Fatalf("no in-process tools: %v", res)
 	}
-	// One that ran but answered nothing may have done the work, so it isn't run again.
+	// One that ran but answered nothing may have done the work, so a call isn't run again;
+	// tools/list has no side effects, so it is.
 	t.Setenv("BOX_TEST_MCPCALL", "die")
-	res := mcpCaller(a, os.Args[0])(context.Background(), mcpCall{Method: "tools/list"}, nil)
+	call = mcpCaller(a, os.Args[0])
+	res := call(context.Background(), mcpCall{Method: "tools/call", Params: json.RawMessage(`{"name":"box_status"}`)}, nil)
 	if res["isError"] != true || !strings.Contains(text(res), "without a result") {
 		t.Fatalf("res %v", res)
+	}
+	if res := call(context.Background(), mcpCall{Method: "tools/list"}, nil); res["tools"] == nil {
+		t.Fatalf("tools/list after a failed child: %v", res)
 	}
 }
 
