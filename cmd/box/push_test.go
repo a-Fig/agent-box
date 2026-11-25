@@ -703,3 +703,19 @@ func TestMCPToolSurface(t *testing.T) {
 		t.Errorf("tools = %v", names)
 	}
 }
+
+// reset drops the last follow's output only once the next one prints: a
+// follow that prints nothing (a frozen box, a gone one) keeps it, for the
+// tail of a lost push.
+func TestLineTailResetIsLazy(t *testing.T) {
+	var l lineTail
+	l.Write([]byte("last-words\n"))
+	l.reset()
+	if got := l.lastLines(5); got != "last-words" {
+		t.Errorf("after a reset with no output = %q", got)
+	}
+	l.Write([]byte("again\n"))
+	if got := l.lastLines(5); got != "again" {
+		t.Errorf("after the next follow printed = %q", got)
+	}
+}
