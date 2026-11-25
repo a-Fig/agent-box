@@ -18,6 +18,16 @@ Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here to
 3. **`setup-distro.sh`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-distro.sh [--build-base]`.
 4. Add client certs (commands are printed at the end of `setup-distro.sh`), then `incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token ...` on the laptop. Use the tailnet name, not an IP: Incus serves a Let's Encrypt certificate for that name (`https-cert.sh`, needs HTTPS certificates enabled in the tailnet's DNS settings), so the client trusts it without pinning and renewals need no client change.
 
+## Updating boxd
+
+`deploy-boxd.sh`, run from the laptop, builds boxd from the checkout and installs it with `systemd/agent-box-boxd.service` in one go, so the PC's binary and unit come from one commit:
+
+```bash
+provision/deploy-boxd.sh user@pc-host      # or AGENT_BOX_PC=user@pc-host; on this laptop, through .scratch/golock.sh
+```
+
+It sends one tar over SSH and pipes it into the distro with a `.cmd` (the distro has no `/mnt/c`, and cmd keeps a binary stdin intact where PowerShell doesn't). In the distro, `install-boxd.sh` checks the SHA-256 sums and changes nothing on a mismatch. One install runs at a time. A running boxd that is healthy is kept as `boxd.old`, with its unit as `agent-box-boxd.service.old`; an unhealthy one isn't, so a retry never replaces the last good build. Then it restarts the service. After 8 seconds the service must be active, must not have restarted itself, must answer HTTP, and boxd must have logged no WARNING (such as a missing `INCUS_CONF`). If any of that fails, or the script is cut off after swapping files, it puts the old ones back, restarts them, and fails. It was written after the PC's unit was found older than this folder's (2026-11-25), and tried on the PC that day: a deploy, a checksum mismatch, and a rollback from a boxd that exits at once.
+
 Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume, cloud-init), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
 ## What changes on the PC, and how to undo it
@@ -41,6 +51,7 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 | | Incus: storage pool `default`, bridge `incusbr0`, HTTPS `:8443`, project `agents` (restricted, caps, `cache` volume), its `default` profile, image `agent-base` | `incus project delete agents` after removing its instances and volume; or just `wsl --unregister agents` |
 | | Tailscale node `agent-box` | `tailscale logout` in the distro and remove the node in the admin console |
 | | With `-BoxdPath`: `boxd` in `/opt/agent-box/bin`, `agent-box-boxd.service`, `/etc/agent-box/boxd.json` (owners: this node's tailnet login), and `tailscale serve` on 443 to `127.0.0.1:7766` | `tailscale serve --https=443 off`, `systemctl disable --now agent-box-boxd`, delete those files |
+| `deploy-boxd.sh` | `boxd` and `boxd.old` in `/opt/agent-box/bin`; `agent-box-boxd.service` and its `.old` in `/etc/systemd/system`; `/run/agent-box-deploy.lock` | as for `-BoxdPath` above |
 
 ## Details
 
