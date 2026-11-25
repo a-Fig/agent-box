@@ -28,7 +28,7 @@ const usage = `usage:
                                             sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
   box jobs [--box name]                     list jobs, newest first
-  box cancel <id>                           stop a running job
+  box cancel <id>                           stop a running job, or take a queued one off the queue
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
   box new [name] [--ttl 2h] [--size S | --gpu] [--reason "why"]

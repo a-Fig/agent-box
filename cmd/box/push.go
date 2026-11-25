@@ -596,7 +596,7 @@ func endedMessage(r jobRecord, e jobEnd) string {
 func pausedMessage(r jobRecord) string {
 	// T3 may deliver this long after it was sent, when the job has resumed
 	// (#96); the end push follows either way.
-	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. If box_job still says paused when you read this and you can't wait, run it locally and box_cancel this job. %s\n%s",
+	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. If box_job still says paused and you can't wait, run it locally and box_cancel this job. %s\n%s",
 		r.Job, frozenWindow, fromBox, r.context())
 }
 

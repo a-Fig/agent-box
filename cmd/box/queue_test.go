@@ -392,4 +392,10 @@ func TestCLICancelOfAJobQueuedElsewhere(t *testing.T) {
 	if !strings.Contains(b.callList(), "/api/queue/"+queuedJobName+"/cancel") {
 		t.Errorf("boxd calls: %s", b.callList())
 	}
+
+	// Not waiting there either: the box's error stands, and nothing is marked.
+	b.cancel = 404
+	if _, _, _, err := e.a.CancelAny(context.Background(), "my-repo-ab12.20261123-120000-ffff"); err == nil || !strings.Contains(err.Error(), "Instance not found") || e.a.exists("my-repo-ab12.20261123-120000-ffff", ".notified") {
+		t.Errorf("cancel of a job nobody has: %v", err)
+	}
 }
