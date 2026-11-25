@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// RetryETag runs set, a single `incus config set` or `incus project set`,
-// again while it loses a write race. Those commands read the config and
+// RetryETag runs set, a single `incus config set`, `incus project set` or
+// `incus delete`, again while it loses a race. Those commands read the config and
 // write it back with its ETag, and the tray writes the project's keys and
 // each box's CPU limits every few seconds when they differ from what it
 // wants, so a write can meet 412 "ETag doesn't match". A 412 means nothing
