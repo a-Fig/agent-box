@@ -746,11 +746,9 @@ func TestJoinSkipsBareGeminiDirWithoutAntigravity(t *testing.T) {
 		Home: home, Exe: filepath.Join(home, "box.exe"), Out: &out,
 		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
 	}
-	if err := join(context.Background(), c, false); err != nil {
-		t.Fatalf("join: %v", err)
-	}
-	if !strings.Contains(out.String(), "antigravity: not installed, skipped") {
-		t.Errorf("expected skip on bare ~/.gemini:\n%s", out.String())
+	// A bare ~/.gemini is no agent: with nothing else here, join finds none.
+	if err := join(context.Background(), c, false); err == nil || !strings.Contains(err.Error(), "no coding agent found") {
+		t.Fatalf("join = %v\n%s", err, out.String())
 	}
 	if _, err := os.Stat(filepath.Join(home, ".gemini", "config")); !os.IsNotExist(err) {
 		t.Errorf("created config dir in bare ~/.gemini: %v", err)
