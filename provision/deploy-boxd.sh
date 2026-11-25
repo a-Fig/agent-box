@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# deploy-boxd.sh: build boxd from this checkout and deploy it, with its
+# systemd unit, to the PC's agents distro in one go. Run it from the laptop
+# (Git Bash), at the repo root or anywhere in it:
+#
+#   provision/deploy-boxd.sh user@pc-host
+#
+# The target can also come from AGENT_BOX_PC. It needs go, ssh and scp, and
+# key-based SSH to the PC (bootstrap-ssh.ps1), whose shell is PowerShell.
+#
+# Why a script: boxd and its unit were copied by hand, and on 2026-11-25 the
+# PC's unit was found older than provision/systemd's (no INCUS_CONF), so every
+# job scan had been failing. This sends both together from one commit.
+#
+# How: the build, the unit, install-boxd.sh and their SHA256SUMS go to the PC
+# as one tar, with a .cmd that pipes it into the distro. The distro has no
+# /mnt/c automount (wsl.conf), and cmd keeps a binary stdin intact where
+# PowerShell doesn't. install-boxd.sh, in the distro, checks the sums, keeps
+# the running boxd as boxd.old, restarts the service and rolls back if the
+# new one isn't healthy. This script exits non-zero if anything fails.
+set -euo pipefail
+
+PC=${1:-${AGENT_BOX_PC:-}}
+DISTRO=${AGENT_BOX_DISTRO:-agents}
+[ -n "$PC" ] || { echo "usage: $0 user@pc-host   (or set AGENT_BOX_PC)" >&2; exit 2; }
+
+ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+cd "$ROOT"
+commit=$(git rev-parse --short HEAD)
+dirty=""
+git diff --quiet HEAD -- cmd internal provision go.mod go.sum || dirty=" (with uncommitted changes)"
+
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/boxd-deploy.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+echo "== building boxd at $commit$dirty"
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$STAGE/boxd" ./cmd/boxd
+# The scripts and unit go as LF, whatever the checkout did to them.
+tr -d '\r' < provision/systemd/agent-box-boxd.service > "$STAGE/agent-box-boxd.service"
+tr -d '\r' < provision/install-boxd.sh > "$STAGE/install-boxd.sh"
+(cd "$STAGE" && sha256sum boxd agent-box-boxd.service install-boxd.sh > SHA256SUMS)
+tar -cf "$STAGE/boxd-deploy.tar" -C "$STAGE" boxd agent-box-boxd.service install-boxd.sh SHA256SUMS
+echo "   boxd $(cut -c1-12 "$STAGE/SHA256SUMS" | head -n1)"
+
+# The .cmd runs in the SSH session's home folder on the PC, where scp put the tar.
+dest=/opt/agent-box-provision/deploy-boxd
+printf '%s\r\n' \
+  '@echo off' \
+  "wsl.exe -d $DISTRO -u root --exec sh -c \"rm -rf $dest && mkdir -p $dest && tar -xf - -C $dest\" < boxd-deploy.tar || exit /b 1" \
+  "wsl.exe -d $DISTRO -u root --exec bash $dest/install-boxd.sh" > "$STAGE/boxd-deploy.cmd"
+
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
+echo "== copying to $PC"
+scp -q "${ssh_opts[@]}" "$STAGE/boxd-deploy.tar" "$STAGE/boxd-deploy.cmd" "$PC:"
+echo "== installing in the $DISTRO distro"
+rc=0
+ssh "${ssh_opts[@]}" "$PC" 'cmd.exe /c boxd-deploy.cmd' </dev/null || rc=$?
+# A batch file can't delete itself while it runs, so both go afterwards.
+ssh "${ssh_opts[@]}" "$PC" 'Remove-Item -ErrorAction SilentlyContinue boxd-deploy.cmd, boxd-deploy.tar' </dev/null || true
+if [ "$rc" != 0 ]; then
+  echo "== deploy failed (exit $rc); see above" >&2
+  exit "$rc"
+fi
+echo "== deployed boxd $commit$dirty"

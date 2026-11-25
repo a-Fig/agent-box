@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -32,6 +33,9 @@ func main() {
 	}
 	if len(cfg.Owners) == 0 {
 		log.Printf("boxd: no owners in %s: every request will be refused", *cfgPath)
+	}
+	if err := boxd.CheckClient(os.Getenv, exec.LookPath); err != nil {
+		log.Printf("boxd: WARNING: job scans, logs and queued starts will fail: %v", err)
 	}
 	hist, err := boxd.OpenHistory(cfg.HistoryDir, time.Now)
 	if err != nil {
