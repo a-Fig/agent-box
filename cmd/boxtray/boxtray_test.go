@@ -33,28 +33,6 @@ func TestConfigRoundTripAndDefaults(t *testing.T) {
 	}
 }
 
-func TestClassify(t *testing.T) {
-	cases := []struct {
-		app    uint32
-		state  int
-		gaming bool
-		reason string
-	}{
-		{0, 0, false, ""},
-		{0, 5, false, ""}, // accepts notifications
-		{570, 5, true, "steam:570"},
-		{0, 3, true, "fullscreen"},
-		{0, 2, true, "busy"},
-		{570, 3, true, "steam:570"},
-	}
-	for _, c := range cases {
-		g, r := classify(c.app, c.state)
-		if g != c.gaming || r != c.reason {
-			t.Errorf("classify(%d,%d) = %v %q", c.app, c.state, g, r)
-		}
-	}
-}
-
 func TestDistroListed(t *testing.T) {
 	utf16 := func(s string) []byte {
 		b := []byte{0xff, 0xfe}
@@ -79,8 +57,7 @@ func TestStatusText(t *testing.T) {
 		st   mode.Status
 		want string
 	}{
-		{mode.Status{Chosen: mode.Full, Effective: mode.Full, Running: 2}, "Full, 2 running"},
-		{mode.Status{Chosen: mode.Full, Effective: mode.MyPC, Yielding: true, Reason: "steam:570"}, "Paused for game (steam:570), Full chosen"},
+		{mode.Status{Chosen: mode.Full, Running: 2}, "Full, 2 running"},
 		{mode.Status{Chosen: mode.Shared, Down: true}, "Shared chosen, WSL not running"},
 	}
 	for _, c := range cases {
@@ -91,13 +68,11 @@ func TestStatusText(t *testing.T) {
 }
 
 type fakeSensors struct {
-	mu     sync.Mutex
-	up     bool
-	gaming bool
-	awake  []bool
+	mu    sync.Mutex
+	up    bool
+	awake []bool
 }
 
-func (f *fakeSensors) Gaming() (bool, string)      { return f.gaming, "steam:1" }
 func (f *fakeSensors) HostUp(context.Context) bool { return f.up }
 func (f *fakeSensors) HoldAwake(on bool) {
 	f.mu.Lock()
@@ -143,7 +118,7 @@ func TestRunSkipsIncusWhileHostDownAndHoldsAwake(t *testing.T) {
 	s.up = true
 	s.mu.Unlock()
 	wake <- struct{}{}
-	if st := <-results; st.Down || st.Running != 1 || st.Effective != mode.Full {
+	if st := <-results; st.Down || st.Running != 1 || st.Chosen != mode.Full {
 		t.Fatalf("up: %+v", st)
 	}
 	cancel()
@@ -280,18 +255,13 @@ func TestIconRetryRestartAfterExplorerRestart(t *testing.T) {
 func TestStatusLogOnlyLogsChanges(t *testing.T) {
 	var lines []string
 	s := &statusLog{logf: func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }}
-	st := mode.Status{Chosen: mode.Shared, Effective: mode.Shared}
+	st := mode.Status{Chosen: mode.Shared}
 	s.observe(st)
 	s.observe(st)
 	s.observe(st)
 	if len(lines) != 1 {
 		t.Fatalf("steady state logged %q", lines)
 	}
-	y := st
-	y.Yielding, y.Reason, y.Effective = true, "steam:570", mode.MyPC
-	s.observe(y)
-	s.observe(y)
-	s.observe(st)
 	c := st
 	c.Chosen = mode.Full
 	s.observe(c)
@@ -304,7 +274,7 @@ func TestStatusLogOnlyLogsChanges(t *testing.T) {
 	r.Reclaimed = []mode.Reclaimed{{Name: "a", Left: 11 << 20}}
 	s.observe(r)
 	joined := strings.Join(lines, "|")
-	for _, want := range []string{"yielding to a game (steam:570)", "game ended", "mode chosen: ", "not running", "tick error: boom", "reclaimed a: 11MiB left in RAM"} {
+	for _, want := range []string{"mode chosen: ", "not running", "tick error: boom", "reclaimed a: 11MiB left in RAM"} {
 		if strings.Count(joined, want) != 1 {
 			t.Fatalf("want one %q in %q", want, joined)
 		}

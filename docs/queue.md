@@ -5,7 +5,7 @@ Tyler afterwards.
 
 ## Why
 
-Before the queue, a run with no room (the caps were full) or a paused PC (My PC or a game) got exit 75,
+Before the queue, a run with no room (the caps were full) or a paused PC (My PC) got exit 75,
 and the agent ran the command on the laptop, often the starving laptop that offloading exists to
 spare. Once results arrive as a pushed turn (see the push design in DESIGN.md), an agent doesn't need
 to sit and wait. So it can hand the run to a queue and keep working.
@@ -13,13 +13,13 @@ to sit and wait. So it can hand the run to a queue and keep working.
 ## Behaviour
 
 - **A run that can't start now is queued, not refused.** `box_run` returns
-  `state: queued`, with the job ID, the position ("2nd in line"), why it waits (no room, My PC,
-  yielding to a game), and `push` as for a running job. The result comes by the same push when the
+  `state: queued`, with the job ID, the position ("2nd in line"), why it waits (no room, My PC),
+  and `push` as for a running job. The result comes by the same push when the
   job has run.
 - **What is never queued:** these still get exit 75 at once, as before:
   - `queue: false` on `box_run`, for "I need the answer now or I'll run it locally";
-  - a GPU run while the PC yields to a game or is in My PC: games can last hours, and GPU work is
-    rarely urgent enough to wait out a game;
+  - a GPU run while the PC is in My PC: My PC can last hours, and GPU work is rarely urgent
+    enough to wait it out;
   - a session with no push (`push: false`): it couldn't hear when the job starts.
 - **The code is snapshotted when the job is queued.** The agent keeps editing after it hands the run
   off, so `box` sends the worktree as it is now. That covers uncommitted and untracked files, as a
@@ -55,7 +55,7 @@ laptop and agent reaches.
   short by a restart is then retried in the same box, unless the job's files are already in it, in
   which case it has started and is not run twice. Until that retry looks, such a job with its box
   there (or before `boxd` has listed the boxes) can't be cancelled from the queue.
-- **Scheduling.** Each poll (3s), `boxd` works out what each job waits for: My PC, a game, the GPU,
+- **Scheduling.** Each poll (3s), `boxd` works out what each job waits for: My PC, the GPU,
   or room for its size. A job on an existing running box needs no room. `boxd` starts at most one
   job at a time; the caps are read again on the next poll.
 - **Starting.** `boxd` starts a queued job by doing what `box run` does. It launches the box if
@@ -91,7 +91,7 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
   - `request` is `{box, new, size, gpu, checkout, ref, command, env, timeout, meta}`. `meta` is the
     `.meta` box would write.
   - It returns 201 with `{job, key, position, why}`.
-  - A GPU run while the PC is in My PC or yielding gets 409 (`frozen` or `yielding`).
+  - A GPU run while the PC is in My PC gets 409 (`frozen`).
 - **`GET /api/queue`:** `{jobs}`, the waiting jobs in the order they start.
 - **`GET /api/queue/{job}`:** one job by its name, whether it is waiting, running or finished. This
   is so `box watch` can follow it through its start.
@@ -114,5 +114,5 @@ It is built after the push design and `boxd`'s read side, both of which it depen
 3. The page: the Queue section and its controls. Overview and Jobs show the line in order, with
    each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
    **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
-   says where it is in line. The `full` and `yielding` fixtures hold queued jobs, and the devserver
+   says where it is in line. The `full` and `mypc` fixtures hold queued jobs, and the devserver
    plays the queue. History counts queued jobs beside the runs turned away, with their median wait.

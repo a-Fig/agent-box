@@ -484,7 +484,7 @@ func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]das
 func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxes map[string]dash.Box) {
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
-		ModeReason: cfg[mode.ProjectReasonKey], Boxd: w.Version}
+		Boxd: w.Version}
 	if v := cfg[mode.ProjectTrayVersionKey]; v != "" {
 		var tv dash.Version
 		if json.Unmarshal([]byte(v), &tv) == nil && tv.Commit != "" {
@@ -495,7 +495,6 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 			m.Tray = &tv
 		}
 	}
-	m.Yielding = m.ModeReason != ""
 	if v := cfg[keyModeRequest]; v != "" {
 		var r dash.ModeRequest
 		if json.Unmarshal([]byte(v), &r) == nil && r.Mode != "" {
@@ -506,8 +505,8 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 		t = t.UTC()
 		m.TrayLastSeen = &t
 	}
-	// Which enforcer wrote the heartbeat, and the pick it acts on (the mode
-	// that comes back after a game). Values other than boxtray's are unknown.
+	// Which enforcer wrote the heartbeat, and the pick it acts on. Values
+	// other than boxtray's are unknown.
 	switch e := cfg[mode.ProjectEnforcerKey]; e {
 	case dash.EnforcerTray, dash.EnforcerHeadless:
 		m.Enforcer = e
@@ -524,7 +523,7 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 		m.WSLMemory = w.WSLMemory()
 	}
 
-	if cur := (modeRec{m.Mode, m.ModeReason}); m.Mode != "" && (w.lastMode == nil || *w.lastMode != cur) {
+	if cur := (modeRec{m.Mode}); m.Mode != "" && (w.lastMode == nil || *w.lastMode != cur) {
 		w.lastMode = &cur
 		w.record(record{Type: recMode, At: now, Mode: &cur})
 	}
@@ -661,7 +660,7 @@ func (w *Watcher) Job(key string) (dash.Job, bool) {
 func (w *Watcher) Live() Live {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return Live{Mode: modeRec{w.machine.Mode, w.machine.ModeReason}, MemCap: w.machine.Caps.Memory}
+	return Live{Mode: modeRec{w.machine.Mode}, MemCap: w.machine.Caps.Memory}
 }
 
 // Subscribe returns the state now and a channel of the events after it. The

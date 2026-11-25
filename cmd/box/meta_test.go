@@ -15,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
-	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 const testReason = "Run the tests in a box for this change."
@@ -287,8 +286,7 @@ func TestRefusalPosted(t *testing.T) {
 		f   *fakePC
 		why string // "" posts nothing
 	}{
-		"yielding": {&fakePC{mode: "mypc", project: map[string]string{mode.ProjectReasonKey: "gaming: steam:570"}}, refusedYielding},
-		"full":     {&fakePC{refuse: memoryRefusal}, refusedFull},
+		"full": {&fakePC{refuse: memoryRefusal}, refusedFull},
 		"gpu busy": {&fakePC{mode: "shared", running: "other-1234.20261123-110000-beef",
 			insts: []instance{{Name: "other-1234", Status: "Running", Config: gpuConfig(throwawayKey, "true")}}}, refusedGPUBusy},
 		"unreachable":        {&fakePC{listErr: true}, ""},

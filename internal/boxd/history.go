@@ -32,7 +32,7 @@ const (
 	recJobEnd      = "job-end"
 	recBoxCreate   = "box-create"
 	recBoxDelete   = "box-delete"
-	recMode        = "mode" // the effective mode or its reason changed
+	recMode        = "mode" // the mode changed
 	recModeRequest = "mode-request"
 	recControl     = "control"
 	recRefusal     = "refusal"
@@ -66,8 +66,7 @@ type boxRec struct {
 func (b boxRec) id() string { return b.Name + "@" + b.CreatedAt.UTC().Format(time.RFC3339Nano) }
 
 type modeRec struct {
-	Mode   string `json:"mode"`
-	Reason string `json:"reason"`
+	Mode string `json:"mode"`
 }
 
 // controlRec is something done from the page (step 4 of docs/ui.md).
@@ -572,12 +571,12 @@ func segments(modes []modeAt, start, now time.Time, cur modeRec) []dash.Segment 
 	var segs []dash.Segment
 	open := func(at time.Time, m modeRec) {
 		if n := len(segs); n > 0 {
-			if segs[n-1].Mode == m.Mode && segs[n-1].Reason == m.Reason {
+			if segs[n-1].Mode == m.Mode {
 				return
 			}
 			segs[n-1].End = at
 		}
-		segs = append(segs, dash.Segment{Start: at, End: now, Mode: m.Mode, Reason: m.Reason})
+		segs = append(segs, dash.Segment{Start: at, End: now, Mode: m.Mode})
 	}
 	for i, m := range modes {
 		if m.at.After(now) {

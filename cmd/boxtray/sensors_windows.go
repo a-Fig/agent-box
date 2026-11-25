@@ -12,7 +12,6 @@ import (
 
 	"github.com/a-Fig/agent-box/internal/mode"
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
 
 const distro = "agents"
@@ -21,10 +20,9 @@ var (
 	shell32  = windows.NewLazySystemDLL("shell32.dll")
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
-	procQueryNotifyState = shell32.NewProc("SHQueryUserNotificationState")
-	procPowerCreate      = kernel32.NewProc("PowerCreateRequest")
-	procPowerSet         = kernel32.NewProc("PowerSetRequest")
-	procPowerClear       = kernel32.NewProc("PowerClearRequest")
+	procPowerCreate = kernel32.NewProc("PowerCreateRequest")
+	procPowerSet    = kernel32.NewProc("PowerSetRequest")
+	procPowerClear  = kernel32.NewProc("PowerClearRequest")
 )
 
 // hidden stops wsl.exe from flashing a console window.
@@ -66,23 +64,6 @@ func wslRoot(ctx context.Context, args ...string) ([]byte, error) {
 type winSensors struct {
 	mu      sync.Mutex
 	request windows.Handle // power request handle, 0 when not held
-}
-
-// Gaming checks Steam's RunningAppID, then the shell's notification state.
-func (*winSensors) Gaming() (bool, string) {
-	var appID uint32
-	if k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Valve\Steam`, registry.QUERY_VALUE); err == nil {
-		if v, _, err := k.GetIntegerValue("RunningAppID"); err == nil {
-			appID = uint32(v)
-		}
-		k.Close()
-	}
-	state := 0
-	var s int32
-	if hr, _, _ := procQueryNotifyState.Call(uintptr(unsafe.Pointer(&s))); hr == 0 {
-		state = int(s)
-	}
-	return classify(appID, state)
 }
 
 // HostUp asks wsl.exe which distros run. It never starts one.

@@ -1,6 +1,5 @@
 // Package fixture builds the dashboard's scenarios from the dash types: what
-// boxd would answer for an empty PC, a busy one, one yielding to a game, and so
-// on. The golden test in internal/dash writes them to internal/dash/testdata
+// boxd would answer for an empty PC, a busy one, one in My PC, and so on. The golden test in internal/dash writes them to internal/dash/testdata
 // at a fixed time; the devserver builds them at the current time.
 //
 // Everything here is made up: the repos, agents, hosts and paths are fiction,
@@ -41,12 +40,12 @@ var scenarios = []struct {
 }{
 	{"empty", "No boxes and no jobs yet: the PC in Shared, the tray alive.", buildEmpty},
 	{"busy", "Full mode, three boxes, two jobs running, a day of finished jobs.", buildBusy},
-	{"yielding", "A game is running, so every box is frozen and a job paused; a request for Full waits for the game to end.", buildYielding},
+	{"mypc", "My PC is chosen, so every box is frozen, a job paused and two runs queued.", buildMyPC},
 	{"full", "The caps are full (a GPU box and a medium box), and runs were turned away today.", buildFull},
 	{"tray-down", "The tray hasn't been seen for 14 minutes, so a mode request from a phone isn't being picked up.", buildTrayDown},
 	{"headless", "Nobody is logged on to the PC: the headless enforcer holds Full, and a request for Shared from a phone waits for the tray.", buildHeadless},
 	{"lost", "boxd restarted and found a job's box gone: the job is lost.", buildLost},
-	{"week", "A week of history: jobs, box-hours, yields and refusals.", buildWeek},
+	{"week", "A week of history: jobs, box-hours, modes and refusals.", buildWeek},
 }
 
 // Names lists the scenarios.
@@ -336,46 +335,45 @@ func (w *world) history(since time.Time, perDay int) {
 }
 
 // segment adds a stretch of a mode.
-func (w *world) segment(from, to time.Time, m, reason string) {
-	w.segments = append(w.segments, dash.Segment{Start: from, End: to, Mode: m, Reason: reason})
+func (w *world) segment(from, to time.Time, m string) {
+	w.segments = append(w.segments, dash.Segment{Start: from, End: to, Mode: m})
 }
 
 // days fills since..now with a working week's modes, in the fiction's local
 // time (UTC-8): Full overnight, Shared by day, now and then My PC at lunch,
-// and most evenings a game, which the tray yields to.
+// and most evenings My PC.
 func (w *world) days(since time.Time) {
-	games := []string{"gaming: steam:570", "gaming: steam:1086940", "gaming: full-screen app"}
 	cur := since
-	add := func(to time.Time, m, reason string) {
+	add := func(to time.Time, m string) {
 		to = earlier(to, w.now)
 		if !to.After(cur) {
 			return
 		}
-		w.segment(cur, to, m, reason)
+		w.segment(cur, to, m)
 		cur = to
 	}
 	mins := func(n int) time.Duration { return time.Duration(n) * time.Minute }
 	for d := since.Truncate(24 * time.Hour).Add(-16 * time.Hour); d.Before(w.now); d = d.Add(24 * time.Hour) {
-		add(d.Add(8*time.Hour+mins(w.rnd.IntN(40))), dash.ModeFull, "")
-		add(d.Add(12*time.Hour), dash.ModeShared, "")
+		add(d.Add(8*time.Hour+mins(w.rnd.IntN(40))), dash.ModeFull)
+		add(d.Add(12*time.Hour), dash.ModeShared)
 		if w.rnd.IntN(3) == 0 {
-			add(d.Add(13*time.Hour), dash.ModeMyPC, "")
+			add(d.Add(13*time.Hour), dash.ModeMyPC)
 		}
-		add(d.Add(19*time.Hour+mins(w.rnd.IntN(60))), dash.ModeShared, "")
+		add(d.Add(19*time.Hour+mins(w.rnd.IntN(60))), dash.ModeShared)
 		if w.rnd.IntN(3) != 0 {
-			add(d.Add(21*time.Hour+mins(w.rnd.IntN(90))), dash.ModeMyPC, games[w.rnd.IntN(len(games))])
+			add(d.Add(21*time.Hour+mins(w.rnd.IntN(90))), dash.ModeMyPC)
 		}
-		add(d.Add(24*time.Hour), dash.ModeFull, "")
+		add(d.Add(24*time.Hour), dash.ModeFull)
 	}
 	w.merge()
 }
 
-// merge joins neighbouring segments of the same mode and reason, and ends
+// merge joins neighbouring segments of the same mode, and ends
 // the last at now.
 func (w *world) merge() {
 	var out []dash.Segment
 	for _, s := range w.segments {
-		if n := len(out); n > 0 && out[n-1].Mode == s.Mode && out[n-1].Reason == s.Reason && !out[n-1].End.Before(s.Start) {
+		if n := len(out); n > 0 && out[n-1].Mode == s.Mode && !out[n-1].End.Before(s.Start) {
 			out[n-1].End = s.End
 			continue
 		}
@@ -384,17 +382,13 @@ func (w *world) merge() {
 	w.segments = out
 }
 
-// refuse adds runs turned away: in each yield and My PC stretch, and n more
-// for why at random times in the last hours.
+// refuse adds runs turned away in each My PC stretch.
 func (w *world) refuse() {
 	for _, s := range w.segments {
 		if s.Mode != dash.ModeMyPC {
 			continue
 		}
 		why := dash.RefusedMyPC
-		if s.Reason != "" {
-			why = dash.RefusedYielding
-		}
 		for range int(s.End.Sub(s.Start).Hours()*1.5) + w.rnd.IntN(2) {
 			w.refusals = append(w.refusals, refusal{s.Start.Add(time.Duration(w.rnd.Float64() * float64(s.End.Sub(s.Start)))), why})
 		}
@@ -639,7 +633,7 @@ func (w *world) historyFor(rng string, done []dash.Job) dash.History {
 		h.Segments = append(h.Segments, s)
 	}
 	if len(h.Segments) == 0 {
-		h.Segments = append(h.Segments, dash.Segment{Start: start, End: w.now, Mode: w.machine.Mode, Reason: w.machine.ModeReason})
+		h.Segments = append(h.Segments, dash.Segment{Start: start, End: w.now, Mode: w.machine.Mode})
 	}
 	return h
 }
@@ -690,7 +684,7 @@ func tail(log string) string {
 
 func buildEmpty(w *world) {
 	w.machine.WSLMemory = 1200 << 20
-	w.segment(w.now.Add(-24*time.Hour), w.now, dash.ModeShared, "")
+	w.segment(w.now.Add(-24*time.Hour), w.now, dash.ModeShared)
 }
 
 func buildBusy(w *world) {
@@ -704,33 +698,30 @@ func buildBusy(w *world) {
 	w.running(lb, lantern, 0, "feat/resumable-sync", 6*time.Minute+12*time.Second, dash.JobRunning)
 	w.running(tb, tidepool, 0, "feat/router-cache", 3*time.Minute+40*time.Second, dash.JobRunning)
 	w.history(w.now.Add(-24*time.Hour), 34)
-	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-15*time.Hour), dash.ModeShared, "")
-	w.segment(w.now.Add(-15*time.Hour), w.now.Add(-12*time.Hour), dash.ModeMyPC, "gaming: steam:570")
-	w.segment(w.now.Add(-12*time.Hour), w.now.Add(-3*time.Hour), dash.ModeFull, "")
-	w.segment(w.now.Add(-3*time.Hour), w.now, dash.ModeFull, "")
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-15*time.Hour), dash.ModeShared)
+	w.segment(w.now.Add(-15*time.Hour), w.now.Add(-12*time.Hour), dash.ModeMyPC)
+	w.segment(w.now.Add(-12*time.Hour), w.now.Add(-3*time.Hour), dash.ModeFull)
+	w.segment(w.now.Add(-3*time.Hour), w.now, dash.ModeFull)
 	w.merge()
 	w.refuse()
 }
 
-func buildYielding(w *world) {
+func buildMyPC(w *world) {
 	w.machine.Mode = dash.ModeMyPC
-	w.machine.Yielding = true
-	w.machine.ModeReason = "gaming: steam:570"
-	w.machine.Chosen = &dash.ChosenMode{Mode: dash.ModeFull, At: w.now.Add(-7 * time.Hour)}
-	w.machine.ModeRequested = &dash.ModeRequest{Mode: dash.ModeFull, At: w.now.Add(-3 * time.Minute), By: host}
+	w.machine.Chosen = &dash.ChosenMode{Mode: dash.ModeMyPC, At: w.now.Add(-18 * time.Minute)}
 	lb := w.box("lantern", "medium", lantern, dash.BoxFrozen, false, 2*time.Hour, 23*time.Hour+10*time.Minute)
 	w.load(lb, 0.66, 0)
 	sb := w.box("sparrow-ml", "medium", sparrow, dash.BoxFrozen, false, 50*time.Minute, 70*time.Minute)
 	w.load(sb, 0.31, 0)
 	w.running(lb, lantern, 0, "fix/store-lock-order", 22*time.Minute, dash.JobPaused)
 	w.history(w.now.Add(-24*time.Hour), 26)
-	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-7*time.Hour), dash.ModeShared, "")
-	w.segment(w.now.Add(-7*time.Hour), w.now.Add(-18*time.Minute), dash.ModeFull, "")
-	w.segment(w.now.Add(-18*time.Minute), w.now, dash.ModeMyPC, "gaming: steam:570")
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-7*time.Hour), dash.ModeShared)
+	w.segment(w.now.Add(-7*time.Hour), w.now.Add(-18*time.Minute), dash.ModeFull)
+	w.segment(w.now.Add(-18*time.Minute), w.now, dash.ModeMyPC)
 	w.refuse()
-	w.refuseRecent(dash.RefusedYielding, 3, 15*time.Minute)
-	w.queued(lantern, 1, "fix/store-lock-order", dash.RefusedYielding, 4*time.Minute+10*time.Second)
-	w.queued(tidepool, 2, "main", dash.RefusedYielding, 55*time.Second)
+	w.refuseRecent(dash.RefusedMyPC, 3, 15*time.Minute)
+	w.queued(lantern, 1, "fix/store-lock-order", dash.RefusedMyPC, 4*time.Minute+10*time.Second)
+	w.queued(tidepool, 2, "main", dash.RefusedMyPC, 55*time.Second)
 }
 
 func buildFull(w *world) {
@@ -742,8 +733,8 @@ func buildFull(w *world) {
 	w.running(gb, sparrow, 1, "exp/lora-rank", 25*time.Minute, dash.JobRunning)
 	w.running(lb, lantern, 3, "main", 9*time.Minute, dash.JobRunning)
 	w.history(w.now.Add(-24*time.Hour), 30)
-	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-9*time.Hour), dash.ModeShared, "")
-	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull, "")
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-9*time.Hour), dash.ModeShared)
+	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull)
 	w.refuseRecent(dash.RefusedFull, 9, 3*time.Hour)
 	w.refuseRecent(dash.RefusedGPUBusy, 4, 25*time.Minute)
 	w.queued(tidepool, 1, "feat/router-cache", dash.RefusedFull, 14*time.Minute+20*time.Second)
@@ -762,7 +753,7 @@ func buildTrayDown(w *world) {
 	w.load(tb, 0.49, 0.45)
 	w.running(tb, tidepool, 0, "fix/hydration-flash", 2*time.Minute+5*time.Second, dash.JobRunning)
 	w.history(w.now.Add(-24*time.Hour), 22)
-	w.segment(w.now.Add(-24*time.Hour), w.now, dash.ModeShared, "")
+	w.segment(w.now.Add(-24*time.Hour), w.now, dash.ModeShared)
 }
 
 func buildHeadless(w *world) {
@@ -773,8 +764,8 @@ func buildHeadless(w *world) {
 	w.load(lb, 0.55, 0.96)
 	w.running(lb, lantern, 3, "main", 12*time.Minute, dash.JobRunning)
 	w.history(w.now.Add(-24*time.Hour), 18)
-	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-9*time.Hour), dash.ModeShared, "")
-	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull, "")
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-9*time.Hour), dash.ModeShared)
+	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull)
 }
 
 func buildLost(w *world) {
@@ -782,7 +773,7 @@ func buildLost(w *world) {
 	w.load(ob, 0.77, 0.9)
 	w.running(ob, orbit, 0, "feat/offline-queue", 11*time.Minute, dash.JobRunning)
 	w.history(w.now.Add(-24*time.Hour), 20)
-	// The GPU box was stopped for a game while boxd was down; when boxd came
+	// The GPU box was stopped in My PC while boxd was down; when boxd came
 	// back the box had been reaped, so its job is lost.
 	started := w.now.Add(-52 * time.Minute)
 	id := started.Format("20060102-150405") + "-" + w.hex(4)
@@ -796,9 +787,9 @@ func buildLost(w *world) {
 	}
 	j.Tail = tail(w.log(j, 14, true))
 	w.jobs = append(w.jobs, j)
-	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-50*time.Minute), dash.ModeShared, "")
-	w.segment(w.now.Add(-50*time.Minute), w.now.Add(-20*time.Minute), dash.ModeMyPC, "gaming: steam:1086940")
-	w.segment(w.now.Add(-20*time.Minute), w.now, dash.ModeShared, "")
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-50*time.Minute), dash.ModeShared)
+	w.segment(w.now.Add(-50*time.Minute), w.now.Add(-20*time.Minute), dash.ModeMyPC)
+	w.segment(w.now.Add(-20*time.Minute), w.now, dash.ModeShared)
 	w.refuse()
 }
 
