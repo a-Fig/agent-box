@@ -22,39 +22,41 @@ import (
 // With bash set, "incus exec" runs the script locally in that bash, so the
 // shell scripts are tested end to end; otherwise exec answers from canned values.
 type fakePC struct {
-	t         *testing.T
-	mu        sync.Mutex
-	insts     []instance
-	mode      string
-	listErr   bool
-	bash      string
-	log       string          // canned follow output
-	exit      string          // canned exit file
-	running   string          // canned output of the running-jobs check
-	race      map[string]bool // names another run launches just before ours
-	block     bool            // follow waits until its context ends
-	pushHang  bool            // file push waits until its context ends
-	freeze    bool            // follow freezes the box and fails
-	launchErr bool            // the connection drops after creating an instance
-	refuse    string          // launch fails with this Incus error, creating nothing
-	launches  [][]string      // arguments of each launch
-	startErr  bool            // the connection drops while starting the job
-	calls     []string
-	pushed    int
-	project   map[string]string // project config other than the mode
-	memory    string            // the default profile's limits.memory
-	jobs      map[string]string // canned "# jobs" output by box
-	script    string            // canned output of the page, cancel and checkout scripts
-	scriptRC  int
-	pull      func(src, dst string) // file pull -r src dst
-	pulls     []string
-	stdins    []string          // stdin of each launch ("" when none)
-	launched  func(f *fakePC)   // runs after each successful launch, under f.mu
-	stopFor   string            // follow stops the box with this user.box.stopped and fails
-	remotes   string            // output of incus remote list --format json
-	files     map[string]string // content of each pushed file, by its target
-	cancelled bool              // the .cancelled probe finds the mark
-	followErr int               // this many follows fail with a transport error
+	t          *testing.T
+	mu         sync.Mutex
+	insts      []instance
+	mode       string
+	listErr    bool
+	bash       string
+	log        string          // canned follow output
+	exit       string          // canned exit file
+	running    string          // canned output of the running-jobs check
+	race       map[string]bool // names another run launches just before ours
+	block      bool            // follow waits until its context ends
+	pushHang   bool            // file push waits until its context ends
+	freeze     bool            // follow freezes the box and fails
+	launchErr  bool            // the connection drops after creating an instance
+	refuse     string          // launch fails with this Incus error, creating nothing
+	launches   [][]string      // arguments of each launch
+	startErr   bool            // the connection drops while starting the job
+	calls      []string
+	pushed     int
+	project    map[string]string // project config other than the mode
+	memory     string            // the default profile's limits.memory
+	jobs       map[string]string // canned "# jobs" output by box
+	script     string            // canned output of the page, cancel and checkout scripts
+	scriptRC   int
+	pull       func(src, dst string) // file pull -r src dst
+	pulls      []string
+	stdins     []string          // stdin of each launch ("" when none)
+	launched   func(f *fakePC)   // runs after each successful launch, under f.mu
+	stopFor    string            // follow stops the box with this user.box.stopped and fails
+	remotes    string            // output of incus remote list --format json
+	files      map[string]string // content of each pushed file, by its target
+	cancelled  bool              // the .cancelled probe finds the mark
+	followErr  int               // this many follows fail with a transport error
+	kept       map[string]bool   // boxes the kept-jobs check finds kept
+	refuseOnce bool              // refuse applies to the first launch only
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -110,7 +112,11 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 		f.stdins = append(f.stdins, in)
 		if f.refuse != "" {
-			return Result{Stderr: f.refuse, Code: 1}, nil
+			msg := f.refuse
+			if f.refuseOnce {
+				f.refuse = ""
+			}
+			return Result{Stderr: msg, Code: 1}, nil
 		}
 		name := strings.TrimPrefix(args[2], "pc:")
 		if f.race[name] {
@@ -214,6 +220,11 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			case isScript(c, "# cancelled"):
 				if f.cancelled {
 					return Result{Stdout: "yes\n"}, nil
+				}
+				return Result{}, nil
+			case isScript(c, "# kept jobs"):
+				if f.kept[strings.TrimPrefix(args[1], "pc:")] {
+					return Result{Stdout: "kept\n"}, nil
 				}
 				return Result{}, nil
 			case isScript(c, "# running jobs"):

@@ -100,7 +100,8 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
 It is built after the push design and `boxd`'s read side, both of which it depends on.
 1. `boxd`: the queue store, the scheduler, the starter and the API.
 2. `box`: queue on no room or pause, the snapshot upload, `box watch` following queued jobs, the
-   nudge, and `queue: false`.
+   nudge, and `queue: false`. Built in `cmd/box/queue.go`: only `box_run` queues, since only it
+   can push. The CLI's `box run` still exits 75, because nothing would follow its job.
 3. The page: the Queue section and its controls. Overview and Jobs show the line in order, with
    each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
    **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
