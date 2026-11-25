@@ -170,19 +170,36 @@ func TestStatusCountsLimitsInheritedFromProfiles(t *testing.T) {
 }
 
 func TestStatusHonorsZeroAndContainerCaps(t *testing.T) {
-	for name, project := range map[string]map[string]string{
-		"instances":  {"limits.instances": "0"},
-		"cpu":        {"limits.cpu": "0"},
-		"memory":     {"limits.memory": "0"},
-		"disk":       {"info": `{"resources":{"disk":{"Limit":0,"Usage":0}}}`},
-		"containers": {"info": `{"resources":{"containers":{"Limit":0,"Usage":0}}}`},
+	for name, tc := range map[string]struct {
+		project map[string]string
+		room    string
+	}{
+		"instances":  {map[string]string{"limits.instances": "0"}, "none (box slots: 0 of 0)"},
+		"cpu":        {map[string]string{"limits.cpu": "0"}, "none (CPUs: 0 of 0 allocated)"},
+		"memory":     {map[string]string{"limits.memory": "0"}, "none (memory: 0GiB of 0GiB allocated)"},
+		"disk":       {map[string]string{"info": `{"resources":{"disk":{"Limit":0,"Usage":0}}}`}, "none (disk: 0GiB of 0GiB allocated)"},
+		"containers": {map[string]string{"info": `{"resources":{"containers":{"Limit":0,"Usage":0}}}`}, "none (containers)"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			a, _ := testApp(&fakePC{t: t, project: project})
-			if s := a.Status(context.Background(), ""); s.Available || s.Room != "none" {
-				t.Errorf("available = %v, room = %q", s.Available, s.Room)
+			a, _ := testApp(&fakePC{t: t, project: tc.project})
+			if s := a.Status(context.Background(), ""); s.Available || s.Room != tc.room {
+				t.Errorf("available = %v, room = %q, want %q", s.Available, s.Room, tc.room)
 			}
 		})
+	}
+}
+
+// Slots free but the disk cap full: status says which cap, so an agent knows
+// a smaller size won't help and deleting a box would (#92).
+func TestStatusNamesTheFullCap(t *testing.T) {
+	f := &fakePC{t: t, project: map[string]string{
+		"limits.instances": "10", "limits.cpu": "24", "limits.memory": "24GiB",
+		"info": fmt.Sprintf(`{"resources":{"disk":{"Limit":%d,"Usage":%d}}}`, int64(210)<<30, int64(205)<<30+int64(300)<<20),
+	}}
+	a, out := testApp(f)
+	s := a.Status(context.Background(), "")
+	if s.Room != "none (disk: 205.3GiB of 210GiB allocated)" || !strings.Contains(s.Advice, "busy: no room for another box (disk: 205.3GiB of 210GiB allocated)") {
+		t.Errorf("room = %q, advice = %q\n%s", s.Room, s.Advice, out)
 	}
 }
 

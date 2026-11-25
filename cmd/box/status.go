@@ -27,7 +27,7 @@ type StatusReport struct {
 	// ended, which the next launch deletes first.
 	Replaceable int        `json:"replaceable,omitempty"`
 	Sizes       []SizeRoom `json:"sizes"`
-	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
+	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none (disk: 205GiB of 210GiB allocated)"; "no limit"
 	// GPU is "free", "free, but no room ...", "in use: job X" or
 	// "unavailable: ..." (My PC).
 	GPU     string   `json:"gpu"`
@@ -187,46 +187,61 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 
 	sizes := make([]SizeRoom, len(mode.Sizes))
 	limited := false
+	var fullCaps []string
 	for i, sz := range mode.Sizes {
 		szMem, _ := mode.ParseBytes(sz.Memory)
 		szDisk, _ := mode.ParseBytes(sz.Disk)
 		// fitsWith is how many fit once the boxes in gone are deleted, under
-		// memory cap mc; -1 when no cap limits.
+		// memory cap mc; -1 when no cap limits. full collects the caps that
+		// leave no room for one.
+		var full []string
 		fitsWith := func(gone alloc, mc int64) int64 {
 			fits := int64(-1)
-			limit := func(free, each int64) {
-				if n := max(free, 0) / each; fits < 0 || n < fits {
+			full = nil
+			limit := func(free, each int64, name string) {
+				n := max(free, 0) / each
+				if fits < 0 || n < fits {
 					fits = n
+				}
+				if n == 0 {
+					full = append(full, name)
 				}
 			}
 			if instCap >= 0 {
-				limit(instCap-held.n+gone.n, 1)
+				limit(instCap-held.n+gone.n, 1, fmt.Sprintf("box slots: %d of %d", held.n-gone.n, instCap))
 			}
 			if containersKnown {
-				limit(containersFree+gone.n, 1)
+				limit(containersFree+gone.n, 1, "containers")
 			}
 			if cpuErr == nil && cpuCap >= 0 {
-				limit(cpuCap-held.cpus+gone.cpus, int64(sz.FullCPUs))
+				limit(cpuCap-held.cpus+gone.cpus, int64(sz.FullCPUs), fmt.Sprintf("CPUs: %d of %d allocated", held.cpus-gone.cpus, cpuCap))
 			}
 			if memKnown {
-				limit(mc-held.mem+gone.mem, szMem)
+				limit(mc-held.mem+gone.mem, szMem, fmt.Sprintf("memory: %s of %s allocated", gib(held.mem-gone.mem), gib(mc)))
 			}
 			if diskKnown {
-				limit(diskFree+gone.disk, szDisk)
+				d := resources["disk"]
+				limit(diskFree+gone.disk, szDisk, fmt.Sprintf("disk: %s of %s allocated", gib(*d.Usage-gone.disk), gib(*d.Limit)))
 			}
 			if sz.GPU { // one at a time
-				limit(1-held.gpus+gone.gpus, 1)
+				limit(1-held.gpus+gone.gpus, 1, "the GPU")
 			}
 			return fits
 		}
 		fits := fitsWith(alloc{}, memCap)
 		if evict.n > 0 {
+			blocked := full
 			if f := fitsWith(evict, evictMemCap); f > fits || f < 0 {
 				fits = f
+			} else {
+				full = blocked
 			}
 		}
 		sizes[i] = SizeRoom{Size: sz, CPUs: sz.CPUs(now), Fits: int(fits)}
 		limited = limited || (fits >= 0 && !sz.GPU)
+		if i == 0 { // the smallest size: what leaves no room at all (#92)
+			fullCaps = full
+		}
 	}
 	var parts []string
 	for i := len(sizes) - 1; i >= 0; i-- { // largest first
@@ -237,6 +252,8 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 	switch {
 	case !limited:
 		return sizes, "no limit"
+	case len(parts) == 0 && len(fullCaps) > 0:
+		return sizes, "none (" + strings.Join(fullCaps, "; ") + ")"
 	case len(parts) == 0:
 		return sizes, "none"
 	}
@@ -289,22 +306,34 @@ func advice(s StatusReport, repoBox *instance) (string, bool) {
 			busy = fmt.Sprintf(", %d job(s) running there (runs take turns)", n)
 		}
 		more := "; room for " + s.Room + " more"
-		switch s.Room {
-		case "none":
-			more = "; no room for more boxes"
-		case "no limit":
+		switch {
+		case noRoom(s.Room):
+			more = "; no room for more boxes" + strings.TrimPrefix(s.Room, "none")
+		case s.Room == "no limit":
 			more = ""
 		}
 		return fmt.Sprintf("available: this repo's box %s (%s) is %s%s%s", repoBox.Name, sizeText(s, s.RepoBox.Size), strings.ToLower(repoBox.Status), busy, more) + modeNote(s), true
 	case s.SlotsFree == 0:
 		return fmt.Sprintf("busy: all %d box slots are taken: run locally, or reuse a box with box_run box", s.MaxBoxes), false
-	case s.Room == "none":
-		return "busy: no room for another box (CPU, memory or disk caps): run locally, or reuse a box with box_run box", false
+	case noRoom(s.Room):
+		why := strings.TrimPrefix(s.Room, "none ")
+		if why == "none" {
+			why = "(CPU, memory or disk caps)"
+		}
+		return "busy: no room for another box " + why + ": run locally, or reuse a box with box_run box", false
 	case s.Room == "no limit":
 		return "available: " + sizeText(s, mode.DefaultSize) + modeNote(s), true
 	}
 	return "available: room for " + s.Room + modeNote(s), true
 }
+
+// gib writes n in GiB to a tenth: Incus's disk usage is rarely whole GiB.
+func gib(n int64) string {
+	return strings.TrimSuffix(strconv.FormatFloat(float64(n)/(1<<30), 'f', 1, 64), ".0") + "GiB"
+}
+
+// noRoom is a Room that fits no box: "none", with the full caps after it when known.
+func noRoom(room string) bool { return room == "none" || strings.HasPrefix(room, "none (") }
 
 func modeNote(s StatusReport) string {
 	if s.Mode == "" {
