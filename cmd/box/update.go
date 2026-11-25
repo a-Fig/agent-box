@@ -72,6 +72,10 @@ func runBox(ctx context.Context, exe string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, exe, args...).Output()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+	}
 	return string(out), err
 }
 

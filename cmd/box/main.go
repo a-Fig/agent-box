@@ -309,9 +309,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			fmt.Fprintln(a.Out, skillSHA())
 			return 0
 		}
-		c, err := a.JoinConfig(a.Out)
-		if err == nil {
-			err = skillSync(c, args[1])
+		home, err := os.UserHomeDir()
+		if err == nil { // not box join's config: that refuses a box under the temp folder
+			err = skillSync(joinConfig{Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+				CodexHome: os.Getenv("CODEX_HOME"), Out: a.Out}, args[1])
 		}
 		if err != nil {
 			return fail(err)
