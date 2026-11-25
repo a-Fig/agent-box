@@ -66,7 +66,7 @@ var tools = []tool{
 	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: run locally"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; the output tail follows, and is also structuredContent's tail. A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail." + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\". push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. The first line of the result gives the job ID, box and exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail." + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
@@ -122,6 +122,7 @@ var jobOutput = obj(map[string]any{
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+	"digest":   str("A Go test or vitest run that ended: its failed tests, each with file:line and first assertion or panic line, then the counts (at most 3KiB). In the text result it comes before the tail. Absent for other commands."),
 	"tail":     str("The end of the job's output (up to 32KiB), as in the text result."),
 	"error":    str("Why the call failed, when it did."),
 	"finished": str("Your jobs that ended since you last looked."),
@@ -343,7 +344,7 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	if len(warnings) > 0 {
 		head += "\n" + strings.Join(warnings, "\n")
 	}
-	text := head + "\n" + log
+	text := head + "\n" + r.Digest + log
 	if err != nil {
 		text += "\nerror: " + err.Error()
 	}
@@ -357,11 +358,12 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Position int      `json:"position,omitempty"`
 		Why      string   `json:"why,omitempty"`
 		Warnings []string `json:"warnings,omitempty"`
+		Digest   string   `json:"digest,omitempty"`
 		// Claude Code shows structuredContent instead of the text when a
 		// result has both (#33), so what the agent reads is here too.
 		Tail  string `json:"tail"`
 		Error string `json:"error,omitempty"`
-	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, log, ""}
+	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, ""}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -565,7 +567,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 				if end, ok := a.endedElsewhere(ctx, args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
 					box, _, _ := strings.Cut(args.ID, ".")
 					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
-					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code}, nil, end.Tail, warnings)
+					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code, Digest: end.Digest}, nil, end.Tail, warnings)
 				}
 				return textResult(err.Error(), true)
 			}

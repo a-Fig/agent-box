@@ -800,3 +800,34 @@ func TestSafetyNetRecoversAWatcherKilledMidSend(t *testing.T) {
 		t.Errorf("after delivery: %q", line)
 	}
 }
+
+// A Go test run's result leads with its digest, read from the box after
+// the job: inline, in structuredContent, and in the pushed message.
+func TestDigestLeadsTheResult(t *testing.T) {
+	report := "#box-digest go\n" +
+		`{"Action":"fail","Package":"p","Test":"TestQueue"}` + "\n" +
+		`{"Action":"pass","Package":"p","Test":"TestOther"}` + "\n" +
+		`{"Action":"output","Package":"p","Test":"TestQueue","Output":"    queue_test.go:88: expected 2 got 3\n"}` + "\n"
+	want := "FAIL: 1 of 2 tests failed (go test)\np\n  TestQueue  queue_test.go:88: expected 2 got 3\n"
+
+	e := newPushEnv(t, &fakePC{t: t, log: "FAIL\tp\t0.1s\n", exit: "1\n", digest: report}, "thread-1")
+	text, st := e.run(t, "go test ./...")
+	if st["exitCode"] != 1.0 || st["digest"] != want {
+		t.Fatalf("structured = %v", st)
+	}
+	if _, rest, _ := strings.Cut(text, "\n"); !strings.HasPrefix(rest, want) || !strings.HasSuffix(rest, "FAIL\tp\t0.1s\n") {
+		t.Fatalf("text doesn't lead with the digest:\n%s", text)
+	}
+
+	f := &fakePC{t: t, block: true, digest: report}
+	e = newPushEnv(t, f, "thread-1")
+	_, st = e.run(t, "go test ./...")
+	job := st["job"].(string)
+	f.finish("1", "FAIL\tp\t0.1s\n")
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 1 {
+		t.Fatalf("watch: %v, pushed %d", err, e.push.count())
+	}
+	if msg := e.push.sent[0].msg; !strings.Contains(msg, "\n"+want+"Output tail:\nFAIL\tp\t0.1s\n") {
+		t.Fatalf("pushed message:\n%s", msg)
+	}
+}
