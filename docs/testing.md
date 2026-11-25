@@ -302,3 +302,128 @@ incus --project agents config get 'pc:<gpu box>' user.expires       # about 30 m
 
 After the game ends and the tray is back in Shared, the box stays stopped, and the next
 `box run --gpu` deletes it and launches a fresh one.
+
+## Live checks for pushes, the hook, the queue, the dashboard and deploys
+
+Added 2026-11-25. All passed that day against main `e823842`, except where a check says otherwise.
+Shell steps are Git Bash on the laptop. Agent steps are tool calls from a Claude Code session in
+T3, so that `T3CODE_THREAD_ID` is set. Set `U=https://agent-box.<tailnet>.ts.net`, and set `BOX` to the built
+`box.exe` (outside `%TEMP%`).
+
+The two mode switches below freeze every box while the PC is in My PC. Check first that nothing
+runs, then put the PC back in Full:
+
+```sh
+curl -s "$U/api/state" | python -c "import json,sys; print([(j['box'], j['state']) for j in json.load(sys.stdin)['jobs'] if j['state'] in ('running','paused','queued')])"   # []
+mode() { curl -s -o /dev/null -w "%{http_code}\n" -X POST -H 'X-Agent-Box: 1' -H 'Content-Type: application/json' -d "{\"mode\":\"$1\"}" "$U/api/mode"; }   # 202
+now() { curl -s "$U/api/state" | python -c "import json,sys; print(json.load(sys.stdin)['machines'][0]['mode'])"; }
+```
+
+### Dashboard
+
+```sh
+curl -s -o /dev/null -w "%{http_code}\n" "$U/"                       # 200
+curl -s -o /dev/null -w "%{http_code}\n" "$U/api/state"              # 200
+mode full; now                                                        # 202, then full within ~10s
+curl -s "$U/api/history?range=day" | python -c "import json,sys; b=json.load(sys.stdin)['buckets'][-1]; print(sum(b['jobs']['byResult'].values()), b['queued'])"
+```
+
+The last line prints this hour's job count and `{'jobs', 'started', 'medianWaitSeconds'}`. Both
+grow after the next two checks. The page shows the same numbers under History.
+
+### Pushed result
+
+Agent: `box_run` with `dir`, command `sleep 40; echo push-smoke-ok`, `new: true`, `size: small`
+and a reason. It returns `state: running`, `push: true`. End the turn. A new turn arrives within
+seconds of the job ending: `box: job <id> ended, exit 0, after ...`, with `push-smoke-ok` in the
+tail. `%LOCALAPPDATA%\agent-box\jobs\<id>.notified` reads `watcher`. If the agent is mid-turn, T3
+holds the push until the turn ends, unless the hook below is installed.
+
+### Hook
+
+`box join` in a scratch home adds the hook, and `--leave` removes it. Run join only from a built
+binary outside `%TEMP%`. The fake `claude` keeps the real Claude config out of it:
+
+```sh
+H="$LOCALAPPDATA/Temp/box-join-smoke"; mkdir -p "$H/bin" "$H/.claude"; printf '@exit /b 0\r\n' > "$H/bin/claude.cmd"
+J() { env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u T3CODE_THREAD_ID -u CLAUDE_CODE_SESSION_ID HOME="$H" USERPROFILE="$(cygpath -w "$H")" PATH="$H/bin:/usr/bin:/c/Windows/System32" "$BOX" join "$@"; }
+J; J; cat "$H/.claude/settings.json"   # "added the hook", then "hook already in"; one PostToolUse entry: "<box.exe>" hook
+J --leave; cat "$H/.claude/settings.json"; rm -r "$H"   # "removed the hook"; the file is {}
+```
+
+The hook itself, with a fake ended job for a made-up thread:
+
+```sh
+D="$LOCALAPPDATA/agent-box/jobs"; T=smoke-hook-$RANDOM; J=widget.20261125-000000-$T
+printf '{"job":"%s","thread":"%s","reason":"Hook smoke test.","command":"true","worktree":"C:\\tmp"}' "$J" "$T" > "$D/$J.json"
+printf '{"code":0,"tookSeconds":5,"tail":"hook-smoke-ok"}' > "$D/$J.ended"
+echo '{"session_id":"s"}' | T3CODE_THREAD_ID=$T "$BOX" hook   # {"hookSpecificOutput":{"additionalContext":"box: job ... ended, exit 0 ... hook-smoke-ok ...","hookEventName":"PostToolUse"}}
+echo '{"session_id":"s"}' | T3CODE_THREAD_ID=$T "$BOX" hook   # nothing: told once
+cat "$D/$J.notified"                                                                 # hook
+rm -f "${D:?}/${J:?}".json "${D:?}/${J:?}".ended "${D:?}/${J:?}".notified "${D:?}/${T:?}.hookseen"
+```
+
+Not yet run end to end (2026-11-25): a push landing mid-turn as `PostToolUse ... hook additional
+context: box: job ...` in a session whose real settings hold the hook. That waits on running `box
+join` against the real configs.
+
+### Queue
+
+```sh
+mode mypc; now   # 202, then mypc within ~10s
+```
+
+Agent: `box_run`, command `echo queue-smoke-ok`, `new: true`, `size: small`. It returns
+`state: queued`, `position: 1`, `why: mypc`.
+
+```sh
+curl -s "$U/api/queue/<job>" | python -c "import json,sys; j=json.load(sys.stdin); print(j['state'], j['position'], j['why'])"   # queued 1 mypc
+mode full; now   # 202, full
+```
+
+The job starts within about 10s, and its end is pushed as above. History's `queued` for the hour
+counts it, with its wait (`started: 1`, `medianWaitSeconds` about 11 on 2026-11-25).
+
+### Paused mid-run push
+
+Run by lime-sieve on 2026-11-25. Agent: `box_run`, command `echo pause-smoke-start; sleep 150; echo
+pause-smoke-finished`, `new: true`, `size: small`. It returns `state: running`. Then:
+
+```sh
+mode mypc; now   # mypc within ~6s; <job>.paused appears in the state folder ~11s after the request
+```
+
+At the agent's next turn: `box: job <id> paused: the PC's owner took the PC back. It resumes if
+they switch back within 15 minutes ...`.
+
+```sh
+mode full; now   # full within ~5s
+```
+
+About 2 minutes later: `box: job <id> ended, exit 0, after 2m58s`, with `pause-smoke-start` and
+`pause-smoke-finished` in the tail. Before #47, `pause-smoke-start` showed twice there; the log
+itself, `box job <id> --offset 0`, has it once.
+
+### Android unit tests
+
+From a pi-vi worktree. `gradlew` is mode 644 there, and these `-x` tasks stage APK payloads that
+need private release downloads. Agent: `box_run`, `new: true`, `size: medium`, command:
+
+```
+cd android/app && bash ./gradlew :vi:testDebugUnitTest --tests 'com.heyvi.vi.assets.SingleFlightTest' --rerun --no-daemon -q -x fetchNodeRuntime -x copyNodeLibs -x stageClaudeRuntime -x copyGoogleBinLibs -x prunePayloadStaleOutputs -x buildPayload && echo ANDROID-SMOKE-OK
+```
+
+It exits 0 and prints `ANDROID-SMOKE-OK`. That took under 30s with the SDK and Gradle caches warm
+in `/cache`. One SDK XML version warning is expected. `| tail` would hide Gradle's exit code.
+
+### deploy-boxd.sh
+
+```sh
+bash .scratch/golock.sh bash provision/deploy-boxd.sh user@pc-host
+curl -s -o /dev/null -w "%{http_code}\n" "$U/api/state"   # 200
+```
+
+It prints `checksums OK`, `kept the running boxd as boxd.old`, `boxd <sha> is active and
+answering`, then `deployed boxd <commit>`, and exits 0 in about 25s. boxd is down for about 8s.
+On 2026-11-25 these also passed, run by hand in the distro: a checksum mismatch, which changes
+nothing, and a fake boxd that exits at once, which rolls back to `boxd.old`, active again.
