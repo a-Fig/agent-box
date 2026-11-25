@@ -53,6 +53,8 @@ type fakePC struct {
 	stopFor   string            // follow stops the box with this user.box.stopped and fails
 	remotes   string            // output of incus remote list --format json
 	files     map[string]string // content of each pushed file, by its target
+	cancelled bool              // the .cancelled probe finds the mark
+	followErr int               // this many follows fail with a transport error
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -191,6 +193,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		if f.bash == "" {
 			switch {
 			case isScript(c, "# follow"):
+				if f.followErr > 0 {
+					f.followErr--
+					return Result{}, errors.New("connection reset")
+				}
 				if f.stopFor != "" {
 					in := f.inst(args[1])
 					in.Status = "Stopped"
@@ -205,6 +211,11 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 				if f.exit != "" {
 					io.WriteString(c.Stderr, exitMarker+strings.TrimSpace(f.exit)+"\n")
 				}
+			case isScript(c, "# cancelled"):
+				if f.cancelled {
+					return Result{Stdout: "yes\n"}, nil
+				}
+				return Result{}, nil
 			case isScript(c, "# running jobs"):
 				return Result{Stdout: f.running}, nil
 			case isScript(c, "# jobs"):

@@ -80,6 +80,11 @@ type App struct {
 	// WatchPoll replaces the watcher's waits, for tests.
 	InlineWait time.Duration
 	WatchPoll  time.Duration
+	// KeepEnded, when set, keeps a throwaway box for this long after its
+	// job ended (its user.expires moves to now plus this, and the reaper
+	// deletes it) instead of deleting it, so box_pull and the full log still
+	// work after the result was pushed.
+	KeepEnded time.Duration
 }
 
 func newApp() *App {
@@ -893,6 +898,12 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 		fmt.Fprintf(a.Err, "box: keeping %s: still running %s\n", box, strings.Join(running, " "))
 		return
 	}
+	if a.KeepEnded > 0 {
+		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
+			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+		}
+		return
+	}
 	a.removeQuietly(ctx, box)
 }
 
@@ -1112,7 +1123,12 @@ func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFun
 		if err != nil {
 			continue
 		}
-		if in := find(insts, box); in != nil && in.Status == "Frozen" {
+		in := find(insts, box)
+		if in == nil {
+			stop() // the box was deleted: the follow can't end by itself
+			return
+		}
+		if in.Status == "Frozen" {
 			gpu.Store(mode.IsGPU(in.Config))
 			hit.Store(true)
 			stop()
