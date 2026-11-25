@@ -507,3 +507,36 @@ func TestQueuePausedStartStillCancels(t *testing.T) {
 		t.Fatal("a paused start's job didn't cancel")
 	}
 }
+
+// A start that looks in a restored job's box clears restored, however it
+// ends: a later pause leaves the job cancellable again.
+func TestQueueStartClearsRestored(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc", "limits.memory": "24GiB", "limits.instances": "10"})
+	_, rep, _ := r.enqueue(small("widget", "quiet-otter"), "B")
+	box, _, _ := strings.Cut(rep.Job, ".")
+	it, _ := r.w.Queue.get(rep.Job)
+	r.w.Queue.markStarting(it, r.c.now().UTC())
+	r.f.set(func() {
+		r.f.ins = append(r.f.ins, inst(box, "Running", "small", r.c.now()))
+		r.f.cfg["user.agent-box.mode"] = "full"
+		r.f.cliErr = func(args []string) error {
+			if args[0] == "file" {
+				return errors.New("push failed")
+			}
+			return nil
+		}
+	})
+	w := r.restart()
+	re, _ := w.Queue.get(rep.Job)
+	w.Poll(context.Background())
+	for i := 0; i < 200; i++ {
+		w.mu.Lock()
+		busy := w.starting != ""
+		w.mu.Unlock()
+		if !busy && !w.Queue.wasRestored(re) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("a start that looked left the job restored")
+}
