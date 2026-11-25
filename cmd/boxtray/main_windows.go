@@ -35,6 +35,9 @@ func main() {
 		fmt.Println(version.Text("boxtray", version.Get()))
 		return
 	}
+	if len(os.Args) > 2 && os.Args[1] == "--update" {
+		os.Exit(installByHand(os.Args[2]))
+	}
 	if headlessRequested(os.Args[1:]) {
 		runHeadless()
 		return
@@ -50,8 +53,7 @@ func main() {
 	}()
 
 	// One tray per login session.
-	name, _ := windows.UTF16PtrFromString(`Local\agent-box-boxtray`)
-	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
+	if !takeMutex(`Local\agent-box-boxtray`) {
 		lg.Printf("exit: another boxtray is already running in this session")
 		return
 	}
@@ -142,7 +144,13 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hb := newHeartbeat(mgr.Incus, mode.EnforcerTray, lg.Printf)
-	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat}
+	up := autoUpdater(os.Args[1:], lg.Printf, func() {
+		if t == nil {
+			os.Exit(0)
+		}
+		t.close() // the message loop ends, the icon goes, main returns
+	})
+	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Maintain: up.maintain}
 	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
 	lg.Printf("mode loop started")
 
