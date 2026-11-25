@@ -1,0 +1,57 @@
+{"ImportPath":"example.com/gofail/broken [example.com/gofail/broken.test]","Action":"build-output","Output":"# example.com/gofail/broken [example.com/gofail/broken.test]\n"}
+{"ImportPath":"example.com/gofail/broken [example.com/gofail/broken.test]","Action":"build-output","Output":"broken/broken_test.go:5:33: undefined: undefinedThing\n"}
+{"ImportPath":"example.com/gofail/broken [example.com/gofail/broken.test]","Action":"build-fail"}
+{"Time":"2026-11-25T08:10:30.913403684Z","Action":"start","Package":"example.com/gofail"}
+{"Time":"2026-11-25T08:10:30.913576396Z","Action":"start","Package":"example.com/gofail/broken"}
+{"Time":"2026-11-25T08:10:30.913598479Z","Action":"output","Package":"example.com/gofail/broken","Output":"FAIL\texample.com/gofail/broken [build failed]\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.913613191Z","Action":"fail","Package":"example.com/gofail/broken","Elapsed":0,"FailedBuild":"example.com/gofail/broken [example.com/gofail/broken.test]"}
+{"Time":"2026-11-25T08:10:30.915351183Z","Action":"run","Package":"example.com/gofail","Test":"TestPass"}
+{"Time":"2026-11-25T08:10:30.915381259Z","Action":"output","Package":"example.com/gofail","Test":"TestPass","Output":"=== RUN   TestPass\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915390233Z","Action":"output","Package":"example.com/gofail","Test":"TestPass","Output":"    fail_test.go:5: passing output is hidden\n"}
+{"Time":"2026-11-25T08:10:30.915398373Z","Action":"output","Package":"example.com/gofail","Test":"TestPass","Output":"--- PASS: TestPass (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915404615Z","Action":"pass","Package":"example.com/gofail","Test":"TestPass","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.915411334Z","Action":"run","Package":"example.com/gofail","Test":"TestSkip"}
+{"Time":"2026-11-25T08:10:30.915416816Z","Action":"output","Package":"example.com/gofail","Test":"TestSkip","Output":"=== RUN   TestSkip\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915422802Z","Action":"output","Package":"example.com/gofail","Test":"TestSkip","Output":"    fail_test.go:7: not here\n"}
+{"Time":"2026-11-25T08:10:30.91543151Z","Action":"output","Package":"example.com/gofail","Test":"TestSkip","Output":"--- SKIP: TestSkip (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915438953Z","Action":"skip","Package":"example.com/gofail","Test":"TestSkip","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.915444682Z","Action":"run","Package":"example.com/gofail","Test":"TestAssert"}
+{"Time":"2026-11-25T08:10:30.915450466Z","Action":"output","Package":"example.com/gofail","Test":"TestAssert","Output":"=== RUN   TestAssert\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915456599Z","Action":"output","Package":"example.com/gofail","Test":"TestAssert","Output":"    fail_test.go:12: queue length: expected 2 got 3\n","OutputType":"error"}
+{"Time":"2026-11-25T08:10:30.915463657Z","Action":"output","Package":"example.com/gofail","Test":"TestAssert","Output":"          extra detail line\n","OutputType":"error-continue"}
+{"Time":"2026-11-25T08:10:30.915470688Z","Action":"output","Package":"example.com/gofail","Test":"TestAssert","Output":"--- FAIL: TestAssert (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915476619Z","Action":"fail","Package":"example.com/gofail","Test":"TestAssert","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.915482329Z","Action":"run","Package":"example.com/gofail","Test":"TestSub"}
+{"Time":"2026-11-25T08:10:30.915487738Z","Action":"output","Package":"example.com/gofail","Test":"TestSub","Output":"=== RUN   TestSub\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915495465Z","Action":"run","Package":"example.com/gofail","Test":"TestSub/ok"}
+{"Time":"2026-11-25T08:10:30.915500993Z","Action":"output","Package":"example.com/gofail","Test":"TestSub/ok","Output":"=== RUN   TestSub/ok\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915507299Z","Action":"output","Package":"example.com/gofail","Test":"TestSub/ok","Output":"--- PASS: TestSub/ok (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915514Z","Action":"pass","Package":"example.com/gofail","Test":"TestSub/ok","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.915528602Z","Action":"run","Package":"example.com/gofail","Test":"TestSub/bad"}
+{"Time":"2026-11-25T08:10:30.915539217Z","Action":"output","Package":"example.com/gofail","Test":"TestSub/bad","Output":"=== RUN   TestSub/bad\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915545423Z","Action":"output","Package":"example.com/gofail","Test":"TestSub/bad","Output":"    fail_test.go:18: subtest broke\n","OutputType":"error"}
+{"Time":"2026-11-25T08:10:30.915552509Z","Action":"output","Package":"example.com/gofail","Test":"TestSub/bad","Output":"--- FAIL: TestSub/bad (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915558558Z","Action":"fail","Package":"example.com/gofail","Test":"TestSub/bad","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.915564783Z","Action":"output","Package":"example.com/gofail","Test":"TestSub","Output":"--- FAIL: TestSub (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915570695Z","Action":"fail","Package":"example.com/gofail","Test":"TestSub","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.915576589Z","Action":"run","Package":"example.com/gofail","Test":"TestPanic"}
+{"Time":"2026-11-25T08:10:30.915582062Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"=== RUN   TestPanic\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.915588423Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"--- FAIL: TestPanic (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.917662888Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"panic: assignment to entry in nil map [recovered, repanicked]\n"}
+{"Time":"2026-11-25T08:10:30.917679287Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\n"}
+{"Time":"2026-11-25T08:10:30.917685905Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"goroutine 12 [running]:\n"}
+{"Time":"2026-11-25T08:10:30.917693954Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"testing.tRunner.func1.2({0x6b8e20, 0x6f10e0})\n"}
+{"Time":"2026-11-25T08:10:30.917700205Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2125 +0x232\n"}
+{"Time":"2026-11-25T08:10:30.917706164Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"testing.tRunner.func1()\n"}
+{"Time":"2026-11-25T08:10:30.917712498Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2128 +0x329\n"}
+{"Time":"2026-11-25T08:10:30.917760879Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"panic({0x6b8e20?, 0x6f10e0?})\n"}
+{"Time":"2026-11-25T08:10:30.917769101Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\t/usr/local/go/src/runtime/panic.go:859 +0x125\n"}
+{"Time":"2026-11-25T08:10:30.917775142Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"example.com/gofail.TestPanic(0x2862d406afc8?)\n"}
+{"Time":"2026-11-25T08:10:30.917781238Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\t/work/agent-box/internal/digest/testdata/gofail/fail_test.go:23 +0x28\n"}
+{"Time":"2026-11-25T08:10:30.917790835Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"testing.tRunner(0x2862d406afc8, 0x6d68c0)\n"}
+{"Time":"2026-11-25T08:10:30.917796977Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2195 +0xea\n"}
+{"Time":"2026-11-25T08:10:30.917802999Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"created by testing.(*T).Run in goroutine 1\n"}
+{"Time":"2026-11-25T08:10:30.917808921Z","Action":"output","Package":"example.com/gofail","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2260 +0x4d4\n"}
+{"Time":"2026-11-25T08:10:30.918084441Z","Action":"fail","Package":"example.com/gofail","Test":"TestPanic","Elapsed":0}
+{"Time":"2026-11-25T08:10:30.91810678Z","Action":"output","Package":"example.com/gofail","Output":"FAIL\texample.com/gofail\t0.004s\n","OutputType":"frame"}
+{"Time":"2026-11-25T08:10:30.918118999Z","Action":"fail","Package":"example.com/gofail","Elapsed":0.005}

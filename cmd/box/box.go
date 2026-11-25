@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/digest"
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
@@ -724,6 +726,10 @@ type JobResult struct {
 	// A queued job's place in line, from 1, and what it waits for.
 	Position int    `json:"position,omitempty"`
 	Why      string `json:"why,omitempty"`
+	// Digest leads a finished Go test or vitest run's result: the failed
+	// tests with file:line and first message, then the counts
+	// (internal/digest). "" for other runs.
+	Digest string `json:"digest,omitempty"`
 
 	throwaway bool // a queued job's box is a throwaway, kept after the job
 }
@@ -899,7 +905,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		a.warn(fmt.Sprintf("box: warning: setting job expiry on %s: %v", box, err))
 	}
 
-	r.State, r.Code, err = a.attach(ctx, job, o.Wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, job, o.Wait)
 	switch {
 	case !o.New:
 	case err == nil && r.State == stateDone:
@@ -1078,7 +1084,7 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 	box, _, _ := strings.Cut(job, ".")
 	r := JobResult{Job: job, Box: box}
 	var err error
-	r.State, r.Code, err = a.attach(ctx, job, wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, job, wait)
 	if err != nil {
 		// A job whose exit was read once has ended: when its box has gone
 		// since (a throwaway's 30 minutes ran out, or a launch short of room
@@ -1086,7 +1092,7 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 		if end, ok := a.endedElsewhere(ctx, job); ok {
 			fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
 			fmt.Fprint(a.Out, end.Tail)
-			return JobResult{Job: job, Box: box, State: stateDone, Code: end.Code}, nil
+			return JobResult{Job: job, Box: box, State: stateDone, Code: end.Code, Digest: end.Digest}, nil
 		}
 	}
 	if err == nil && r.State == stateDone {
@@ -1120,6 +1126,8 @@ while :; do
   fi
   if [ $fin = 1 ]; then
     printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
+    d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0)
+    [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     exit 0
   fi
   if ! alive "$pid" %[2]s; then
@@ -1129,7 +1137,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker))
+`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker))
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
@@ -1146,6 +1154,13 @@ const (
 // needs no second exec that a freeze could cut off.
 const exitMarker = "\x01box-exit "
 
+// digestMarker starts the line followScript prints on stderr after the exit
+// line when the job left a test report: the cut-down report (digest.Script),
+// base64. It rides on the follow, so the digest costs no exec of its own, and
+// comes after the exit, within 10 seconds, so it can't hold the result back:
+// a follow cut off before it just has no digest.
+const digestMarker = "\x01box-digest "
+
 // lockedWriter writes to w under mu.
 type lockedWriter struct {
 	mu *sync.Mutex
@@ -1161,11 +1176,12 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 // exitFilter passes writes through except lines that start with exitMarker,
 // which it keeps.
 type exitFilter struct {
-	w    io.Writer
-	mu   sync.Mutex
-	buf  []byte
-	code string
-	seen bool
+	w      io.Writer
+	mu     sync.Mutex
+	buf    []byte
+	code   string
+	seen   bool
+	report string // digestMarker's base64, when there was one
 }
 
 func (e *exitFilter) Write(p []byte) (int, error) {
@@ -1180,6 +1196,8 @@ func (e *exitFilter) Write(p []byte) (int, error) {
 		line := e.buf[:i+1]
 		if rest, ok := bytes.CutPrefix(line, []byte(exitMarker)); ok {
 			e.code, e.seen = strings.TrimSpace(string(rest)), true
+		} else if rest, ok := bytes.CutPrefix(line, []byte(digestMarker)); ok {
+			e.report = strings.TrimSpace(string(rest))
 		} else if _, err := e.w.Write(line); err != nil {
 			return len(p), err
 		}
@@ -1187,14 +1205,28 @@ func (e *exitFilter) Write(p []byte) (int, error) {
 	}
 }
 
-// flush writes a trailing partial line.
+// flush writes a trailing partial line, unless it is a marker's, cut off.
 func (e *exitFilter) flush() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if bytes.HasPrefix(e.buf, []byte(digestMarker)) || bytes.HasPrefix(e.buf, []byte(exitMarker)) {
+		e.buf = nil
+	}
 	if len(e.buf) > 0 {
 		e.w.Write(e.buf)
 		e.buf = nil
 	}
+}
+
+// digest is the failure digest of the report the follow printed, or "".
+func (e *exitFilter) digest() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	b, err := base64.StdEncoding.DecodeString(e.report)
+	if err != nil {
+		return ""
+	}
+	return digest.Parse(string(b))
 }
 
 func (e *exitFilter) exit() (string, bool) {
@@ -1265,7 +1297,7 @@ func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFun
 // If the box is frozen meanwhile it returns statePaused promptly. The
 // follow itself reports the job's exit code, and a code it reported wins
 // over any cancellation after it.
-func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state string, code int, err error) {
+func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state string, code int, dg string, err error) {
 	box, _, _ := strings.Cut(job, ".")
 	follow := ctx
 	if wait > 0 {
@@ -1297,13 +1329,14 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	if text, ok := ef.exit(); ok {
 		code, cerr := strconv.Atoi(text)
 		if cerr != nil {
-			return "", 1, fmt.Errorf("job %s: bad exit code %q", job, text)
+			return "", 1, "", fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
 		ended := a.Now()
 		a.markIdle(ctx, box)
 		a.reportEnded(ctx, job, code, ended, tail.String())
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20))})
-		return stateDone, code, nil
+		dg = ef.digest()
+		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
+		return stateDone, code, dg, nil
 	}
 	if hit.Load() && ctx.Err() == nil {
 		if gpu.Load() {
@@ -1311,30 +1344,30 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		} else {
 			fmt.Fprintln(a.Err, pausedMidRun(job))
 		}
-		return statePaused, exitPaused, nil
+		return statePaused, exitPaused, "", nil
 	}
 	if follow.Err() != nil {
 		fmt.Fprintf(a.Err, "box: job %s is still running; reattach with: box job %s\n", job, job)
-		return stateDetached, exitDetached, nil
+		return stateDetached, exitDetached, "", nil
 	}
 	if err != nil {
-		return "", 1, err
+		return "", 1, "", err
 	}
 	// The tray stops a GPU box in My PC. Its job may look dead (4) or the
 	// exec may just end; either way the agent should hear why.
 	if res.Code != 0 && res.Code != 3 {
 		if msg := a.gpuStopped(ctx, box); msg != "" {
 			fmt.Fprintf(a.Err, "box: %s\n", msg)
-			return statePaused, exitPaused, nil
+			return statePaused, exitPaused, "", nil
 		}
 	}
 	switch res.Code {
 	case 0:
-		return "", 1, fmt.Errorf("job %s ended without an exit code", job)
+		return "", 1, "", fmt.Errorf("job %s ended without an exit code", job)
 	case 3:
-		return "", 1, fmt.Errorf("no job %s", job)
+		return "", 1, "", fmt.Errorf("no job %s", job)
 	case 4:
-		return "", 1, fmt.Errorf("job %s died without an exit code", job)
+		return "", 1, "", fmt.Errorf("job %s died without an exit code", job)
 	default:
 		if _, paused := a.check(ctx, box); paused != "" {
 			if strings.HasSuffix(paused, " is paused") {
@@ -1342,9 +1375,9 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 			} else {
 				fmt.Fprintf(a.Err, "box: %s; run it locally\n", paused)
 			}
-			return statePaused, exitPaused, nil
+			return statePaused, exitPaused, "", nil
 		}
-		return "", 1, fmt.Errorf("lost job %s (reattach with: box job %s)", job, job)
+		return "", 1, "", fmt.Errorf("lost job %s (reattach with: box job %s)", job, job)
 	}
 }
 
