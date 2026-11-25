@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,7 +56,7 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 		rest := slices.DeleteFunc(slices.Clone(w.lastIns), func(in Instance) bool {
 			return slices.ContainsFunc(gone, func(g Instance) bool { return g.Name == in.Name })
 		})
-		_, _, room := allot(w.lastProj.Config, w.lastProj, rest)
+		_, _, room := allot(w.lastProj.Config, withoutDisk(w.lastProj, gone), rest)
 		if w.roomFor(it, byName, room) == "" {
 			for _, g := range gone {
 				it.evict = append(it.evict, g.Name)
@@ -64,6 +65,24 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 		}
 	}
 	return why
+}
+
+// withoutDisk is proj with the disk of the gone boxes taken off its use, by
+// size as box status counts it. allot takes disk from Incus's project total,
+// which deleting boxes in a sum doesn't lower; without this a queued job
+// short of disk never made room (#103).
+func withoutDisk(proj Project, gone []Instance) Project {
+	d, ok := proj.Resources["disk"]
+	if !ok || d.Usage < 0 {
+		return proj
+	}
+	for _, g := range gone {
+		b, _ := mode.ParseBytes(mode.SizeOf(g.Config).Disk)
+		d.Usage = max(d.Usage-b, 0)
+	}
+	proj.Resources = maps.Clone(proj.Resources)
+	proj.Resources["disk"] = d
+	return proj
 }
 
 // spareThrowaways lists the throwaway boxes kept after their job ended
