@@ -289,10 +289,15 @@ func sizeText(s StatusReport, name string) string {
 	return name
 }
 
+// waitsAdvice ends a status that says a run can't start now but would queue:
+// box run and a pushed box_run wait in the PC's queue (#93); box_run without
+// push still gets 75.
+const waitsAdvice = ": box run, or box_run with push, would wait in the PC's queue; run locally if you need it now"
+
 func advice(s StatusReport, repoBox *instance) (string, bool) {
 	switch {
 	case s.Mode == string(mode.MyPC):
-		return "unavailable: PC is in My PC mode: run locally", false
+		return "unavailable: PC is in My PC mode" + waitsAdvice + " (a GPU run doesn't wait)", false
 	case repoBox != nil && repoBox.Status == "Frozen":
 		return fmt.Sprintf("unavailable: this repo's box %s is frozen: run locally", repoBox.Name), false
 	case repoBox != nil && repoBox.Config[throwawayKey] != "true":
@@ -309,9 +314,9 @@ func advice(s StatusReport, repoBox *instance) (string, bool) {
 		}
 		return fmt.Sprintf("available: this repo's box %s (%s) is %s%s%s", repoBox.Name, sizeText(s, s.RepoBox.Size), strings.ToLower(repoBox.Status), busy, more) + modeNote(s), true
 	case s.SlotsFree == 0:
-		return fmt.Sprintf("busy: all %d box slots are taken: run locally, or reuse a box with box_run box", s.MaxBoxes), false
+		return fmt.Sprintf("busy: all %d box slots are taken", s.MaxBoxes) + waitsAdvice, false
 	case noRoom(s.Room):
-		return "busy: no room for another box " + strings.TrimPrefix(s.Room, "none ") + ": run locally, or reuse a box with box_run box", false
+		return "busy: no room for another box " + strings.TrimPrefix(s.Room, "none ") + waitsAdvice, false
 	case s.Room == "no limit":
 		return "available: " + sizeText(s, mode.DefaultSize) + modeNote(s), true
 	}
