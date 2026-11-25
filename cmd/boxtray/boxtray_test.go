@@ -94,7 +94,6 @@ func (n *noIncus) SetInstanceConfig(context.Context, string, string, string) err
 	n.calls++
 	return nil
 }
-func (n *noIncus) UnsetInstanceConfig(context.Context, string, string) error { n.calls++; return nil }
 func (n *noIncus) SetProjectConfig(context.Context, string, string) error    { n.calls++; return nil }
 func (n *noIncus) ProjectConfig(context.Context, string) (string, error)     { n.calls++; return "", nil }
 
