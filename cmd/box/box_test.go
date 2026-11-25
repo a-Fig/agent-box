@@ -60,6 +60,7 @@ type fakePC struct {
 	refuseOnce bool              // refuse applies to the first launch only
 	digest     string            // canned digest.Script output the follow reports
 	etagFails  int               // this many config sets fail as if another write came first
+	gone       map[string]bool   // boxes exec can't find
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -198,6 +199,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 	case "exec":
 		argv := args[3:] // after "exec pc:box --"
+		if f.gone[strings.TrimPrefix(args[1], "pc:")] {
+			return Result{Stderr: `Error: Failed to fetch instance "x" in project "agents": Instance not found`, Code: 1}, nil
+		}
 		for _, in := range f.insts {
 			if "pc:"+in.Name == args[1] && in.Status == "Stopped" {
 				return Result{Stderr: "Error: Instance is not running", Code: 1}, nil

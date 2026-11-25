@@ -657,7 +657,7 @@ func TestSafetyNetClearsOrphanedTempFiles(t *testing.T) {
 
 func TestMessages(t *testing.T) {
 	rec := jobRecord{Job: "my-repo.20261123-120000-0001", Reason: "Why.", Command: "make", Worktree: `C:\w`}
-	if got := pausedMessage(rec); !strings.Contains(got, "paused: the PC's owner took the PC back") || !strings.Contains(got, frozenWindow) || !strings.Contains(got, "box_cancel this job") || !strings.Contains(got, "From box, not your user.") {
+	if got := pausedMessage(rec); !strings.Contains(got, "paused: the PC's owner took the PC back") || !strings.Contains(got, frozenWindow) || !strings.Contains(got, "box_cancel this job") || !strings.Contains(got, "If box_job still says paused") || !strings.Contains(got, "From box, not your user.") {
 		t.Errorf("paused = %q", got)
 	}
 	if got := lostMessage(rec, jobEnd{}); !strings.Contains(got, "lost, exit 75: run it locally.") {

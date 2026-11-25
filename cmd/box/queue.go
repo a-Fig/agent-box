@@ -367,6 +367,29 @@ func lastLines(s string, n int) string {
 // yet, so it waits for the start, up to a minute, then stops it there.
 // cancelled is false when the job wasn't boxd's to cancel; the caller then
 // stops it in its box.
+// CancelAny cancels a job wherever it is, for box_cancel and box cancel:
+// waiting in boxd's queue (removed, it never ran), or running in its box. A
+// job queued from elsewhere has no record here, so a box that isn't there
+// yet sends it to the queue too (#100).
+func (a *App) CancelAny(ctx context.Context, job string) (removed, cancelled bool, code int, err error) {
+	if a.wasQueued(job) {
+		removed, err = a.cancelQueuedOrStarted(ctx, job)
+		if err != nil {
+			return false, false, 0, fmt.Errorf("cancel %s: %w", job, err)
+		}
+	}
+	if !removed {
+		cancelled, code, err = a.Cancel(ctx, job)
+		if err != nil && isGone(err) && validJob.MatchString(job) && a.cancelQueued(ctx, job) == nil {
+			removed, err = true, nil
+		}
+	}
+	if removed {
+		a.markNotified(job, "cancel")
+	}
+	return removed, cancelled, code, err
+}
+
 func (a *App) cancelQueuedOrStarted(ctx context.Context, job string) (removed bool, err error) {
 	deadline := a.Now().Add(time.Minute)
 	for {

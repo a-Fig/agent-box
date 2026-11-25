@@ -399,7 +399,8 @@ mode mypc; now   # mypc within ~6s; <job>.paused appears in the state folder ~11
 ```
 
 At the agent's next turn: `box: job <id> paused: the PC's owner took the PC back. It resumes if
-they switch back within 15 minutes ...`.
+they switch back within 15 minutes ..., else it is lost; its end is pushed either way. If box_job
+still says paused ...`.
 
 ```sh
 mode full; now   # full within ~5s

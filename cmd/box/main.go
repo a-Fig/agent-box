@@ -241,9 +241,13 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
-		cancelled, c, err := a.Cancel(ctx, fs.Arg(0))
+		removed, cancelled, c, err := a.CancelAny(ctx, fs.Arg(0))
 		if err != nil {
 			return fail(err)
+		}
+		if removed {
+			fmt.Fprintln(a.Out, "removed "+fs.Arg(0)+" from the queue; it never ran")
+			return 0
 		}
 		fmt.Fprintln(a.Out, cancelText(fs.Arg(0), cancelled, c))
 		return 0

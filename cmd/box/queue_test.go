@@ -379,3 +379,17 @@ func TestJobAfterBoxGoneAsksBoxd(t *testing.T) {
 		t.Error("a job neither the box nor boxd knows wasn't an error")
 	}
 }
+
+// box cancel takes a job queued from anywhere off the queue: with no record
+// here, its box not being there yet sends it to boxd (#100).
+func TestCLICancelOfAJobQueuedElsewhere(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{gone: map[string]bool{"my-repo-ab12": true}})
+	var out strings.Builder
+	e.a.Out = &out
+	if c := run(context.Background(), e.a, []string{"cancel", queuedJobName}, nil); c != 0 || !strings.Contains(out.String(), "removed "+queuedJobName+" from the queue") {
+		t.Fatalf("box cancel: exit %d, %q", c, out.String())
+	}
+	if !strings.Contains(b.callList(), "/api/queue/"+queuedJobName+"/cancel") {
+		t.Errorf("boxd calls: %s", b.callList())
+	}
+}
