@@ -192,6 +192,9 @@ type Job struct {
 	QueuedAt *time.Time `json:"queuedAt"`
 	Position int        `json:"position"`
 	Why      string     `json:"why"`
+	// Evicted is the queued job whose room took this job's kept throwaway
+	// box after it ended, or "" (#143).
+	Evicted string `json:"evicted,omitempty"`
 }
 
 // TailBytes is how much of a job's log its Tail keeps.

@@ -114,6 +114,8 @@ func TestRunWithNoRoomIsQueued(t *testing.T) {
 	}
 	if tail, _ := st["tail"].(string); !strings.Contains(tail, "it starts on a new box, my-repo-ab12, when it can") {
 		t.Errorf("the tail doesn't say which box the job will be on (#89): %q", tail)
+	} else if strings.Contains(tail, "launching my-repo-") {
+		t.Errorf("the tail names a box that never exists (#143): %q", tail)
 	}
 	r := b.req
 	if !r.New || r.Box != "my-repo" || r.Checkout != "my-repo" || r.Size != "medium" || r.Timeout != 90 ||
@@ -237,7 +239,7 @@ func TestWatchFollowsAQueuedJob(t *testing.T) {
 		t.Fatalf("pushed %d: %+v", e.push.count(), e.push.sent)
 	}
 	nudge, end := e.push.sent[0].msg, e.push.sent[1].msg
-	if !strings.Contains(nudge, "box: job "+queuedJobName+" still queued after 30m00s (waiting for room). Can't wait? Run it locally and box_cancel this job.") {
+	if !strings.Contains(nudge, "box: job "+queuedJobName+" still queued after 30m00s (waiting for room). It runs when there is room; box_cancel takes it off the queue.") {
 		t.Errorf("nudge = %q", nudge)
 	}
 	if !strings.Contains(end, "box: job "+queuedJobName+" ended, exit 0") {
@@ -384,6 +386,27 @@ func TestJobAfterBoxGoneAsksBoxd(t *testing.T) {
 	b.gone = true
 	if _, err := e.a.Job(context.Background(), queuedJobName, 0); err == nil {
 		t.Error("a job neither the box nor boxd knows wasn't an error")
+	}
+}
+
+// A kept throwaway the queue deleted for room says so in box job and box
+// pull, not Incus's "Instance not found" (#143).
+func TestEvictedBoxSaysSo(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{gone: map[string]bool{"my-repo-ab12": true}})
+	exit := 0
+	b.views = []dash.Job{{Box: "my-repo-ab12", ID: "20261123-120000-cd34", State: dash.JobDone, Exit: &exit, Tail: "ok", Evicted: "other-cd56.20261123-121000-ef78"}}
+	var out, errs strings.Builder
+	e.a.Out, e.a.Err = &out, &errs
+	want := "my-repo-ab12 was deleted to make room for queued job other-cd56.20261123-121000-ef78"
+	if r, err := e.a.Job(context.Background(), queuedJobName, 0); err != nil || r.Code != 0 || !strings.Contains(errs.String(), want) {
+		t.Fatalf("Job = %+v, %v, stderr %q", r, err, errs.String())
+	}
+	if _, err := e.a.Pull(context.Background(), queuedJobName, "cover.out", t.TempDir()); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Pull err = %v", err)
+	}
+	b.views[0].Evicted = ""
+	if _, err := e.a.Pull(context.Background(), queuedJobName, "cover.out", t.TempDir()); err == nil || !strings.Contains(err.Error(), "Instance not found") {
+		t.Errorf("Pull of a box gone some other way: err = %v", err)
 	}
 }
 

@@ -84,7 +84,10 @@ laptop and agent reaches.
   end nobody read (#53) gets the same 30 minutes, and its room can be taken like any kept one: its
   exit code and tail are in boxd's history, which `box job` gives once the box is gone (#90). A queued job that needs the room of kept throwaways (its own, or `box run`'s) gets
   it: boxd deletes them first, soonest to expire first, as `box`'s claimGPU deletes an idle GPU
-  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each.
+  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each. Each deletion is a
+  history control `evict` (target the box, by the queued job), and `GET /api/queue/{job}` gives an
+  ended job whose box went that way `evicted`: the queued job's name. `box pull` and `box job` then
+  say the box was deleted for that job's room, instead of Incus's "Instance not found" (#143).
 - `boxd` has no T3 access, so it doesn't push. The laptop's `box watch <job>` process (from the push
   design) follows the job while it is queued too, and sends the turn when it ends, or the nudge at 20
   minutes.

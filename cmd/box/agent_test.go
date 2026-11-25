@@ -109,18 +109,18 @@ func TestStatus(t *testing.T) {
 		advice string
 		ok     bool
 	}{
-		"unreachable": {&fakePC{listErr: true}, "unavailable: can't reach pc (incus list: Error: connection refused): run locally", false},
-		"my pc":       {&fakePC{mode: "mypc", project: limits}, "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue; run locally if you need it now (a GPU run doesn't wait)", false},
+		"unreachable": {&fakePC{listErr: true}, "unavailable: can't reach pc (incus list: Error: connection refused)", false},
+		"my pc":       {&fakePC{mode: "mypc", project: limits}, "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue (a GPU run doesn't wait)", false},
 		"repo box frozen": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "my-repo", Status: "Frozen"}}},
-			"unavailable: this repo's box my-repo is frozen: run locally", false},
+			"unavailable: this repo's box my-repo is frozen", false},
 		"room": {&fakePC{mode: "shared", project: limits, insts: []instance{{Name: "other", Status: "Running"}}},
 			"available: room for 1 large, or 2 medium, or 4 small", true},
 		"disk binds": {&fakePC{mode: "shared", project: diskFull},
 			"available: room for 1 large, or 1 medium, or 2 small", true},
 		"memory full": {&fakePC{mode: "full", project: limits, insts: []instance{{Name: "a", Config: large}, {Name: "b"}}},
-			"busy: no room for another box (memory: 12GiB of 12GiB allocated): box run, or box_run with push, would wait in the PC's queue; run locally if you need it now", false},
+			"busy: no room for another box (memory: 12GiB of 12GiB allocated): box run, or box_run with push, would wait in the PC's queue", false},
 		"full slots": {&fakePC{mode: "full", project: three, insts: []instance{{Name: "a"}, {Name: "b"}, {Name: "c"}}},
-			"busy: all 3 box slots are taken: box run, or box_run with push, would wait in the PC's queue; run locally if you need it now", false},
+			"busy: all 3 box slots are taken: box run, or box_run with push, would wait in the PC's queue", false},
 		"repo box": {&fakePC{mode: "full", project: three,
 			insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{expiresKey: "2026-11-23T14:00:00Z"}}, {Name: "b"}, {Name: "c"}},
 			jobs:  map[string]string{"my-repo": "my-repo.20261123-110000-beef running - 10\nmy-repo.20261123-100000-0001 done 0 5\n"}},

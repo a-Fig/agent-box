@@ -588,7 +588,7 @@ func endedMessage(r jobRecord, e jobEnd) string {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
 	if r.New {
-		msg += fmt.Sprintf("Box and log kept up to %d minutes (a launch short of room may take them sooner). ", int(endedKeep.Minutes()))
+		msg += fmt.Sprintf("Box and log kept up to %d minutes (a queued job or another launch that needs the room takes them sooner). ", int(endedKeep.Minutes()))
 	}
 	return msg + fmt.Sprintf("Full log: box_job id %s offset 0. Artifacts: box_pull, before this repo's next run.", r.Job)
 }
@@ -596,12 +596,12 @@ func endedMessage(r jobRecord, e jobEnd) string {
 func pausedMessage(r jobRecord) string {
 	// T3 may deliver this long after it was sent, when the job has resumed
 	// (#96); the end push follows either way.
-	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. If box_job still says paused and you can't wait, run it locally and box_cancel this job. %s\n%s",
+	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. Once it resumes, box_cancel this job if you no longer need it. %s\n%s",
 		r.Job, frozenWindow, fromBox, r.context())
 }
 
 func lostMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s lost, exit 75: run it locally. %s\n%s", r.Job, fromBox, r.context())
+	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.Job, fromBox, r.context())
 	if e.Tail != "" {
 		msg += "\n" + mask.Mask(e.Tail)
 	}

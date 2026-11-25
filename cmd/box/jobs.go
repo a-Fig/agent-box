@@ -327,6 +327,15 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	if local == "" {
 		return "", errors.New("give a local directory")
 	}
+	// A job's box the queue took for room says so, not Incus's "Instance not found" (#143).
+	gone := func(err error) error {
+		if job != "" && isGone(err) {
+			if by := a.evictedFor(ctx, job); by != "" {
+				return errors.New(evictedText(box, by))
+			}
+		}
+		return err
+	}
 	if !path.IsAbs(remote) {
 		base, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", checkoutScript(job))
 		if err != nil && job != "" && strings.Contains(err.Error(), "Instance is not running") {
@@ -340,7 +349,7 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 			base = workRoot + "/" + repo
 		}
 		if err != nil {
-			return "", err
+			return "", gone(err)
 		}
 		remote = path.Join(strings.TrimSpace(base), remote)
 	}
@@ -372,7 +381,7 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	}
 	defer os.RemoveAll(staging)
 	if _, err := a.incusOK(ctx, "file", "pull", "-r", a.target(box)+remote, staging); err != nil {
-		return "", err
+		return "", gone(err)
 	}
 	entries, err := os.ReadDir(staging)
 	if err != nil {

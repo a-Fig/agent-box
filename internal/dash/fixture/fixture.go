@@ -96,29 +96,29 @@ var (
 	lantern = &repo{"https://github.com/acme/lantern", "lantern",
 		[]string{"main", "feat/resumable-sync", "fix/store-lock-order", "feat/metrics-export"},
 		[]run{
-			{"go test -race ./...", "Full -race suite before opening the PR; it starves the laptop.", "medium", false, 4 * time.Minute, 9 * time.Minute},
+			{"go test -race ./...", "Full -race suite before opening the PR; it pins every core.", "medium", false, 4 * time.Minute, 9 * time.Minute},
 			{"go vet ./... && go test ./...", "Checking the whole module after rebasing on main, while I keep editing.", "medium", false, 2 * time.Minute, 5 * time.Minute},
 			{"go build ./cmd/... && GOOS=windows go build ./cmd/...", "Cross-compiling the release binaries for two platforms at once.", "medium", false, time.Minute, 3 * time.Minute},
-			{"make release", "Release build with the full test matrix, about 20 minutes on the laptop.", "large", false, 8 * time.Minute, 16 * time.Minute},
+			{"make release", "Release build with the full test matrix, about 20 minutes.", "large", false, 8 * time.Minute, 16 * time.Minute},
 		}}
 	tidepool = &repo{"https://github.com/acme/tidepool", "tidepool",
 		[]string{"main", "feat/router-cache", "fix/hydration-flash"},
 		[]run{
-			{"npx vitest run", "Whole vitest suite after the router refactor; locally it spawns a worker per core.", "medium", false, 3 * time.Minute, 7 * time.Minute},
+			{"npx vitest run", "Whole vitest suite after the router refactor; it spawns a worker per core.", "medium", false, 3 * time.Minute, 7 * time.Minute},
 			{"npm test -- --coverage", "Coverage run for the review; it doubles the suite's memory.", "large", false, 5 * time.Minute, 9 * time.Minute},
 			{"npm run build", "Production build to check the bundle size budget.", "small", false, time.Minute, 3 * time.Minute},
 		}}
 	orbit = &repo{"https://github.com/acme/orbit-android", "orbit-android",
 		[]string{"main", "feat/offline-queue", "fix/sync-retry"},
 		[]run{
-			{"./gradlew :app:testDebugUnitTest", "Robolectric unit tests for the sync change; the full run filled the laptop's disk last time.", "large", false, 6 * time.Minute, 14 * time.Minute},
+			{"./gradlew :app:testDebugUnitTest", "Robolectric unit tests for the sync change; the full run needs a lot of disk.", "large", false, 6 * time.Minute, 14 * time.Minute},
 			{"./gradlew lint assembleRelease", "Lint and a release build, so the PR's CI isn't the first to see them.", "medium", false, 4 * time.Minute, 8 * time.Minute},
 		}}
 	sparrow = &repo{"https://github.com/acme/sparrow-ml", "sparrow-ml",
 		[]string{"main", "exp/lora-rank", "fix/tokenizer-pad"},
 		[]run{
 			{"uv run pytest -x tests/", "Property tests take 12 minutes here; running them on a box while I write the docs.", "medium", false, 3 * time.Minute, 12 * time.Minute},
-			{"uv run python train.py --smoke --steps 200", "Fine-tuning smoke test needs CUDA, and the laptop has no GPU.", "gpu", true, 10 * time.Minute, 35 * time.Minute},
+			{"uv run python train.py --smoke --steps 200", "Fine-tuning smoke test; it needs CUDA.", "gpu", true, 10 * time.Minute, 35 * time.Minute},
 		}}
 	repos = []*repo{lantern, tidepool, orbit, sparrow}
 

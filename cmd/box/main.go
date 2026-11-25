@@ -56,7 +56,7 @@ Sizes (CPUs in Shared/Full mode, RAM, disk):
   %s.
 --size sets the size of a box that box new or box run launches (default
 medium). A reused box of another size isn't resized: the run gets a throwaway.
---gpu is --size gpu: the PC's RTX 3070, one GPU box at a time. box run --gpu
+--gpu is --size gpu: the PC's GPU, one GPU box at a time. box run --gpu
 uses a throwaway. The tray stops a GPU box in My PC.
 
 A run that can't start now (no room, the GPU taken, My PC) waits in the PC's
@@ -161,7 +161,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "run":
 		box := fs.String("box", "", "box to use (default: the repo's own box)")
-		isNew := fs.Bool("new", false, "use a throwaway box, kept 30 minutes after the job for box pull")
+		isNew := fs.Bool("new", false, "use a throwaway box, kept up to 30 minutes after the job for box pull, unless another run needs the room")
 		ttl := fs.Duration("ttl", idleTTL, "initial lifetime of a --new box before the job starts")
 		timeout := fs.Duration("timeout", 0, "kill the command after this long (exit 124)")
 		size := fs.String("size", "", "size of a box this run launches: "+mode.SizeNames()+" (default "+mode.DefaultSize+")")

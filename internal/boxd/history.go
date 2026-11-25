@@ -34,6 +34,7 @@ const (
 	recBoxDelete   = "box-delete"
 	recMode        = "mode" // the mode changed
 	recControl     = "control"
+	actionEvict    = "evict" // a control: the queue deleted kept box Target for job By's room
 	recRefusal     = "refusal"
 	recQueueAdd    = "queue-add"    // a job was queued
 	recQueueStart  = "queue-start"  // boxd started it; seconds is the wait
@@ -109,6 +110,12 @@ type waitAt struct {
 	seconds float64
 }
 
+// evictAt is when the queue deleted a kept throwaway, and for which job.
+type evictAt struct {
+	at  time.Time
+	job string
+}
+
 type refusalAt struct {
 	at  time.Time
 	why string
@@ -127,6 +134,7 @@ type History struct {
 	refusals []refusalAt
 	queueAdd []time.Time
 	waits    []waitAt
+	evicted  map[string]evictAt  // kept throwaways the queue deleted for room, by box name
 	memDays  map[string][]memAgg // done days' minute samples, by UTC hour
 }
 
@@ -140,7 +148,7 @@ func OpenHistory(dir string, now func() time.Time) (*History, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
-	h := &History{dir: dir, now: now, jobs: map[string]*dash.Job{}, boxes: map[string]*boxSpan{}, memDays: map[string][]memAgg{}}
+	h := &History{dir: dir, now: now, jobs: map[string]*dash.Job{}, boxes: map[string]*boxSpan{}, evicted: map[string]evictAt{}, memDays: map[string][]memAgg{}}
 	files, _ := filepath.Glob(filepath.Join(dir, "events-*.jsonl"))
 	slices.Sort(files)
 	for _, f := range files {
@@ -208,6 +216,10 @@ func (h *History) apply(r record) {
 	case recMode:
 		if r.Mode != nil {
 			h.modes = append(h.modes, modeAt{r.At, *r.Mode})
+		}
+	case recControl:
+		if c := r.Control; c != nil && c.Action == actionEvict {
+			h.evicted[c.Target] = evictAt{r.At, c.By}
 		}
 	case recRefusal:
 		if r.Refusal != nil {
@@ -710,7 +722,11 @@ func (h *History) JobByID(box, id string) (dash.Job, bool) {
 	if best == nil {
 		return dash.Job{}, false
 	}
-	return *best, true
+	j := *best
+	if ev, ok := h.evicted[box]; ok && ev.at.After(j.StartedAt) {
+		j.Evicted = ev.job
+	}
+	return j, true
 }
 
 // BoxRepo returns the repo of the newest recorded job on the box created at
