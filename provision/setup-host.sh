@@ -84,7 +84,7 @@ if [ "$kmajor" -lt 6 ] || { [ "$kmajor" -eq 6 ] && [ "${kminor:-0}" -lt 12 ]; };
   fi
   die "kernel is $kernel; Incus 7.x needs Linux 6.12 or newer. Ubuntu 24.04: apt install linux-generic-hwe-24.04, then reboot. Debian 12: a kernel from bookworm-backports. Debian 13 ships 6.12."
 fi
-for f in incus-preseed.yaml default-profile.yaml reaper.sh; do
+for f in incus-preseed.yaml default-profile.yaml reaper.sh https-cert.sh update-boxd.sh systemd; do
   [ -r "$HERE/$f" ] || die "missing $HERE/$f"
 done
 
@@ -116,7 +116,7 @@ for v in AGENTS_CPU_CAP AGENTS_MAX_BOXES; do
   case "${!v:-0}" in *[!0-9]*) die "$v must be a whole number, not '${!v}'" ;; esac
 done
 for v in AGENTS_MEM_CAP AGENTS_DISK_CAP AGENTS_POOL_SIZE; do
-  [ -z "${!v:-}" ] || [[ ${!v} =~ ^[0-9]+[KMGT]iB$ ]] || die "$v must be a size like 12GiB, not '${!v}'"
+  [ -z "${!v:-}" ] || [[ ${!v} =~ ^[0-9]+GiB$ ]] || die "$v must be a size in GiB, like 12GiB, not '${!v}'"
 done
 
 # Caps. On WSL they stay the PC's (docs/DESIGN.md, Box sizes): the tray's memory budgets
@@ -132,10 +132,13 @@ else
   d_boxes=$(( mem_gib / 2 )); [ "$d_boxes" -le 10 ] || d_boxes=10
   d_cpu=$(( $(nproc) * 2 )); [ "$d_cpu" -ge 4 ] || d_cpu=4
   d_mem=${mem_gib}GiB
-  d_disk=$(( ${AGENTS_MAX_BOXES:-$d_boxes} * 18 + 30 ))GiB
   free_gib=$(df -BG --output=avail /var/lib | awk 'NR==2 { sub("G", ""); print int($1) }')
   pool_gib=$(( free_gib * 8 / 10 )); [ "$pool_gib" -le 200 ] || pool_gib=200
   d_pool=${pool_gib}GiB
+  # The disk cap never exceeds the pool, so a full pool is a clear quota refusal, not ENOSPC.
+  pool_cap=${AGENTS_POOL_SIZE:-$d_pool}; pool_cap=${pool_cap%GiB}
+  disk_gib=$(( ${AGENTS_MAX_BOXES:-$d_boxes} * 18 + 30 )); [ "$disk_gib" -le "$pool_cap" ] || disk_gib=$pool_cap
+  d_disk=${disk_gib}GiB
 fi
 CPU_CAP=${AGENTS_CPU_CAP:-$d_cpu}
 MEM_CAP=${AGENTS_MEM_CAP:-$d_mem}
@@ -214,6 +217,8 @@ step "Initialising Incus (preseed)"
 if incus storage show default >/dev/null 2>&1; then
   note "storage pool 'default' exists: already initialised, skipping preseed"
 else
+  # Incus may have been stopped at the first check; now that it runs, refuse other pools here too.
+  [ -z "$(incus storage list -f csv)" ] || die "Incus here already has storage pools, none named 'default'. Setup would change its default profile and HTTPS address, so it stops. Use a host without Incus, or one whose 'default' pool is btrfs."
   pool_n=${POOL_SIZE%GiB}
   case "$pool_n" in ''|*[!0-9]*) pool_n=0 ;; esac
   [ "$pool_n" -ge 50 ] || die "pool size '$POOL_SIZE' isn't 50GiB or more, in GiB (the cache volume is 30GiB and a box 18GiB or more). Free disk space under /var/lib, or set AGENTS_POOL_SIZE=<n>GiB."

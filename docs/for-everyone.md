@@ -8,7 +8,7 @@ agents on one laptop, mostly through T3 Code.
 
 **Blocks a stranger**
 
-- **The host must be the WSL distro.** `provision/setup-distro.sh:2` and its messages assume WSL
+- **The host must be the WSL distro.** `provision/setup-host.sh:2` and its messages assume WSL
   (`:69` points at `/etc/wsl.conf`). `:53` refuses anything but Ubuntu. `:57` needs kernel 6.12+,
   which stock Ubuntu 24.04 (6.8) fails, and says to run `wsl --update`. Its only entry point is
   `install-pc.ps1`, though most of it would work on native Ubuntu.
@@ -22,22 +22,22 @@ agents on one laptop, mostly through T3 Code.
   (`cmd/box/meta.go:330`). The trusted certificate comes from `tailscale cert` (`provision/https-cert.sh:13`).
   Without Tailscale, `box run` still works directly through Incus, but a run that doesn't fit is
   refused (exit 75) instead of queued, and there's no dashboard. boxd is only installed with
-  `install-pc.ps1 -BoxdPath` (`setup-distro.sh:353`).
+  `install-pc.ps1 -BoxdPath` (`setup-host.sh:353`).
 - **An existing Incus host is assumed to be empty.** The preseed is skipped if a pool named `default`
-  exists (`setup-distro.sh:120`), but the profile still expects that pool to be btrfs and a bridge named
+  exists (`setup-host.sh:120`), but the profile still expects that pool to be btrfs and a bridge named
   `incusbr0` (`provision/default-profile.yaml:298-306`). A homelab with a ZFS or LVM pool, or a
   differently named bridge, breaks.
 
 **Works, but wrong for most machines**
 
-- **Sized for one PC.** CPU, disk and box caps (`setup-distro.sh:26-29`: 24 CPUs, 210GiB, 10 boxes), a
+- **Sized for one PC.** CPU, disk and box caps (`setup-host.sh:26-29`: 24 CPUs, 210GiB, 10 boxes), a
   200GiB pool (`provision/incus-preseed.yaml:24`) and memory budgets of 12/24GiB
   (`internal/mode/size.go:40`). A 16GB machine gets a Full budget bigger than its RAM.
 - **The GPU is WSL-only.** `--gpu` attaches `/dev/dxg` and `/usr/lib/wsl/*` (`internal/mode/size.go:55-65`;
-  `setup-distro.sh:211`). On native Linux, an NVIDIA card needs Incus's `gpu` device instead. Docs
+  `setup-host.sh:211`). On native Linux, an NVIDIA card needs Incus's `gpu` device instead. Docs
   name this PC's card (`README.md:35,61`).
 - **The tray is Windows and WSL only.** It drives `wsl.exe -d agents` (`cmd/boxtray/sensors_windows.go:17`,
-  `internal/mode/incus.go:53-56`). Without it the mode stays Shared (`setup-distro.sh:164`),
+  `internal/mode/incus.go:53-56`). Without it the mode stays Shared (`setup-host.sh:164`),
   which is fine once written down.
 - **Push is T3-only.** Results reach the agent only through a T3 thread
   (`cmd/box/meta.go:113` `T3CODE_THREAD_ID`, `cmd/box/push.go:88-90` `t3.cmd`). In plain Claude Code,
@@ -46,7 +46,7 @@ agents on one laptop, mostly through T3 Code.
 - **`box join` covers Claude Code, Codex and Antigravity** (`cmd/box/join.go:63-64,92`), not Cursor.
   It registers `box mcp` with no environment, so `BOX_REMOTE` (`cmd/box/box.go:104-106`) must already be
   set globally, or the remote must be named `pc`.
-- **Fixed names.** Tailscale hostname `agent-box` (`setup-distro.sh:258`), project `agents`, trust
+- **Fixed names.** Tailscale hostname `agent-box` (`setup-host.sh:258`), project `agents`, trust
   name `laptop-agents` (`:437`), boxd's machine ID `pc` (`internal/boxd/auth.go:59`).
 - **Exposure.** Incus listens on `[::]:8443` (`incus-preseed.yaml:10`). Behind WSL's NAT that is only
   reachable through Tailscale. On a native server it is on every interface, guarded only by
@@ -60,7 +60,7 @@ name this setup's machine, tailnet and addresses in a public repo.
 ## A stranger's first hour
 
 **A Linux server or homelab running Incus.** Installing the host fails at once: no Linux entry
-point, and `setup-distro.sh` is in `provision/` with a WSL name. A stranger who runs it anyway on
+point, and `setup-host.sh` is in `provision/` with a WSL name. A stranger who runs it anyway on
 Ubuntu with a 6.12+ kernel gets most of the way: Incus from Zabbly, the project, profile, cache and
 Tailscale. On Debian it stops at `:53`. With Incus already there, it can trip on the pool and bridge.
 Building `agent-base` takes a while and needs `--build-base`. Connecting: setup prints the trust
@@ -101,7 +101,7 @@ From a-Fig/murmur's README, `docs/agents/join.md` and `install.sh` (read 2026-11
 
 1. **`install.sh` / `install.ps1` for `box`**, copied from Murmur's. Add `box-linux-arm64` and
    `box-darwin-amd64` to the release. It installs the binary, and `box join` runs from there.
-2. **A native Linux host script.** Rename or wrap `setup-distro.sh` as `setup-host.sh`. Drop the WSL
+2. **A native Linux host script.** Rename or wrap `setup-host.sh` as `setup-host.sh`. Drop the WSL
    wording, accept Debian, skip the WSL GPU keys off WSL, and make Tailscale opt-in (`--tailscale`).
    Size caps from `nproc` and RAM (environment overrides already exist), set the memory cap once,
    and say that no tray means Shared. Refuse clearly on a non-btrfs pool or a missing `incusbr0`,
