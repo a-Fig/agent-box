@@ -197,8 +197,7 @@ func goDigest(report string, max int) string {
 			pkg = t.pkg
 			d.line(pkg)
 		}
-		loc, msg, more := goProblem(out[t])
-		loc = inPackage(loc, t.pkg, module)
+		loc, msg, more := goProblem(out[t], t.pkg, module)
 		s := "  " + t.name
 		if loc != "" {
 			s += "  " + loc + ":"
@@ -263,23 +262,11 @@ var (
 )
 
 // goProblem finds a failed test's first problem in its output: a panic and
-// the frame it came from, else its first file:line message (t.Error,
-// t.Fatal and the like), else its first line. more is up to two lines that
-// continue the message.
-func goProblem(lines []string) (loc, msg string, more []string) {
-	// A data race fails its test through the testing package's own line: the
-	// race report's first frame in the checkout is where it is (#110).
-	for i, l := range lines {
-		if strings.TrimSpace(l) != "WARNING: DATA RACE" {
-			continue
-		}
-		for _, f := range lines[i+1:] {
-			if m := raceFrame.FindStringSubmatch(strings.TrimRight(f, "\n")); m != nil && !goroot(m[1]) {
-				return rel(m[1]) + ":" + m[2], "data race", nil
-			}
-		}
-		return "", "data race", nil
-	}
+// the frame it came from, else a data race, else its first file:line message
+// (t.Error, t.Fatal and the like; its package-relative file is made
+// checkout-relative with pkg and module), else its first line. more is up to
+// two lines that continue the message.
+func goProblem(lines []string, pkg, module string) (loc, msg string, more []string) {
 	for i, l := range lines {
 		l = strings.TrimRight(l, "\n")
 		if !strings.HasPrefix(l, "panic: ") {
@@ -302,6 +289,19 @@ func goProblem(lines []string) (loc, msg string, more []string) {
 		}
 		return "", msg, nil
 	}
+	// A data race fails its test through the testing package's own line: the
+	// race report's first frame in the checkout is where it is (#110).
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "WARNING: DATA RACE" {
+			continue
+		}
+		for _, f := range lines[i+1:] {
+			if m := raceFrame.FindStringSubmatch(strings.TrimRight(f, "\n")); m != nil && !goroot(m[1]) {
+				return rel(m[1]) + ":" + m[2], "data race", nil
+			}
+		}
+		return "", "data race", nil
+	}
 	for i, l := range lines {
 		m := goAssert.FindStringSubmatch(strings.TrimRight(l, "\n"))
 		if m == nil {
@@ -316,7 +316,7 @@ func goProblem(lines []string) (loc, msg string, more []string) {
 			}
 			more = append(more, "      "+c)
 		}
-		return rel(m[1]) + ":" + m[2], m[3], more
+		return inPackage(rel(m[1])+":"+m[2], pkg, module), m[3], more
 	}
 	for _, l := range lines {
 		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "--- ") && !strings.HasPrefix(l, "=== ") {
