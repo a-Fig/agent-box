@@ -29,9 +29,13 @@ ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$ROOT"
 commit=$(git rev-parse --short HEAD)
 dirty="" modified=false
-git diff --quiet HEAD -- cmd internal provision go.mod go.sum || { dirty=" (with uncommitted changes)"; modified=true; }
+if ! git diff --quiet HEAD -- cmd internal provision go.mod go.sum ||
+  [ -n "$(git ls-files --others --exclude-standard -- cmd internal provision go.mod go.sum)" ]; then
+  dirty=" (with uncommitted changes)" modified=true
+fi
 # The page shows boxd's commit (internal/version). Go stamps it from git too,
-# but counts any untracked file as a change; this says what was built.
+# but counts any untracked file, anywhere, as a change; this looks only at
+# what goes into boxd.
 v=github.com/a-Fig/agent-box/internal/version
 ldflags="-X $v.Commit=$(git rev-parse HEAD) -X $v.Time=$(git log -1 --format=%cI HEAD) -X $v.Modified=$modified"
 

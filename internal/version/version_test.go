@@ -18,6 +18,10 @@ func TestFrom(t *testing.T) {
 	if v.Time == nil || !v.Time.Equal(*from(stamp, "", "", "").Time) || v.Time.Location().String() != "UTC" {
 		t.Errorf("offset: %+v", v)
 	}
+	// Time and Modified don't mix with the stamp's commit.
+	if v := from(stamp, "", "2020-01-01T00:00:00Z", "false"); !v.Modified || v.Time.Year() != 2026 {
+		t.Errorf("mixed: %+v", v)
+	}
 	if v := from(nil, "", "", ""); v.Commit != "" || v.Time != nil || v.String() != "unknown" {
 		t.Errorf("none: %+v", v)
 	}

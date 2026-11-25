@@ -487,7 +487,7 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 		ModeReason: cfg[mode.ProjectReasonKey], Boxd: w.Version}
 	if v := cfg[mode.ProjectTrayVersionKey]; v != "" {
 		var tv dash.Version
-		if json.Unmarshal([]byte(v), &tv) == nil {
+		if json.Unmarshal([]byte(v), &tv) == nil && tv.Commit != "" {
 			if tv.Time != nil {
 				t := tv.Time.UTC()
 				tv.Time = &t

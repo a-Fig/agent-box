@@ -202,9 +202,11 @@ func TestMachineVersions(t *testing.T) {
 		t.Fatalf("machine: %+v %+v", m.Boxd, m.Tray)
 	}
 	r.w.Version = &dash.Version{Commit: "e823842def"}
-	r.f.set(func() { r.f.cfg["user.agent-box.tray-version"] = "not json" })
-	r.poll()
-	if m := r.w.Machine(); m.Boxd == nil || m.Boxd.Commit != "e823842def" || m.Tray != nil {
-		t.Fatalf("after: %+v %+v", m.Boxd, m.Tray)
+	for _, bad := range []string{"not json", `{"commit":"","time":null,"modified":false}`} {
+		r.f.set(func() { r.f.cfg["user.agent-box.tray-version"] = bad })
+		r.poll()
+		if m := r.w.Machine(); m.Boxd == nil || m.Boxd.Commit != "e823842def" || m.Tray != nil {
+			t.Fatalf("after %s: %+v %+v", bad, m.Boxd, m.Tray)
+		}
 	}
 }

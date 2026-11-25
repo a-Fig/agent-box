@@ -17,7 +17,8 @@ import (
 	"github.com/a-Fig/agent-box/internal/dash"
 )
 
-// Set with -ldflags -X; each one set wins over the build's own stamp.
+// Set with -ldflags -X. A set Commit replaces the build's own stamp, Time
+// and Modified included; Time and Modified are ignored without it.
 var Commit, Time, Modified string
 
 // Get is this binary's version. Its Commit is "" when nothing recorded one.
@@ -34,7 +35,7 @@ func Get() dash.Version {
 
 func from(stamp map[string]string, commit, at, modified string) dash.Version {
 	if commit == "" {
-		commit, at, modified = stamp["vcs.revision"], pick(at, stamp["vcs.time"]), pick(modified, stamp["vcs.modified"])
+		commit, at, modified = stamp["vcs.revision"], stamp["vcs.time"], stamp["vcs.modified"]
 	}
 	v := dash.Version{Commit: commit, Modified: modified == "true"}
 	if t, err := time.Parse(time.RFC3339, at); err == nil && commit != "" {
@@ -42,11 +43,4 @@ func from(stamp map[string]string, commit, at, modified string) dash.Version {
 		v.Time = &t
 	}
 	return v
-}
-
-func pick(set, stamped string) string {
-	if set != "" {
-		return set
-	}
-	return stamped
 }
