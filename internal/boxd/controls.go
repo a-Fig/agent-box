@@ -164,7 +164,11 @@ func (w *Watcher) RequestMode(ctx context.Context, req dash.ModeRequest) (dash.M
 	b, _ := json.Marshal(req)
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
-	if _, err := w.Incus.CLI(ctx, "", "project", "set", w.project(), keyModeRequest+"="+string(b)); err != nil {
+	// The tray writes the project's keys every few seconds (jobrun.RetryETag).
+	if err := jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", "project", "set", w.project(), keyModeRequest+"="+string(b))
+		return err
+	}); err != nil {
 		return dash.Machine{}, err
 	}
 	w.mu.Lock()
@@ -300,18 +304,23 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
-	in, err := w.checkCreated(ctx, name, createdAt)
-	if err != nil {
-		return b, err
-	}
-	// From the expiry Incus holds now, not the poll's copy, which another
-	// writer may have moved since.
-	from := w.Now().UTC()
-	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
-		from = t.UTC()
-	}
-	until := from.Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
-	if _, err := w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+until.Format(time.RFC3339)); err != nil {
+	// Each try reads the box again: the write that beat ours may have moved
+	// the expiry (a job starting there, or another extend), and the new
+	// expiry is counted from the one Incus holds now.
+	var until time.Time
+	if err := jobrun.RetryETag(ctx, func() error {
+		in, err := w.checkCreated(ctx, name, createdAt)
+		if err != nil {
+			return err
+		}
+		from := w.Now().UTC()
+		if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
+			from = t.UTC()
+		}
+		until = from.Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
+		_, err = w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+until.Format(time.RFC3339))
+		return err
+	}); err != nil {
 		return b, err
 	}
 	w.mu.Lock()

@@ -218,7 +218,7 @@ else
   note "GPU: /dev/dxg or /usr/lib/wsl/{lib,drivers} is missing, so gpu boxes won't start (needs the NVIDIA driver on Windows)"
 fi
 
-step "Volume 'cache' (shared /cache for Go, npm, Gradle, uv)"
+step "Volume 'cache' (shared /cache for Go, npm, Gradle, Android SDK, Robolectric, uv)"
 if incus storage volume show default cache --project "$PROJECT" >/dev/null 2>&1; then
   note "exists"
 else
@@ -277,7 +277,7 @@ if [ "$BUILD_BASE" -eq 1 ]; then
       || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
-      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, gh"
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh"
     incus delete "$builder" --project "$PROJECT"
     note "published as 'agent-base' (images are shared via the default project)"
   fi

@@ -135,8 +135,11 @@ func spawnWatcher(stateDir, job string) error {
 
 // jobRecord is <job>.json.
 type jobRecord struct {
-	Job      string `json:"job"`
-	Thread   string `json:"thread"` // the session the result is for
+	Job    string `json:"job"`
+	Thread string `json:"thread"` // the session the result is for
+	// Session is Claude Code's session ID, when box_run ran under Claude
+	// Code: box hook tells only that session, not a claude started inside it.
+	Session  string `json:"session,omitempty"`
 	Reason   string `json:"reason"`
 	Command  string `json:"command"`
 	Worktree string `json:"worktree"`
@@ -321,7 +324,7 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	rec := jobRecord{Job: job, Thread: a.thread(), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
+	rec := jobRecord{Job: job, Thread: a.thread(), Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
@@ -357,6 +360,12 @@ func (a *App) safetyNet(skip string) string {
 		if strings.HasPrefix(name, ".claim-") || strings.HasPrefix(name, ".tmp-") {
 			if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > tempKeep {
 				os.Remove(filepath.Join(a.StateDir, name)) // left by a crashed writer
+			}
+			continue
+		}
+		if strings.HasSuffix(name, ".hookseen") {
+			if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
+				os.Remove(filepath.Join(a.StateDir, name)) // a thread long gone
 			}
 			continue
 		}
@@ -532,6 +541,17 @@ func lostMessage(r jobRecord, e jobEnd) string {
 		msg += "\n" + mask.Mask(e.Tail)
 	}
 	return msg
+}
+
+// endMessage is what the agent is told of a job's end.
+func endMessage(rec jobRecord, end jobEnd) string {
+	switch {
+	case end.Dropped:
+		return droppedMessage(rec)
+	case end.Lost:
+		return lostMessage(rec, end)
+	}
+	return endedMessage(rec, end)
 }
 
 // send delivers a message, retrying a few times.
@@ -751,17 +771,10 @@ func (a *App) deliver(ctx context.Context, rec jobRecord, end jobEnd) error {
 		return err
 	}
 	defer a.releaseLease(rec.Job, ".sending", token)
-	if a.exists(rec.Job, ".notified") {
-		return nil
+	if a.exists(rec.Job, ".notified") || a.waitForHook(ctx, rec) {
+		return nil // the agent has it, from box_job or mid-turn from the hook
 	}
-	msg := endedMessage(rec, end)
-	switch {
-	case end.Dropped:
-		msg = droppedMessage(rec)
-	case end.Lost:
-		msg = lostMessage(rec, end)
-	}
-	if err := a.send(ctx, rec.Thread, msg); err != nil {
+	if err := a.send(ctx, rec.Thread, endMessage(rec, end)); err != nil {
 		return err // .ended stays, so box_* results keep offering it
 	}
 	a.markNotified(rec.Job, "watcher")

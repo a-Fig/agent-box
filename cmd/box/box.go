@@ -559,9 +559,14 @@ func (a *App) expiryConfig(ttl time.Duration) string {
 	return expiresKey + "=" + a.Now().Add(ttl).UTC().Format(time.RFC3339)
 }
 
+// It retries a lost write race (jobrun.RetryETag): the tray sets a box's CPU
+// limits whenever they differ from the mode's, within a tick of a launch in
+// Full, just when box sets the job's expiry, or on any mode change.
 func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
-	_, err := a.incusOK(ctx, "config", "set", a.target(box), a.expiryConfig(ttl))
-	return err
+	return jobrun.RetryETag(ctx, func() error {
+		_, err := a.incusOK(ctx, "config", "set", a.target(box), a.expiryConfig(ttl))
+		return err
+	})
 }
 
 // isConflict says whether a launch failed because the name is taken.
