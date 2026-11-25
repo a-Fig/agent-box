@@ -18,7 +18,8 @@ import (
 )
 
 // JobVar names the job's file prefix in the job's shell. The wrappers write
-// <prefix>.gotest.json and <prefix>.vitest.json; unset, they do nothing.
+// <prefix>.gotest.json and <prefix>.vitest.json (plus .vitest.<n>.json for
+// extra runs in the same job); unset, they do nothing.
 const JobVar = "BOX_JOB_FILES"
 
 // goRender is jq that prints go test -json's events as go test prints
@@ -92,7 +93,7 @@ __box_vargs() {
   for d in "$dir" .; do
     for cfg in "$d"/vitest.config.* "$d"/vite.config.* "$d"/vitest.workspace.*; do
       [ -f "$cfg" ] || continue
-      if sed 's|//.*||' "$cfg" | grep -sE '(^|[^[:alnum:]_$])(reporters|outputFile)[[:space:]]*:' >/dev/null; then
+      if sed 's|^[[:space:]]*//.*||; s|[[:space:]]//.*||' "$cfg" | grep -sE 'reporters|outputFile' >/dev/null; then
         return 1
       fi
     done
@@ -214,7 +215,7 @@ if [ -s %[1]s.gotest.json ]; then
   [ -n "$m" ] && jq -nc --arg m "$m" '{Action: "box-module", Package: $m}'
 fi
 v=()
-for f in %[1]s.vitest.json %[1]s.vitest.*.json; do [ -s "$f" ] && v+=("$f"); done
+for f in %[1]s.vitest.json %[1]s.vitest.*.json; do [ -s "$f" ] && jq -e . "$f" >/dev/null 2>&1 && v+=("$f"); done
 if [ "${#v[@]}" -gt 0 ]; then echo %[3]s; jq -sc %[5]s "${v[@]}" | head -c %[6]d; echo; fi
 exit 0
 `, p, shq(goHead), shq(vitestHead), shq(goReduce), shq(vitestReduce), maxReport, root)

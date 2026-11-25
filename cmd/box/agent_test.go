@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/digest"
 	"github.com/a-Fig/agent-box/skills"
 )
 
@@ -59,7 +60,7 @@ func TestPayload(t *testing.T) {
 		!strings.Contains(got, "-k 10s 90.001s /bin/bash") || !strings.Contains(got, "go test ./...") {
 		t.Errorf("payload =\n%s", got)
 	}
-	if got := payload(RunOpts{Cmd: []string{"echo", "a b"}}); got != `'echo' 'a b'` {
+	if got := payload(RunOpts{Cmd: []string{"echo", "a b"}}); got != digest.Wrappers+`'echo' 'a b'` {
 		t.Errorf("plain payload = %q", got)
 	}
 }

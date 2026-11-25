@@ -129,10 +129,39 @@ func TestVitestConfigCommentDoesNotDisableDigest(t *testing.T) {
 		t.Fatalf("comment-only config disabled digest: %q", log)
 	}
 
-	if err := os.WriteFile(cfg, []byte("export default { test: { outputFile: 'out.json' } }\n"), 0o644); err != nil {
+	for _, body := range []string{
+		"export default { test: { outputFile: 'out.json' } }\n",
+		"export default { test: { 'reporters': ['junit'] } }\n",
+		"const reporters = ['dot']; export default { test: { reporters } }\n",
+		"export default { server: { proxy: 'http://localhost:3000' }, test: { reporters: ['junit'] } }\n",
+	} {
+		if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if log, _, _ := run(t, dir, "vitest run"); strings.TrimSpace(log) != "args: run" {
+			t.Fatalf("config %q was wrapped: %q", body, log)
+		}
+	}
+}
+
+// One truncated or corrupt vitest report does not drop valid reports from other
+// vitest invocations in the same job.
+func TestVitestCorruptReportDoesNotDropValidReport(t *testing.T) {
+	needs(t, "bash", "jq")
+	prefix := filepath.Join(t.TempDir(), "job")
+	valid := `{"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"numPendingTests":0,"numTodoTests":0,"testResults":[{"name":"/work/r/a.test.js","status":"failed","assertionResults":[{"fullName":"a fails","status":"failed","location":{"line":7},"failureMessages":["AssertionError: expected 1 to be 2"]}]}]}`
+	if err := os.WriteFile(prefix+".vitest.json", []byte(valid), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if log, _, _ := run(t, dir, "vitest run"); strings.TrimSpace(log) != "args: run" {
-		t.Fatalf("real outputFile config was wrapped: %q", log)
+	if err := os.WriteFile(prefix+".vitest.1.json", []byte(`{"numTotalTests":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("bash", "-c", Script(prefix)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Parse(string(out))
+	if !strings.HasPrefix(got, "FAIL: 1 of 2 tests failed (vitest)\n") || !strings.Contains(got, "a.test.js:7: AssertionError: expected 1 to be 2") {
+		t.Fatalf("digest with corrupt sibling:\n%s", got)
 	}
 }

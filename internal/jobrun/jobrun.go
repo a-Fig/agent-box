@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/digest"
 )
 
@@ -50,13 +49,13 @@ func Payload(env map[string]string, args []string, timeout time.Duration) string
 		// "go test ./... | tail" exits with go test's code, not tail's (#6).
 		cmd = "set -o pipefail\n" + cmd
 	}
-	// A Go test or vitest run also leaves its JSON report beside the log,
-	// for the failure digest (internal/digest). The functions are defined
-	// in the shell that runs the command, so the command's own children
-	// (a script that calls go test itself) run the real tools.
-	if k := dash.Classify(strings.Join(args, " "), false); k == dash.KindGoTest || k == dash.KindJSTest {
-		cmd = digest.Wrappers + cmd
-	}
+	// Define wrappers for go test and vitest so a test run leaves its JSON
+	// report beside the log for the failure digest (internal/digest). The
+	// wrappers pass through any command shape they don't handle and live
+	// only in this shell, so child scripts run the real tools. Always load
+	// them rather than gating on dash.Classify, so commands like
+	// `npm run test:unit` or `npm -w packages/a test` get a digest too.
+	cmd = digest.Wrappers + cmd
 	if timeout > 0 {
 		secs := strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64)
 		// A hard timeout can kill the timeout process itself. Read its private
