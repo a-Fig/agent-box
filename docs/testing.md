@@ -136,8 +136,12 @@ if (-not $jobLine.Success -or $text -notmatch 'throwaway-smoke-ok') {
 $throwaway = $jobLine.Groups['box'].Value
 $instances = incus --project agents list pc: --format json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Could not list instances after the run' }
-if ($instances | Where-Object { $_.name -eq $throwaway }) { throw "Throwaway $throwaway still exists" }
+if (-not ($instances | Where-Object { $_.name -eq $throwaway })) { throw "Throwaway $throwaway is already gone" }
+& $box rm $throwaway
 ```
+
+The throwaway is kept for 30 minutes after a run whose exit code was read, for `box pull`, and the
+run's last line says so (since #86). A launch short of room may take it sooner.
 
 If a previous step left the named smoke box behind, use `box ls` to confirm the printed name and remove only that box.
 
