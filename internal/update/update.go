@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,9 +34,20 @@ type Client struct {
 	HTTP *http.Client
 }
 
+// ErrNoStable is Latest's error while the repo has no stable release: GitHub
+// answers 404, as it does before the first one is tagged.
+var ErrNoStable = errors.New("no stable release yet")
+
+// errNotFound is an HTTP 404 from GitHub.
+var errNotFound = errors.New("404 Not Found")
+
 // Latest is GitHub's latest release, which is never a prerelease: the stable channel.
 func (c Client) Latest(ctx context.Context) (Release, error) {
-	return c.release(ctx, "/repos/"+Repo+"/releases/latest")
+	rel, err := c.release(ctx, "/repos/"+Repo+"/releases/latest")
+	if errors.Is(err, errNotFound) {
+		return Release{}, ErrNoStable
+	}
+	return rel, err
 }
 
 // ByTag is the release with that tag, a nightly included.
@@ -120,6 +132,9 @@ func (c Client) get(ctx context.Context, url string, limit int64) ([]byte, error
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("GET %s: %w", url, errNotFound)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
