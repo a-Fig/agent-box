@@ -28,7 +28,7 @@ to sit and wait. So it can hand the run to a queue and keep working.
   `/var/lib/agent-box/queue/<job>.bundle` until the job starts, and the job checks it out the way a
   run does. A tar was the first plan. The bundle was picked when it was built (2026-11-24), because
   it reuses `box run`'s snapshot and checkout unchanged. The bundle is deleted when the job starts or
-  is cancelled, and it never outlives 24 hours, so the PC stays compute, not storage. The cap is
+  is cancelled, and it outlives 24 hours only for the restart case below, so the PC stays compute, not storage. The cap is
   2GiB in all; a run that would exceed it isn't queued (507 `queue-full`) and gets exit 75.
 - **Order: first in, first out, with one rule for fairness.** When a job can start, the next one is
   the oldest job from the session with the fewest jobs running. One agent's burst of ten can't hold
@@ -36,7 +36,8 @@ to sit and wait. So it can hand the run to a queue and keep working.
   start ahead of a waiting large one if the large one doesn't fit yet.
 - **The nudge.** A job that has waited 20 minutes gets one push: "still queued (why); run it locally
   and box_cancel <job> if you can't wait". The agent decides. Jobs queued over 24 hours are dropped,
-  with a push saying so.
+  with a push saying so, except one whose start a restart cut short while its box is there: it may
+  be running, so it stays until a start looks in the box or the box is reaped.
 - **Cancel:** `box_cancel` removes a queued job and deletes its snapshot.
 - **On the dashboard:**
   - Overview shows a Queue section: each job's reason, agent, size, how long it has waited and why
@@ -52,7 +53,8 @@ laptop and agent reaches.
   crash-safe: on start, `boxd` reloads it, and drops a job without its bundle or a bundle without its
   job. A job's file records when a start began, before anything is launched or run. A start cut
   short by a restart is then retried in the same box, unless the job's files are already in it, in
-  which case it has started and is not run twice.
+  which case it has started and is not run twice. Until that retry looks, such a job with its box
+  there (or before `boxd` has listed the boxes) can't be cancelled from the queue.
 - **Scheduling.** Each poll (3s), `boxd` works out what each job waits for: My PC, a game, the GPU,
   or room for its size. A job on an existing running box needs no room. `boxd` starts at most one
   job at a time; the caps are read again on the next poll.
@@ -92,10 +94,13 @@ The types are in `internal/dash` (`QueueRequest`, `QueueReply`, `QueuePage`). Ev
 - **`GET /api/queue/{job}`:** one job by its name, whether it is waiting, running or finished. This
   is so `box watch` can follow it through its start.
 - **`POST /api/queue/{job}/cancel`** (204) and **`/front`** (200, the `Job`): controls. Both get 409
-  `not-running` once the job has started.
+  `not-running` once the job has started, and cancel also while a job whose start a restart cut
+  short may be running in its box.
 - Queued jobs appear in `/api/state` as `Job.state: queued` with `queuedAt`, `position` and `why`
   (one of the refusal causes).
-- `/api/history` buckets carry `queued: {jobs, medianWaitSeconds}`.
+- `/api/history` buckets carry `queued: {jobs, started, medianWaitSeconds}`: the jobs queued in the
+  bucket (cancelled and dropped ones too), and the queued jobs that started in it with their median
+  wait.
 
 ## Order of work
 
@@ -108,4 +113,4 @@ It is built after the push design and `boxd`'s read side, both of which it depen
    each job's place, reason, agent, size, wait and why; a job past `QueueNudge` is marked "nudged".
    **Move to front** and **Cancel** (which asks first) are on each one, and a waiting job's own page
    says where it is in line. The `full` and `yielding` fixtures hold queued jobs, and the devserver
-   plays the queue. Counting queued jobs in History is still to do.
+   plays the queue. History counts queued jobs beside the runs turned away, with their median wait.

@@ -49,6 +49,7 @@ type queued struct {
 
 	view     dash.Job // the job as the page sees it, from Meta
 	starting bool
+	restored bool     // loaded with Starting set, and no start has looked in its box since
 	evict    []string // kept throwaways to delete for its room (spareThrowaways)
 }
 
@@ -81,6 +82,7 @@ func OpenQueue(dir string) (*Queue, error) {
 			continue
 		}
 		it.view = viewOf(&it)
+		it.restored = it.Starting != nil
 		q.items[it.Job] = &it
 	}
 	bundles, _ := filepath.Glob(filepath.Join(dir, "*.bundle"))
@@ -270,7 +272,8 @@ func (q *Queue) Front(job string) bool {
 }
 
 // list is the waiting jobs in their order. The pointers are the store's;
-// callers hold no lock, so they read only fields that don't change.
+// callers hold no lock, so they read only fields that don't change, and
+// Starting through startMark.
 func (q *Queue) list() []*queued {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -294,14 +297,37 @@ func (q *Queue) get(job string) (*queued, bool) {
 	return it, ok
 }
 
-// markStarting records on disk that a start of it began at t.
+// markStarting records on disk that a start of it began at t. A later
+// attempt moves the mark to its own time: that attempt found nothing in the
+// box, and t is the start time the job's .meta will hold.
 func (q *Queue) markStarting(it *queued, t time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if it.Starting == nil {
-		it.Starting = &t
-	}
+	it.Starting = &t
 	return q.save(it)
+}
+
+// looked clears restored: a start has looked in the box, or found none.
+func (q *Queue) looked(it *queued) {
+	q.mu.Lock()
+	it.restored = false
+	q.mu.Unlock()
+}
+
+// wasRestored says whether it came back from disk mid-start and no start has
+// looked in its box since.
+func (q *Queue) wasRestored(it *queued) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return it.restored
+}
+
+// startMark is when a start of it last began, or nil. The starter writes it
+// while the scheduler reads, so it is read under the store's lock.
+func (q *Queue) startMark(it *queued) *time.Time {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return it.Starting
 }
 
 func (q *Queue) setStarting(it *queued, v bool) {

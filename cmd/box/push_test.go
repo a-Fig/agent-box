@@ -115,8 +115,41 @@ func TestRunInlineResultWithinWindow(t *testing.T) {
 	if len(*e.spawns) != 0 {
 		t.Errorf("spawned a watcher for a finished run: %v", *e.spawns)
 	}
-	if ents, _ := os.ReadDir(e.a.StateDir); len(ents) != 0 {
+	// Only the recorded end, for a box_job after the box has gone.
+	if ents, _ := os.ReadDir(e.a.StateDir); len(ents) != 1 || !strings.HasSuffix(ents[0].Name(), ".result") {
 		t.Errorf("state files for an inline result: %v", ents)
+	}
+}
+
+// A job whose exit was read keeps its result after its box goes: box_job
+// gives the recorded exit code and tail, never "lost".
+func TestJobAfterBoxGoneGivesRecordedEnd(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t, log: "hello\n", exit: "3\n"}, "thread-1")
+	_, st := e.run(t, "go test ./...")
+	job := st["job"].(string)
+	if st["exitCode"] != 3.0 {
+		t.Fatalf("run = %v", st)
+	}
+	e.f.mu.Lock()
+	e.f.insts, e.f.log, e.f.exit = nil, "", ""
+	e.f.mu.Unlock()
+	text, st := e.call(t, "box_job", map[string]any{"id": job})
+	if st["state"] != "done" || st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") || !strings.Contains(text, "recorded when it ended") {
+		t.Errorf("box_job after the box went = %v\n%s", st, text)
+	}
+	if _, st := e.call(t, "box_job", map[string]any{"id": job, "offset": 0}); st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") {
+		t.Errorf("box_job page after the box went = %v", st)
+	}
+	if text, _ := e.call(t, "box_job", map[string]any{"id": job, "offset": -1}); !strings.Contains(text, "can't be negative") {
+		t.Errorf("a bad offset after the box went = %q", text)
+	}
+	// A lost guess from a watcher that lost the race doesn't hide the real end.
+	writeJSON(e.a.statePath(job, ".ended"), jobEnd{Code: exitPaused, Lost: true})
+	if end, ok := e.a.recordedEnd(job); !ok || end.Code != 3 {
+		t.Errorf("recorded end under a lost .ended = %+v, %v", end, ok)
+	}
+	if _, ok := e.a.recordedEnd("../" + job); ok {
+		t.Error("recordedEnd read a path outside the state directory")
 	}
 }
 
@@ -177,12 +210,14 @@ func TestRunRefusedHasNoPush(t *testing.T) {
 	}
 }
 
-func TestRunRejectsObsoleteParameters(t *testing.T) {
+// A session holding an older tool list still sends these (#34): the run goes
+// ahead, with a notice.
+func TestRunIgnoresObsoleteParameters(t *testing.T) {
 	e := newPushEnv(t, &fakePC{t: t}, "thread-1")
 	for _, extra := range []map[string]any{{"box": "mine"}, {"wait": "10m"}} {
-		text, _ := e.call(t, "box_run", e.runArgs(extra, "true"))
-		if !strings.Contains(text, "no longer takes") || e.f.callList() != "" {
-			t.Errorf("%v = %q (calls %q)", extra, text, e.f.callList())
+		text, st := e.call(t, "box_run", e.runArgs(extra, "true"))
+		if !strings.Contains(text, "no longer takes") || !strings.Contains(text, "ignored") || st["job"] == nil {
+			t.Errorf("%v = %q", extra, text)
 		}
 	}
 }

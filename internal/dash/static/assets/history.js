@@ -132,7 +132,7 @@ function memory(buckets, range) {
 }
 
 // The mode timeline: a strip of the effective mode, yields in their own color, and under it the
-// runs turned away in each bucket, so it is plain what games cost agents.
+// runs turned away and the runs queued in each bucket, so it is plain what games cost agents.
 function timeline(d, range) {
   const buckets = d.buckets;
   const t0 = Date.parse(buckets[0].start);
@@ -157,9 +157,22 @@ function timeline(d, range) {
     const why = Object.entries(b.refusals.byWhy || {}).map(([k, v]) => v + " " + (WHY[k] || k));
     kids.push(s("rect", { class: "hit", x: left + step * i, y: 32, width: step, height: 30 }, s("title", null, label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"))));
   });
+  // Runs queued, counted when they were queued; a bucket's tooltip also gives the waits of the
+  // queued runs that started in it.
+  const qmax = Math.max(1, ...buckets.map((b) => b.queued?.jobs || 0));
+  kids.push(s("text", { x: left - 6, y: 90, "text-anchor": "end" }, "queued"), s("line", { class: "axis", x1: left, x2: W, y1: 100, y2: 100 }));
+  buckets.forEach((b, i) => {
+    const q = b.queued || {};
+    const n = q.jobs || 0;
+    const bx = left + step * i + step * 0.2;
+    if (n) kids.push(s("rect", { x: bx, y: 100 - (n / qmax) * 26, width: Math.max(2, step * 0.6), height: (n / qmax) * 26, rx: 2, fill: "var(--s7)" }));
+    const lines = [label(b, range) + ": " + (n ? n + " queued" : "none queued")];
+    if (q.started) lines.push(q.started + " started after a median wait of " + dur(q.medianWaitSeconds));
+    kids.push(s("rect", { class: "hit", x: left + step * i, y: 70, width: step, height: 30 }, s("title", null, lines.join("\n"))));
+  });
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
-  buckets.forEach((b, i) => i % every === 0 && kids.push(s("text", { x: left + step * i + step / 2, y: 78, "text-anchor": "middle" }, label(b, range))));
-  return s("svg", { viewBox: `0 0 ${W} 82`, role: "img", "aria-label": "Mode timeline and refused runs" }, kids);
+  buckets.forEach((b, i) => i % every === 0 && kids.push(s("text", { x: left + step * i + step / 2, y: 116, "text-anchor": "middle" }, label(b, range))));
+  return s("svg", { viewBox: `0 0 ${W} 120`, role: "img", "aria-label": "Mode timeline, refused runs and queued runs" }, kids);
 }
 
 // Totals as horizontal bars, biggest first, labelled with their value.
@@ -239,6 +252,11 @@ const history = {
     const jobsN = sum(byResult);
     const hours = sum(totals(B, (b) => b.boxHours.bySize));
     const refused = sum(totals(B, (b) => b.refusals.byWhy));
+    // Queued runs, and their median wait over the range: each bucket's median weighted by the
+    // queued runs that started in it, as the run-time medians are below.
+    const queuedN = B.reduce((a, b) => a + (b.queued?.jobs || 0), 0);
+    const startedN = B.reduce((a, b) => a + (b.queued?.started || 0), 0);
+    const wait = startedN ? B.reduce((a, b) => a + (b.queued?.medianWaitSeconds || 0) * (b.queued?.started || 0), 0) / startedN : 0;
     const passRate = jobsN ? Math.round(((byResult.pass || 0) / Math.max(1, jobsN - (byResult.cancelled || 0))) * 100) + "%" : "—";
     // The median per repo over the range: each bucket's median weighted by its jobs, which is
     // close enough to read from and needs no second call.
@@ -263,12 +281,13 @@ const history = {
           [passRate, "passed, of those not cancelled"],
           [hours.toFixed(hours < 10 ? 1 : 0), "box-hours"],
           [refused, "runs turned away"],
+          [queuedN, startedN ? "runs queued; median wait " + dur(wait) : "runs queued"],
         ].map(([v, l]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", null, l))),
       ),
       h(
         "div",
         { class: "charts" },
-        chart("Mode and yields", "The PC's mode, the games it yielded to, and the runs it turned away in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], (k) => (k === "yield" ? "Yielding to a game" : modeLabel(k))), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"))], true),
+        chart("Mode and yields", "The PC's mode, the games it yielded to, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], (k) => (k === "yield" ? "Yielding to a game" : modeLabel(k))), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", null, h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
         chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])], true),
         chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),

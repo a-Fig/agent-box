@@ -43,6 +43,10 @@ func Payload(env map[string]string, args []string, timeout time.Duration) string
 		fmt.Fprintf(&b, "export %s=%s || exit 2\n", k, Shq(env[k]))
 	}
 	cmd := ShellCommand(args)
+	if len(args) == 1 {
+		// "go test ./... | tail" exits with go test's code, not tail's (#6).
+		cmd = "set -o pipefail\n" + cmd
+	}
 	if timeout > 0 {
 		secs := strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64)
 		// A hard timeout can kill the timeout process itself. Read its private

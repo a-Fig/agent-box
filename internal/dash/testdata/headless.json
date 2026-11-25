@@ -249,7 +249,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T02:55:35Z",
         "position": 0,
         "why": ""
       },
@@ -590,7 +590,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T02:55:35Z",
         "position": 0,
         "why": ""
       },
@@ -801,6 +801,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -837,6 +838,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -874,6 +876,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -916,6 +919,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -954,6 +958,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -980,6 +985,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1004,6 +1010,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1028,6 +1035,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1063,8 +1071,9 @@
         "memUsed": 181836531,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 83
         }
       },
       {
@@ -1100,6 +1109,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1126,6 +1136,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1162,6 +1173,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1188,6 +1200,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1212,6 +1225,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1248,6 +1262,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1272,6 +1287,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1296,6 +1312,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1320,6 +1337,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1344,6 +1362,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1380,6 +1399,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1404,6 +1424,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1428,6 +1449,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1465,6 +1487,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1492,6 +1515,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       }
@@ -1535,6 +1559,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1559,6 +1584,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1583,6 +1609,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1607,6 +1634,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1631,6 +1659,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1679,6 +1708,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1729,8 +1759,9 @@
         "memUsed": 532309668,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 83
         }
       }
     ],

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestMCP(t *testing.T) {
@@ -42,8 +44,11 @@ func TestMCP(t *testing.T) {
 	}
 	got := map[int]reply{}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 7 { // no reply to the notification
+	if len(lines) != 8 { // no reply to the notification, and tools/list_changed after it
 		t.Fatalf("got %d replies:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[1], `"method":"notifications/tools/list_changed"`) {
+		t.Errorf("second line = %s, want tools/list_changed after initialized", lines[1])
 	}
 	for _, l := range lines {
 		var r reply
@@ -238,6 +243,83 @@ func TestMCPSubmoduleWarningSurvivesLongLog(t *testing.T) {
 	}
 	if got := strings.SplitN(reply.Result.Content[0].Text, "\n", 4); len(got) < 3 || got[1] != warning || got[2] != "[earlier output cut]" {
 		t.Error("warning was not shown ahead of the truncated log")
+	}
+}
+
+// Claude Code shows structuredContent, not the text, when a result has both
+// (#33): the log tail must be there too.
+func TestMCPStructuredCarriesTail(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{Name: "agent-box", Status: "Running"}}, log: "hello\n", exit: "3\n"}
+	a, _ := testApp(f)
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_job","arguments":{"id":"agent-box.20261123-120000-0001"}}}`
+	var out bytes.Buffer
+	if err := serveMCP(context.Background(), a, strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Result struct {
+			Structured map[string]any `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if s := r.Result.Structured; s["exitCode"] != 3.0 || !strings.Contains(fmt.Sprint(s["tail"]), "hello") {
+		t.Errorf("structuredContent = %v", s)
+	}
+}
+
+// A session holding an older box's tool list (#34) sends box_run with wait
+// and box and without reason: it runs, with notices, and the reason recorded
+// says none was given.
+func TestMCPOldShapedRun(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running"}}, log: "ok\n", exit: "0"}
+	a, _ := testApp(f)
+	repoJSON, err := json.Marshal(newRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"box_run","arguments":{"dir":` + string(repoJSON) + `,"command":"go test ./...","timeout":"40m","wait":"2m","box":"other"}}}`
+	var out bytes.Buffer
+	if err := serveMCP(context.Background(), a, strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(&out)
+	readJobNotice(t, dec, "starting_job")
+	var reply struct {
+		Result struct {
+			IsError           bool
+			StructuredContent struct {
+				State    string
+				Warnings []string
+				Tail     string
+			}
+		}
+	}
+	if err := dec.Decode(&reply); err != nil {
+		t.Fatal(err)
+	}
+	s := reply.Result.StructuredContent
+	if reply.Result.IsError || s.State != stateDone || len(s.Warnings) != 3 || !strings.Contains(s.Tail, "ok") {
+		t.Fatalf("old-shaped box_run = %+v", reply.Result)
+	}
+	for i, want := range []string{"takes box", "takes wait", "needs a reason"} {
+		if !strings.Contains(s.Warnings[i], want) {
+			t.Errorf("notice %d = %q, want %q", i, s.Warnings[i], want)
+		}
+	}
+	if m, _ := metaOf(t, f); m.Reason != "(no reason given) go test ./..." {
+		t.Errorf("recorded reason = %q", m.Reason)
+	}
+}
+
+func TestMissingReason(t *testing.T) {
+	long := missingReason(strings.Repeat("x", 100))
+	if n := utf8.RuneCountInString(long); n != len("(no reason given) ")+81 || n > reasonMax {
+		t.Errorf("long command reason = %q", long)
+	}
+	if _, err := checkReason(missingReason("go"), true, "reason"); err != nil {
+		t.Errorf("a short command's default reason is refused: %v", err)
 	}
 }
 
