@@ -170,7 +170,7 @@ func TestGoWrapper(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit %d, want go test's 1:\n%s", code, log)
 	}
-	for _, s := range []string{"--- FAIL: TestAssert", "fail_test.go:12: queue length", "--- FAIL: TestSub/bad", "panic: assignment to entry in nil map", "FAIL\texample.com/gofail\t", "undefined: undefinedThing"} {
+	for _, s := range []string{"--- FAIL: TestAssert (0.00s)\n    fail_test.go:12: queue length", "--- FAIL: TestSub/bad", "panic: assignment to entry in nil map", "FAIL\texample.com/gofail\t", "undefined: undefinedThing"} {
 		if !strings.Contains(log, s) {
 			t.Errorf("log lacks %q", s)
 		}

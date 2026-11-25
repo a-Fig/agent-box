@@ -21,7 +21,9 @@ const JobVar = "BOX_JOB_FILES"
 
 // goRender is jq that prints go test -json's events as go test prints
 // without -json: the output of failed tests, and package lines, while a
-// passing test's output is dropped when it passes. $v (the run asked for
+// passing test's output is dropped when it passes. A test's "--- FAIL" line,
+// which -json prints last, goes before its output, as go test prints it.
+// $v (the run asked for
 // -v) prints all output. A line that isn't an event is printed as it is.
 const goRender = `def key: (.Package // "") + " " + .Test;
 def drop($p): .b |= with_entries(select(.key | startswith($p) | not));
@@ -32,6 +34,7 @@ foreach inputs as $l ({b: {}, o: null};
     elif $e.Action == "output" or $e.Action == "build-output" then
       if $e.Test == null then .o = (if $e.Output == "PASS\n" then null else $e.Output end)
       elif ($e.Output // "" | startswith("=== ")) then .o = null
+      elif ($e.Output | startswith("--- ")) then .o = null | .b[$e | key] |= $e.Output + (. // "")
       else .o = null | .b[$e | key] += $e.Output end
     elif $e.Test != null then
       ($e | key) as $k
