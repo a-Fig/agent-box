@@ -12,25 +12,37 @@ import (
 
 // fake is an in-memory Incus. Calls are logged as "verb args".
 type fake struct {
-	state   map[string]string // instance -> Running/Frozen/Stopped
-	order   []string
-	calls   []string
-	failOn  string // a call prefix that returns an error
-	project map[string]string
-	config  map[string]map[string]string // instance -> its own config
-	logCap  bool                         // log project limits.memory writes (only cap tests want them)
+	state    map[string]string // instance -> Running/Frozen/Stopped
+	lastUsed map[string]time.Time
+	order    []string
+	calls    []string
+	failOn   string // a call prefix that returns an error
+	project  map[string]string
+	config   map[string]map[string]string // instance -> its own config
+	logCap   bool                         // log project limits.memory writes (only cap tests want them)
 }
 
 func newFake(kv ...string) *fake {
 	// The project starts at the Shared/My PC budget, so only Full writes the cap.
-	f := &fake{state: map[string]string{}, project: map[string]string{MemoryCapKey: "12GiB"}, config: map[string]map[string]string{}}
+	f := &fake{
+		state:    map[string]string{},
+		lastUsed: map[string]time.Time{},
+		project:  map[string]string{MemoryCapKey: "12GiB"},
+		config:   map[string]map[string]string{},
+	}
 	for i := 0; i < len(kv); i += 2 {
 		f.add(kv[i], kv[i+1])
 	}
 	return f
 }
 
-func (f *fake) add(name, status string) { f.state[name] = status; f.order = append(f.order, name) }
+func (f *fake) add(name, status string) {
+	f.state[name] = status
+	if status != "Stopped" {
+		f.lastUsed[name] = t0
+	}
+	f.order = append(f.order, name)
+}
 
 func (f *fake) rec(format string, a ...any) error {
 	c := fmt.Sprintf(format, a...)
@@ -53,7 +65,7 @@ func (f *fake) List(context.Context) ([]Instance, error) {
 		for k, v := range f.config[n] {
 			cfg[k] = v
 		}
-		in := Instance{Name: n, Status: f.state[n], Config: cfg}
+		in := Instance{Name: n, Status: f.state[n], LastUsedAt: f.lastUsed[n], Config: cfg}
 		if f.state[n] != "Stopped" {
 			in.State = &InstanceState{Pid: int64(1000 + len(out))}
 		}
@@ -87,6 +99,7 @@ func (f *fake) Delete(_ context.Context, n string) error {
 		return err
 	}
 	delete(f.state, n)
+	delete(f.lastUsed, n)
 	delete(f.config, n)
 	for i, o := range f.order {
 		if o == n {
@@ -381,12 +394,83 @@ func TestFrozenInstanceStaysFrozenIfLimitsFail(t *testing.T) {
 
 func TestStoppedInstancesStayStopped(t *testing.T) {
 	f := newFake("a", "Stopped")
+	f.lastUsed["a"] = t0
 	m := New(f, Full)
 	tick(m, 0)
 	for _, c := range f.take() {
 		if strings.HasPrefix(c, "resume") {
 			t.Fatalf("resumed a stopped instance: %s", c)
 		}
+	}
+}
+
+func TestThawSkipsNeverStartedStoppedInstance(t *testing.T) {
+	// Incus CreateInternal inserts a new instance row as Stopped with
+	// last_used_at=1970-01-01T00:00:00Z while EnsureImage unpacks the image.
+	// Neither that epoch value nor a zero time may trigger config writes.
+	for _, md := range []Mode{Shared, Full} {
+		t.Run(string(md), func(t *testing.T) {
+			f := newFake("creating", "Stopped", "zero", "Stopped")
+			f.lastUsed["creating"] = time.Unix(0, 0).UTC()
+			f.config["creating"] = map[string]string{"limits.cpu": "2", "limits.cpu.priority": "0", "limits.cpu.allowance": "50%"}
+			f.config["zero"] = map[string]string{"limits.cpu.allowance": "50%"}
+			m := New(f, md)
+
+			tick(m, 0)
+			equal(t, f.take(), []string{"project user.agent-box.mode=" + string(md)})
+
+			// Once launch finishes and the container starts, limits are enforced.
+			f.state["creating"] = "Running"
+			f.lastUsed["creating"] = t0.Add(10 * time.Second)
+			tick(m, 10*time.Second)
+			var want []string
+			if md == Full {
+				want = []string{"set creating limits.cpu=4", "set creating limits.cpu.priority=10", "unset creating limits.cpu.allowance"}
+			} else {
+				want = []string{"unset creating limits.cpu.allowance"}
+			}
+			equal(t, f.take(), want)
+		})
+	}
+}
+
+func TestThawUpdatesLimitsOnPreviouslyRunStoppedInstance(t *testing.T) {
+	// A box the tray stopped after FrozenStop still gets its limits updated
+	// when the mode changes back, without resuming, so a later start inherits
+	// the current mode's limits.
+	f := newFake("a", "Running", "old", "Stopped")
+	f.lastUsed["old"] = t0.Add(-time.Hour)
+	f.config["old"] = map[string]string{"limits.cpu": "4", "limits.cpu.priority": "10", "limits.cpu.allowance": "50%"}
+	m := New(f, Full)
+
+	tick(m, 0)
+	equal(t, f.take(), []string{
+		"project user.agent-box.mode=full",
+		"set a limits.cpu=4", "set a limits.cpu.priority=10",
+		"unset old limits.cpu.allowance",
+	})
+
+	// Freeze and stop "a" in My PC.
+	m.SetChosen(MyPC)
+	tick(m, time.Second)
+	f.take()
+	tick(m, time.Second+FrozenStop)
+	equal(t, f.take(), []string{"stop a"})
+	if f.state["a"] != "Stopped" {
+		t.Fatalf("a state = %q, want Stopped", f.state["a"])
+	}
+
+	// Switch to Shared: both previously-run stopped boxes get Shared limits
+	// and stay stopped.
+	m.SetChosen(Shared)
+	tick(m, time.Second+FrozenStop+time.Second)
+	equal(t, f.take(), []string{
+		"project user.agent-box.mode=shared",
+		"set a limits.cpu=2", "set a limits.cpu.priority=0",
+		"set old limits.cpu=2", "set old limits.cpu.priority=0",
+	})
+	if f.state["a"] != "Stopped" || f.state["old"] != "Stopped" {
+		t.Fatalf("states = %q, %q; want both Stopped", f.state["a"], f.state["old"])
 	}
 }
 
@@ -448,13 +532,13 @@ func TestCLIArgs(t *testing.T) {
 	run := func(_ context.Context, args ...string) ([]byte, error) {
 		got = append(got, args)
 		if args[0] == "list" {
-			return []byte(`[{"name":"a","status":"Running","type":"container"},{"name":"b","status":"Frozen","config":{"limits.cpu":"2"}}]`), nil
+			return []byte(`[{"name":"a","status":"Running","type":"container","last_used_at":"2026-11-25T06:50:46Z"},{"name":"b","status":"Frozen","last_used_at":"1970-01-01T00:00:00Z","config":{"limits.cpu":"2"}}]`), nil
 		}
 		return nil, nil
 	}
 	c, ctx := CLI{Run: run}, context.Background()
 	ins, err := c.List(ctx)
-	if err != nil || len(ins) != 2 || ins[1].Name != "b" || ins[1].Status != "Frozen" || ins[1].Config["limits.cpu"] != "2" || len(ins[0].Config) != 0 {
+	if err != nil || len(ins) != 2 || ins[1].Name != "b" || ins[1].Status != "Frozen" || ins[1].Config["limits.cpu"] != "2" || len(ins[0].Config) != 0 || ins[0].LastUsedAt.Unix() <= 0 || ins[1].LastUsedAt.Unix() > 0 {
 		t.Fatalf("list = %v, %v", ins, err)
 	}
 	c.Pause(ctx, "a")
