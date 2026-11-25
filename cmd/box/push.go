@@ -37,7 +37,8 @@ import (
 //	                 before anything is sent
 //	<job>.sending    a lease held while a send is under way
 //	<job>.notified   the end reached the agent: made after t3 accepted the
-//	                 push, by box_job when it returns a terminal result, or by
+//	                 push, by box_job or box job when it gives the session its
+//	                 end, or by
 //	                 box_cancel. Until it exists the end is still owed.
 //	<job>.paused     the watcher already pushed the paused message
 //
@@ -268,6 +269,19 @@ func (a *App) claimBy(job, ext, who string) (bool, error) {
 func (a *App) exists(job, ext string) bool {
 	_, err := os.Stat(a.statePath(job, ext))
 	return err == nil
+}
+
+// markRead marks a pushed job notified once box_job or box job has given
+// its end to the session the push was for: the agent has the full result,
+// so the watcher needn't push it, and box job deletes a throwaway at once,
+// so a later push would say a box is kept that is gone (#76). Read from
+// anywhere else (a person's terminal, another session), the push still goes.
+// If the watcher pushed it in the same moment, the agent gets it twice.
+func (a *App) markRead(job string, r JobResult, err error, who string) {
+	var rec jobRecord
+	if err == nil && r.State == stateDone && readJSON(a.statePath(job, ".json"), &rec) == nil && rec.Thread == a.thread() {
+		a.markNotified(job, who)
+	}
 }
 
 // markNotified says the end reached the agent. A failure to write it only

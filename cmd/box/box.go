@@ -104,7 +104,10 @@ func newApp() *App {
 		Out:     os.Stdout,
 		Err:     os.Stderr,
 		Now:     time.Now,
-		Rand:    randHex,
+		// The CLI keeps a throwaway as box mcp does, so box pull can fetch
+		// a build's output after the run (#78).
+		KeepEnded: endedKeep,
+		Rand:      randHex,
 
 		JoinConfig: defaultJoinConfig,
 		Post:       postJSON,
@@ -611,7 +614,7 @@ type RunOpts struct {
 	Dir string   // local git worktree
 	Cmd []string // one shell string, or argv to quote
 	Box string   // box to use; "" is the repo's own box
-	New bool     // use a throwaway box, deleted afterwards
+	New bool     // use a throwaway box, kept KeepEnded after the job, else deleted
 	// Size of a box launched for this run: "" is medium for a new box and
 	// any size for an existing one.
 	Size string
@@ -846,7 +849,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			}
 		}
 		if o.New {
-			fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 		}
 		return r, err
 	}
@@ -863,14 +866,18 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true)
 	default:
-		fmt.Fprintf(a.Err, "box: keeping %s; box job %s removes it once the job has ended\n", box, job)
+		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
 	}
 	return r, err
 }
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
-// existing box: a taken name means another try with a new suffix.
+// existing box: a taken name means another try with a new suffix. It also
+// retries once under a fresh suffix on Incus's btrfs first-launch metadata
+// error (jobrun.IsDisallowedMetadata), which warms the image cache on the
+// failed try but leaves the old name's empty container dir poisoned on disk.
 func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
+	retriedMeta := false
 	for try := 0; try < 8; try++ {
 		name := base + "-" + a.Rand()
 		if find(insts, name) != nil {
@@ -881,6 +888,14 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		err := a.launch(ctx, name, ttl, true, sz)
 		if err == nil {
 			return name, a.confirmGPU(ctx, name, sz)
+		}
+		if jobrun.IsDisallowedMetadata(err) && !retriedMeta && try < 7 {
+			// Guard try < 7 so a metadata error on the final slot returns the
+			// real Incus error rather than "no free name for a throwaway box".
+			retriedMeta = true
+			fmt.Fprintf(a.Err, "box: %s hit Incus's first-launch metadata error; retrying once with a fresh box\n", name)
+			insts = append(insts, instance{Name: name})
+			continue
 		}
 		if !isConflict(err) {
 			return name, err
@@ -910,6 +925,9 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 		return paused, nil
 	}
 	if now == nil {
+		if jobrun.IsDisallowedMetadata(err) {
+			return "", fmt.Errorf("%w (this or an earlier failed launch left an empty dir on the PC: /var/lib/incus/storage-pools/default/containers/%s_%s; use a new box (--new / new: true) until it is removed)", err, a.Project, box)
+		}
 		return "", err
 	}
 	if err := reusableBox(now, requestedSize); err != nil {
@@ -962,7 +980,9 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	if a.KeepEnded > 0 {
 		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
 			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+			return
 		}
+		fmt.Fprintf(a.Err, "box: kept %s for %d minutes, for box pull; box rm %s deletes it now\n", box, int(a.KeepEnded.Minutes()), box)
 		return
 	}
 	a.removeQuietly(ctx, box)

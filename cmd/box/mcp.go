@@ -70,7 +70,7 @@ var tools = []tool{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; too heavy for the laptop." The PC's owner sees it.`),
-		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, deleted after the run. Use it for parallel runs on one repo, which otherwise take turns."},
+		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept 30 minutes after the run for box_pull, then deleted. Use it for parallel runs on one repo, which otherwise take turns."},
 		"size":    sizeArg,
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
@@ -581,11 +581,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 		}
 		r, err := a.Job(ctx, args.ID, wait)
-		if err == nil && r.State == stateDone && a.exists(args.ID, ".json") {
-			// The agent has the full result now, so the watcher needn't push it.
-			// If the watcher pushed it in the same moment, the agent gets it twice.
-			a.markNotified(args.ID, "box_job")
-		}
+		a.markRead(args.ID, r, err, "box_job")
 		return jobResult(r, err, out.String(), warnings)
 	}
 	return textResult("unknown tool "+p.Name, true)
