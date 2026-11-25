@@ -332,9 +332,20 @@ func TestQueueNoMetaAndInstanceCap(t *testing.T) {
 }
 
 // A throwaway kept after its job ended gives way to a queued job that needs
-// its room; one whose job hasn't ended, or that isn't kept, doesn't.
+// its room; one whose job hasn't ended, or that isn't kept, doesn't. The
+// room short is a box, or disk (#103: the fake's disk is 50 of 200GiB used,
+// so a 66GiB cap leaves 16, and a small box needs 18).
 func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
-	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	for _, short := range []string{"limits.instances=2", "limits.disk=66GiB"} {
+		t.Run(short, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, short) })
+	}
+}
+
+func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
+	cfg := map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "10"}
+	k, v, _ := strings.Cut(short, "=")
+	cfg[k] = v
+	r := newQueueRig(t, cfg)
 	r.f.set(func() {
 		repo := inst("widget", "Running", "small", t0)
 		fresh := inst("fresh-0001", "Running", "small", t0)
