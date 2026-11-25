@@ -51,6 +51,8 @@ this file loads into every session, so it stays short and points into `docs/` fo
 Tyler's rules:
 
 - Reuse existing tools and open source before writing code; keep custom code thin.
+- Simple first (2026-11-25): build the simplest version that works and keep it until it causes
+  a real problem, then fix it only there. No guards or schemes for failures nobody has hit.
 - Go: standard library first; a dependency needs a written reason. `gofmt`, `go vet ./...` and
   `go test ./...` pass. Code that needs Incus, WSL or Windows sits behind an interface, so the
   rest is tested with fakes.
