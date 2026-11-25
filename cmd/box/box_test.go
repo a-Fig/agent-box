@@ -173,6 +173,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			}
 		}
 	case "file":
+		if args[1] == "pull" && args[3] == "-" { // one file to stdout
+			f.pulls = append(f.pulls, args[2])
+			return Result{Stdout: f.files[args[2]]}, nil
+		}
 		if args[1] == "pull" {
 			f.pulls = append(f.pulls, args[3])
 			if f.pull != nil {
