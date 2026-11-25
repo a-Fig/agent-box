@@ -121,7 +121,7 @@ const vitestReduce = `{numTotalTests, numPassedTests, numFailedTests, numPending
   testResults: [.testResults[]? | select(.status != "passed" or any(.assertionResults[]?; .status == "failed"))
     | {name, status, message: (.message // "")[:2000],
        assertionResults: [.assertionResults[]? | select(.status == "failed")
-         | {fullName, location, failureMessages: [(.failureMessages // [])[:1][] | .[:2000]]}][:50]}][:50]}`
+         | {fullName, status, location, failureMessages: [(.failureMessages // [])[:1][] | .[:2000]]}][:50]}][:50]}`
 
 // Section heads in Script's output.
 const (
