@@ -30,6 +30,10 @@ config:
           export npm_config_cache=/cache/npm
           export GRADLE_USER_HOME=/cache/gradle
           export UV_CACHE_DIR=/cache/uv
+          # Browser downloads. Tools that hardcode ~/.cache/puppeteer or ~/.cache/ms-playwright
+          # reach the same folders through root's symlinks (agent-box-provision.sh).
+          export PUPPETEER_CACHE_DIR=/cache/puppeteer
+          export PLAYWRIGHT_BROWSERS_PATH=/cache/ms-playwright
           # ANDROID_HOME only (not deprecated ANDROID_SDK_ROOT), so a per-job ANDROID_HOME override
           # does not collide with AGP's duplicate-SDK-var check.
           export ANDROID_HOME=/cache/android-sdk
@@ -37,7 +41,7 @@ config:
           # /cache can be wiped at any time; restore Gradle's static init.d delegating stub and the
           # Robolectric cache dir here so the next Android run rebuilds /cache/android-sdk.
           if [ -d /cache ]; then
-            mkdir -p /cache/gradle/init.d /cache/robolectric-m2 2>/dev/null || true
+            mkdir -p /cache/gradle/init.d /cache/robolectric-m2 /cache/puppeteer /cache/ms-playwright 2>/dev/null || true
             if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
               _ab_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX 2>/dev/null || true)
               if [ -n "$_ab_tmp" ]; then
@@ -215,7 +219,8 @@ config:
           GO_VERSION=1.27.3
           arch=$(dpkg --print-architecture)
 
-          mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle/init.d /cache/robolectric-m2 /cache/uv /work
+          mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle/init.d /cache/robolectric-m2 /cache/uv \
+            /cache/puppeteer /cache/ms-playwright /work
           if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
             init_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX)
             printf '%s\n' \
@@ -226,13 +231,33 @@ config:
             mv -n "$init_tmp" /cache/gradle/init.d/agent-box-android.gradle || true
             rm -f "$init_tmp"
           fi
-          chmod a+rwX /cache /cache/go-build /cache/go-mod /cache/npm /cache/gradle /cache/gradle/init.d /cache/robolectric-m2 /cache/uv || true
+          chmod a+rwX /cache /cache/go-build /cache/go-mod /cache/npm /cache/gradle /cache/gradle/init.d /cache/robolectric-m2 /cache/uv \
+            /cache/puppeteer /cache/ms-playwright || true
+          # Puppeteer scripts often pass ~/.cache/puppeteer themselves (pi-vi's smoke does), so
+          # root's browser caches point into /cache too and a download outlives the box.
+          mkdir -p /root/.cache
+          for d in puppeteer ms-playwright; do
+            [ -e "/root/.cache/$d" ] || [ -L "/root/.cache/$d" ] || ln -s "/cache/$d" "/root/.cache/$d"
+          done
 
           apt_pkgs="git build-essential curl ca-certificates unzip jq openjdk-17-jdk-headless"
           # shellcheck disable=SC2086
           if ! dpkg -s $apt_pkgs >/dev/null 2>&1; then
             apt-get update -qq
             apt-get install -y -qq $apt_pkgs
+          fi
+
+          # Chromium's runtime libraries, for Puppeteer and Playwright suites (#38). An explicit list,
+          # not `playwright install-deps chromium`: that needs a Playwright download at image build,
+          # its list moves with Playwright's version, and it leaves out GTK 3, which full Chromium
+          # builds such as pi-vi's Chromium 91 need. Tried in a box on 2026-11-25: pi-vi's smoke passes.
+          browser_pkgs="libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libnss3 libnspr4
+            libxshmfence1 libgtk-3-0t64 fonts-liberation"
+          # shellcheck disable=SC2086
+          if ! dpkg -s $browser_pkgs >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends $browser_pkgs
           fi
 
           if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go${GO_VERSION} "; then
