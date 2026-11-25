@@ -663,8 +663,25 @@ func TestWatcherSkipsUnsetCreatedAtAndRecoversBoxRepoAfterRestart(t *testing.T) 
 	}
 	// The box is small even though metaJSON says "medium" (as an older box
 	// binary writes when reusing a small repo box without --size): boxd keeps
-	// the box's real size.
-	if st := w2.State(); len(st.Jobs) != 1 || st.Jobs[0].Size != "small" {
-		t.Fatalf("job size = %q, want small: %+v", st.Jobs[0].Size, st.Jobs)
+	// the box's real size and GPU flag.
+	st := w2.State()
+	if len(st.Jobs) != 1 {
+		t.Fatalf("jobs = %+v, want 1", st.Jobs)
+	}
+	if st.Jobs[0].Size != "small" || st.Jobs[0].GPU || st.Jobs[0].Kind != dash.KindGoTest {
+		t.Fatalf("job size/gpu/kind = %q/%v/%q, want small/false/go-test", st.Jobs[0].Size, st.Jobs[0].GPU, st.Jobs[0].Kind)
+	}
+
+	// Stale gpu:true in .meta cannot override a CPU box's real size/GPU/kind.
+	gpuMeta := strings.Replace(metaJSON, `"gpu":false`, `"gpu":true`, 1)
+	f.set(func() {
+		f.jobs["demo"] = append(f.jobs["demo"], fakeJob{name: "demo.20261124-180025-cd34", state: "running", log: "ok\n", meta: gpuMeta})
+	})
+	c.add(15 * time.Second)
+	w2.Poll(context.Background())
+	for _, j := range w2.State().Jobs {
+		if j.ID == "20261124-180025-cd34" && (j.Size != "small" || j.GPU || j.Kind != dash.KindGoTest) {
+			t.Fatalf("stale gpu meta overrode CPU box: %+v", j)
+		}
 	}
 }

@@ -199,10 +199,15 @@ func (w *Watcher) schedule(now time.Time, ins []Instance) {
 	if pick == nil || w.machine.Mode == "" && !w.machine.Reachable {
 		return
 	}
-	_, exists := byName[pick.Box]
+	in, exists := byName[pick.Box]
+	reuse := exists && (!pick.New || w.Queue.startMark(pick) != nil)
+	sz := pick.sizeOf()
+	if reuse {
+		sz = mode.SizeOf(in.Config)
+	}
 	w.starting = pick.Job
 	w.Queue.setStarting(pick, true)
-	go w.startQueued(pick, exists && (!pick.New || w.Queue.startMark(pick) != nil), slices.Clone(pick.evict))
+	go w.startQueued(pick, reuse, sz, slices.Clone(pick.evict))
 }
 
 // mayHaveStarted says whether a start that a restart cut short may have
@@ -339,7 +344,7 @@ func (w *Watcher) dropQueued(it *queued, now time.Time, why string) {
 }
 
 // startQueued starts a job and settles the queue after.
-func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
+func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
 	defer cancel()
 	var err error
@@ -365,7 +370,7 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 		w.logf("boxd: queue: %s had started before boxd restarted", it.Job)
 	default:
 		if err = w.Queue.markStarting(it, started); err == nil {
-			err = w.startJob(ctx, it, reuse, started)
+			err = w.startJob(ctx, it, reuse, sz, started)
 		}
 	}
 	w.mu.Lock()
@@ -388,6 +393,8 @@ func (w *Watcher) startQueued(it *queued, reuse bool, evict []string) {
 		delete(w.noRoom, it.Job)
 		j := it.view
 		j.State, j.StartedAt, j.Why = dash.JobRunning, started, ""
+		j.Size, j.GPU = sz.Name, sz.GPU
+		j.Kind = dash.Classify(j.Command, j.GPU)
 		j.Key = dash.JobKey(j.Box, j.ID, started)
 		w.started[it.Job] = j // GET /api/queue/{job} until a scan sees it
 		w.record(record{Type: recQueueStart, At: started, Job: &j, Seconds: started.Sub(it.QueuedAt).Seconds()})
@@ -410,8 +417,8 @@ func (w *Watcher) startedInBox(ctx context.Context, it *queued) bool {
 
 // startJob does what box run does once it has a box: launch one if needed,
 // push the snapshot and the .meta, set the job's expiry and start it.
-func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time.Time) (err error) {
-	box, sz := it.Box, it.sizeOf()
+func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.Size, now time.Time) (err error) {
+	box := it.Box
 	if !reuse {
 		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New)
 		args := append([]string{"launch", w.image(), box}, flags...)
@@ -438,6 +445,7 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, now time
 		m = map[string]any{} // check accepts objects only; a file from before may hold null
 	}
 	m["v"], m["queuedAt"], m["startedAt"] = 1, it.QueuedAt.Format(time.RFC3339), now.Format(time.RFC3339)
+	m["size"], m["gpu"] = sz.Name, sz.GPU
 	b, _ := json.Marshal(m)
 	tmp := filepath.Join(w.Queue.dir, it.Job+".meta.tmp")
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
