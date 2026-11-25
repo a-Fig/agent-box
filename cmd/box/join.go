@@ -78,18 +78,21 @@ func (c joinConfig) skillPaths() []string {
 }
 
 // join registers box mcp as a user-scope MCP server named box with each
-// agent CLI it finds and installs the box skill; leave undoes both.
+// agent CLI it finds, installs the box skill, and adds box hook to Claude
+// Code's settings (hook.go); leave undoes all three.
 func join(ctx context.Context, c joinConfig, leave bool) error {
 	if !leave && !filepath.IsAbs(c.Exe) {
 		return fmt.Errorf("box binary path %q isn't absolute", c.Exe)
 	}
 	var errs []error
+	claude := false
 	for _, a := range agentCLIs(c.Exe) {
 		bin, err := c.LookPath(a.name)
 		if err != nil {
 			fmt.Fprintf(c.Out, "%s: not installed, skipped\n", a.name)
 			continue
 		}
+		claude = claude || a.name == "claude"
 		// Removing first makes join repeatable: add refuses an existing name.
 		rm, err := c.R.Run(ctx, Cmd{Name: bin, Args: a.remove})
 		if err != nil {
@@ -113,6 +116,23 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			continue
 		}
 		fmt.Fprintf(c.Out, "%s: registered MCP server box (user scope): %s mcp\n", a.name, c.Exe)
+	}
+	// The hook goes where Claude Code is; leave takes it out wherever it is.
+	for _, p := range c.claudeSettingsPaths() {
+		if !claude && !leave {
+			break
+		}
+		if _, err := os.Stat(p); leave && err != nil {
+			continue
+		}
+		did, err := setHook(p, c.Exe, leave)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("claude hook: %w", err))
+			continue
+		}
+		if did != "" {
+			fmt.Fprintf(c.Out, "claude: %s\n", did)
+		}
 	}
 	for _, p := range c.skillPaths() {
 		existing, err := os.ReadFile(p)

@@ -534,6 +534,17 @@ func lostMessage(r jobRecord, e jobEnd) string {
 	return msg
 }
 
+// endMessage is what the agent is told of a job's end.
+func endMessage(rec jobRecord, end jobEnd) string {
+	switch {
+	case end.Dropped:
+		return droppedMessage(rec)
+	case end.Lost:
+		return lostMessage(rec, end)
+	}
+	return endedMessage(rec, end)
+}
+
 // send delivers a message, retrying a few times.
 func (a *App) send(ctx context.Context, thread, msg string) error {
 	var err error
@@ -751,17 +762,10 @@ func (a *App) deliver(ctx context.Context, rec jobRecord, end jobEnd) error {
 		return err
 	}
 	defer a.releaseLease(rec.Job, ".sending", token)
-	if a.exists(rec.Job, ".notified") {
-		return nil
+	if a.exists(rec.Job, ".notified") || a.waitForHook(ctx, rec) {
+		return nil // the agent has it, from box_job or mid-turn from the hook
 	}
-	msg := endedMessage(rec, end)
-	switch {
-	case end.Dropped:
-		msg = droppedMessage(rec)
-	case end.Lost:
-		msg = lostMessage(rec, end)
-	}
-	if err := a.send(ctx, rec.Thread, msg); err != nil {
+	if err := a.send(ctx, rec.Thread, endMessage(rec, end)); err != nil {
 		return err // .ended stays, so box_* results keep offering it
 	}
 	a.markNotified(rec.Job, "watcher")

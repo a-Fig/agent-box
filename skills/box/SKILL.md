@@ -10,7 +10,7 @@ description: Offload heavy test runs and builds from this laptop to a disposable
 1. `box_status` with your worktree as `dir`: its first line says whether to offload.
 2. `box_run` with `dir`, `command` and `reason` (why; the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` if it might hang (exit 124). Pipes use `pipefail`, so `| head` can exit 141.
 3. A run ending within 30 s returns its result; else `running`:
-   - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives as a turn starting "box: job …".
+   - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives starting "box: job …" (Claude Code: mid-turn).
    - `push: false`: call `box_job` with the ID; it waits up to 10 min.
    - **Subagents pass `push: false`** (a push would wake the parent).
 4. **`state: queued`**: the PC is full or paused, so a snapshot waits in line; the result is pushed. Can't wait? Run locally and `box_cancel` it.
