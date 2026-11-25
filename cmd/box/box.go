@@ -560,16 +560,16 @@ func (a *App) expiryConfig(ttl time.Duration) string {
 }
 
 // It retries a lost write race: incus config set reads the config and writes
-// it back with its ETag, and the tray sets a new box's CPU limits for the
-// mode within a tick of its launch (in Full, both keys differ from launch's),
-// just when box sets the job's expiry. 412 means nothing was written.
+// it back with its ETag, and the tray sets a box's CPU limits whenever they
+// differ from the mode's: within a tick of a launch in Full, just when box
+// sets the job's expiry, or on any mode change. 412 means nothing was written.
 func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
 	var err error
 	for try := 0; try < 5; try++ {
 		if try > 0 {
 			select {
 			case <-ctx.Done():
-				return err
+				return ctx.Err()
 			case <-time.After(time.Duration(try) * 200 * time.Millisecond):
 			}
 		}

@@ -24,9 +24,9 @@ func TestNewSetsSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, want := range []string{
-		"-c user.box.size=large -c limits.cpu=4 -c limits.memory=8GiB -d root,size=40GiB",
-		"-c user.box.size=medium -c limits.cpu=2 -c limits.memory=4GiB -d root,size=30GiB",
-		"-c user.box.size=small -c limits.cpu=1 -c limits.memory=2GiB -d root,size=18GiB",
+		"-c user.box.size=large -c limits.cpu=4 -c limits.cpu.priority=0 -c limits.memory=8GiB -d root,size=40GiB",
+		"-c user.box.size=medium -c limits.cpu=2 -c limits.cpu.priority=0 -c limits.memory=4GiB -d root,size=30GiB",
+		"-c user.box.size=small -c limits.cpu=1 -c limits.cpu.priority=0 -c limits.memory=2GiB -d root,size=18GiB",
 	} {
 		if got := strings.Join(f.launches[i], " "); !strings.Contains(got, want) {
 			t.Errorf("launch %d = %s\nwant %s", i, got, want)
