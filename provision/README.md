@@ -23,7 +23,7 @@ Setup scripts for the gaming PC. Read `../docs/DESIGN.md` first. Nothing here to
 `deploy-boxd.sh`, run from the laptop, builds boxd from the checkout and installs it with `systemd/agent-box-boxd.service` in one go, so the PC's binary and unit come from one commit, and stamps boxd with it (the dashboard's foot shows boxd's and the tray's commits):
 
 ```bash
-provision/deploy-boxd.sh user@pc-host      # or AGENT_BOX_PC=user@pc-host; on this laptop, through .scratch/golock.sh
+provision/deploy-boxd.sh user@pc-host      # or AGENT_BOX_PC=user@pc-host; boxd is built on a box
 ```
 
 It sends one tar over SSH and pipes it into the distro with a `.cmd` (the distro has no `/mnt/c`, and cmd keeps a binary stdin intact where PowerShell doesn't). In the distro, `install-boxd.sh` checks the SHA-256 sums and changes nothing on a mismatch. One install runs at a time. A running boxd that is healthy is kept as `boxd.old`, with its unit as `agent-box-boxd.service.old`; an unhealthy one isn't, so a retry never replaces the last good build. Then it restarts the service. After 8 seconds the service must be active, must not have restarted itself, must answer HTTP, and boxd must have logged no WARNING (such as a missing `INCUS_CONF`). If any of that fails, or the script is cut off after swapping files, it puts the old ones back, restarts them, and fails. It was written after the PC's unit was found older than this folder's (2026-11-25), and tried on the PC that day: a deploy, a checksum mismatch, and a rollback from a boxd that exits at once.
