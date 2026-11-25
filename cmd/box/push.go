@@ -108,9 +108,12 @@ func defaultStateDir() string {
 	return filepath.Join(d, "agent-box", "jobs")
 }
 
-// spawnWatcher starts `box watch` detached, so it outlives this process. It
-// fails, and the run reports push false, when it can't get out of this
-// process's job object: Windows would kill the watcher with the MCP server.
+// spawnWatcher starts `box watch` detached, so it outlives this process. On
+// Windows it first tries to break away from this process's job object, which
+// would kill the watcher with the MCP server. Codex starts MCP servers in a
+// job that forbids that (access denied, seen 2026-11-25), so the watcher then
+// starts inside it: it lives as long as the MCP server, which Codex keeps for
+// its session, and if it dies the safety net restarts it (safetyNet).
 func spawnWatcher(stateDir, job string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -124,13 +127,28 @@ func spawnWatcher(stateDir, job string) error {
 		return err
 	}
 	defer logf.Close()
-	cmd := exec.Command(exe, "watch", "--state", stateDir, job)
-	cmd.Stdout, cmd.Stderr = logf, logf
-	detach(cmd, true)
-	if err := cmd.Start(); err != nil {
+	return startDetached(func(breakaway bool) error {
+		cmd := exec.Command(exe, "watch", "--state", stateDir, job)
+		cmd.Stdout, cmd.Stderr = logf, logf
+		detach(cmd, breakaway)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		return cmd.Process.Release()
+	})
+}
+
+// startDetached starts a process with breakaway, and again without it when
+// the job object refuses breakaway.
+func startDetached(start func(breakaway bool) error) error {
+	err := start(true)
+	if err != nil && breakawayDenied(err) {
+		err = start(false)
+	}
+	if err != nil {
 		return fmt.Errorf("can't start a detached watcher: %w", err)
 	}
-	return cmd.Process.Release()
+	return nil
 }
 
 // jobRecord is <job>.json.

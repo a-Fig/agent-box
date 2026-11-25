@@ -719,3 +719,38 @@ func TestLineTailResetIsLazy(t *testing.T) {
 		t.Errorf("after the next follow printed = %q", got)
 	}
 }
+
+// A watcher that dies with its MCP server (Codex keeps it inside its job
+// object) leaves leases that expire: the safety net restarts it once they
+// have, within sendLease of a death mid-send, and the end is pushed once.
+func TestSafetyNetRecoversAWatcherKilledMidSend(t *testing.T) {
+	f := &fakePC{t: t, block: true}
+	e := newPushEnv(t, f, "thread-1")
+	_, st := e.run(t, "go test ./...")
+	job := st["job"].(string)
+	now := e.a.Now()
+	e.a.Now = func() time.Time { return now }
+	// Killed while sending: its .ended written, its leases left behind.
+	if err := writeJSON(e.a.statePath(job, ".ended"), jobEnd{Code: 1, Tail: "FAIL x"}); err != nil {
+		t.Fatal(err)
+	}
+	for ext, ttl := range map[string]time.Duration{".sending": sendLease, ".watch": watchLease} {
+		if won, err := e.a.claimBy(job, ext, e.a.leaseText("dead", ttl)); !won || err != nil {
+			t.Fatal(ext, won, err)
+		}
+	}
+	*e.spawns = nil
+	if line := e.a.safetyNet(""); !strings.Contains(line, job+" exit 1") || len(*e.spawns) != 0 {
+		t.Errorf("while the leases hold: %q, spawns %v", line, *e.spawns)
+	}
+	now = now.Add(sendLease + time.Second)
+	if e.a.safetyNet(""); len(*e.spawns) != 1 {
+		t.Fatalf("after the leases expired, spawns = %v", *e.spawns)
+	}
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, "ended, exit 1") {
+		t.Errorf("restarted watcher: %v, %+v", err, e.push.sent)
+	}
+	if line := e.a.safetyNet(""); line != "" {
+		t.Errorf("after delivery: %q", line)
+	}
+}

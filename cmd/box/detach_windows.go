@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os/exec"
 	"syscall"
 )
@@ -27,7 +28,7 @@ func hideWindow(cmd *exec.Cmd) {
 // console its children (t3.cmd runs cmd.exe) share instead of opening
 // windows, and, when breakaway is set, a way out of the parent's job object,
 // which would otherwise kill it with the MCP server. Breakaway fails if the
-// job doesn't allow it; the caller then tries without.
+// job doesn't allow it (breakawayDenied); startDetached then tries without.
 func detach(cmd *exec.Cmd, breakaway bool) {
 	flags := uint32(createNewProcessGroup | createNoWindow)
 	if breakaway {
@@ -35,3 +36,7 @@ func detach(cmd *exec.Cmd, breakaway bool) {
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags, HideWindow: true}
 }
+
+// breakawayDenied says whether a start failed because the job object doesn't
+// allow CREATE_BREAKAWAY_FROM_JOB: CreateProcess then fails with access denied.
+func breakawayDenied(err error) bool { return errors.Is(err, syscall.ERROR_ACCESS_DENIED) }
