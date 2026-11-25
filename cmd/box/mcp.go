@@ -558,6 +558,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			}
 			pg, err := a.LogPage(ctx, args.ID, off, lim)
 			if err != nil {
+				if end, ok := a.recordedEnd(args.ID); ok { // the box went: its recorded end is all there is
+					box, _, _ := strings.Cut(args.ID, ".")
+					a.warn("box: " + box + " is gone, and its full log with it; this is the tail recorded when the job ended")
+					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code}, nil, end.Tail, warnings)
+				}
 				return textResult(err.Error(), true)
 			}
 			return pageResult(pg)

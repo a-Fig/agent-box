@@ -990,6 +990,16 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 	r := JobResult{Job: job, Box: box}
 	var err error
 	r.State, r.Code, err = a.attach(ctx, job, wait)
+	if err != nil {
+		// A job whose end was read once ended: when its box has gone since
+		// (a throwaway's 30 minutes ran out, or a launch short of room took
+		// it), its recorded end is the result, not "lost".
+		if end, ok := a.recordedEnd(job); ok {
+			fmt.Fprintf(a.Err, "box: %s is gone; this is the result recorded when the job ended (box_pull and the full log went with the box)\n", box)
+			fmt.Fprint(a.Out, end.Tail)
+			return JobResult{Job: job, Box: box, State: stateDone, Code: end.Code}, nil
+		}
+	}
 	if err == nil && r.State == stateDone {
 		a.cleanup(ctx, box, false)
 	}
@@ -1196,7 +1206,8 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	// pipe, so serialize the writes.
 	var wmu sync.Mutex
 	ef := &exitFilter{w: &lockedWriter{&wmu, a.Err}}
-	tail := &tailWriter{w: &lockedWriter{&wmu, a.Out}}
+	kept := &lineTail{}
+	tail := &tailWriter{w: &lockedWriter{&wmu, io.MultiWriter(a.Out, kept)}}
 	res, err := a.incus(run, Cmd{
 		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
 		Stdout: tail, Stderr: ef,
@@ -1212,6 +1223,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		ended := a.Now()
 		a.markIdle(ctx, box)
 		a.reportEnded(ctx, job, code, ended, tail.String())
+		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20))})
 		return stateDone, code, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

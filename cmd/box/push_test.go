@@ -115,8 +115,30 @@ func TestRunInlineResultWithinWindow(t *testing.T) {
 	if len(*e.spawns) != 0 {
 		t.Errorf("spawned a watcher for a finished run: %v", *e.spawns)
 	}
-	if ents, _ := os.ReadDir(e.a.StateDir); len(ents) != 0 {
+	// Only the recorded end, for a box_job after the box has gone.
+	if ents, _ := os.ReadDir(e.a.StateDir); len(ents) != 1 || !strings.HasSuffix(ents[0].Name(), ".ended") {
 		t.Errorf("state files for an inline result: %v", ents)
+	}
+}
+
+// A job whose exit was read keeps its result after its box goes: box_job
+// gives the recorded exit code and tail, never "lost".
+func TestJobAfterBoxGoneGivesRecordedEnd(t *testing.T) {
+	e := newPushEnv(t, &fakePC{t: t, log: "hello\n", exit: "3\n"}, "thread-1")
+	_, st := e.run(t, "go test ./...")
+	job := st["job"].(string)
+	if st["exitCode"] != 3.0 {
+		t.Fatalf("run = %v", st)
+	}
+	e.f.mu.Lock()
+	e.f.insts, e.f.log, e.f.exit = nil, "", ""
+	e.f.mu.Unlock()
+	text, st := e.call(t, "box_job", map[string]any{"id": job})
+	if st["state"] != "done" || st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") || !strings.Contains(text, "is gone") {
+		t.Errorf("box_job after the box went = %v\n%s", st, text)
+	}
+	if _, st := e.call(t, "box_job", map[string]any{"id": job, "offset": 0}); st["exitCode"] != 3.0 || !strings.Contains(st["tail"].(string), "hello") {
+		t.Errorf("box_job page after the box went = %v", st)
 	}
 }
 
@@ -303,7 +325,7 @@ func TestJobCancelledElsewhereIsNotPushed(t *testing.T) {
 	job := st["job"].(string)
 	f.finish("130", "")
 	f.cancelled = true // the box has the .cancelled mark box cancel writes
-	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 || e.a.exists(job, ".ended") {
+	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 || !e.a.exists(job, ".notified") {
 		t.Errorf("watch pushed a job cancelled on the box: %v, %d", err, e.push.count())
 	}
 	if text, _ := e.call(t, "box_pull", pullArgs); strings.Contains(text, "finished since") {
