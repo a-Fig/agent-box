@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,9 @@ func TestRunWithNoRoomIsQueued(t *testing.T) {
 	}
 	if !strings.HasPrefix(text, "job "+queuedJobName+" on box my-repo-ab12: queued, 2nd in line, waiting for room, push: true") {
 		t.Errorf("text = %q", text)
+	}
+	if tail, _ := st["tail"].(string); !strings.Contains(tail, "it starts on a new box, my-repo-ab12, when it can") {
+		t.Errorf("the tail doesn't say which box the job will be on (#89): %q", tail)
 	}
 	r := b.req
 	if !r.New || r.Box != "my-repo" || r.Checkout != "my-repo" || r.Size != "medium" || r.Timeout != 90 ||
@@ -296,11 +300,39 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 	if names := f.names(); strings.Contains(names, "old-0001") || !strings.Contains(names, "fresh-0002") || !strings.Contains(names, "far-0003") {
 		t.Errorf("boxes left: %s (calls %s)", names, f.callList())
 	}
-	if calls := f.callList(); calls != "launch list list exec exec delete launch" { // far-0003 isn't even checked
+	if calls := f.callList(); calls != "launch list list exec exec project project project project project delete launch" { // far-0003 isn't even checked; the projects are the room check (#87)
 		t.Errorf("calls: %s", calls)
 	}
 	if !strings.Contains(out.String(), "box: deleting old-0001, kept after its job, for room") {
 		t.Errorf("output %q", out)
+	}
+}
+
+// A launch that deleting every kept throwaway still couldn't fit leaves them
+// alone, for their own box pull (#87).
+func TestKeptThrowawaysStayWhenTheyCantMakeRoom(t *testing.T) {
+	soon := "2026-11-23T12:20:00Z"
+	f := &fakePC{t: t, refuse: memoryRefusal, kept: map[string]bool{"old-0001": true},
+		project: map[string]string{"limits.memory": "24GiB"},
+		insts: []instance{
+			{Name: "old-0001", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: soon, "user.box.size": "small", "limits.memory": "2GiB"}},
+			{Name: "busy-0002", Status: "Running", Config: map[string]string{"user.box.size": "large", "limits.memory": "20GiB"}},
+		}}
+	a, out := testApp(f)
+	if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "large")); !isNoRoom(err) {
+		t.Fatalf("launch: %v\n%s", err, out)
+	}
+	if !strings.Contains(f.names(), "old-0001") || !strings.Contains(out.String(), "wouldn't make room for a large box; leaving them") {
+		t.Errorf("boxes %s, output %q", f.names(), out)
+	}
+}
+
+// A delete another launch got to first is no failure (#87).
+func TestIsGone(t *testing.T) {
+	if !isGone(errors.New(`incus delete: Error: Failed deleting instance pc:x in project "agents": Instance not found`)) ||
+		!isGone(errors.New("incus delete: Error: Stopping the instance pc:x failed: The instance is already stopped")) ||
+		isGone(errors.New("incus delete: Error: Failed to delete the storage volume")) {
+		t.Error("isGone is wrong about a delete")
 	}
 }
 
@@ -324,5 +356,26 @@ func TestCancelAJobBeingStarted(t *testing.T) {
 	text, _ := e.call(t, "box_cancel", map[string]any{"id": queuedJobName})
 	if !strings.Contains(text, "cancelled "+queuedJobName+" (exit 130)") || strings.Count(b.callList(), "/cancel") != 2 {
 		t.Fatalf("%q, boxd calls %s", text, b.callList())
+	}
+}
+
+// A job nobody here read whose box has gone gives boxd's record of its end,
+// not "lost" (#90).
+func TestJobAfterBoxGoneAsksBoxd(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{})
+	exit := 3
+	b.views = []dash.Job{{Box: "my-repo-ab12", ID: "20261123-120000-cd34", State: dash.JobDone, Exit: &exit, Tail: "boxd's tail"}}
+	var out strings.Builder
+	e.a.Out = &out
+	r, err := e.a.Job(context.Background(), queuedJobName, 0)
+	if err != nil || r.State != stateDone || r.Code != 3 || out.String() != "boxd's tail" {
+		t.Fatalf("Job = %+v, %v, out %q", r, err, out.String())
+	}
+	if _, st := e.call(t, "box_job", map[string]any{"id": queuedJobName, "offset": 0}); st["exitCode"] != 3.0 || st["tail"] != "boxd's tail" {
+		t.Errorf("box_job page after the box went = %v", st)
+	}
+	b.gone = true
+	if _, err := e.a.Job(context.Background(), queuedJobName, 0); err == nil {
+		t.Error("a job neither the box nor boxd knows wasn't an error")
 	}
 }

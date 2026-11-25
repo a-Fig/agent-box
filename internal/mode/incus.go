@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Instance is one Incus instance in the agents project.
 type Instance struct {
 	Name   string `json:"name"`
 	Status string `json:"status"` // Running, Frozen, Stopped, ...
+	// LastUsedAt is when the instance was last started. Incus sets it to the
+	// Unix epoch (1970-01-01T00:00:00Z) when CreateInternal inserts the row,
+	// before the image is unpacked and before the first start.
+	LastUsedAt time.Time `json:"last_used_at"`
 	// Config is the instance's own config (not the profile's), as
 	// `incus list --format json` reports it. The Manager compares it with
 	// what the mode wants, so a key an agent changed is put back.
