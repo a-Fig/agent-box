@@ -20,6 +20,7 @@
 #                     and boxd. A host already on a tailnet gets these steps without the flag.
 #   --remote NAME     the client's name for this host (default pc, which box uses without BOX_REMOTE)
 #   --host ADDR       the address clients reach this host at (default its tailnet name, else its main IP)
+#   --new-client      make a client token even though a restricted client is already trusted
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
 set -Eeuo pipefail
@@ -36,15 +37,17 @@ REBUILD=0
 TAILSCALE=0
 REMOTE=pc
 HOST_ADDR=
+NEW_CLIENT=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --new-client) NEW_CLIENT=1 ;;
     --build-base) BUILD_BASE=1 ;;
     --rebuild-base) BUILD_BASE=1; REBUILD=1 ;;
     --tailscale) TAILSCALE=1 ;;
     --remote) [ $# -ge 2 ] || { echo "--remote needs a name" >&2; exit 2; }; REMOTE=$2; shift ;;
     --host) [ $# -ge 2 ] || { echo "--host needs an address" >&2; exit 2; }; HOST_ADDR=$2; shift ;;
-    -h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -97,10 +100,24 @@ check_pool_and_bridge() {
   { printf '%s\n' "$net" | grep -qx 'managed: true' && printf '%s\n' "$net" | grep -qx 'type: bridge'; } \
     || die "network 'incusbr0' isn't a managed bridge, which boxes need."
 }
-# Before anything changes: an Incus that is already here is checked first.
-if command -v incus >/dev/null 2>&1 && incus storage show default >/dev/null 2>&1; then
-  check_pool_and_bridge
+# Before anything changes: an Incus that is already here is checked first. One with pools but
+# none named `default` is refused too: the preseed would rewrite its default profile and
+# core.https_address under whatever already runs there.
+if command -v incus >/dev/null 2>&1 && incus storage list -f csv >/dev/null 2>&1; then
+  if incus storage show default >/dev/null 2>&1; then
+    check_pool_and_bridge
+  elif [ -n "$(incus storage list -f csv)" ]; then
+    die "Incus here already has storage pools, none named 'default'. Setup would change its default profile and HTTPS address, so it stops. Use a host without Incus, or one whose 'default' pool is btrfs."
+  fi
 fi
+
+# Overrides are checked before they are used: whole numbers, and sizes like 12GiB.
+for v in AGENTS_CPU_CAP AGENTS_MAX_BOXES; do
+  case "${!v:-0}" in *[!0-9]*) die "$v must be a whole number, not '${!v}'" ;; esac
+done
+for v in AGENTS_MEM_CAP AGENTS_DISK_CAP AGENTS_POOL_SIZE; do
+  [ -z "${!v:-}" ] || [[ ${!v} =~ ^[0-9]+[KMGT]iB$ ]] || die "$v must be a size like 12GiB, not '${!v}'"
+done
 
 # Caps. On WSL they stay the PC's (docs/DESIGN.md, Box sizes): the tray's memory budgets
 # (internal/mode/size.go) are fixed to them. Elsewhere there is no tray, so the mode stays Shared
@@ -126,10 +143,11 @@ MAX_BOXES=${AGENTS_MAX_BOXES:-$d_boxes}
 DISK_CAP=${AGENTS_DISK_CAP:-$d_disk}
 POOL_SIZE=${AGENTS_POOL_SIZE:-$d_pool}
 
-# Tailscale is opt-in, but a host already on a tailnet (the PC, rerun by hand) keeps its steps.
+# Tailscale is opt-in, but a host already on a tailnet keeps its steps. On WSL (the PC, rerun by
+# hand) an installed Tailscale is enough: just after a WSL boot tailscaled may not say Running yet.
 ts_state() { tailscale status --json 2>/dev/null | sed -n 's/.*"BackendState": *"\([^"]*\)".*/\1/p' | head -n1 || true; }
-if [ "$TAILSCALE" -eq 0 ] && command -v tailscale >/dev/null 2>&1 && [ "$(ts_state)" = Running ]; then
-  TAILSCALE=1
+if [ "$TAILSCALE" -eq 0 ] && command -v tailscale >/dev/null 2>&1; then
+  if [ "$WSL" -eq 1 ] || [ "$(ts_state)" = Running ]; then TAILSCALE=1; fi
 fi
 
 export DEBIAN_FRONTEND=noninteractive
@@ -144,9 +162,10 @@ case "$state" in
     ;;
 esac
 
-step "Installing prerequisites (curl, gnupg, ca-certificates, btrfs-progs)"
+step "Installing prerequisites (curl, gnupg, ca-certificates, btrfs-progs, python3)"
 apt-get update -qq
-apt-get install -y -qq curl gnupg ca-certificates btrfs-progs
+# python3 reads Tailscale's and Incus's JSON (here and in https-cert.sh); minimal Debian lacks it.
+apt-get install -y -qq curl gnupg ca-certificates btrfs-progs python3
 
 # ---------------------------------------------------------------- Incus
 step "Adding the Zabbly Incus stable repository"
@@ -542,10 +561,14 @@ fi
 # ---------------------------------------------------------------- client
 step "Done. Connect a client"
 # A restricted client cert, limited to the agents project, as box expects. A token still waiting
-# for its client is shown again rather than a new one made, so a rerun leaves one pending.
+# for its client is shown again rather than a new one made, so a rerun leaves one pending. Once a
+# restricted client is trusted (on the PC, the laptop's), none is made without --new-client:
+# tokens don't expire unless core.remote_token_expiry is set, and an unused one is a way in.
 trust_name="box-$REMOTE"
 token=$(incus config trust list-tokens --format csv | awk -F, -v n="$trust_name" '$1 == n { print $2; exit }')
-if [ -z "$token" ]; then
+clients=$(incus query '/1.0/certificates?recursion=1' | python3 -c 'import json, sys
+print(sum(1 for c in json.load(sys.stdin) if c.get("type") == "client" and c.get("restricted") and sys.argv[1] in (c.get("projects") or [])))' "$PROJECT")
+if [ -z "$token" ] && { [ "$clients" -eq 0 ] || [ "$NEW_CLIENT" -eq 1 ]; }; then
   token=$(incus config trust add "$trust_name" --restricted --projects "$PROJECT" | tail -n1)
 fi
 if [ -z "$HOST_ADDR" ]; then
@@ -565,15 +588,20 @@ port=${addr##*:}
 # addresses in the token and gives up when the first one fails.
 fpr=$(incus info | sed -n 's/^ *certificate_fingerprint: *//p' | head -n1)
 [ -n "$fpr" ] || die "could not read this host's certificate fingerprint (incus info)"
-cat <<EOF
+if [ -z "$token" ]; then
+  note "$clients restricted client(s) already trusted for '$PROJECT'; rerun with --new-client for another."
+else
+  cat <<EOF
 
   On the client, with the Incus client installed, run once:
 
     echo $fpr | incus remote add $REMOTE https://$HOST_ADDR:$port --token $token --project $PROJECT
 
   The echo answers the client's certificate check with this host's fingerprint. The token is
-  single-use: rerun this script for another client (--host if the address is wrong).
+  single-use and doesn't expire; revoke an unused one with: incus config trust revoke-token $trust_name
+  For another client, rerun with --new-client (--host if the address is wrong).
 EOF
+fi
 [ "$REMOTE" = pc ] || printf '  box uses the remote named pc unless BOX_REMOTE=%s is set for it.\n' "$REMOTE"
 if [ "$WSL" -eq 1 ]; then
   cat <<'EOF'
