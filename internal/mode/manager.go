@@ -77,6 +77,7 @@ type Manager struct {
 	chosen      Mode
 	choiceAt    time.Time // when chosen was picked: a click, or a request's time
 	chosenDirty bool      // chosen is not yet stored in ProjectChosenKey
+	seedAt      time.Time // the time a seeded pick is stored under (choiceAt stays zero)
 
 	chosenSynced bool // ProjectChosenKey was read once (guarded by tickMu)
 
@@ -143,6 +144,11 @@ func (m *Manager) Tick(ctx context.Context, now time.Time, gaming bool, reason s
 	var hsErrs []error
 	if m.Handshake {
 		hsErrs = m.handshake(ctx, now)
+		if !m.Synced() {
+			// Not read yet: applying the default could undo an earlier pick.
+			m.last = Status{Chosen: m.Chosen(), Effective: m.Chosen(), Down: true, Running: m.last.Running, Err: errors.Join(hsErrs...)}
+			return m.last
+		}
 	}
 	st := Status{Chosen: m.Chosen(), Yielding: m.yielding, Reason: m.reason}
 	st.Effective = st.Chosen

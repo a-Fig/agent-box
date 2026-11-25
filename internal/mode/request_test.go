@@ -1,6 +1,7 @@
 package mode
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -176,6 +177,69 @@ func TestNothingIsStoredUntilSomeoneChooses(t *testing.T) {
 	tray.SeedChosen = true // the tray's saved pick seeds an empty project
 	tick(tray, time.Minute, false)
 	if v := storedChoice(t, f); v.Mode != Shared {
+		t.Fatalf("stored %+v", v)
+	}
+}
+
+// A new enforcer applies nothing until it has read the project's chosen mode.
+func TestNothingIsAppliedUntilTheChosenModeWasRead(t *testing.T) {
+	f := newFake("a", "Running")
+	f.project[ProjectChosenKey] = `{"mode":"mypc","at":"2026-01-01T11:00:00Z"}`
+	f.failOn = "project get"
+	m, _ := handshakeMgr(f, Full)
+	if st := tick(m, 0, false); !st.Down || st.Err == nil {
+		t.Fatalf("status %+v", st)
+	}
+	equal(t, f.take(), nil) // Full's default was not applied to the box
+	f.failOn = ""
+	if st := tick(m, 5*time.Second, false); st.Chosen != MyPC || st.Effective != MyPC {
+		t.Fatalf("status %+v", st)
+	}
+	equal(t, f.take(), []string{"project user.agent-box.mode=mypc", "pause a"})
+}
+
+// racy lets a second request arrive while the first is being handled.
+type racy struct {
+	*fake
+	second string
+}
+
+func (r *racy) SetProjectConfig(ctx context.Context, k, v string) error {
+	err := r.fake.SetProjectConfig(ctx, k, v)
+	if k == ProjectChosenKey && r.second != "" {
+		r.project[ProjectModeRequestKey], r.second = r.second, ""
+	}
+	return err
+}
+
+func TestASecondRequestArrivingMeanwhileIsNotCleared(t *testing.T) {
+	f := newFake()
+	f.project[ProjectModeRequestKey] = reqJSON(t, Shared, t0.Add(-2*time.Minute))
+	second := reqJSON(t, MyPC, t0.Add(-time.Minute))
+	m := New(&racy{f, second}, Full)
+	m.Handshake = true
+	if st := tick(m, 0, false); st.Chosen != Shared {
+		t.Fatalf("first: %+v", st)
+	}
+	if f.project[ProjectModeRequestKey] != second {
+		t.Fatalf("the second request was cleared: %q", f.project[ProjectModeRequestKey])
+	}
+	if st := tick(m, time.Second, false); st.Chosen != MyPC || f.project[ProjectModeRequestKey] != "" {
+		t.Fatalf("second: %+v", st)
+	}
+}
+
+// Seeding an empty project stores the tray's old pick under the time of
+// seeding, but that must not make a slightly older request look outdated.
+func TestSeedingDoesNotOutdateARecentRequest(t *testing.T) {
+	f := newFake()
+	f.project[ProjectModeRequestKey] = reqJSON(t, MyPC, t0.Add(-time.Minute))
+	m, _ := handshakeMgr(f, Shared)
+	m.SeedChosen = true
+	if st := tick(m, 0, false); st.Chosen != MyPC {
+		t.Fatalf("%+v", st)
+	}
+	if v := storedChoice(t, f); v.Mode != MyPC {
 		t.Fatalf("stored %+v", v)
 	}
 }

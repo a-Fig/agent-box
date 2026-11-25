@@ -50,20 +50,27 @@ func (m *Manager) logf(format string, args ...any) {
 	}
 }
 
-// adopt takes a pick from the project or the page.
-func (m *Manager) adopt(c Mode, at time.Time) {
+// adoptNewer takes a pick from the project (strictly newer than ours) or from
+// a request (not older than ours), deciding under the lock so a click that
+// lands meanwhile is never overwritten. It reports whether it adopted.
+func (m *Manager) adoptNewer(c Mode, at time.Time, orEqual bool) bool {
 	m.mu.Lock()
-	m.chosen, m.choiceAt = c, at
+	newer := at.After(m.choiceAt) || (orEqual && at.Equal(m.choiceAt))
+	if newer {
+		m.chosen, m.choiceAt = c, at
+	}
 	m.mu.Unlock()
-	if m.Persist != nil {
+	if newer && m.Persist != nil {
 		m.Persist(c)
 	}
+	return newer
 }
 
 // handshake runs at the start of a Tick when Handshake is set. It first syncs
-// the chosen mode with the project, then publishes a pick made here, then
-// applies a pending request unless a game is running. Every step that fails is
-// retried next tick.
+// the chosen mode with the project (until that has worked the Tick applies
+// nothing: see Synced), then publishes a pick made here, then applies a
+// pending request unless a game is running. Every step that fails is retried
+// next tick.
 func (m *Manager) handshake(ctx context.Context, now time.Time) (errs []error) {
 	if !m.chosenSynced {
 		cur, err := m.Incus.ProjectConfig(ctx, ProjectChosenKey)
@@ -71,14 +78,15 @@ func (m *Manager) handshake(ctx context.Context, now time.Time) (errs []error) {
 			return []error{err}
 		}
 		var v chosenValue
-		if json.Unmarshal([]byte(cur), &v) == nil && v.At.After(m.choiceAtLocked()) {
-			if _, ok := Parse(string(v.Mode)); ok {
-				m.adopt(v.Mode, v.At)
+		if json.Unmarshal([]byte(cur), &v) == nil {
+			if _, ok := Parse(string(v.Mode)); ok && m.adoptNewer(v.Mode, v.At, false) {
 				m.logf("mode %s adopted from the project (chosen %s)", v.Mode, v.At.Format(time.RFC3339))
 			}
 		} else if cur == "" && m.SeedChosen {
+			// Stored with the time of seeding, but not stamped on the local
+			// pick: a request older than that is still newer than this old pick.
 			m.mu.Lock()
-			m.choiceAt, m.chosenDirty = now, true
+			m.chosenDirty, m.seedAt = true, now
 			m.mu.Unlock()
 		}
 		m.chosenSynced = true
@@ -99,19 +107,15 @@ func (m *Manager) handshake(ctx context.Context, now time.Time) (errs []error) {
 	var req ModeRequest
 	if err := json.Unmarshal([]byte(raw), &req); err != nil {
 		m.logf("dropping an unreadable mode request %q: %v", raw, err)
-		return append(errs, m.clearRequest(ctx))
+		return append(errs, m.clearRequest(ctx, raw))
 	}
 	if _, ok := Parse(string(req.Mode)); !ok {
 		m.logf("dropping a mode request for %q from %s", req.Mode, req.By)
-		return append(errs, m.clearRequest(ctx))
+		return append(errs, m.clearRequest(ctx, raw))
 	}
-	switch {
-	case now.Sub(req.At) > RequestMaxAge:
+	if now.Sub(req.At) > RequestMaxAge {
 		m.logf("dropping a mode request for %s from %s: %s old", req.Mode, req.By, now.Sub(req.At).Round(time.Second))
-	case req.At.Before(m.choiceAtLocked()):
-		m.logf("dropping a mode request for %s from %s: a newer choice was made here", req.Mode, req.By)
-	default:
-		m.adopt(req.Mode, req.At)
+	} else if m.adoptNewer(req.Mode, req.At, true) {
 		m.mu.Lock()
 		m.chosenDirty = true
 		m.mu.Unlock()
@@ -121,20 +125,26 @@ func (m *Manager) handshake(ctx context.Context, now time.Time) (errs []error) {
 		if err := m.publishChosen(ctx); err != nil {
 			return append(errs, err)
 		}
+	} else {
+		m.logf("dropping a mode request for %s from %s: a newer choice was made here", req.Mode, req.By)
 	}
-	return append(errs, m.clearRequest(ctx))
+	return append(errs, m.clearRequest(ctx, raw))
 }
 
-func (m *Manager) choiceAtLocked() time.Time {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.choiceAt
-}
+// Synced reports whether the chosen mode has been read from the project. A
+// Tick with Handshake on applies nothing until it has: an enforcer that
+// started while Incus was still coming up would otherwise apply its default
+// (Full, for the headless one) over a pick made earlier.
+func (m *Manager) Synced() bool { return !m.Handshake || m.chosenSynced }
 
 // publishChosen writes ProjectChosenKey if a pick is waiting to be stored.
 func (m *Manager) publishChosen(ctx context.Context) error {
 	m.mu.Lock()
 	dirty, v := m.chosenDirty, chosenValue{m.chosen, m.choiceAt}
+	if v.At.IsZero() {
+		v.At = m.seedAt
+	}
+	picked := m.choiceAt
 	m.mu.Unlock()
 	if !dirty {
 		return nil
@@ -144,14 +154,23 @@ func (m *Manager) publishChosen(ctx context.Context) error {
 		return fmt.Errorf("store the chosen mode: %w", err)
 	}
 	m.mu.Lock()
-	if m.choiceAt.Equal(v.At) { // not replaced while writing
+	if m.choiceAt.Equal(picked) { // not replaced while writing
 		m.chosenDirty = false
 	}
 	m.mu.Unlock()
 	return nil
 }
 
-func (m *Manager) clearRequest(ctx context.Context) error {
+// clearRequest empties the request key, but only if it still holds raw: a
+// second request that arrived while this one was handled is left for the next tick.
+func (m *Manager) clearRequest(ctx context.Context, raw string) error {
+	cur, err := m.Incus.ProjectConfig(ctx, ProjectModeRequestKey)
+	if err != nil {
+		return fmt.Errorf("clear the mode request: %w", err)
+	}
+	if cur != raw {
+		return nil
+	}
 	if err := m.Incus.SetProjectConfig(ctx, ProjectModeRequestKey, ""); err != nil {
 		return fmt.Errorf("clear the mode request: %w", err)
 	}
