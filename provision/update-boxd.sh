@@ -61,7 +61,7 @@ if [ -z "$TAG" ]; then
     exit 0
   fi
   code=0
-  json=$(curl -fsSL -m 30 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/releases/latest") || code=$?
+  json=$(curl -fsL -m 30 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/releases/latest") || code=$?
   if [ "$code" = 22 ]; then
     say "no stable release yet: nothing to do"
     exit 0
