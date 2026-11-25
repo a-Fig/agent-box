@@ -33,7 +33,6 @@ const (
 	recBoxCreate   = "box-create"
 	recBoxDelete   = "box-delete"
 	recMode        = "mode" // the mode changed
-	recModeRequest = "mode-request"
 	recControl     = "control"
 	recRefusal     = "refusal"
 	recQueueAdd    = "queue-add"    // a job was queued
@@ -51,7 +50,6 @@ type record struct {
 	Seconds float64           `json:"seconds,omitempty"` // job-end: how long it ran
 	Box     *boxRec           `json:"box,omitempty"`
 	Mode    *modeRec          `json:"mode,omitempty"`
-	Request *dash.ModeRequest `json:"request,omitempty"`
 	Refusal *dash.RefusalBody `json:"refusal,omitempty"`
 	Control *controlRec       `json:"control,omitempty"`
 }
@@ -76,20 +74,17 @@ type controlRec struct {
 	By     string `json:"by"`
 }
 
-// sample is one line of a samples file, each minute: one for the machine and
-// one per box.
+// sample is one line of a samples file, each minute, for the machine. Files
+// written before 2026-11-25 also hold a line per box ("kind":"box"), which
+// nothing reads.
 type sample struct {
 	V        int       `json:"v"`
 	At       time.Time `json:"at"`
-	Kind     string    `json:"kind"` // machine, box
-	Box      string    `json:"box,omitempty"`
-	Size     string    `json:"size,omitempty"`
+	Kind     string    `json:"kind"` // machine
 	MemUsed  int64     `json:"memUsed"`
-	MemLimit int64     `json:"memLimit,omitempty"` // box
-	MemCap   int64     `json:"memCap,omitempty"`   // machine
-	MemAlloc int64     `json:"memAlloc,omitempty"` // machine: what boxes hold of the cap
+	MemCap   int64     `json:"memCap,omitempty"`
+	MemAlloc int64     `json:"memAlloc,omitempty"` // what boxes hold of the cap
 	WSL      int64     `json:"wslMemory,omitempty"`
-	CPUTime  int64     `json:"cpuTime,omitempty"` // box: nanoseconds
 }
 
 type boxSpan struct {

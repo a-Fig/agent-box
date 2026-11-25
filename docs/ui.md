@@ -210,10 +210,11 @@ otherwise), masks the tail as it masks every tail, records the end, and answers 
 - **`events-YYYY-MM-DD.jsonl`**, kept 180 days:
   - job started and job ended, with the `.meta`, exit code and duration;
   - box created and box deleted;
-  - mode changes, mode requests, and controls (with the device);
+  - mode changes and controls (with the device; a mode request is a control);
   - refusals.
-- **`samples-YYYY-MM-DD.jsonl`**, kept 14 days: a line per box and one for the machine each minute
-  (memory, CPU time, allocated memory).
+- **`samples-YYYY-MM-DD.jsonl`**, kept 14 days: a line for the machine each minute (memory used,
+  the cap, what boxes hold of it, WSL's memory). Files from before 2026-11-25 also have a line per
+  box, which nothing reads.
 
 How the files are written and read:
 - Every line has `"v": 1`. A reader skips a truncated last line, so a crash mid-write loses one

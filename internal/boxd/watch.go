@@ -58,7 +58,6 @@ type Watcher struct {
 	listed    bool // lastIns is from a poll that listed the boxes
 	cpu       map[string]cpuMark
 	lastMode  *modeRec
-	lastReq   string
 	sampled   time.Time
 	subs      map[chan dash.Event]struct{}
 }
@@ -522,12 +521,6 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 		w.lastMode = &cur
 		w.record(record{Type: recMode, At: now, Mode: &cur})
 	}
-	if v := cfg[mode.ProjectModeRequestKey]; v != w.lastReq {
-		w.lastReq = v
-		if m.ModeRequested != nil {
-			w.record(record{Type: recModeRequest, At: now, Request: m.ModeRequested})
-		}
-	}
 	if !reflect.DeepEqual(w.machine, m) {
 		w.machine = m
 		w.emit(dash.Event{Name: dash.EventMachine, Data: m})
@@ -587,18 +580,12 @@ func allot(cfg map[string]string, proj Project, ins []Instance) (caps, held dash
 }
 
 func (w *Watcher) sample(now time.Time, ins []Instance, boxes map[string]dash.Box) {
-	ss := []sample{{At: now, Kind: "machine", MemCap: w.machine.Caps.Memory, MemAlloc: w.machine.Allocated.Memory,
-		WSL: w.machine.WSLMemory}}
+	s := sample{At: now, Kind: "machine", MemCap: w.machine.Caps.Memory, MemAlloc: w.machine.Allocated.Memory,
+		WSL: w.machine.WSLMemory}
 	for _, in := range ins {
-		b := boxes[in.Name]
-		s := sample{At: now, Kind: "box", Box: b.Name, Size: b.Size, MemUsed: b.MemUsed, MemLimit: b.MemLimit}
-		if in.State != nil {
-			s.CPUTime = in.State.CPU.Usage
-		}
-		ss[0].MemUsed += b.MemUsed
-		ss = append(ss, s)
+		s.MemUsed += boxes[in.Name].MemUsed
 	}
-	if err := w.Hist.Samples(ss); err != nil {
+	if err := w.Hist.Samples([]sample{s}); err != nil {
 		w.logf("boxd: history: %v", err)
 	}
 }

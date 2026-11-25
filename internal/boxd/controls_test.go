@@ -176,8 +176,7 @@ func TestExtendRetryReadsTheNewExpiry(t *testing.T) {
 // boxtray doesn't write is left out.
 func TestMachineEnforcer(t *testing.T) {
 	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "mypc",
-		"user.agent-box.enforcer": "headless", "user.agent-box.tray-seen": "2026-11-24T17:59:30Z",
-		"user.agent-box.chosen": `{"mode":"full","at":"2026-11-24T09:00:00+01:00"}`})
+		"user.agent-box.enforcer": "headless", "user.agent-box.tray-seen": "2026-11-24T17:59:30Z"})
 	m := r.w.Machine()
 	if m.Enforcer != dash.EnforcerHeadless || m.TrayLastSeen == nil {
 		t.Fatalf("machine: %+v", m)
