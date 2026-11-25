@@ -29,6 +29,9 @@ type loopCfg struct {
 	Beat func(ctx context.Context, now time.Time)
 	// Logf, if set, records handovers.
 	Logf func(format string, args ...any)
+	// Maintain, if set, is called after every tick, with whether this process is the enforcer
+	// (false while it stands aside); the self-update (update.go) throttles itself.
+	Maintain func(ctx context.Context, active bool)
 }
 
 // run polls until ctx ends. It ticks every interval and immediately on wake
@@ -50,6 +53,9 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 				m = nil
 				s.HoldAwake(false)
 			}
+			if cfg.Maintain != nil {
+				cfg.Maintain(ctx, false)
+			}
 			return
 		}
 		if m == nil {
@@ -68,6 +74,9 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 		}
 		s.HoldAwake(st.Running > 0)
 		report(st)
+		if cfg.Maintain != nil {
+			cfg.Maintain(ctx, true)
+		}
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()

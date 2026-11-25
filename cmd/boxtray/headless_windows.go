@@ -70,7 +70,7 @@ func runHeadless() {
 			os.Exit(2)
 		}
 	}()
-	if _, err := createMutex(headlessMutex); errors.Is(err, windows.ERROR_ALREADY_EXISTS) || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+	if !takeMutex(headlessMutex) {
 		lg.Printf("exit: another headless enforcer is already running")
 		return
 	}
@@ -87,9 +87,10 @@ func runHeadless() {
 			m.Reclaim = mode.CgroupReclaim{Run: wslRoot} // swap limits are part of the job
 			return m
 		},
-		Idle: trayRunning,
-		Beat: hb.beat,
-		Logf: lg.Printf,
+		Idle:     trayRunning,
+		Beat:     hb.beat,
+		Logf:     lg.Printf,
+		Maintain: autoUpdater(os.Args[1:], lg.Printf, func() { os.Exit(0) }).maintain,
 	}
 	sl := &statusLog{logf: lg.Printf}
 	ctx := context.Background()

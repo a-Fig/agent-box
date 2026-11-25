@@ -88,13 +88,20 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
     nightly or a test prerelease, and `box status` says when a newer stable release is out.
     Installing one older than the latest stable release pins it like a rollback, until
     `box update` or a newer release.
-- **boxtray.exe.** The tray checks hourly. To swap itself it:
-  1. stops the `agent-box-enforcer` task;
-  2. renames itself to `.old` and moves the new file into its place;
-  3. starts the new one and exits.
-
-  The mutex hand-over that already exists between the tray and the headless enforcer covers the
-  gap.
+- **boxtray.exe** (`cmd/boxtray/update.go`). The active enforcer, tray or headless, checks hourly
+  and installs a newer release with the same steps, keeping `boxtray.old.exe`.
+  - Every boxtray process stats `boxtray.exe` each tick (5 s). When the file has changed and is
+    another release than its own, older too (a rollback), the process starts the new one with
+    `--after-update` and exits. Restarted processes run outside their scheduled tasks.
+    That holds for the active one and the headless one standing aside alike, so both run the new
+    code within seconds of a swap. The new process waits up to 20 s for the old one's mutexes.
+  - The tray restarts itself, not through its scheduled task: Task Scheduler's restart-on-failure
+    doesn't restart a program that exits with an error (#97, tried on the PC 2026-11-25). The
+    headless enforcer's gap is a few seconds; the tray's is covered by the headless one, as at
+    logon.
+  - `boxtray.exe --update <tag>` installs a release, nightly or test prerelease by hand, logging
+    to `boxtray.log`. It is also the rollback: one older than the latest stable release pins, so
+    the hourly check skips that release until a newer one (`boxtray-update.json`).
 - **boxd.** An `agent-box-update.timer` in the distro runs `update-boxd.sh` hourly. It fetches the
   release's `boxd`, unit and `install-boxd.sh`, checks them and probes the new boxd, and runs that
   `install-boxd.sh`, which health-checks the new boxd and rolls back. A boxd that isn't a release
@@ -106,7 +113,7 @@ A part never moves to an older version, and `AGENT_BOX_NO_UPDATE=1` turns all of
 
 - **No canary** (Tyler's simple-first rule, 2026-11-25): a stable tag by Tyler's hand is the
   guard. The 10-minute wait for boxd's health was dropped before it was built.
-- **Rollback.** `box update --rollback`, and the tray's menu, swap `.old` back in. The hourly
+- **Rollback.** `box update --rollback` swaps `.old` back in, and `boxtray.exe --update <tag>` installs an older tag. The hourly
   check then skips the release rolled back from until a newer one comes out.
 - **What the checksum proves.** It catches a damaged download. It doesn't prove who built the
   file, as in Murmur. The repo is public, and only Tyler and his agents can push tags.

@@ -184,7 +184,7 @@ func TestAutoWaitsForTheLock(t *testing.T) {
 	// A lock left by a killed update is taken once it is stale.
 	p := filepath.Join(u.Dir, "update.lock")
 	os.WriteFile(p, nil, 0o644)
-	old := u.Now().Add(-lockStale - time.Minute)
+	old := u.Now().Add(-update.LockStale - time.Minute)
 	os.Chtimes(p, old, old)
 	u.auto(context.Background())
 	if gh.asks != 1 {
