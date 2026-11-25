@@ -14,19 +14,22 @@ import (
 
 // StatusReport says whether offloading to the PC is worth it now.
 type StatusReport struct {
-	Advice    string     `json:"advice"`
-	Available bool       `json:"available"` // box_run can start a job now
-	Remote    string     `json:"remote"`
-	Reachable bool       `json:"reachable"`
-	Error     string     `json:"error,omitempty"` // why the PC can't be reached
-	Mode      string     `json:"mode"`            // mypc, shared, full, or "" if unknown
-	Yielding  bool       `json:"yielding"`        // the tray has paused boxes for a game
-	Reason    string     `json:"reason,omitempty"`
-	Boxes     int        `json:"boxes"`
-	MaxBoxes  int        `json:"maxBoxes"`  // -1: no limit
-	SlotsFree int        `json:"slotsFree"` // -1: no limit
-	Sizes     []SizeRoom `json:"sizes"`
-	Room      string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
+	Advice    string `json:"advice"`
+	Available bool   `json:"available"` // box_run can start a job now
+	Remote    string `json:"remote"`
+	Reachable bool   `json:"reachable"`
+	Error     string `json:"error,omitempty"` // why the PC can't be reached
+	Mode      string `json:"mode"`            // mypc, shared, full, or "" if unknown
+	Yielding  bool   `json:"yielding"`        // the tray has paused boxes for a game
+	Reason    string `json:"reason,omitempty"`
+	Boxes     int    `json:"boxes"`
+	MaxBoxes  int    `json:"maxBoxes"`  // -1: no limit
+	SlotsFree int    `json:"slotsFree"` // -1: no limit
+	// Replaceable is how many boxes SlotsFree counts as free: expired, or throwaways whose job
+	// ended, which the next launch deletes first.
+	Replaceable int        `json:"replaceable,omitempty"`
+	Sizes       []SizeRoom `json:"sizes"`
+	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none"; "no limit"
 	// GPU is "free", "free, but no room ...", "in use: job X" or
 	// "unavailable: ..." (a game or My PC).
 	GPU     string   `json:"gpu"`
@@ -83,6 +86,7 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 		for _, in := range insts {
 			if evictable(in) {
 				free++
+				s.Replaceable++
 			}
 		}
 		s.MaxBoxes, s.SlotsFree = n, max(free, 0)
@@ -353,7 +357,11 @@ func writeStatus(w io.Writer, s StatusReport) {
 	}
 	fmt.Fprintf(w, "mode: %s\n", m)
 	if s.MaxBoxes >= 0 {
-		fmt.Fprintf(w, "boxes: %d of %d (%d free)\n", s.Boxes, s.MaxBoxes, s.SlotsFree)
+		free := fmt.Sprintf("%d free", s.SlotsFree)
+		if s.Replaceable > 0 { // "4 of 10 (8 free)" read as a bug (#82)
+			free += fmt.Sprintf(", %d of them taken by finished throwaways or expired boxes a launch replaces", s.Replaceable)
+		}
+		fmt.Fprintf(w, "boxes: %d of %d (%s)\n", s.Boxes, s.MaxBoxes, free)
 	} else {
 		fmt.Fprintf(w, "boxes: %d\n", s.Boxes)
 	}
