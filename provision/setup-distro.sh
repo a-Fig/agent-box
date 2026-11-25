@@ -306,9 +306,22 @@ else
 fi
 
 step "Dashboard server (boxd, docs/ui.md)"
-# boxd is copied in by install-pc.ps1 -BoxdPath; without it this step only reports.
+# boxd is copied in by install-pc.ps1 -BoxdPath, which empties this folder first, so a boxd here
+# is one this run staged. It is used once and deleted: on 2026-11-25 a rerun of this script by
+# hand found the copy staged at the first install still here and put it over the newer boxd that
+# deploy-boxd.sh had installed. It never downgrades either: a staged boxd older (by mtime) than
+# the installed one is skipped. deploy-boxd.sh is how boxd is updated after setup.
+boxd_new=no
 if [ -f "$HERE/boxd" ]; then
+  if [ -f /opt/agent-box/bin/boxd ] && [ "$HERE/boxd" -ot /opt/agent-box/bin/boxd ]; then
+    note "the staged boxd is older than the installed one: kept the installed one (deploy-boxd.sh updates boxd)"
+  else
+    boxd_new=yes
+  fi
+fi
+if [ "$boxd_new" = yes ]; then
   install -D -m 0755 "$HERE/boxd" /opt/agent-box/bin/boxd
+  rm -f "$HERE/boxd"
   install -m 0644 "$HERE/systemd/agent-box-boxd.service" /etc/systemd/system/
   install -d -m 0755 /etc/agent-box
   # The owner is the tailnet login this node belongs to (Tyler's). It is read here, never
@@ -334,7 +347,12 @@ print(u.get("LoginName", "") if not d["Self"].get("Tags") else "")' 2>/dev/null 
     note "Tailscale is not up: run 'tailscale serve --bg --https=443 http://127.0.0.1:7766' once it is"
   fi
 else
-  note "not installed (pass -BoxdPath to install-pc.ps1)"
+  rm -f "$HERE/boxd"
+  if [ -f /opt/agent-box/bin/boxd ]; then
+    note "left as installed: $(systemctl is-active agent-box-boxd.service || true) (deploy-boxd.sh updates it)"
+  else
+    note "not installed (pass -BoxdPath to install-pc.ps1)"
+  fi
 fi
 
 step "Virtual machines (/dev/kvm)"
