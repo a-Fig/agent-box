@@ -316,7 +316,8 @@ step "Dashboard server (boxd, docs/ui.md)"
 # halfway. To put an older build in on purpose, use deploy-boxd.sh, or delete the installed one.
 boxd_new=no
 if [ -f "$HERE/boxd" ]; then
-  if [ -f /opt/agent-box/bin/boxd ] && [ "$HERE/boxd" -ot /opt/agent-box/bin/boxd ]; then
+  # The same file counts as new, so a rerun after a failure below installs and restarts it.
+  if [ -f /opt/agent-box/bin/boxd ] && ! cmp -s "$HERE/boxd" /opt/agent-box/bin/boxd && [ "$HERE/boxd" -ot /opt/agent-box/bin/boxd ]; then
     note "the staged boxd is older than the installed one: kept the installed one (deploy-boxd.sh updates boxd)"
   else
     install -D -m 0755 "$HERE/boxd" /opt/agent-box/bin/boxd
@@ -350,8 +351,13 @@ print(u.get("LoginName", "") if not d["Self"].get("Tags") else "")' 2>/dev/null 
   fi
   note "boxd: $(systemctl is-active agent-box-boxd.service || true), owners in /etc/agent-box/boxd.json"
   if tailscale status >/dev/null 2>&1; then
-    tailscale serve --bg --https=443 http://127.0.0.1:7766 >/dev/null
-    note "tailscale serve: https://<this node>.<tailnet>.ts.net/ -> 127.0.0.1:7766 (tailnet only)"
+    # It runs on every rerun now, so a failure (HTTPS certificates off in the tailnet's DNS
+    # settings) is a note rather than the end of setup; timeout in case it waits for a consent.
+    if timeout 30 tailscale serve --bg --https=443 http://127.0.0.1:7766 >/dev/null </dev/null; then
+      note "tailscale serve: https://<this node>.<tailnet>.ts.net/ -> 127.0.0.1:7766 (tailnet only)"
+    else
+      note "tailscale serve failed (HTTPS certificates off in the tailnet's DNS settings?): run 'tailscale serve --bg --https=443 http://127.0.0.1:7766' once they are on"
+    fi
   else
     note "Tailscale is not up: run 'tailscale serve --bg --https=443 http://127.0.0.1:7766' once it is"
   fi
