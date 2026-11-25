@@ -869,8 +869,12 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 }
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
-// existing box: a taken name means another try with a new suffix.
+// existing box: a taken name means another try with a new suffix. It also
+// retries once under a fresh suffix on Incus's btrfs first-launch metadata
+// error (jobrun.IsDisallowedMetadata), which warms the image cache on the
+// failed try but leaves the old name's empty container dir poisoned on disk.
 func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
+	retriedMeta := false
 	for try := 0; try < 8; try++ {
 		name := base + "-" + a.Rand()
 		if find(insts, name) != nil {
@@ -881,6 +885,14 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		err := a.launch(ctx, name, ttl, true, sz)
 		if err == nil {
 			return name, a.confirmGPU(ctx, name, sz)
+		}
+		if jobrun.IsDisallowedMetadata(err) && !retriedMeta && try < 7 {
+			// Guard try < 7 so a metadata error on the final slot returns the
+			// real Incus error rather than "no free name for a throwaway box".
+			retriedMeta = true
+			fmt.Fprintf(a.Err, "box: %s hit Incus's first-launch metadata error; retrying once with a fresh box\n", name)
+			insts = append(insts, instance{Name: name})
+			continue
 		}
 		if !isConflict(err) {
 			return name, err
@@ -910,6 +922,9 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 		return paused, nil
 	}
 	if now == nil {
+		if jobrun.IsDisallowedMetadata(err) {
+			return "", fmt.Errorf("%w (this or an earlier failed launch left an empty dir on the PC: /var/lib/incus/storage-pools/default/containers/%s_%s; use a new box (--new / new: true) until it is removed)", err, a.Project, box)
+		}
 		return "", err
 	}
 	if err := reusableBox(now, requestedSize); err != nil {

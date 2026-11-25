@@ -456,6 +456,89 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	}
 }
 
+func TestLaunchThrowawayRetriesOnceOnDisallowedMetadata(t *testing.T) {
+	const metaErr = "Error: Failed creating instance from image: Instance metadata contained disallowed entries: [/var/lib/incus/storage-pools/default/containers/agents_my-repo-0001/abc/rootfs/bin]"
+
+	t.Run("recovers on fresh name", func(t *testing.T) {
+		f := &fakePC{t: t, exit: "0", refuse: metaErr, refuseOnce: true}
+		a, out := testApp(f)
+		r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true, TTL: 2 * time.Hour})
+		if err != nil || r.Code != 0 {
+			t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+		}
+		if len(f.launches) != 2 {
+			t.Fatalf("launches = %d, want 2", len(f.launches))
+		}
+		if first, second := f.launches[0][2], f.launches[1][2]; first == second {
+			t.Errorf("retried with same name %q; want a fresh name", second)
+		}
+		if r.Box != strings.TrimPrefix(f.launches[1][2], "pc:") {
+			t.Errorf("result box = %q, want %q", r.Box, f.launches[1][2])
+		}
+		if !strings.Contains(out.String(), "retrying once with a fresh box") {
+			t.Errorf("missing retry notice in output:\n%s", out)
+		}
+	})
+
+	t.Run("final try returns real metadata error", func(t *testing.T) {
+		// 7 colliding names (0002..0008; 0001 is consumed by the job ID) leave
+		// only the 8th try (try == 7); a metadata error there must return the
+		// real Incus error instead of "no free name".
+		insts := make([]instance, 7)
+		for i := range insts {
+			insts[i] = instance{Name: fmt.Sprintf("my-repo-%04x", i+2), Status: "Running"}
+		}
+		f := &fakePC{t: t, insts: insts, refuse: metaErr, refuseOnce: true}
+		a, _ := testApp(f)
+		_, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true, TTL: 2 * time.Hour})
+		if err == nil || !strings.Contains(err.Error(), "Instance metadata contained disallowed entries") {
+			t.Fatalf("err = %v, want real disallowed metadata error", err)
+		}
+		if len(f.launches) != 1 || f.launches[0][2] != "pc:my-repo-0009" {
+			t.Errorf("launches = %v, want single launch of pc:my-repo-0009", f.launches)
+		}
+	})
+
+	t.Run("stops after one retry", func(t *testing.T) {
+		f := &fakePC{t: t, refuse: metaErr}
+		a, _ := testApp(f)
+		_, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true, TTL: 2 * time.Hour})
+		if err == nil || !strings.Contains(err.Error(), "Instance metadata contained disallowed entries") {
+			t.Fatalf("err = %v, want disallowed metadata error", err)
+		}
+		if len(f.launches) != 2 {
+			t.Errorf("launches = %d, want 2 (1 initial + 1 retry)", len(f.launches))
+		}
+	})
+
+	t.Run("does not retry unrelated launch errors", func(t *testing.T) {
+		f := &fakePC{t: t, refuse: "Error: Failed creating instance: disk broken", refuseOnce: true}
+		a, _ := testApp(f)
+		_, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true, TTL: 2 * time.Hour})
+		if err == nil || !strings.Contains(err.Error(), "disk broken") {
+			t.Fatalf("err = %v, want disk broken", err)
+		}
+		if len(f.launches) != 1 {
+			t.Errorf("launches = %d, want 1", len(f.launches))
+		}
+	})
+
+	t.Run("does not retry reusable repo box", func(t *testing.T) {
+		f := &fakePC{t: t, refuse: metaErr, refuseOnce: true}
+		a, _ := testApp(f)
+		_, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
+		if err == nil || !strings.Contains(err.Error(), "Instance metadata contained disallowed entries") {
+			t.Fatalf("err = %v, want disallowed metadata error", err)
+		}
+		if !strings.Contains(err.Error(), "/var/lib/incus/storage-pools/default/containers/agents_my-repo") || !strings.Contains(err.Error(), "new: true") {
+			t.Errorf("err missing recovery hint: %v", err)
+		}
+		if len(f.launches) != 1 {
+			t.Errorf("launches = %d, want 1", len(f.launches))
+		}
+	})
+}
+
 func TestNewSetsExpiry(t *testing.T) {
 	f := &fakePC{t: t}
 	a, _ := testApp(f)

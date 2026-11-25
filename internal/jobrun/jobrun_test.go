@@ -1,6 +1,7 @@
 package jobrun
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -20,5 +21,18 @@ func TestCancelScriptMarks(t *testing.T) {
 	}
 	if !strings.Contains(agent, "\nj='b.20261124-010203-abcd'\n") || !strings.Contains(agent, "echo 130 >") {
 		t.Fatalf("job or code missing:\n%s", agent)
+	}
+}
+
+func TestIsDisallowedMetadata(t *testing.T) {
+	if IsDisallowedMetadata(nil) {
+		t.Error("nil error matched")
+	}
+	if IsDisallowedMetadata(errors.New("incus launch: Error: something else")) {
+		t.Error("unrelated error matched")
+	}
+	err := errors.New("incus launch: Error: Failed creating instance from image: Instance metadata contained disallowed entries: [/var/lib/incus/...]")
+	if !IsDisallowedMetadata(err) {
+		t.Error("disallowed metadata error did not match")
 	}
 }
