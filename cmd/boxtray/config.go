@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/a-Fig/agent-box/internal/mode"
 )
@@ -39,8 +40,12 @@ func loadMode(path string) mode.Mode {
 	return mode.MyPC
 }
 
+var saveMu sync.Mutex // a click and an adopted request may save at once
+
 // saveMode writes the mode atomically.
 func saveMode(path string, m mode.Mode) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
 	b, err := json.Marshal(config{Mode: m})
 	if err != nil {
 		return err

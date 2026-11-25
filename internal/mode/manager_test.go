@@ -701,3 +701,19 @@ func TestSizeTable(t *testing.T) {
 		}
 	}
 }
+
+// Another enforcer may overwrite the label during a hand-over; a minute later
+// this one reads it back and puts its own value back, with no write otherwise.
+func TestModeLabelIsReadBackAndRepaired(t *testing.T) {
+	f := newFake()
+	m := New(f, Full)
+	tick(m, 0, false)
+	equal(t, f.take(), []string{"project user.agent-box.mode=full"})
+	tick(m, ProjectRecheck, false)
+	equal(t, f.take(), nil) // read back, unchanged: no write
+	f.project[ProjectModeKey] = "mypc"
+	tick(m, ProjectRecheck+ProjectRecheck/2, false)
+	equal(t, f.take(), nil) // not due yet
+	tick(m, 2*ProjectRecheck, false)
+	equal(t, f.take(), []string{"project user.agent-box.mode=full"})
+}

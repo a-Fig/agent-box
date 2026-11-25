@@ -132,10 +132,18 @@ The same set everywhere, since everywhere is the same page.
     applied days later.
   - A running game still wins. The request waits until the yield ends, and the page shows it as
     pending.
+- **The chosen mode lives in the project: `user.agent-box.chosen`** (`{mode, at}` JSON), written by
+  whichever enforcer is active when a click or a request is applied. The tray and the headless
+  enforcer both adopt it when they start enforcing, so a pick made from the page while nobody is
+  logged on survives the hand-over in both directions. `boxtray.json` is the tray's local copy: it
+  seeds an empty project once, and every adopted pick is saved to it. The headless enforcer's Full is
+  only the default until something is chosen.
 - **The last choice wins**, whether it was a tray click or a page request. The tray compares the
   request's `at` with the time of its own last click.
-- **The tray writes `user.agent-box.tray-seen`** (a time) every 30s. That is the dashboard's "tray
-  alive" signal, and it explains a request that isn't being picked up.
+- **The tray writes `user.agent-box.tray-seen`** (RFC3339 UTC) every 30s, plus `user.agent-box.enforcer`
+  (`tray`, or `headless` while nobody is logged on). That is the dashboard's "tray alive" signal, and it
+  explains a request that isn't being picked up. The headless enforcer applies requests too (see
+  below), so `enforcer` only says who is in charge.
 
 ## Data
 
