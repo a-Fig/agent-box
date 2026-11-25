@@ -57,6 +57,7 @@ type fakePC struct {
 	followErr  int               // this many follows fail with a transport error
 	kept       map[string]bool   // boxes the kept-jobs check finds kept
 	refuseOnce bool              // refuse applies to the first launch only
+	etagFails  int               // this many config sets fail as if another write came first
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -151,6 +152,10 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		k, v, ok := strings.Cut(args[3], "=")
 		if args[1] != "set" || !ok {
 			f.t.Fatalf("unexpected incus config arguments: %q", args)
+		}
+		if f.etagFails > 0 {
+			f.etagFails--
+			return Result{Code: 1, Stderr: "Error: ETag doesn't match: 1 vs 2"}, nil
 		}
 		if inst.Config == nil {
 			inst.Config = make(map[string]string)
@@ -418,6 +423,20 @@ func TestRunReusesRepoBox(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "ok\n") || !strings.Contains(out.String(), "job my-repo.20261123-120000-0001") {
 		t.Errorf("output = %q", out)
+	}
+}
+
+// The tray setting a new box's CPU limits makes a config set lose its ETag
+// race; box tries again rather than failing the run or warning.
+func TestRunRetriesExpiryOnETagRace(t *testing.T) {
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running"}}, log: "ok\n", exit: "0\n", etagFails: 2}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
+	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
+		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
+	}
+	if got := strings.Count(f.callList(), "config"); got != 5 { // 2 lost, the start's, the run's, the idle one
+		t.Errorf("config calls = %d: %s", got, f.callList())
 	}
 }
 

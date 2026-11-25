@@ -559,8 +559,24 @@ func (a *App) expiryConfig(ttl time.Duration) string {
 	return expiresKey + "=" + a.Now().Add(ttl).UTC().Format(time.RFC3339)
 }
 
+// It retries a lost write race: incus config set reads the config and writes
+// it back with its ETag, and the tray sets a box's CPU limits whenever they
+// differ from the mode's: within a tick of a launch in Full, just when box
+// sets the job's expiry, or on any mode change. 412 means nothing was written.
 func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
-	_, err := a.incusOK(ctx, "config", "set", a.target(box), a.expiryConfig(ttl))
+	var err error
+	for try := 0; try < 5; try++ {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(try) * 200 * time.Millisecond):
+			}
+		}
+		if _, err = a.incusOK(ctx, "config", "set", a.target(box), a.expiryConfig(ttl)); err == nil || !strings.Contains(err.Error(), "ETag doesn't match") {
+			return err
+		}
+	}
 	return err
 }
 
