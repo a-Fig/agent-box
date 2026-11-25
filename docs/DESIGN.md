@@ -20,7 +20,7 @@ On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq
 | Isolation for agents | Incus project `agents` (`restricted=true`, its own profiles) + **restricted client certs** (`incus config trust add --restricted --projects agents`); see Isolation below |
 | Dashboard | Incus web UI (`incus-ui-canonical`) at `https://agent-box.<tailnet>.ts.net:8443`, with a Let's Encrypt certificate from Tailscale (`provision/https-cert.sh`, renewed weekly) |
 | Client on the laptop | Windows `incus` client (`winget install LinuxContainers.Incus`), `incus remote add pc` |
-| Image | `images:ubuntu/24.04/cloud` + cloud-init in the `agents` profile (git, build-essential, Go, Node LTS, uv, JDK 17, lazy Android SDK hook, gh), published once as `agent-base` |
+| Image | `images:ubuntu/24.04/cloud` + cloud-init in the `agents` profile (git, build-essential, Go, Node LTS, uv, JDK 17, lazy Android SDK hook, gh, Chromium's libraries), published once as `agent-base` |
 | Caches | Custom storage volume `cache` mounted at `/cache` (Go, npm, Gradle, Android SDK, Robolectric, uv caches) |
 | Keeping WSL up | Scheduled Task at boot: `wsl -d agents --exec sleep infinity` |
 | Enforcing the mode with nobody logged on | Scheduled Task `agent-box-enforcer` at boot: `boxtray.exe --headless` (Full; the tray takes over at logon) |

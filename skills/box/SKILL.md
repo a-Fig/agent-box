@@ -24,4 +24,4 @@ Boxes are throwaway; `/cache` survives.
 
 **Sizes** (`size`): small (quick), medium (default), large (Gradle). **GPU**: `gpu: true` gets the RTX 3070, one at a time; a game stops it.
 
-Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS, uv, JDK 17, Android SDK 34/35 (lazy in /cache; first run fetches ~1 GB, or `sdkmanager --list`), gh, git, build-essential.
+Toolchain: Ubuntu 24.04, Go 1.27.3, Node LTS, uv, JDK 17, Android SDK 34/35 (lazy in /cache; first run fetches ~1 GB, or `sdkmanager --list`), gh, git, build-essential, Chromium's libraries (Puppeteer and Playwright downloads cache in /cache).
