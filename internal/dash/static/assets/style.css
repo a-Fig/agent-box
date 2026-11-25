@@ -493,10 +493,6 @@ code {
 .dot-on {
   background: var(--success);
 }
-.dot-warn {
-  border: 1.5px solid var(--warning);
-  background: linear-gradient(90deg, var(--warning) 50%, transparent 50%);
-}
 .dot-bad {
   background: var(--destructive);
 }
