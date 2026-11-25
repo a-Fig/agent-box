@@ -1,8 +1,8 @@
 # v0.1.0: go/no-go (2026-11-25)
 
-**Go: tag v0.1.0 on `dc68a60`** (main, the dev→main merge #112). Then run the two hand steps
-below once. box.exe and boxtray.exe are dev builds of that commit, and a dev build never updates
-itself, so the tag alone doesn't move them. boxd is already on releases and follows by itself.
+**Go: tag v0.1.0 on `dc68a60`** (main, the dev→main merge #112). Then run the three hand steps
+below once. Every installed part is a dev build, and a dev build never updates itself, so the tag
+alone changes nothing on either machine.
 
 ```sh
 git fetch origin && git tag v0.1.0 dc68a60 && git push origin v0.1.0
@@ -27,9 +27,10 @@ afterwards); see Checked.
    Get-CimInstance Win32_Process -Filter "Name='boxtray.exe'" | % { Stop-Process -Id $_.ProcessId -Force }
    Start-ScheduledTask agent-box-enforcer   # and agent-box-tray, if logged on
    ```
-3. **PC, boxd: nothing to do.** It was put on releases during this check: `v0.0.0-test.13`, the
-   same `dc68a60` code. Its hourly `agent-box-update.timer` installs v0.1.0 within an hour of the
-   tag. `agent-box-update-boxd v0.1.0`, as root in the `agents` distro, does it at once.
+3. **PC, boxd:** `agent-box-update-boxd v0.1.0` as root in the `agents` distro. boxd was
+   redeployed as a dev build with `deploy-boxd.sh` after this check, and the update timer leaves a
+   dev build alone. Once it is on v0.1.0, the timer takes every later stable release, so routine
+   releases no longer need `deploy-boxd.sh`.
 
 From then on, all three follow stable releases by themselves: box.exe in `box mcp` and boxtray
 hourly, and boxd from its hourly timer.
@@ -103,7 +104,6 @@ Earlier the same day: the tray's self-update and rollback, headless, live on the
 
 ## Known, not blocking
 
-- `box update` before any stable release prints GitHub's raw `404 Not Found`. The tag ends that.
 - A box built inside a box reports the box's snapshot commit, not the repo's (`box 35c340e`
   instead of `dc68a60`), because the snapshot is a commit of its own. Release builds come from
   release.yml and are unaffected.
