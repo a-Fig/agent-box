@@ -24,12 +24,187 @@ config:
         permissions: "0644"
         content: |
           # Managed by agent-box cloud-init. Caches live on the shared /cache volume.
-          export PATH="$PATH:/usr/local/go/bin"
+          export PATH="$PATH:/usr/local/go/bin:/cache/android-sdk/cmdline-tools/latest/bin:/cache/android-sdk/platform-tools"
           export GOCACHE=/cache/go-build
           export GOMODCACHE=/cache/go-mod
           export npm_config_cache=/cache/npm
           export GRADLE_USER_HOME=/cache/gradle
           export UV_CACHE_DIR=/cache/uv
+          # ANDROID_HOME only (not deprecated ANDROID_SDK_ROOT), so a per-job ANDROID_HOME override
+          # does not collide with AGP's duplicate-SDK-var check.
+          export ANDROID_HOME=/cache/android-sdk
+
+          # /cache can be wiped at any time; restore Gradle's static init.d delegating stub and the
+          # Robolectric cache dir here so the next Android run rebuilds /cache/android-sdk.
+          if [ -d /cache ]; then
+            mkdir -p /cache/gradle/init.d /cache/robolectric-m2 2>/dev/null || true
+            if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
+              _ab_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX 2>/dev/null || true)
+              if [ -n "$_ab_tmp" ]; then
+                if printf '%s\n' \
+                  "// Managed by agent-box. Delegates to each box's own init script so mixed profile versions coexist." \
+                  "def f = new File('/etc/agent-box/android-sdk.init.gradle')" \
+                  "if (f.isFile()) apply from: f" > "$_ab_tmp" 2>/dev/null &&
+                  chmod 0644 "$_ab_tmp" 2>/dev/null &&
+                  mv -n "$_ab_tmp" /cache/gradle/init.d/agent-box-android.gradle 2>/dev/null; then
+                  rm -f "$_ab_tmp" 2>/dev/null || true
+                else
+                  rm -f "$_ab_tmp" 2>/dev/null || true
+                fi
+              fi
+              unset _ab_tmp
+            fi
+          fi
+      - path: /etc/agent-box/android-sdk.init.gradle
+        permissions: "0644"
+        content: |
+          // Managed by agent-box cloud-init. Lazily installs the Android SDK into /cache/android-sdk
+          // on the first Android Gradle build (or after /cache is wiped), and points Robolectric's
+          // android-all jar cache at /cache/robolectric-m2 without sharing mavenLocal() across boxes.
+          def sdkStampName = "v1-16111833-34-35"
+
+          gradle.projectsLoaded { g ->
+              g.rootProject.allprojects { proj ->
+                  proj.tasks.withType(org.gradle.api.tasks.testing.Test).configureEach { t ->
+                      if (!System.getProperty("maven.repo.local") && !t.systemProperties.containsKey("maven.repo.local")) {
+                          t.systemProperty("maven.repo.local", "/cache/robolectric-m2")
+                      }
+                  }
+              }
+
+              def envHome = g.rootProject.providers.environmentVariable("ANDROID_HOME").orNull
+              def sdkDir = (envHome ?: "/cache/android-sdk").replaceAll('/+$', '')
+              if (sdkDir != "/cache/android-sdk") return
+              def helper = new File("/usr/local/bin/agent-box-ensure-android-sdk")
+              if (!helper.canExecute()) return
+              if (new File(sdkDir, ".agent-box-stamps/${sdkStampName}").isFile() &&
+                  new File(sdkDir, "cmdline-tools/latest/bin/sdkmanager").canExecute()) {
+                  return
+              }
+
+              // Only install the SDK for builds that actually use the Android Gradle Plugin.
+              def candidates = []
+              ["settings.gradle", "settings.gradle.kts", "gradle/libs.versions.toml",
+               "buildSrc/build.gradle", "buildSrc/build.gradle.kts"].each { rel ->
+                  def f = new File(g.rootProject.projectDir, rel)
+                  if (f.isFile()) candidates << f
+              }
+              g.rootProject.allprojects.each { p ->
+                  if (p.buildFile?.isFile()) candidates << p.buildFile
+              }
+              def isAndroid = candidates.any { f ->
+                  def text = f.getText("UTF-8")
+                  text.contains("com.android.") || text.contains("android-application") || text.contains("android-library")
+              }
+              if (!isAndroid) return
+
+              def execOut = g.rootProject.providers.exec {
+                  commandLine(helper.absolutePath)
+                  ignoreExitValue = true
+              }
+              def rc = execOut.result.get().exitValue
+              def out = execOut.standardOutput.asText.get()
+              def err = execOut.standardError.asText.get()
+              if (out) g.rootProject.logger.lifecycle(out.trim())
+              if (err) g.rootProject.logger.lifecycle(err.trim())
+              if (rc != 0) {
+                  throw new GradleException("agent-box-ensure-android-sdk failed with exit code ${rc}")
+              }
+          }
+      - path: /usr/local/bin/agent-box-ensure-android-sdk
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          # Lazily installs the Android SDK into /cache/android-sdk on first Android use.
+          # Safe under concurrent boxes (flock), mixed profile versions (per-spec stamps), and /cache wipes.
+          set -euo pipefail
+
+          SDK_DIR=${ANDROID_HOME:-/cache/android-sdk}
+          SDK_DIR=${SDK_DIR%/}
+          CMDLINE_BUILD=16111833
+          CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_BUILD}_latest.zip"
+          CMDLINE_SHA256="0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8"
+          PACKAGES=(
+            "platform-tools"
+            "platforms;android-34"
+            "platforms;android-35"
+            "build-tools;34.0.0"
+            "build-tools;35.0.0"
+          )
+          STAMP_NAME="v1-${CMDLINE_BUILD}-34-35"
+          STAMP_DIR="${SDK_DIR}/.agent-box-stamps"
+          STAMP="${STAMP_DIR}/${STAMP_NAME}"
+          SDKMANAGER="${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager"
+
+          ready() {
+            [ -x "$SDKMANAGER" ] && [ -f "$STAMP" ]
+          }
+
+          # Under pipefail, `yes` exits 141 (SIGPIPE) once sdkmanager closes stdin; check sdkmanager's exit status.
+          # Convert CR progress bars to LF so logs stay readable.
+          run_yes() {
+            local rc=0
+            yes 2>/dev/null | "$@" 2>&1 | tr '\r' '\n' || rc=${PIPESTATUS[1]}
+            return "$rc"
+          }
+
+          if ready; then
+            exit 0
+          fi
+
+          mkdir -p "$(dirname "$SDK_DIR")"
+          exec 9>"$(dirname "$SDK_DIR")/.android-sdk.lock"
+          if ! flock -n 9; then
+            echo "agent-box: waiting for another box to finish installing Android SDK into ${SDK_DIR}..." >&2
+            flock -w 1800 9 || { echo "agent-box: timed out waiting for Android SDK install lock" >&2; exit 1; }
+          fi
+
+          if ready; then
+            exit 0
+          fi
+
+          echo "agent-box: installing Android SDK into ${SDK_DIR} (one-time, cached in /cache)..." >&2
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+
+          have_build=$(cat "${SDK_DIR}/.agent-box-cmdline-build" 2>/dev/null || true)
+          case "$have_build" in
+            ''|*[!0-9]*) have_build=0 ;;
+          esac
+          # Only install or upgrade cmdline-tools monotonically so an older box never downgrades a newer build.
+          if [ ! -x "$SDKMANAGER" ] || [ "$have_build" -lt "$CMDLINE_BUILD" ]; then
+            curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 --retry 3 --retry-delay 2 \
+              "$CMDLINE_URL" -o "$tmp/cmdline-tools.zip"
+            echo "${CMDLINE_SHA256}  $tmp/cmdline-tools.zip" | sha256sum -c - >/dev/null
+            unzip -q "$tmp/cmdline-tools.zip" -d "$tmp/unpack"
+            mkdir -p "${SDK_DIR}/cmdline-tools"
+            rm -rf "${SDK_DIR}/cmdline-tools/latest"
+            mv "$tmp/unpack/cmdline-tools" "${SDK_DIR}/cmdline-tools/latest"
+            printf '%s\n' "$CMDLINE_BUILD" > "${SDK_DIR}/.agent-box-cmdline-build"
+          fi
+
+          # Accept licenses before and after install so sdkmanager never blocks and AGP can
+          # auto-download additional SDK levels if another repo needs them.
+          run_yes "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null
+          run_yes "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "${PACKAGES[@]}" >&2
+          run_yes "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null
+
+          mkdir -p "$STAMP_DIR"
+          chmod -R a+rwX "$SDK_DIR" || true
+          printf 'cmdline-tools=%s %s\n' "$CMDLINE_BUILD" "${PACKAGES[*]}" > "${STAMP}.tmp"
+          mv -f "${STAMP}.tmp" "$STAMP"
+          echo "agent-box: Android SDK ready in ${SDK_DIR}." >&2
+      - path: /usr/local/bin/sdkmanager
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          sdk_dir=${ANDROID_HOME:-/cache/android-sdk}
+          sdk_dir=${sdk_dir%/}
+          if [ "$sdk_dir" = "/cache/android-sdk" ]; then
+            /usr/local/bin/agent-box-ensure-android-sdk >&2
+          fi
+          exec "${sdk_dir}/cmdline-tools/latest/bin/sdkmanager" "$@"
       - path: /usr/local/sbin/agent-box-provision.sh
         permissions: "0755"
         content: |
@@ -40,8 +215,18 @@ config:
           GO_VERSION=1.27.3
           arch=$(dpkg --print-architecture)
 
-          mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle /cache/uv /work
-          chmod -R a+rwX /cache || true
+          mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle/init.d /cache/robolectric-m2 /cache/uv /work
+          if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
+            init_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX)
+            printf '%s\n' \
+              "// Managed by agent-box. Delegates to each box's own init script so mixed profile versions coexist." \
+              "def f = new File('/etc/agent-box/android-sdk.init.gradle')" \
+              "if (f.isFile()) apply from: f" > "$init_tmp"
+            chmod 0644 "$init_tmp"
+            mv -n "$init_tmp" /cache/gradle/init.d/agent-box-android.gradle || true
+            rm -f "$init_tmp"
+          fi
+          chmod a+rwX /cache /cache/go-build /cache/go-mod /cache/npm /cache/gradle /cache/gradle/init.d /cache/robolectric-m2 /cache/uv || true
 
           apt_pkgs="git build-essential curl ca-certificates unzip jq openjdk-17-jdk-headless"
           # shellcheck disable=SC2086

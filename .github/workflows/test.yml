@@ -43,7 +43,27 @@ jobs:
         run: |
           bash -n provision/setup-distro.sh
           shellcheck -S warning provision/setup-distro.sh
-          python3 -c 'import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]' provision/*.yaml
+          python3 - <<'PY'
+          import glob, subprocess, tempfile, yaml
+          for f in sorted(glob.glob('provision/*.yaml')):
+              doc = yaml.safe_load(open(f))
+              if not isinstance(doc, dict):
+                  continue
+              ud_raw = (doc.get('config') or {}).get('cloud-init.user-data')
+              if not ud_raw:
+                  continue
+              ud = yaml.safe_load(ud_raw)
+              for wf in ud.get('write_files', []):
+                  p, c = wf['path'], wf['content']
+                  if not (p.endswith('.sh') or c.startswith('#!/bin/bash')):
+                      continue
+                  shell = 'bash' if c.startswith('#!/bin/bash') else 'sh'
+                  with tempfile.NamedTemporaryFile('w', suffix='.sh') as tf:
+                      tf.write(c)
+                      tf.flush()
+                      subprocess.run([shell, '-n', tf.name], check=True)
+                      subprocess.run(['shellcheck', '-S', 'warning', '-s', shell, tf.name], check=True)
+          PY
 
   # gofmt runs on Linux only: a Windows checkout of LF files can confuse it.
   test-windows:
