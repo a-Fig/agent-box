@@ -67,8 +67,10 @@ laptop and agent reaches.
   - once it runs, the key's time is its real start, which `boxd` writes into the `.meta` as
     `startedAt`, next to `queuedAt`;
   - so the page gets `job-gone` for the waiting key, then `job` for the running one.
-- **Throwaways.** No `box run` follows a queued job, so `boxd` deletes a throwaway it launched once
-  that job ends and nothing else runs there. Its exit code and tail are in boxd by then.
+- **Throwaways.** No `box run` follows a queued job, so once that job ends and nothing else runs
+  there, `boxd` gives a throwaway it launched 30 minutes to live, as `box run` does since #23, so
+  `box pull` and the full log still work; the reaper deletes it then. Its exit code and tail are in
+  boxd by then.
 - `boxd` has no T3 access, so it doesn't push. The laptop's `box watch <job>` process (from the push
   design) follows the job while it is queued too, and sends the turn when it ends, or the nudge at 20
   minutes.

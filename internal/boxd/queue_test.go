@@ -156,7 +156,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 		t.Fatalf("running: %+v", st.Jobs)
 	}
 
-	// It ends: boxd deletes the throwaway it launched.
+	// It ends: boxd keeps the throwaway it launched for half an hour.
 	r.f.set(func() { r.f.jobs[box][0].state, r.f.jobs[box][0].exit = "done", "0" })
 	r.c.add(3 * time.Second)
 	r.poll()
@@ -164,8 +164,8 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.f.mu.Lock()
 	last := r.f.cli[len(r.f.cli)-1]
 	r.f.mu.Unlock()
-	if last != "delete "+box+" --force" {
-		t.Fatalf("throwaway not deleted: %s", last)
+	if want := "config set " + box + " user.expires=" + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); last != want {
+		t.Fatalf("throwaway's expiry: %s, want %s", last, want)
 	}
 	var h dash.History
 	resp, _ := http.Get(r.srv.URL + "/api/history?range=day")

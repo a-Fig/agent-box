@@ -340,9 +340,11 @@ func (w *Watcher) image() string {
 	return "agent-base"
 }
 
-// reapQueuedThrowaway deletes a throwaway box that boxd launched for a queued
-// job once that job has ended and nothing else runs there: no box run is
-// following it to clean up. With w.mu held.
+// reapQueuedThrowaway hands a throwaway box that boxd launched for a queued
+// job to the reaper once that job has ended and nothing else runs there: no
+// box run is following it to clean up. As box run does, it keeps the box for
+// jobrun.EndedKeep first, so box pull and the full log still work. With w.mu
+// held.
 //
 // A repo box it reused or launched gets box new's idle expiry back instead,
 // as box run's markIdle does once a job ends.
@@ -368,11 +370,11 @@ func (w *Watcher) reapQueuedThrowaway(j *dash.Job) {
 			if in.Name != box || !holds(in.CreatedAt, started) {
 				continue
 			}
+			ttl := idleTTL
 			if in.Config[keyThrowaway] == "true" {
-				_, err = w.Incus.CLI(ctx, "", "delete", box, "--force")
-			} else {
-				_, err = w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+w.Now().UTC().Add(idleTTL).Format(time.RFC3339))
+				ttl = jobrun.EndedKeep
 			}
+			_, err = w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+w.Now().UTC().Add(ttl).Format(time.RFC3339))
 			if err != nil {
 				w.logf("boxd: queue: after %s's job: %v", box, err)
 			}

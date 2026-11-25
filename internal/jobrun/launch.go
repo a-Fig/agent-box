@@ -14,6 +14,11 @@ import (
 // (limits.memory and the like, or limits.instances).
 var LimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
 
+// EndedKeep is how long a throwaway box and its log outlive a job that
+// ended, so box pull and the full log still work after the result was pushed.
+// box run and boxd both move its expiry to now plus this; the reaper deletes it.
+const EndedKeep = 30 * time.Minute
+
 // Instance keys a box is launched with (cmd/box reads them too).
 const (
 	ExpiresKey   = "user.expires"
