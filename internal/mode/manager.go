@@ -426,6 +426,17 @@ func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state
 // changed is put back, and nothing is called when nothing changed. Limits go on before the resume so a thawed box is never
 // briefly uncapped.
 func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string) (string, error) {
+	// Leave a stopped, never-started instance alone: on Incus 7.6 (2026-11-24,
+	// btrfs + GHSA-5pgx-q9xx-j3qv), CreateInternal inserts the row as Stopped
+	// with last_used_at=1970-01-01T00:00:00Z before EnsureImage unpacks the
+	// image. Writing instance config in that window creates
+	// containers/<project>_<name> as an empty plain directory before `btrfs
+	// subvolume snapshot` runs, failing the launch. Once a box has started
+	// (including one later stopped by FrozenStop or FrozenSwappedStop),
+	// last_used_at is set and thaw updates its limits as usual.
+	if state == "stopped" && in.LastUsedAt.Unix() <= 0 {
+		return state, nil
+	}
 	cpus := strconv.Itoa(SizeOf(in.Config).CPUs(eff))
 	want := [...][2]string{{"limits.cpu", cpus}, {"limits.cpu.priority", eff.priority()}}
 	var errs []error
