@@ -40,8 +40,8 @@ const usage = `usage:
                                             (box_run starts it detached; not for people)
   box hook                                  Claude Code's PostToolUse hook: this session's ended jobs,
                                             mid-turn (box join adds it; not for people)
-  box join [--leave]                        register box mcp with Claude Code and Codex, install the skill
-                                            and Claude Code's hook
+  box join [--leave]                        register box mcp with Claude Code, Codex and Antigravity,
+                                            install the skill and Claude Code's hook
   box ui [--url U]                          open the PC's dashboard in the browser
   box app [--url U] [--wait]                open the dashboard in a window of its own
   box --version                             the release and commit this box was built from
@@ -322,7 +322,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		home, err := os.UserHomeDir()
 		if err == nil { // not box join's config: that refuses a box under the temp folder
 			err = skillSync(joinConfig{Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
-				CodexHome: os.Getenv("CODEX_HOME"), Out: a.Out}, args[1:]...)
+				CodexHome: os.Getenv("CODEX_HOME"), GeminiHome: os.Getenv("GEMINI_HOME"),
+				T3Home: os.Getenv("T3CODE_HOME"), Out: a.Out}, args[1:]...)
 		}
 		if err != nil {
 			return fail(err)

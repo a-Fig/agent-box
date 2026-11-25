@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -21,6 +22,8 @@ type joinConfig struct {
 	Home            string // the user's home directory
 	ClaudeConfigDir string // $CLAUDE_CONFIG_DIR, if set
 	CodexHome       string // $CODEX_HOME, if set
+	GeminiHome      string // $GEMINI_HOME, if set
+	T3Home          string // $T3CODE_HOME, if set (else ~/.t3)
 	Exe             string // absolute path of this box binary
 	Out             io.Writer
 }
@@ -44,6 +47,7 @@ func defaultJoinConfig(out io.Writer) (joinConfig, error) {
 	return joinConfig{
 		R: execRunner{}, LookPath: exec.LookPath,
 		Home: home, ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"), CodexHome: os.Getenv("CODEX_HOME"),
+		GeminiHome: os.Getenv("GEMINI_HOME"), T3Home: os.Getenv("T3CODE_HOME"),
 		Exe: exe, Out: out,
 	}, nil
 }
@@ -61,7 +65,8 @@ func agentCLIs(exe string) []agentCLI {
 	}
 }
 
-// skillPaths returns the user skill locations for Claude Code and Codex.
+// skillPaths returns the user skill locations for Claude Code, Codex and
+// Antigravity.
 func (c joinConfig) skillPaths() []string {
 	paths := []string{filepath.Join(c.Home, ".claude", "skills", "box", "SKILL.md")}
 	if c.ClaudeConfigDir != "" {
@@ -74,12 +79,147 @@ func (c joinConfig) skillPaths() []string {
 	if codexHome == "" {
 		codexHome = filepath.Join(c.Home, ".codex")
 	}
-	return append(paths, filepath.Join(codexHome, "skills", "box", "SKILL.md"))
+	paths = append(paths, filepath.Join(codexHome, "skills", "box", "SKILL.md"))
+	for _, h := range c.antigravityHomes() {
+		paths = append(paths, filepath.Join(h, "config", "skills", "box", "SKILL.md"))
+	}
+	return paths
+}
+
+// antigravityHomes returns each Antigravity home directory that is configured
+// or installed: $GEMINI_HOME, standalone ~/.gemini (if present or `agy` is on
+// PATH), and every initialized T3 Code Antigravity provider directory under
+// ~/.t3/userdata/providers/antigravity/ (or $T3CODE_HOME).
+func (c joinConfig) antigravityHomes() []string {
+	var homes []string
+	add := func(dir string) {
+		if dir == "" {
+			return
+		}
+		clean := filepath.Clean(dir)
+		for _, h := range homes {
+			if strings.EqualFold(h, clean) {
+				return
+			}
+		}
+		homes = append(homes, clean)
+	}
+	if c.GeminiHome != "" {
+		add(c.GeminiHome)
+	}
+	if c.Home != "" {
+		standalone := filepath.Join(c.Home, ".gemini")
+		agyErr := error(os.ErrNotExist)
+		if c.LookPath != nil {
+			_, agyErr = c.LookPath("agy")
+		}
+		if isDir(standalone) || agyErr == nil {
+			add(standalone)
+		}
+	}
+	t3Home := c.T3Home
+	if t3Home == "" && c.Home != "" {
+		t3Home = filepath.Join(c.Home, ".t3")
+	}
+	if t3Home != "" {
+		providers := filepath.Join(t3Home, "userdata", "providers", "antigravity")
+		if ents, err := os.ReadDir(providers); err == nil {
+			for _, e := range ents {
+				p := filepath.Join(providers, e.Name())
+				if isDir(p) {
+					add(p)
+				}
+			}
+		}
+	}
+	return homes
+}
+
+func isDir(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
+// setAntigravityMCP adds box mcp to an Antigravity config/mcp_config.json
+// file, or with leave removes it. Other servers, key order and a UTF-8 BOM are
+// kept. A symlinked file is written through the link.
+func setAntigravityMCP(path, exe string, leave bool) (string, error) {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		path = p
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if leave {
+			return "MCP server box wasn't registered (" + path + ")", nil
+		}
+	}
+	bom := bytes.HasPrefix(b, utf8BOM)
+	b = bytes.TrimPrefix(b, utf8BOM)
+	root := &object{}
+	if len(bytes.TrimSpace(b)) > 0 {
+		v, err := decodeOrdered(b)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", path, err)
+		}
+		o, ok := v.(*object)
+		if !ok {
+			return "", fmt.Errorf("%s: not a JSON object", path)
+		}
+		root = o
+	}
+	servers, _ := root.get("mcpServers").(*object)
+	if servers == nil && root.has("mcpServers") {
+		return "", fmt.Errorf("%s: mcpServers isn't an object", path)
+	}
+	if servers == nil {
+		servers = &object{}
+	}
+	if leave {
+		if !servers.has("box") {
+			return "MCP server box wasn't registered (" + path + ")", nil
+		}
+		servers.del("box")
+		if len(servers.keys) == 0 {
+			root.del("mcpServers")
+		}
+		return "removed MCP server box (" + path + ")", writeOrdered(path, root, bom)
+	}
+	if cur, ok := servers.get("box").(*object); ok && sameAntigravityEntry(cur, exe) {
+		return "MCP server box already registered (" + path + ")", nil
+	}
+	entry := &object{}
+	entry.set("command", exe)
+	entry.set("args", []any{"mcp"})
+	servers.set("box", entry)
+	root.set("mcpServers", servers)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("registered MCP server box: %s mcp (%s)", exe, path), writeOrdered(path, root, bom)
+}
+
+func sameAntigravityEntry(o *object, exe string) bool {
+	if len(o.keys) != 2 {
+		return false
+	}
+	cmd, ok := o.get("command").(string)
+	if !ok || cmd != exe {
+		return false
+	}
+	args, ok := o.get("args").([]any)
+	if !ok || len(args) != 1 {
+		return false
+	}
+	s, ok := args[0].(string)
+	return ok && s == "mcp"
 }
 
 // join registers box mcp as a user-scope MCP server named box with each
-// agent CLI it finds, installs the box skill, and adds box hook to Claude
-// Code's settings (hook.go); leave undoes all three.
+// agent it finds (Claude Code, Codex and Antigravity), installs the box skill,
+// and adds box hook to Claude Code's settings (hook.go); leave undoes all three.
 func join(ctx context.Context, c joinConfig, leave bool) error {
 	if !leave && !filepath.IsAbs(c.Exe) {
 		return fmt.Errorf("box binary path %q isn't absolute", c.Exe)
@@ -116,6 +256,21 @@ func join(ctx context.Context, c joinConfig, leave bool) error {
 			continue
 		}
 		fmt.Fprintf(c.Out, "%s: registered MCP server box (user scope): %s mcp\n", a.name, c.Exe)
+	}
+	agHomes := c.antigravityHomes()
+	if len(agHomes) == 0 {
+		fmt.Fprintf(c.Out, "antigravity: not installed, skipped\n")
+	}
+	for _, h := range agHomes {
+		p := filepath.Join(h, "config", "mcp_config.json")
+		did, err := setAntigravityMCP(p, c.Exe, leave)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("antigravity: %w", err))
+			continue
+		}
+		if did != "" {
+			fmt.Fprintf(c.Out, "antigravity: %s\n", did)
+		}
 	}
 	// The hook goes where Claude Code is; leave takes it out wherever it is.
 	for _, p := range c.claudeSettingsPaths() {
