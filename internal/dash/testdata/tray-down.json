@@ -112,7 +112,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T16:57:30Z",
         "position": 0,
         "why": ""
       },
@@ -140,7 +140,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T13:00:12Z",
         "position": 0,
         "why": ""
       },
@@ -168,7 +168,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T11:25:22Z",
         "position": 0,
         "why": ""
       },
@@ -677,7 +677,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T16:57:30Z",
         "position": 0,
         "why": ""
       },
@@ -705,7 +705,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T13:00:12Z",
         "position": 0,
         "why": ""
       },
@@ -733,7 +733,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T11:25:22Z",
         "position": 0,
         "why": ""
       },
@@ -1252,6 +1252,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1297,6 +1298,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1333,6 +1335,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1359,6 +1362,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1399,6 +1403,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1435,6 +1440,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1471,6 +1477,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1506,6 +1513,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1542,6 +1550,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1578,6 +1587,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1602,6 +1612,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1638,6 +1649,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1662,6 +1674,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1703,6 +1716,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1730,6 +1744,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1756,6 +1771,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1780,6 +1796,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1815,8 +1832,9 @@
         "memUsed": 595694985,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 85
         }
       },
       {
@@ -1840,6 +1858,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1875,8 +1894,9 @@
         "memUsed": 932798522,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 1357
         }
       },
       {
@@ -1900,6 +1920,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1924,6 +1945,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1949,7 +1971,8 @@
         "memUsed": 2104533975,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
+          "jobs": 1,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -1986,7 +2009,8 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
-          "medianWaitSeconds": 0
+          "started": 1,
+          "medianWaitSeconds": 610
         }
       }
     ],
@@ -2023,6 +2047,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2047,6 +2072,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2071,6 +2097,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2095,6 +2122,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2119,6 +2147,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2171,6 +2200,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -2221,8 +2251,9 @@
         "memUsed": 992801768,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 3,
+          "started": 3,
+          "medianWaitSeconds": 610
         }
       }
     ],

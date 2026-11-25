@@ -108,7 +108,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.929s\nok  \tgithub.com/acme/lantern/internal/sync\t1.519s\nok  \tgithub.com/acme/lantern/internal/api\t8.186s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.584s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.355s\nok  \tgithub.com/acme/lantern/internal/wire\t8.551s\nok  \tgithub.com/acme/lantern/internal/cache\t2.212s\nok  \tgithub.com/acme/lantern/internal/store\t4.665s\nok  \tgithub.com/acme/lantern/internal/sync\t7.672s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.636s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.135s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.718s\nok  \tgithub.com/acme/lantern/internal/wire\t4.918s\nok  \tgithub.com/acme/lantern/internal/cache\t6.225s\nok  \tgithub.com/acme/lantern/internal/store\t3.601s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t7.826s\nok  \tgithub.com/acme/lantern/internal/config\t0.959s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.770s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.348s\nok  \tgithub.com/acme/lantern/internal/wire\t1.527s\nok  \tgithub.com/acme/lantern/internal/cache\t8.186s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t1.742s\nok  \tgithub.com/acme/lantern/internal/api\t4.345s\nok  \tgithub.com/acme/lantern/internal/config\t2.933s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.791s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.811s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T17:21:17Z",
         "position": 0,
         "why": ""
       },
@@ -192,7 +192,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T15:43:38Z",
         "position": 0,
         "why": ""
       },
@@ -248,7 +248,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T07:52:40Z",
         "position": 0,
         "why": ""
       },
@@ -332,7 +332,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (28 tests) 449ms\n ✓ src/store/session.test.ts (24 tests) 340ms\n ✓ src/ui/Button.test.tsx (13 tests) 280ms\n ✓ src/api/client.test.ts (21 tests) 596ms\n ✓ src/hydrate.test.ts (28 tests) 241ms\n ✓ src/router/cache.test.ts (19 tests) 736ms\n ✓ src/store/session.test.ts (7 tests) 725ms\n ✓ src/ui/Button.test.tsx (5 tests) 756ms\n ✓ src/api/client.test.ts (22 tests) 614ms\n ✓ src/hydrate.test.ts (25 tests) 160ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T06:43:26Z",
         "position": 0,
         "why": ""
       },
@@ -360,7 +360,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (28 tests) 387ms\n ✓ src/store/session.test.ts (3 tests) 672ms\n ✓ src/ui/Button.test.tsx (22 tests) 377ms\n ✓ src/api/client.test.ts (19 tests) 814ms\n ✓ src/hydrate.test.ts (26 tests) 697ms\n ✓ src/router/cache.test.ts (20 tests) 342ms\n ✓ src/store/session.test.ts (23 tests) 589ms\n ✓ src/ui/Button.test.tsx (8 tests) 40ms\n ✓ src/api/client.test.ts (4 tests) 922ms\n ✓ src/hydrate.test.ts (14 tests) 816ms\n ✓ src/router/cache.test.ts (22 tests) 372ms\n ✓ src/store/session.test.ts (16 tests) 579ms\n ✓ src/ui/Button.test.tsx (11 tests) 472ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T06:12:38Z",
         "position": 0,
         "why": ""
       },
@@ -584,7 +584,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n  CC   build/lantern/obj15.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T02:28:26Z",
         "position": 0,
         "why": ""
       },
@@ -668,7 +668,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.811s\nok  \tgithub.com/acme/lantern/internal/sync\t4.821s\nok  \tgithub.com/acme/lantern/internal/api\t1.735s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.391s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.015s\nok  \tgithub.com/acme/lantern/internal/wire\t5.961s\nok  \tgithub.com/acme/lantern/internal/cache\t3.155s\nok  \tgithub.com/acme/lantern/internal/store\t2.514s\nok  \tgithub.com/acme/lantern/internal/sync\t8.203s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.385s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.682s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.608s\nok  \tgithub.com/acme/lantern/internal/wire\t6.602s\nok  \tgithub.com/acme/lantern/internal/cache\t1.461s\nok  \tgithub.com/acme/lantern/internal/store\t5.766s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t5.377s\nok  \tgithub.com/acme/lantern/internal/config\t9.006s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.288s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.261s\nok  \tgithub.com/acme/lantern/internal/wire\t1.596s\nok  \tgithub.com/acme/lantern/internal/cache\t6.452s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.202s\nok  \tgithub.com/acme/lantern/internal/api\t0.925s\nok  \tgithub.com/acme/lantern/internal/config\t5.250s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.766s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.556s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T23:31:55Z",
         "position": 0,
         "why": ""
       },
@@ -724,7 +724,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T23:02:19Z",
         "position": 0,
         "why": ""
       },
@@ -1116,7 +1116,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (13 tests) 773ms\n ✓ src/store/session.test.ts (27 tests) 460ms\n ✓ src/ui/Button.test.tsx (8 tests) 243ms\n ✓ src/api/client.test.ts (8 tests) 911ms\n ✓ src/hydrate.test.ts (25 tests) 365ms\n ✓ src/router/cache.test.ts (5 tests) 437ms\n ✓ src/store/session.test.ts (9 tests) 404ms\n ✓ src/ui/Button.test.tsx (12 tests) 681ms\n ✓ src/api/client.test.ts (14 tests) 276ms\n ✓ src/hydrate.test.ts (11 tests) 61ms\n ✓ src/router/cache.test.ts (16 tests) 838ms\n ✓ src/store/session.test.ts (8 tests) 933ms\n ✓ src/ui/Button.test.tsx (3 tests) 521ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T14:43:24Z",
         "position": 0,
         "why": ""
       },
@@ -1340,7 +1340,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py .................................. [  9%]\ntests/test_data.py .................................... [ 18%]\ntests/test_model.py ................... [ 27%]\ntests/test_schedule.py .............................. [ 36%]\ntests/test_tokenizer.py ........... [ 45%]\ntests/test_data.py ................... [ 54%]\ntests/test_model.py ................................... [ 63%]\ntests/test_schedule.py ............. [ 72%]\ntests/test_tokenizer.py .................. [ 81%]\ntests/test_data.py ......... [ 90%]\ntests/test_model.py ..................................... [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T05:57:08Z",
         "position": 0,
         "why": ""
       },
@@ -1396,7 +1396,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T05:19:39Z",
         "position": 0,
         "why": ""
       },
@@ -1452,7 +1452,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n  CC   build/tidepool/obj11.o\n  CC   build/tidepool/obj12.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T03:29:11Z",
         "position": 0,
         "why": ""
       },
@@ -1513,7 +1513,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t5.929s\nok  \tgithub.com/acme/lantern/internal/sync\t1.519s\nok  \tgithub.com/acme/lantern/internal/api\t8.186s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.584s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.355s\nok  \tgithub.com/acme/lantern/internal/wire\t8.551s\nok  \tgithub.com/acme/lantern/internal/cache\t2.212s\nok  \tgithub.com/acme/lantern/internal/store\t4.665s\nok  \tgithub.com/acme/lantern/internal/sync\t7.672s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t3.636s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.135s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.718s\nok  \tgithub.com/acme/lantern/internal/wire\t4.918s\nok  \tgithub.com/acme/lantern/internal/cache\t6.225s\nok  \tgithub.com/acme/lantern/internal/store\t3.601s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t7.826s\nok  \tgithub.com/acme/lantern/internal/config\t0.959s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.770s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.348s\nok  \tgithub.com/acme/lantern/internal/wire\t1.527s\nok  \tgithub.com/acme/lantern/internal/cache\t8.186s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t1.742s\nok  \tgithub.com/acme/lantern/internal/api\t4.345s\nok  \tgithub.com/acme/lantern/internal/config\t2.933s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.791s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.811s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T17:21:17Z",
         "position": 0,
         "why": ""
       },
@@ -1597,7 +1597,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T15:43:38Z",
         "position": 0,
         "why": ""
       },
@@ -1653,7 +1653,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T07:52:40Z",
         "position": 0,
         "why": ""
       },
@@ -1737,7 +1737,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (28 tests) 449ms\n ✓ src/store/session.test.ts (24 tests) 340ms\n ✓ src/ui/Button.test.tsx (13 tests) 280ms\n ✓ src/api/client.test.ts (21 tests) 596ms\n ✓ src/hydrate.test.ts (28 tests) 241ms\n ✓ src/router/cache.test.ts (19 tests) 736ms\n ✓ src/store/session.test.ts (7 tests) 725ms\n ✓ src/ui/Button.test.tsx (5 tests) 756ms\n ✓ src/api/client.test.ts (22 tests) 614ms\n ✓ src/hydrate.test.ts (25 tests) 160ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T06:43:26Z",
         "position": 0,
         "why": ""
       },
@@ -1765,7 +1765,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (28 tests) 387ms\n ✓ src/store/session.test.ts (3 tests) 672ms\n ✓ src/ui/Button.test.tsx (22 tests) 377ms\n ✓ src/api/client.test.ts (19 tests) 814ms\n ✓ src/hydrate.test.ts (26 tests) 697ms\n ✓ src/router/cache.test.ts (20 tests) 342ms\n ✓ src/store/session.test.ts (23 tests) 589ms\n ✓ src/ui/Button.test.tsx (8 tests) 40ms\n ✓ src/api/client.test.ts (4 tests) 922ms\n ✓ src/hydrate.test.ts (14 tests) 816ms\n ✓ src/router/cache.test.ts (22 tests) 372ms\n ✓ src/store/session.test.ts (16 tests) 579ms\n ✓ src/ui/Button.test.tsx (11 tests) 472ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T06:12:38Z",
         "position": 0,
         "why": ""
       },
@@ -1989,7 +1989,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n  CC   build/lantern/obj15.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-24T02:28:26Z",
         "position": 0,
         "why": ""
       },
@@ -2073,7 +2073,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t8.811s\nok  \tgithub.com/acme/lantern/internal/sync\t4.821s\nok  \tgithub.com/acme/lantern/internal/api\t1.735s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.391s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.015s\nok  \tgithub.com/acme/lantern/internal/wire\t5.961s\nok  \tgithub.com/acme/lantern/internal/cache\t3.155s\nok  \tgithub.com/acme/lantern/internal/store\t2.514s\nok  \tgithub.com/acme/lantern/internal/sync\t8.203s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.385s\nok  \tgithub.com/acme/lantern/internal/metrics\t6.682s\nok  \tgithub.com/acme/lantern/cmd/lantern\t1.608s\nok  \tgithub.com/acme/lantern/internal/wire\t6.602s\nok  \tgithub.com/acme/lantern/internal/cache\t1.461s\nok  \tgithub.com/acme/lantern/internal/store\t5.766s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t5.377s\nok  \tgithub.com/acme/lantern/internal/config\t9.006s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.288s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.261s\nok  \tgithub.com/acme/lantern/internal/wire\t1.596s\nok  \tgithub.com/acme/lantern/internal/cache\t6.452s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t5.202s\nok  \tgithub.com/acme/lantern/internal/api\t0.925s\nok  \tgithub.com/acme/lantern/internal/config\t5.250s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.766s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.556s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T23:31:55Z",
         "position": 0,
         "why": ""
       },
@@ -2129,7 +2129,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T23:02:19Z",
         "position": 0,
         "why": ""
       },
@@ -2521,7 +2521,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (13 tests) 773ms\n ✓ src/store/session.test.ts (27 tests) 460ms\n ✓ src/ui/Button.test.tsx (8 tests) 243ms\n ✓ src/api/client.test.ts (8 tests) 911ms\n ✓ src/hydrate.test.ts (25 tests) 365ms\n ✓ src/router/cache.test.ts (5 tests) 437ms\n ✓ src/store/session.test.ts (9 tests) 404ms\n ✓ src/ui/Button.test.tsx (12 tests) 681ms\n ✓ src/api/client.test.ts (14 tests) 276ms\n ✓ src/hydrate.test.ts (11 tests) 61ms\n ✓ src/router/cache.test.ts (16 tests) 838ms\n ✓ src/store/session.test.ts (8 tests) 933ms\n ✓ src/ui/Button.test.tsx (3 tests) 521ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T14:43:24Z",
         "position": 0,
         "why": ""
       },
@@ -2745,7 +2745,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py .................................. [  9%]\ntests/test_data.py .................................... [ 18%]\ntests/test_model.py ................... [ 27%]\ntests/test_schedule.py .............................. [ 36%]\ntests/test_tokenizer.py ........... [ 45%]\ntests/test_data.py ................... [ 54%]\ntests/test_model.py ................................... [ 63%]\ntests/test_schedule.py ............. [ 72%]\ntests/test_tokenizer.py .................. [ 81%]\ntests/test_data.py ......... [ 90%]\ntests/test_model.py ..................................... [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T05:57:08Z",
         "position": 0,
         "why": ""
       },
@@ -2801,7 +2801,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T05:19:39Z",
         "position": 0,
         "why": ""
       },
@@ -2857,7 +2857,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n  CC   build/tidepool/obj11.o\n  CC   build/tidepool/obj12.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T03:29:11Z",
         "position": 0,
         "why": ""
       },
@@ -2913,7 +2913,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (30 tests) 462ms\n ✓ src/store/session.test.ts (23 tests) 646ms\n ✓ src/ui/Button.test.tsx (9 tests) 711ms\n ✓ src/api/client.test.ts (31 tests) 502ms\n ✓ src/hydrate.test.ts (32 tests) 529ms\n ✓ src/router/cache.test.ts (32 tests) 254ms\n ✓ src/store/session.test.ts (25 tests) 745ms\n ✓ src/ui/Button.test.tsx (13 tests) 926ms\n ✓ src/api/client.test.ts (30 tests) 51ms\n ✓ src/hydrate.test.ts (31 tests) 502ms\n ✓ src/router/cache.test.ts (32 tests) 738ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T01:46:13Z",
         "position": 0,
         "why": ""
       },
@@ -2941,7 +2941,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............ [  9%]\ntests/test_data.py ...................... [ 18%]\ntests/test_model.py ......... [ 27%]\ntests/test_schedule.py ........... [ 36%]\ntests/test_tokenizer.py .................... [ 45%]\ntests/test_data.py ................. [ 54%]\ntests/test_model.py .................................. [ 63%]\ntests/test_schedule.py ........................... [ 72%]\ntests/test_tokenizer.py .................................... [ 81%]\ntests/test_data.py .......... [ 90%]\ntests/test_model.py ......................... [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T01:33:52Z",
         "position": 0,
         "why": ""
       },
@@ -2969,7 +2969,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n^C\nbox: cancelled\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-23T00:31:34Z",
         "position": 0,
         "why": ""
       },
@@ -3277,7 +3277,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T05:47:09Z",
         "position": 0,
         "why": ""
       },
@@ -3333,7 +3333,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ npx vitest run\n ✓ src/router/cache.test.ts (9 tests) 721ms\n ✓ src/store/session.test.ts (11 tests) 506ms\n ✓ src/ui/Button.test.tsx (13 tests) 321ms\n ✓ src/api/client.test.ts (20 tests) 545ms\n ✓ src/hydrate.test.ts (32 tests) 417ms\n ✓ src/router/cache.test.ts (18 tests) 501ms\n ✓ src/store/session.test.ts (13 tests) 206ms\n ✓ src/ui/Button.test.tsx (14 tests) 585ms\n ✓ src/api/client.test.ts (5 tests) 582ms\n ✓ src/hydrate.test.ts (11 tests) 349ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T04:31:54Z",
         "position": 0,
         "why": ""
       },
@@ -3361,7 +3361,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T04:24:05Z",
         "position": 0,
         "why": ""
       },
@@ -3389,7 +3389,7 @@
         "size": "gpu",
         "gpu": true,
         "tail": "$ uv run python train.py --smoke --steps 200\nstep    7/200  loss 2.8264  lr 2.0e-4  3.4 it/s  gpu mem 6.1 GiB\nstep   14/200  loss 2.8058  lr 2.0e-4  3.8 it/s  gpu mem 6.4 GiB\nstep   22/200  loss 2.7398  lr 2.0e-4  3.6 it/s  gpu mem 6.5 GiB\nstep   29/200  loss 2.6806  lr 2.0e-4  3.7 it/s  gpu mem 6.0 GiB\nstep   37/200  loss 2.6435  lr 2.0e-4  3.8 it/s  gpu mem 6.3 GiB\nstep   44/200  loss 2.6329  lr 2.0e-4  3.0 it/s  gpu mem 6.4 GiB\nstep   51/200  loss 2.6062  lr 2.0e-4  3.1 it/s  gpu mem 6.8 GiB\nstep   59/200  loss 2.5466  lr 2.0e-4  3.7 it/s  gpu mem 6.7 GiB\nstep   66/200  loss 2.5175  lr 2.0e-4  3.4 it/s  gpu mem 6.0 GiB\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T04:21:32Z",
         "position": 0,
         "why": ""
       },
@@ -3417,7 +3417,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n  CC   build/tidepool/obj11.o\n  CC   build/tidepool/obj12.o\n  CC   build/tidepool/obj13.o\n  CC   build/tidepool/obj14.o\n  CC   build/tidepool/obj15.o\n  CC   build/tidepool/obj16.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T03:58:20Z",
         "position": 0,
         "why": ""
       },
@@ -3529,7 +3529,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T02:47:52Z",
         "position": 0,
         "why": ""
       },
@@ -3613,7 +3613,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T02:14:18Z",
         "position": 0,
         "why": ""
       },
@@ -3641,7 +3641,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t4.115s\nok  \tgithub.com/acme/lantern/internal/sync\t6.885s\nok  \tgithub.com/acme/lantern/internal/api\t8.550s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t4.632s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.796s\nok  \tgithub.com/acme/lantern/internal/wire\t7.569s\nok  \tgithub.com/acme/lantern/internal/cache\t8.306s\nok  \tgithub.com/acme/lantern/internal/store\t7.387s\nok  \tgithub.com/acme/lantern/internal/sync\t8.219s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.827s\nok  \tgithub.com/acme/lantern/internal/metrics\t5.095s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.717s\nok  \tgithub.com/acme/lantern/internal/wire\t8.572s\nok  \tgithub.com/acme/lantern/internal/cache\t2.467s\nok  \tgithub.com/acme/lantern/internal/store\t8.107s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t3.131s\nok  \tgithub.com/acme/lantern/internal/config\t5.263s\nok  \tgithub.com/acme/lantern/internal/metrics\t8.908s\nok  \tgithub.com/acme/lantern/cmd/lantern\t2.315s\nok  \tgithub.com/acme/lantern/internal/wire\t4.065s\nok  \tgithub.com/acme/lantern/internal/cache\t7.255s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t6.061s\nok  \tgithub.com/acme/lantern/internal/api\t5.123s\nok  \tgithub.com/acme/lantern/internal/config\t6.003s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.862s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.949s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T01:35:38Z",
         "position": 0,
         "why": ""
       },
@@ -3669,7 +3669,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ............. [ 11%]\ntests/test_data.py ........................ [ 22%]\ntests/test_model.py .............................. [ 33%]\ntests/test_schedule.py ..................... [ 44%]\ntests/test_tokenizer.py ......................... [ 55%]\ntests/test_data.py ....................... [ 66%]\ntests/test_model.py ............................... [ 77%]\ntests/test_schedule.py ......................... [ 88%]\ntests/test_tokenizer.py .......................... [100%]\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-22T01:05:33Z",
         "position": 0,
         "why": ""
       },
@@ -3865,7 +3865,7 @@
         "size": "small",
         "gpu": false,
         "tail": "$ npm run build\n  CC   build/tidepool/obj00.o\n  CC   build/tidepool/obj01.o\n  CC   build/tidepool/obj02.o\n  CC   build/tidepool/obj03.o\n  CC   build/tidepool/obj04.o\n  CC   build/tidepool/obj05.o\n  CC   build/tidepool/obj06.o\n  CC   build/tidepool/obj07.o\n  CC   build/tidepool/obj08.o\n  CC   build/tidepool/obj09.o\n  CC   build/tidepool/obj10.o\n  CC   build/tidepool/obj11.o\n  CC   build/tidepool/obj12.o\n  CC   build/tidepool/obj13.o\n  CC   build/tidepool/obj14.o\n  CC   build/tidepool/obj15.o\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-21T21:19:08Z",
         "position": 0,
         "why": ""
       },
@@ -4397,7 +4397,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go vet ./... \u0026\u0026 go test ./...\nok  \tgithub.com/acme/lantern/internal/store\t6.084s\nok  \tgithub.com/acme/lantern/internal/sync\t5.238s\nok  \tgithub.com/acme/lantern/internal/api\t5.097s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t7.442s\nok  \tgithub.com/acme/lantern/cmd/lantern\t9.013s\nok  \tgithub.com/acme/lantern/internal/wire\t7.862s\nok  \tgithub.com/acme/lantern/internal/cache\t4.975s\nok  \tgithub.com/acme/lantern/internal/store\t2.577s\nok  \tgithub.com/acme/lantern/internal/sync\t5.937s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-21T03:10:57Z",
         "position": 0,
         "why": ""
       },
@@ -4565,7 +4565,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T23:41:57Z",
         "position": 0,
         "why": ""
       },
@@ -4621,7 +4621,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (9 tests) 733ms\n ✓ src/store/session.test.ts (27 tests) 78ms\n ✓ src/ui/Button.test.tsx (8 tests) 565ms\n ✓ src/api/client.test.ts (29 tests) 443ms\n ✓ src/hydrate.test.ts (10 tests) 445ms\n ✓ src/router/cache.test.ts (16 tests) 915ms\n ✓ src/store/session.test.ts (4 tests) 41ms\n ✓ src/ui/Button.test.tsx (10 tests) 199ms\n ✓ src/api/client.test.ts (10 tests) 496ms\n ✓ src/hydrate.test.ts (24 tests) 772ms\n ✓ src/router/cache.test.ts (9 tests) 715ms\n ✓ src/store/session.test.ts (26 tests) 68ms\n ✓ src/ui/Button.test.tsx (25 tests) 896ms\n ✓ src/api/client.test.ts (25 tests) 451ms\n ✓ src/hydrate.test.ts (26 tests) 640ms\n ✓ src/router/cache.test.ts (14 tests) 45ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T20:45:36Z",
         "position": 0,
         "why": ""
       },
@@ -4677,7 +4677,7 @@
         "size": "gpu",
         "gpu": true,
         "tail": "$ uv run python train.py --smoke --steps 200\nstep    7/200  loss 2.8174  lr 2.0e-4  3.1 it/s  gpu mem 6.3 GiB\nstep   14/200  loss 2.8040  lr 2.0e-4  3.7 it/s  gpu mem 6.8 GiB\nstep   22/200  loss 2.7377  lr 2.0e-4  3.5 it/s  gpu mem 6.1 GiB\nstep   29/200  loss 2.7133  lr 2.0e-4  3.6 it/s  gpu mem 6.6 GiB\nstep   37/200  loss 2.6505  lr 2.0e-4  3.7 it/s  gpu mem 6.4 GiB\nstep   44/200  loss 2.6281  lr 2.0e-4  3.4 it/s  gpu mem 6.7 GiB\nstep   51/200  loss 2.5929  lr 2.0e-4  3.9 it/s  gpu mem 6.8 GiB\nstep   59/200  loss 2.5503  lr 2.0e-4  3.8 it/s  gpu mem 6.4 GiB\nstep   66/200  loss 2.5212  lr 2.0e-4  3.7 it/s  gpu mem 6.6 GiB\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T19:59:20Z",
         "position": 0,
         "why": ""
       },
@@ -4761,7 +4761,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\nerror: process exited with status 1\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T18:08:51Z",
         "position": 0,
         "why": ""
       },
@@ -4873,7 +4873,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T16:42:25Z",
         "position": 0,
         "why": ""
       },
@@ -4929,7 +4929,7 @@
         "size": "gpu",
         "gpu": true,
         "tail": "$ uv run python train.py --smoke --steps 200\nstep    4/200  loss 2.8458  lr 2.0e-4  3.3 it/s  gpu mem 6.4 GiB\nstep    8/200  loss 2.7737  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep   12/200  loss 2.7505  lr 2.0e-4  3.0 it/s  gpu mem 6.4 GiB\nstep   16/200  loss 2.6830  lr 2.0e-4  3.2 it/s  gpu mem 6.8 GiB\nstep   20/200  loss 2.6560  lr 2.0e-4  3.3 it/s  gpu mem 6.7 GiB\nstep   25/200  loss 2.6491  lr 2.0e-4  3.2 it/s  gpu mem 6.8 GiB\nstep   29/200  loss 2.5606  lr 2.0e-4  3.9 it/s  gpu mem 6.2 GiB\nstep   33/200  loss 2.5509  lr 2.0e-4  3.4 it/s  gpu mem 6.1 GiB\nstep   37/200  loss 2.4834  lr 2.0e-4  3.3 it/s  gpu mem 6.1 GiB\nstep   41/200  loss 2.4842  lr 2.0e-4  3.6 it/s  gpu mem 6.1 GiB\nstep   45/200  loss 2.4151  lr 2.0e-4  3.0 it/s  gpu mem 6.4 GiB\nstep   50/200  loss 2.4054  lr 2.0e-4  3.4 it/s  gpu mem 6.3 GiB\nstep   54/200  loss 2.3468  lr 2.0e-4  3.1 it/s  gpu mem 6.7 GiB\nstep   58/200  loss 2.3002  lr 2.0e-4  3.3 it/s  gpu mem 6.7 GiB\nstep   62/200  loss 2.2821  lr 2.0e-4  3.2 it/s  gpu mem 6.7 GiB\nstep   66/200  loss 2.2101  lr 2.0e-4  4.0 it/s  gpu mem 6.8 GiB\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T16:24:09Z",
         "position": 0,
         "why": ""
       },
@@ -5125,7 +5125,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py .............. [  5%]\ntests/test_data.py ............................... [ 11%]\ntests/test_model.py ................. [ 17%]\ntests/test_schedule.py ............ [ 23%]\ntests/test_tokenizer.py ......... [ 29%]\ntests/test_data.py ................... [ 35%]\ntests/test_model.py ............................ [ 41%]\ntests/test_schedule.py .......... [ 47%]\ntests/test_tokenizer.py ................ [ 52%]\ntests/test_data.py ..................................... [ 58%]\ntests/test_model.py ................. [ 64%]\ntests/test_schedule.py ............................ [ 70%]\ntests/test_tokenizer.py ................................. [ 76%]\ntests/test_data.py .............................. [ 82%]\ntests/test_model.py ................................. [ 88%]\ntests/test_schedule.py .................................... [ 94%]\ntests/test_tokenizer.py ...................... [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T06:57:18Z",
         "position": 0,
         "why": ""
       },
@@ -5181,7 +5181,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t6.778s\nok  \tgithub.com/acme/lantern/internal/sync\t3.968s\nok  \tgithub.com/acme/lantern/internal/api\t7.893s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t1.165s\nok  \tgithub.com/acme/lantern/cmd/lantern\t6.969s\nok  \tgithub.com/acme/lantern/internal/wire\t7.204s\nok  \tgithub.com/acme/lantern/internal/cache\t2.161s\nok  \tgithub.com/acme/lantern/internal/store\t5.311s\nok  \tgithub.com/acme/lantern/internal/sync\t2.839s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t0.928s\nok  \tgithub.com/acme/lantern/internal/metrics\t2.172s\nok  \tgithub.com/acme/lantern/cmd/lantern\t7.760s\nok  \tgithub.com/acme/lantern/internal/wire\t6.152s\nok  \tgithub.com/acme/lantern/internal/cache\t4.333s\nok  \tgithub.com/acme/lantern/internal/store\t6.515s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t3.267s\nok  \tgithub.com/acme/lantern/internal/config\t1.827s\nok  \tgithub.com/acme/lantern/internal/metrics\t1.882s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.475s\nok  \tgithub.com/acme/lantern/internal/wire\t3.847s\nok  \tgithub.com/acme/lantern/internal/cache\t1.769s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t8.879s\nok  \tgithub.com/acme/lantern/internal/api\t3.450s\nok  \tgithub.com/acme/lantern/internal/config\t0.722s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.433s\nok  \tgithub.com/acme/lantern/cmd/lantern\t4.205s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-20T05:40:49Z",
         "position": 0,
         "why": ""
       },
@@ -5629,7 +5629,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ npm test -- --coverage\n ✓ src/router/cache.test.ts (11 tests) 882ms\n ✓ src/store/session.test.ts (31 tests) 525ms\n ✓ src/ui/Button.test.tsx (20 tests) 693ms\n ✓ src/api/client.test.ts (10 tests) 374ms\n ✓ src/hydrate.test.ts (28 tests) 169ms\n ✓ src/router/cache.test.ts (16 tests) 715ms\n ✓ src/store/session.test.ts (31 tests) 248ms\n ✓ src/ui/Button.test.tsx (26 tests) 547ms\n ✓ src/api/client.test.ts (26 tests) 176ms\n ✓ src/hydrate.test.ts (3 tests) 756ms\n ✓ src/router/cache.test.ts (3 tests) 183ms\n ✓ src/store/session.test.ts (20 tests) 824ms\n ✓ src/ui/Button.test.tsx (19 tests) 849ms\n ✓ src/api/client.test.ts (24 tests) 631ms\n ✓ src/hydrate.test.ts (18 tests) 420ms\n ✓ src/router/cache.test.ts (30 tests) 252ms\n Test Files  42 passed (42)\n      Tests  611 passed (611)\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-19T15:46:38Z",
         "position": 0,
         "why": ""
       },
@@ -5965,7 +5965,7 @@
         "size": "gpu",
         "gpu": true,
         "tail": "$ uv run python train.py --smoke --steps 200\nstep    6/200  loss 2.8196  lr 2.0e-4  3.1 it/s  gpu mem 6.5 GiB\nstep   13/200  loss 2.7906  lr 2.0e-4  3.9 it/s  gpu mem 6.1 GiB\nstep   20/200  loss 2.7572  lr 2.0e-4  3.4 it/s  gpu mem 6.6 GiB\nstep   26/200  loss 2.7096  lr 2.0e-4  3.4 it/s  gpu mem 6.1 GiB\nstep   33/200  loss 2.6496  lr 2.0e-4  3.6 it/s  gpu mem 6.2 GiB\nstep   40/200  loss 2.6488  lr 2.0e-4  3.0 it/s  gpu mem 6.6 GiB\nstep   46/200  loss 2.5700  lr 2.0e-4  3.7 it/s  gpu mem 6.4 GiB\nstep   53/200  loss 2.5403  lr 2.0e-4  3.8 it/s  gpu mem 6.5 GiB\nstep   60/200  loss 2.4828  lr 2.0e-4  3.9 it/s  gpu mem 6.4 GiB\nstep   66/200  loss 2.4511  lr 2.0e-4  3.2 it/s  gpu mem 6.5 GiB\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-19T03:44:35Z",
         "position": 0,
         "why": ""
       },
@@ -5993,7 +5993,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ ./gradlew :app:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-19T02:20:08Z",
         "position": 0,
         "why": ""
       },
@@ -6133,7 +6133,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ go test -race ./...\nok  \tgithub.com/acme/lantern/internal/store\t6.649s\nok  \tgithub.com/acme/lantern/internal/sync\t1.652s\nok  \tgithub.com/acme/lantern/internal/api\t3.428s\n?   \tgithub.com/acme/lantern/internal/config\t[no test files]\nok  \tgithub.com/acme/lantern/internal/metrics\t8.465s\nok  \tgithub.com/acme/lantern/cmd/lantern\t8.547s\nok  \tgithub.com/acme/lantern/internal/wire\t9.337s\nok  \tgithub.com/acme/lantern/internal/cache\t4.271s\nok  \tgithub.com/acme/lantern/internal/store\t2.287s\nok  \tgithub.com/acme/lantern/internal/sync\t6.599s\n?   \tgithub.com/acme/lantern/internal/api\t[no test files]\nok  \tgithub.com/acme/lantern/internal/config\t7.466s\nok  \tgithub.com/acme/lantern/internal/metrics\t4.021s\nok  \tgithub.com/acme/lantern/cmd/lantern\t3.496s\nok  \tgithub.com/acme/lantern/internal/wire\t6.923s\nok  \tgithub.com/acme/lantern/internal/cache\t5.806s\nok  \tgithub.com/acme/lantern/internal/store\t4.428s\n?   \tgithub.com/acme/lantern/internal/sync\t[no test files]\nok  \tgithub.com/acme/lantern/internal/api\t7.707s\nok  \tgithub.com/acme/lantern/internal/config\t0.481s\nok  \tgithub.com/acme/lantern/internal/metrics\t7.309s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.125s\nok  \tgithub.com/acme/lantern/internal/wire\t5.552s\nok  \tgithub.com/acme/lantern/internal/cache\t1.180s\n?   \tgithub.com/acme/lantern/internal/store\t[no test files]\nok  \tgithub.com/acme/lantern/internal/sync\t3.533s\nok  \tgithub.com/acme/lantern/internal/api\t6.781s\nok  \tgithub.com/acme/lantern/internal/config\t3.666s\nok  \tgithub.com/acme/lantern/internal/metrics\t3.803s\nok  \tgithub.com/acme/lantern/cmd/lantern\t5.316s\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-18T23:06:11Z",
         "position": 0,
         "why": ""
       },
@@ -6833,7 +6833,7 @@
         "size": "medium",
         "gpu": false,
         "tail": "$ uv run pytest -x tests/\ntests/test_tokenizer.py ................... [  5%]\ntests/test_data.py .......... [ 11%]\ntests/test_model.py ............................ [ 17%]\ntests/test_schedule.py ........................... [ 23%]\ntests/test_tokenizer.py ................................. [ 29%]\ntests/test_data.py ............................... [ 35%]\ntests/test_model.py ........... [ 41%]\ntests/test_schedule.py ............ [ 47%]\ntests/test_tokenizer.py ................... [ 52%]\ntests/test_data.py ....................... [ 58%]\ntests/test_model.py .................... [ 64%]\ntests/test_schedule.py ............. [ 70%]\ntests/test_tokenizer.py ........ [ 76%]\ntests/test_data.py ..................................... [ 82%]\ntests/test_model.py ................................... [ 88%]\ntests/test_schedule.py ........................ [ 94%]\ntests/test_tokenizer.py ................. [100%]\n======== 318 passed in 412.80s ========\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-17T23:52:18Z",
         "position": 0,
         "why": ""
       },
@@ -6889,7 +6889,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-17T22:00:14Z",
         "position": 0,
         "why": ""
       },
@@ -7113,7 +7113,7 @@
         "size": "large",
         "gpu": false,
         "tail": "$ make release\n  CC   build/lantern/obj00.o\n  CC   build/lantern/obj01.o\n  CC   build/lantern/obj02.o\n  CC   build/lantern/obj03.o\n  CC   build/lantern/obj04.o\n  CC   build/lantern/obj05.o\n  CC   build/lantern/obj06.o\n  CC   build/lantern/obj07.o\n  CC   build/lantern/obj08.o\n  CC   build/lantern/obj09.o\n  CC   build/lantern/obj10.o\n  CC   build/lantern/obj11.o\n  CC   build/lantern/obj12.o\n  CC   build/lantern/obj13.o\n  CC   build/lantern/obj14.o\n  CC   build/lantern/obj15.o\n  CC   build/lantern/obj16.o\n",
-        "queuedAt": null,
+        "queuedAt": "2026-11-17T17:29:46Z",
         "position": 0,
         "why": ""
       }
@@ -7162,6 +7162,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7206,6 +7207,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7243,6 +7245,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7269,6 +7272,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7295,6 +7299,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7335,8 +7340,9 @@
         "memUsed": 3882796958,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 731
         }
       },
       {
@@ -7362,6 +7368,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7399,6 +7406,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7443,8 +7451,9 @@
         "memUsed": 2764552283,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 466
         }
       },
       {
@@ -7481,6 +7490,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7524,6 +7534,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7561,6 +7572,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7600,8 +7612,9 @@
         "memUsed": 1365594455,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 436
         }
       },
       {
@@ -7642,8 +7655,9 @@
         "memUsed": 3487264293,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 398
         }
       },
       {
@@ -7670,6 +7684,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7707,6 +7722,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7731,6 +7747,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7755,6 +7772,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7779,6 +7797,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7803,6 +7822,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7827,6 +7847,7 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7852,7 +7873,8 @@
         "memUsed": 0,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
+          "jobs": 1,
+          "started": 0,
           "medianWaitSeconds": 0
         }
       },
@@ -7891,7 +7913,8 @@
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
-          "medianWaitSeconds": 0
+          "started": 1,
+          "medianWaitSeconds": 1203
         }
       },
       {
@@ -7927,8 +7950,9 @@
         "memUsed": 6042136898,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 49
         }
       }
     ],
@@ -8011,8 +8035,9 @@
         "memUsed": 2371304851,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 1,
+          "started": 2,
+          "medianWaitSeconds": 513
         }
       },
       {
@@ -8069,8 +8094,9 @@
         "memUsed": 2242890415,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 3,
+          "started": 3,
+          "medianWaitSeconds": 994
         }
       },
       {
@@ -8130,8 +8156,9 @@
         "memUsed": 2059398297,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 8,
+          "started": 8,
+          "medianWaitSeconds": 606
         }
       },
       {
@@ -8189,8 +8216,9 @@
         "memUsed": 1624619171,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 516
         }
       },
       {
@@ -8247,8 +8275,9 @@
         "memUsed": 2208080544,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 9,
+          "started": 9,
+          "medianWaitSeconds": 748
         }
       },
       {
@@ -8309,8 +8338,9 @@
         "memUsed": 2406391410,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 9,
+          "started": 9,
+          "medianWaitSeconds": 554
         }
       },
       {
@@ -8368,8 +8398,9 @@
         "memUsed": 2233618929,
         "memCap": 12884901888,
         "queued": {
-          "jobs": 0,
-          "medianWaitSeconds": 0
+          "jobs": 6,
+          "started": 6,
+          "medianWaitSeconds": 432
         }
       }
     ],
