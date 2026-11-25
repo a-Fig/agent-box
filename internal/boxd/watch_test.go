@@ -622,3 +622,43 @@ func TestJobEndedBeatsTheBoxGoing(t *testing.T) {
 		t.Fatalf("after the box went: %+v", st.Jobs)
 	}
 }
+
+// An instance whose CreatedAt isn't set yet (still being created) is not
+// recorded as a box-create with a zero timestamp, and a restarted watcher
+// recovers each running box's repo from history instead of showing (no repo).
+func TestWatcherSkipsUnsetCreatedAtAndRecoversBoxRepoAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	c := &clock{t: t0}
+	creating := inst("demo", "Stopped", "small", time.Time{})
+	f := &fakeIncus{
+		ins: []Instance{creating},
+		cfg: map[string]string{"user.agent-box.mode": "full"},
+	}
+	w := newWatcher(t, dir, f, c)
+	w.Poll(context.Background())
+	if got := w.Hist.Range(dash.RangeDay, w.Live()).Buckets[0].BoxHours.BySize["small"]; got != 0 {
+		t.Fatalf("unset CreatedAt added phantom box-hours: %v", got)
+	}
+
+	// Creation finishes and a job runs and finishes on the box.
+	created := t0.Add(3 * time.Second)
+	c.add(3 * time.Second)
+	f.set(func() {
+		f.ins = []Instance{inst("demo", "Running", "small", created)}
+		f.jobs = map[string][]fakeJob{
+			"demo": {{name: "demo.20261124-180005-ab12", state: "done", exit: "0", log: "ok\n", meta: metaJSON, endedAt: created.Add(10 * time.Second).Unix()}},
+		}
+	})
+	c.add(15 * time.Second)
+	w.Poll(context.Background())
+	if st := w.State(); len(st.Boxes) != 1 || st.Boxes[0].Repo != "https://github.com/acme/widget.git" {
+		t.Fatalf("before restart: %+v", st.Boxes)
+	}
+
+	// Simulate a boxd restart: fresh Watcher on the same history directory.
+	w2 := newWatcher(t, dir, f, c)
+	w2.Poll(context.Background())
+	if st := w2.State(); len(st.Boxes) != 1 || st.Boxes[0].Repo != "https://github.com/acme/widget.git" {
+		t.Fatalf("after restart box lost repo: %+v", st.Boxes)
+	}
+}
