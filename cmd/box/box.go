@@ -22,6 +22,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/digest"
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -487,9 +488,8 @@ exit 0
 
 // keptThrowaways lists the throwaway boxes kept after their job ended
 // (endedKeep: box run and boxd move a throwaway's expiry to then, for box
-// pull and the full log), the first to expire first. A throwaway whose exit
-// nobody read has idleTTL from boxd and isn't one of these: its result is
-// only in the box until box reads it. They hold their room
+// pull and the full log), the first to expire first. Their ends stay in
+// boxd's history, which box job reads once they're gone (#90). They hold their room
 // until the reaper deletes them, so a launch short of room deletes them, as
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
 // kept box is a running throwaway whose expiry is within the keep window,
@@ -1015,6 +1015,21 @@ var validJob = regexp.MustCompile(`^[a-z][a-z0-9-]*\.[0-9]{8}-[0-9]{6}-[0-9a-f]+
 
 // Job reattaches to a job started by Run. Once the job has ended, it deletes
 // the job's box if box run --new made it and no other job runs there.
+// endedElsewhere is a job's end when its box can't say: the one recorded
+// here when box read its exit, else boxd's record, which holds every job's
+// end, including one nobody here read (a run that exited on a pause, a push
+// that never came) whose box a launch then took (#90).
+func (a *App) endedElsewhere(ctx context.Context, job string) (jobEnd, bool) {
+	if end, ok := a.recordedEnd(job); ok {
+		return end, true
+	}
+	j, found, err := a.queuedJob(ctx, job)
+	if err != nil || !found || j.State != dash.JobDone || j.Exit == nil {
+		return jobEnd{}, false
+	}
+	return jobEnd{Code: *j.Exit, Tail: j.Tail}, true
+}
+
 func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResult, error) {
 	if !validJob.MatchString(job) {
 		return JobResult{Code: 2}, fmt.Errorf("bad job id %q", job)
@@ -1030,7 +1045,7 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 		// A job whose exit was read once has ended: when its box has gone
 		// since (a throwaway's 30 minutes ran out, or a launch short of room
 		// took it), its recorded end is the result, not "lost".
-		if end, ok := a.recordedEnd(job); ok {
+		if end, ok := a.endedElsewhere(ctx, job); ok {
 			fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
 			fmt.Fprint(a.Out, end.Tail)
 			return JobResult{Job: job, Box: box, State: stateDone, Code: end.Code, Digest: end.Digest}, nil

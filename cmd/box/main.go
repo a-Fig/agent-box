@@ -200,6 +200,11 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		p, err := a.LogPage(ctx, fs.Arg(0), *offset, *limit)
 		if err != nil {
+			if end, ok := a.endedElsewhere(ctx, fs.Arg(0)); ok && *offset >= 0 && *limit >= 0 {
+				fmt.Fprintf(a.Err, "box: can't read the log (%s); this is the tail recorded when the job ended\n", firstLine(err.Error()))
+				io.WriteString(a.Out, end.Tail)
+				return 0
+			}
 			return fail(err)
 		}
 		fmt.Fprintln(a.Err, "box: "+p.pageHead())

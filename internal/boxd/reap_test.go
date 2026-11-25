@@ -18,33 +18,30 @@ func TestEndedExpiry(t *testing.T) {
 		return in
 	}
 	for name, tc := range map[string]struct {
-		in     Instance
-		queued bool
-		want   time.Time // zero: no write
+		in   Instance
+		want time.Time // zero: no write
 	}{
-		"throwaway, its job's 24h":    {box(true, own, started), false, now.Add(2 * time.Hour)},
-		"boxd's queued throwaway":     {box(true, own, started), true, now.Add(30 * time.Minute)},
-		"queued, on a repo box":       {box(false, own, started), true, now.Add(2 * time.Hour)},
-		"repo box, its job's 24h":     {box(false, own, started.Add(-24*time.Hour)), false, now.Add(2 * time.Hour)},
-		"a later job's 24h":           {box(true, now.Add(jobTTL), started), false, time.Time{}},
-		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), false, time.Time{}},
-		"extended from the page":      {box(true, own.Add(4*time.Hour), started), false, time.Time{}},
-		"another box of that name":    {box(true, own, started.Add(time.Hour)), false, time.Time{}},
+		"throwaway, its job's 24h":    {box(true, own, started), now.Add(30 * time.Minute)},
+		"repo box, its job's 24h":     {box(false, own, started.Add(-24*time.Hour)), now.Add(2 * time.Hour)},
+		"a later job's 24h":           {box(true, now.Add(jobTTL), started), time.Time{}},
+		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), time.Time{}},
+		"extended from the page":      {box(true, own.Add(4*time.Hour), started), time.Time{}},
+		"another box of that name":    {box(true, own, started.Add(time.Hour)), time.Time{}},
 	} {
-		got, ok := endedExpiry(tc.in, started, tc.queued, now)
+		got, ok := endedExpiry(tc.in, started, now)
 		if ok != !tc.want.IsZero() || (ok && !got.Equal(tc.want)) {
 			t.Errorf("%s: %v %v, want %v", name, got, ok, tc.want)
 		}
 	}
 	bad := box(true, own, started)
 	bad.Config["user.expires"] = "soon"
-	if _, ok := endedExpiry(bad, started, false, now); ok {
+	if _, ok := endedExpiry(bad, started, now); ok {
 		t.Error("wrote over an expiry it can't read")
 	}
 }
 
 // A job box run started and nobody followed ends: boxd gives its throwaway
-// box new's 2 hours instead of the job's 24 (#53). A job that starts there
+// box's 30 minutes instead of the job's 24 hours (#53, #90). A job that starts there
 // keeps its own 24 hours, whether it shows in the box's running jobs (even
 // within jobExpirySlack of the first job's start) or its write comes
 // between boxd's read and its write.
@@ -84,7 +81,7 @@ func TestReapEndedUnreadJob(t *testing.T) {
 				break
 			}
 		}
-		want := r.c.now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+		want := r.c.now().Add(30 * time.Minute).UTC().Format(time.RFC3339)
 		switch {
 		case tc == "alone" && (len(sets) != 1 || expires != want):
 			t.Errorf("%s: sets %v, expires %s, want %s", tc, sets, expires, want)

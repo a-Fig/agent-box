@@ -326,3 +326,24 @@ func TestCancelAJobBeingStarted(t *testing.T) {
 		t.Fatalf("%q, boxd calls %s", text, b.callList())
 	}
 }
+
+// A job nobody here read whose box has gone gives boxd's record of its end,
+// not "lost" (#90).
+func TestJobAfterBoxGoneAsksBoxd(t *testing.T) {
+	e, b := newQueueEnv(t, &fakePC{})
+	exit := 3
+	b.views = []dash.Job{{Box: "my-repo-ab12", ID: "20261123-120000-cd34", State: dash.JobDone, Exit: &exit, Tail: "boxd's tail"}}
+	var out strings.Builder
+	e.a.Out = &out
+	r, err := e.a.Job(context.Background(), queuedJobName, 0)
+	if err != nil || r.State != stateDone || r.Code != 3 || out.String() != "boxd's tail" {
+		t.Fatalf("Job = %+v, %v, out %q", r, err, out.String())
+	}
+	if _, st := e.call(t, "box_job", map[string]any{"id": queuedJobName, "offset": 0}); st["exitCode"] != 3.0 || st["tail"] != "boxd's tail" {
+		t.Errorf("box_job page after the box went = %v", st)
+	}
+	b.gone = true
+	if _, err := e.a.Job(context.Background(), queuedJobName, 0); err == nil {
+		t.Error("a job neither the box nor boxd knows wasn't an error")
+	}
+}
