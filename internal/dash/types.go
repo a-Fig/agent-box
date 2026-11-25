@@ -88,6 +88,31 @@ type Machine struct {
 	Allocated     Resources    `json:"allocated"`
 	Room          Room         `json:"room"`
 	WSLMemory     int64        `json:"wslMemory"` // bytes the distro's VM holds now
+	Boxd          *Version     `json:"boxd"`      // the boxd serving this; null if its build has no commit
+	Tray          *Version     `json:"tray"`      // the enforcer's build, user.agent-box.tray-version; null: unknown
+}
+
+// Version is the commit a binary was built from, so the page can show when
+// boxd and the tray were built from different commits.
+type Version struct {
+	Commit   string     `json:"commit"`   // the full hash
+	Time     *time.Time `json:"time"`     // the commit's time; null if the build didn't record it
+	Modified bool       `json:"modified"` // built with uncommitted changes
+}
+
+// String is the short commit, with "+" for a modified build, or "unknown".
+func (v Version) String() string {
+	c := v.Commit
+	if len(c) > 7 {
+		c = c[:7]
+	}
+	if c == "" {
+		c = "unknown"
+	}
+	if v.Modified {
+		c += "+"
+	}
+	return c
 }
 
 // TrayAlive reports whether the active enforcer, tray or headless, has written its heartbeat

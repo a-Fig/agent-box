@@ -30,6 +30,10 @@ const ProjectTraySeenKey = "user.agent-box.tray-seen"
 // ProjectEnforcerKey says which enforcer is active: EnforcerTray or EnforcerHeadless.
 const ProjectEnforcerKey = "user.agent-box.enforcer"
 
+// ProjectTrayVersionKey is the active enforcer's build, dash.Version as JSON,
+// written when it starts enforcing.
+const ProjectTrayVersionKey = "user.agent-box.tray-version"
+
 // The two enforcers: the interactive tray, and boxtray --headless, which
 // runs Full while nobody is logged on.
 const (

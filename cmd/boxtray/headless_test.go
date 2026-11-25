@@ -69,6 +69,7 @@ func TestHeartbeatThrottlesAndNamesTheEnforcer(t *testing.T) {
 	hb.beat(context.Background(), t0.Add(29*time.Second))
 	hb.beat(context.Background(), t0.Add(30*time.Second))
 	want := []string{
+		"user.agent-box.tray-version=" + hb.build,
 		"user.agent-box.enforcer=headless", "user.agent-box.tray-seen=2026-11-25T03:00:00Z",
 		"user.agent-box.enforcer=headless", "user.agent-box.tray-seen=2026-11-25T03:00:30Z",
 	}
@@ -152,7 +153,7 @@ func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 
 	trayPresent <- false // the tray is gone again; a fresh manager rewrites everything
 	<-reports
-	if managers != 2 || inc.count("user.agent-box.mode=full") != 2 || inc.count("user.agent-box.enforcer=headless") != 2 {
+	if managers != 2 || inc.count("user.agent-box.mode=full") != 2 || inc.count("user.agent-box.enforcer=headless") != 2 || inc.count("user.agent-box.tray-version=") != 2 {
 		t.Fatalf("resume: managers=%d sets=%v", managers, inc.snapshot())
 	}
 	cancel()

@@ -32,6 +32,7 @@ box ls                                # boxes, status, expiry
 box rm scratch
 box ui                                # the PC's dashboard in the browser
 box app                               # the dashboard in a window of its own (Windows)
+box --version                         # the commit this box was built from
 ```
 
 `box run --reason` (required, 10 to 300 characters) says why the run needs a box; `box new --reason` stores one as `user.box.reason`. `box run` records it in `/work/.box/<job>.meta` with the command, repo, branch, commit, size, `--env` names (never values) and who asked, and reports to the dashboard, best effort, a run turned away with exit 75 and how each run ended. Both are self-reported, for display ([docs/ui.md](docs/ui.md#agent-identity)).
