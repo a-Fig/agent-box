@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 func queueMeta(session string) json.RawMessage {
@@ -124,7 +125,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	box, _, _ := strings.Cut(rep.Job, ".")
 	for _, want := range []string{"launch agent-base " + box + " -c user.expires=", "user.box.size=small", "user.box.throwaway=true",
 		"file push --create-dirs " + bundle + " " + box + "/work/.box/" + rep.Job + ".bundle",
-		".meta.tmp " + box + "/work/.box/" + rep.Job + ".meta", "config set " + box + " user.expires=", "exec " + box + " -- bash -lc "} {
+		".meta.tmp " + box + "/work/.box/" + rep.Job + ".meta", "exec " + box + " -- bash -lc "} {
 		if !strings.Contains(cli, want) {
 			t.Errorf("no %q in\n%s", want, cli)
 		}
@@ -164,8 +165,9 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.f.mu.Lock()
 	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 1 || sets[0] != want {
-		t.Fatalf("throwaway's expiry: %v, want %s", sets, want)
+	start := box + " " + r.c.now().Add(-6*time.Second).UTC().Add(24*time.Hour).Format(time.RFC3339)
+	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 2 || sets[0] != start || sets[1] != want {
+		t.Fatalf("throwaway's expiry: %v, want the job's %s then %s", sets, start, want)
 	}
 	var h dash.History
 	resp, _ := http.Get(r.srv.URL + "/api/history?range=day")
@@ -393,7 +395,15 @@ func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+
+	// A person extended it (#198): it isn't spare until the hold passes.
+	r.f.set(func() { r.f.ins[1].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339) })
 	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a held box: %v", r.f.cli)
+	}
+	r.c.add(10 * time.Minute)
 	r.poll()
 	if len(r.f.cli) < 2 || r.f.cli[0] != "delete fresh-0001 --force" || !strings.HasPrefix(r.f.cli[1], "launch agent-base job-") {
 		t.Fatalf("cli: %v", r.f.cli)

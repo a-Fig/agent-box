@@ -180,6 +180,13 @@ func TestGPUClaimRemovesDeadThrowaways(t *testing.T) {
 			}
 		})
 	}
+	// A throwaway a person extended isn't deleted for the GPU (#198).
+	held := instance{Name: "held-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc", mode.HoldKey, "2026-11-23T13:00:00Z")}
+	f0 := &fakePC{t: t, mode: "shared", insts: []instance{held}}
+	a0, _ := testApp(f0)
+	if err := a0.claimGPU(context.Background(), f0.insts, ""); err != nil || f0.names() != "held-1234" {
+		t.Errorf("claimGPU = %v, boxes %q", err, f0.names())
+	}
 	// A stopped GPU box someone made with box new is left alone, and doesn't hold the GPU.
 	f := &fakePC{t: t, mode: "shared", insts: []instance{{Name: "mine", Status: "Stopped", Config: gpuConfig()}}, exit: "0"}
 	a, out := testApp(f)

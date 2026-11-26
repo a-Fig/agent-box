@@ -135,7 +135,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 
 	switch args[0] {
 	case "new":
-		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires")
+		ttl := fs.Duration("ttl", idleTTL, "lifetime, stored as user.expires; it also holds the box until then")
 		size := fs.String("size", "", mode.SizeNames()+" (default "+mode.DefaultSize+")")
 		gpu := fs.Bool("gpu", false, "same as --size gpu")
 		reason := fs.String("reason", "", "why this needs a box (optional; 10 to 300 characters)")

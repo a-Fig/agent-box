@@ -286,7 +286,9 @@ func (w *Watcher) checkCreated(ctx context.Context, name string, createdAt time.
 	return Instance{}, errBoxGone
 }
 
-// ExtendBox adds hours to the later of now and the box's expiry.
+// ExtendBox adds hours to the later of now and the box's expiry, and holds
+// the box until then (mode.HoldKey): a job's start or end, or a launch short
+// of room, won't take that time away.
 func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Time, hours int, by string) (dash.Box, error) {
 	b, err := w.boxFor(name, createdAt)
 	if err != nil {
@@ -307,8 +309,9 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 		if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
 			from = t.UTC()
 		}
-		until = from.Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
-		_, err = w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+until.Format(time.RFC3339))
+		until = mode.Held(in.Config, from).UTC().Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
+		at := until.Format(time.RFC3339)
+		_, err = w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+at, mode.HoldKey+"="+at)
 		return err
 	}); err != nil {
 		return b, err

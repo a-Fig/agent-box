@@ -15,6 +15,24 @@ import (
 // which the instance is deleted.
 const ExpiresKey = "user.expires"
 
+// HoldKey is the RFC3339 UTC time a person asked a box to live until: an
+// extend from the dashboard, or box new --ttl. Only those write it. Whatever
+// sets ExpiresKey writes Held of its own deadline, the reapers delete a box
+// only once both times have passed, and nothing takes a held box for room.
+// Kept apart from ExpiresKey so a job's end can't mistake an extend for the
+// job's own deadline (#198), as Kubernetes keeps a finalizer apart from the
+// scheduler's state.
+const HoldKey = "user.box.hold-until"
+
+// Held is the later of t and the hold in an instance's config. A box is held
+// at now when Held(cfg, now).After(now).
+func Held(cfg map[string]string, t time.Time) time.Time {
+	if h, err := time.Parse(time.RFC3339, cfg[HoldKey]); err == nil && h.After(t) {
+		return h
+	}
+	return t
+}
+
 const (
 	// FrozenStop is how long an instance may stay frozen in My PC before it is
 	// stopped to free its RAM.
@@ -187,7 +205,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 	return st
 }
 
-// reap deletes every instance whose user.expires is in the past and returns
+// reap deletes every instance whose user.expires and hold (Held) are in the past and returns
 // the rest. It runs in every mode, My PC included, because deleting frees RAM
 // and disk. An instance with no user.expires is left alone; one with a value
 // that isn't RFC3339 is left alone and reported once. A failed delete is
@@ -216,7 +234,7 @@ func (m *Manager) reap(ctx context.Context, now time.Time, ins []Instance, errs 
 			continue
 		}
 		delete(m.badExpires, in.Name)
-		if !exp.Before(now) {
+		if !Held(in.Config, exp).Before(now) {
 			keep = append(keep, in)
 			continue
 		}

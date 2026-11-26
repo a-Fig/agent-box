@@ -439,11 +439,11 @@ function untitled(el) {
 }
 
 // When the reaper deletes the box (user.expires). A job's start sets it 24h ahead, and once the
-// job ends boxd brings it down to 2h, or 30 minutes for a throwaway, unless it is later than the
-// job's own 24h, as an extend makes it (sched.go, endedExpiry).
+// job ends box or boxd brings it down to 2h, or 30 minutes for a throwaway, never before an
+// extend's hold (user.box.hold-until, mode.Held).
 function expiry(b) {
   if (!b.expiresAt) return h("span", hint("Nothing deletes this box on a timer; delete it when it's no longer needed.", {}, "box-" + b.name + "-expiry"), "no expiry");
-  const tip = "Deleted " + stamp(b.expiresAt) + ", with anything on it. A job starting sets this a day ahead; when a job ends it is usually reset to 2 hours from then (30 minutes for a throwaway), and that can undo an extend made while the job ran.";
+  const tip = "Deleted " + stamp(b.expiresAt) + ", with anything on it. A job starting sets this a day ahead; when a job ends it is usually reset to 2 hours from then (30 minutes for a throwaway). An extend holds the box until the time it sets, whatever its jobs do.";
   return h("span", hint(tip, {}, "box-" + b.name + "-expiry"), untitled(timeEl("until", b.expiresAt, "expires ")));
 }
 
@@ -458,7 +458,7 @@ function boxRow(b, full) {
           { class: "menu", role: "group", "aria-label": "Extend " + b.name },
           [1, 4, 24].map((hours) => {
             const tip = b.expiresAt
-              ? "Pushes this box's expiry back " + plural(hours, "hour") + ". A job that ends afterwards can reset it (to 2 hours, 30 minutes for a throwaway), so to be sure, extend an idle box, after its job, not during one."
+              ? "Pushes this box's expiry back " + plural(hours, "hour") + " and holds it until then: a job ending, or another run that needs the room, won't delete it sooner."
               : "This box has no expiry: this gives it one, " + plural(hours, "hour") + " from now, when it is deleted.";
             return control("ext-" + b.name + "-" + hours, hint(tip, { class: "btn btn-xs btn-outline", disabled: busy.has("ext-" + b.name), onclick: () => extendBox(b, hours) }), "+" + hours + "h");
           }),
@@ -472,7 +472,7 @@ function boxRow(b, full) {
     h(
       "div",
       null,
-      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, "box-" + b.name + "-size"), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is usually deleted 30 minutes after that run ends, or sooner if another run needs the room. An extend after the run keeps it longer.", { class: "badge" }, "box-" + b.name + "-throwaway"), "throwaway") : null),
+      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, "box-" + b.name + "-size"), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is usually deleted 30 minutes after that run ends, or sooner if another run needs the room. An extend holds it until the time it sets.", { class: "badge" }, "box-" + b.name + "-throwaway"), "throwaway") : null),
       h(
         "div",
         { class: "meta" },
