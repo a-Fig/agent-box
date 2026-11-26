@@ -37,6 +37,8 @@ type fakePC struct {
 	block        bool            // follow waits until its context ends
 	pushHang     bool            // file push waits until its context ends
 	freeze       bool            // follow freezes the box and fails
+	dnsFails     int             // getent fails this many times before it succeeds
+	dnsCalls     int             // getent attempts seen
 	launchErr    bool            // the connection drops after creating an instance
 	refuse       string          // launch fails with this Incus error, creating nothing
 	launches     [][]string      // arguments of each launch
@@ -223,6 +225,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 		if f.bash == "" {
 			switch {
+			case isScript(c, "# dns wait"):
+				f.dnsCalls++
+				if f.dnsFails > 0 {
+					f.dnsFails--
+					return Result{Stderr: "Temporary failure in name resolution", Code: 2}, nil
+				}
+				return Result{}, nil
 			case isScript(c, "# follow"):
 				if f.followErr > 0 {
 					f.followErr--
@@ -500,11 +509,36 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config config exec config config exec exec config config exec exec delete" {
+	if got := f.callList(); got != "list project launch exec file file config config exec config config exec exec config config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
 		t.Errorf("throwaway box left behind: %+v", f.insts)
+	}
+}
+
+func TestRunNewWaitsForDNS(t *testing.T) {
+	f := &fakePC{t: t, exit: "0", dnsFails: 2}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true})
+	if err != nil || r.Code != 0 {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if f.dnsCalls != 3 {
+		t.Errorf("DNS attempts = %d, want 3 (2 failures, then success)", f.dnsCalls)
+	}
+}
+
+func TestRunNewStartsAnywayWhenDNSNeverWorks(t *testing.T) {
+	f := &fakePC{t: t, exit: "0", dnsFails: 100}
+	a, out := testApp(f)
+	a.DNSWait = 30 * time.Millisecond
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true})
+	if err != nil || r.Code != 0 {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if !strings.Contains(out.String(), "DNS") {
+		t.Errorf("no DNS warning after the bound:\n%s", out)
 	}
 }
 

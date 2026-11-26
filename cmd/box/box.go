@@ -63,6 +63,9 @@ type App struct {
 	// ProbeTimeout bounds each probe after a job's result is known (zero is
 	// probeTimeout), so a freeze there can't hold the result back.
 	PollTimeout, ProbeTimeout time.Duration
+	// DNSWait bounds how long a fresh throwaway waits for DNS before its
+	// command starts; zero is dnsWaitBound. Tests replace it.
+	DNSWait time.Duration
 	// JoinConfig says where box join registers and installs; tests replace it.
 	JoinConfig func(out io.Writer) (joinConfig, error)
 	// Client is the MCP client box mcp serves (empty for the CLI), and
@@ -1073,7 +1076,11 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		a.notify(jobNotice{Event: "launching_box", Box: name})
 		err := a.launch(ctx, name, ttl, true, sz)
 		if err == nil {
-			return name, a.confirmGPU(ctx, name, sz)
+			if err := a.confirmGPU(ctx, name, sz); err != nil {
+				return name, err
+			}
+			a.waitDNS(ctx, name)
+			return name, nil
 		}
 		if jobrun.IsDisallowedMetadata(err) && !retriedMeta && try < 7 {
 			// Guard try < 7 so a metadata error on the final slot returns the
@@ -1093,6 +1100,46 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		insts = append(insts, instance{Name: name})
 	}
 	return "", errors.New("no free name for a throwaway box")
+}
+
+// dnsWaitBound is how long a fresh throwaway may wait for DNS, and dnsPoll
+// how often it tries again (#152).
+const (
+	dnsWaitBound = 30 * time.Second
+	dnsPoll      = 500 * time.Millisecond
+)
+
+// dnsScript resolves one name in the box. Any name the resolver should
+// answer exercises the same path a command's first lookup takes;
+// example.com is IANA's reserved, stable example domain.
+func dnsScript() string { return "# dns wait\ngetent hosts example.com >/dev/null 2>&1" }
+
+// waitDNS waits, briefly and with a bound, until a fresh throwaway can
+// resolve a name: Incus can report the box running before its network and
+// DNS are up, and a command that starts then fails its first lookup (#152).
+// It never fails the run: after the bound the job starts anyway (a command
+// that needs no DNS still works, and one that does reports its own error),
+// with a warning so the agent knows DNS was not ready.
+func (a *App) waitDNS(ctx context.Context, box string) {
+	bound := a.DNSWait
+	if bound <= 0 {
+		bound = dnsWaitBound
+	}
+	wctx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	for {
+		if _, err := a.incusOK(wctx, "exec", a.target(box), "--", "bash", "-c", dnsScript()); err == nil {
+			return
+		}
+		select {
+		case <-wctx.Done():
+			if ctx.Err() == nil {
+				fmt.Fprintf(a.Err, "box: warning: DNS still does not resolve in %s after %s; starting the job anyway\n", box, bound)
+			}
+			return
+		case <-time.After(dnsPoll):
+		}
+	}
 }
 
 // ensureBox launches or starts a reused box and returns the size of the box it
