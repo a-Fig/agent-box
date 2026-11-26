@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="'Space Grotesk', system-ui, sans-serif">
+  <defs>
+    <radialGradient id="glow" cx="22%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FF7A1A" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#FF7A1A" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="34" height="34" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.4" fill="#9AA4B8" opacity="0.13"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#0B0E14"/>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- cube mark -->
+  <g transform="translate(150 150) scale(4.2)">
+    <path d="M0 2.1 8.4 -2.7 8.4 1.9 0 6.7 -8.4 1.9 -8.4 -2.7Z" fill="#FF7A1A" opacity="0.22"/>
+    <path d="M0 2.1 0 6.7 -8.4 1.9 -8.4 -2.7Z" fill="#FF7A1A" opacity="0.5"/>
+    <path d="M0 2.1 8.4 -2.7 8.4 1.9 0 6.7Z" fill="#FF7A1A" opacity="0.32"/>
+    <g fill="none" stroke="#FF9A47" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M0 -9.5 8.4 -4.7 8.4 4.9 0 9.7 -8.4 4.9 -8.4 -4.7Z"/><path d="M0 -9.5 0 0 8.4 4.9"/><path d="M0 0 -8.4 4.9"/>
+    </g>
+  </g>
+  <text x="222" y="162" font-size="40" font-weight="700" fill="#E6EAF2" letter-spacing="-1"><tspan fill="#9AA4B8">agent</tspan>-box</text>
+
+  <text x="92" y="330" font-size="70" font-weight="700" fill="#E6EAF2" letter-spacing="-2">Spare cores from a gaming PC,</text>
+  <text x="92" y="410" font-size="70" font-weight="700" fill="#FF7A1A" letter-spacing="-2">handed to your agents.</text>
+
+  <text x="92" y="478" font-size="27" fill="#9AA4B8" font-family="'JetBrains Mono', monospace">Disposable Linux boxes for coding agents. You dial the power. Games always win.</text>
+
+  <!-- throttle meter -->
+  <g transform="translate(92 520)">
+    <g fill="#1C2230">
+      <rect x="0" y="0" width="54" height="30" rx="2"/><rect x="62" y="0" width="54" height="30" rx="2"/><rect x="124" y="0" width="54" height="30" rx="2"/><rect x="186" y="0" width="54" height="30" rx="2"/><rect x="248" y="0" width="54" height="30" rx="2"/><rect x="310" y="0" width="54" height="30" rx="2"/><rect x="372" y="0" width="54" height="30" rx="2"/><rect x="434" y="0" width="54" height="30" rx="2"/>
+    </g>
+    <g fill="#FF7A1A">
+      <rect x="0" y="0" width="54" height="30" rx="2"/><rect x="62" y="0" width="54" height="30" rx="2"/><rect x="124" y="0" width="54" height="30" rx="2"/><rect x="186" y="0" width="54" height="30" rx="2"/><rect x="248" y="0" width="54" height="30" rx="2"/><rect x="310" y="0" width="54" height="30" rx="2"/>
+    </g>
+  </g>
+  <text x="596" y="542" font-size="22" fill="#39E0C8" font-family="'JetBrains Mono', monospace">Full power</text>
+</svg>

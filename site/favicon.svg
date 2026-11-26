@@ -1,1 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#225BFF"/><g fill="none" stroke="#FFFBEA" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="5" fill="#0B0E14"/>
+  <!-- isometric cube: fill level wedge (allocated compute) then amber wireframe -->
+  <g transform="translate(16 16.6)">
+    <!-- filled portion: bottom slab + its two visible faces -->
+    <path d="M0 2.1 8.4 -2.7 8.4 1.9 0 6.7 -8.4 1.9 -8.4 -2.7Z" fill="#FF7A1A" opacity="0.22"/>
+    <path d="M0 2.1 0 6.7 -8.4 1.9 -8.4 -2.7Z" fill="#FF7A1A" opacity="0.5"/>
+    <path d="M0 2.1 8.4 -2.7 8.4 1.9 0 6.7Z" fill="#FF7A1A" opacity="0.32"/>
+    <!-- wireframe cube -->
+    <g fill="none" stroke="#FF9A47" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M0 -9.5 8.4 -4.7 8.4 4.9 0 9.7 -8.4 4.9 -8.4 -4.7Z"/>
+      <path d="M0 -9.5 0 0 8.4 4.9"/>
+      <path d="M0 0 -8.4 4.9"/>
+    </g>
+  </g>
+</svg>
