@@ -20,11 +20,21 @@ test('wrangler.jsonc and .assetsignore configure static assets for fano.afig.dev
   assert.equal(wrangler.main, undefined, 'starter site should be static-only (no worker main)');
   assert.equal(wrangler.assets?.directory, '.');
   assert.equal(wrangler.routes?.[0]?.pattern, 'fano.afig.dev');
+  assert.equal(wrangler.preview_urls, false);
 
   const ignore = new Set(fs.readFileSync(path.join(SITE, '.assetsignore'), 'utf8').trim().split(/\r?\n/));
-  for (const entry of ['BRAND.md', 'wrangler.jsonc', '.assetsignore', 'test', 'package.json', 'package-lock.json', 'node_modules']) {
+  for (const entry of ['BRAND.md', 'wrangler.jsonc', 'wrangler.preview.json', '.assetsignore', '.wrangler/', 'preview.mjs', 'test', 'package.json', 'package-lock.json', 'node_modules']) {
     assert.ok(ignore.has(entry), `.assetsignore missing ${entry}`);
   }
+});
+
+test('PR previews use a dedicated Worker and a staging directory', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(SITE, 'wrangler.preview.json'), 'utf8'));
+  assert.equal(config.name, 'fano-site-preview');
+  assert.equal(config.workers_dev, false);
+  assert.equal(config.preview_urls, true);
+  assert.equal(config.routes, undefined);
+  assert.equal(config.assets.directory, './assets');
 });
 
 test('index.html internal links and asset references resolve', () => {
