@@ -23,8 +23,6 @@
 #   --new-client      make a client token even though a restricted client is already trusted
 #   --build-base      build the `agent-base` image if it does not exist
 #   --rebuild-base    build it again even if it exists
-#   --stage-base NAME build and warm a staged base image under NAME (not `agent-base`), without
-#                     changing host packages, project caps, the default profile, or services
 set -Eeuo pipefail
 # incus create/edit commands read YAML from stdin when it isn't a terminal; over SSH or a pipe
 # they would hang waiting for it. Nothing here needs stdin.
@@ -36,7 +34,6 @@ PROJECT=agents
 CACHE_SIZE=30GiB
 BUILD_BASE=0
 REBUILD=0
-STAGE_BASE=
 TAILSCALE=0
 REMOTE=pc
 HOST_ADDR=
@@ -47,29 +44,15 @@ while [ $# -gt 0 ]; do
     --new-client) NEW_CLIENT=1 ;;
     --build-base) BUILD_BASE=1 ;;
     --rebuild-base) BUILD_BASE=1; REBUILD=1 ;;
-    --stage-base) [ $# -ge 2 ] || { echo "--stage-base needs an alias" >&2; exit 2; }; STAGE_BASE=$2; shift ;;
     --tailscale) TAILSCALE=1 ;;
     --remote) [ $# -ge 2 ] || { echo "--remote needs a name" >&2; exit 2; }; REMOTE=$2; shift ;;
     --host) [ $# -ge 2 ] || { echo "--host needs an address" >&2; exit 2; }; HOST_ADDR=$2; shift ;;
-    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
 case "$REMOTE" in ''|*[!A-Za-z0-9_.-]*) echo "--remote: use letters, digits, '.', '_' and '-' only" >&2; exit 2 ;; esac
-if [ -n "$STAGE_BASE" ]; then
-  if [ "$BUILD_BASE" -eq 1 ]; then
-    echo "--stage-base cannot be combined with --build-base or --rebuild-base" >&2
-    exit 2
-  fi
-  if [ "$STAGE_BASE" = "agent-base" ]; then
-    echo "--stage-base cannot target 'agent-base'; use --rebuild-base for the live image" >&2
-    exit 2
-  fi
-  # Temporary builder/warm container names append '-build-warm' (11 chars), so cap at 50 chars.
-  [[ "$STAGE_BASE" =~ ^[A-Za-z][A-Za-z0-9-]{0,49}$ ]] \
-    || { echo "--stage-base: start with a letter, use letters, digits and '-' only (max 50 chars)" >&2; exit 2; }
-fi
 
 step() { printf '\n==> %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
@@ -126,100 +109,6 @@ if command -v incus >/dev/null 2>&1 && incus storage list -f csv >/dev/null 2>&1
   elif [ -n "$(incus storage list -f csv)" ]; then
     die "Incus here already has storage pools, none named 'default'. Setup would change its default profile and HTTPS address, so it stops. Use a host without Incus, or one whose 'default' pool is btrfs."
   fi
-fi
-
-# Warm an image in the btrfs pool's images/<fp> cache so later launches copy from it quickly.
-# On Incus 7.6 (2026-11-24, btrfs + GHSA-5pgx-q9xx-j3qv), a concurrent `incus config set`
-# (e.g. from boxtray's 5s tick in Full, or in Shared for instances launched without Shared's
-# limits.cpu/limits.cpu.priority keys) while EnsureImage is still unpacking the tarball runs
-# UpdateInstanceBackupFile -> btrfs MountVolume -> EnsureMountPath, creating
-# containers/<project>_<name> as a plain directory before `btrfs subvolume snapshot` runs.
-# btrfs then nests the snapshot inside that directory (<name>/<fp>/rootfs), which
-# stripInstanceMetadata rejects with "Instance metadata contained disallowed entries" and leaves
-# the empty plain directory behind.
-# Warm in the default project: `agents` has features.images=false so both share storage pool
-# `default` and its images/<fp> cache, while avoiding `agents`'s caps and boxtray's ticks.
-# Still absorb that exact error once and rmdir any leftover plain dir in case of a race.
-warm_image() {
-  local img=$1 name=$2 dir="/var/lib/incus/storage-pools/default/containers/$2" out
-  incus delete --force "$name" --project default >/dev/null 2>&1 || true
-  rmdir "$dir" 2>/dev/null || true
-  if ! out=$(incus init "$img" "$name" --project default 2>&1); then
-    if [[ $out == *"Instance metadata contained disallowed entries"* ]]; then
-      note "absorbed Incus 7.6 btrfs first-launch metadata race while warming $img; retrying once"
-      incus delete --force "$name" --project default >/dev/null 2>&1 || true
-      rmdir "$dir" 2>/dev/null || true
-      if ! out=$(incus init "$img" "$name" --project default 2>&1); then
-        out=${out##*$'\n'}
-        if (( ${#out} > 400 )); then out="${out:0:400}..."; fi
-        printf '%s\n' "$out" >&2
-        return 1
-      fi
-    else
-      printf '%s\n' "$out" >&2
-      return 1
-    fi
-  fi
-  incus delete --force "$name" --project default >/dev/null || return 1
-  rmdir "$dir" 2>/dev/null || true
-}
-
-build_base_image() {
-  local alias=$1 builder="${1}-build" build_warm="${1}-build-warm" alias_warm="${1}-warm"
-  incus delete --force "$builder" --project "$PROJECT" >/dev/null 2>&1 || true
-  rmdir "/var/lib/incus/storage-pools/default/containers/${PROJECT}_${builder}" 2>/dev/null || true
-  warm_image images:ubuntu/24.04/cloud "$build_warm" \
-    || note "warning: couldn't warm base Ubuntu image; continuing"
-  incus launch images:ubuntu/24.04/cloud "$builder" --project "$PROJECT" < "$HERE/agent-base.yaml"
-  note "waiting for cloud-init (installs Go, Node, JDK, ...); this takes a few minutes"
-  until incus exec "$builder" --project "$PROJECT" -- true >/dev/null 2>&1; do sleep 2; done
-  incus exec "$builder" --project "$PROJECT" -- cloud-init status --wait --long \
-    || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
-  # A box is thrown away, so nothing in it updates itself or runs idle housekeeping: apt's
-  # timers and unattended-upgrades hold the dpkg lock and change packages mid-job. Masked, not
-  # just disabled, so no package postinst turns them back on. Kept: networkd, resolved, journald,
-  # logind, udevd, dbus, cron. The image is updated by rebuilding it.
-  incus exec "$builder" --project "$PROJECT" -- systemctl mask --now \
-    unattended-upgrades.service apt-daily.timer apt-daily.service \
-    apt-daily-upgrade.timer apt-daily-upgrade.service motd-news.timer ua-timer.timer \
-    dpkg-db-backup.timer e2scrub_all.timer fstrim.timer \
-    systemd-sysupdate.timer systemd-sysupdate-reboot.timer rsyslog.service polkit.service </dev/null
-  # Toolchains, profile.d and netplan (/etc/netplan/50-cloud-init.yaml) are baked into the image
-  # now. Scrub the builder's per-instance identity (truncate /etc/machine-id so systemd generates
-  # a fresh one per box and DHCPv4 DUIDs don't collide; remove any SSH host keys) while preserving
-  # netplan, then disable cloud-init so launches skip ssh-keygen, apt_configure and runcmd and
-  # don't delay systemd-networkd (#194).
-  incus exec "$builder" --project "$PROJECT" -- bash -c '
-    rm -f /etc/machine-id /etc/ssh/ssh_host_*
-    : > /etc/machine-id
-    [ -L /var/lib/dbus/machine-id ] || rm -f /var/lib/dbus/machine-id
-    touch /etc/cloud/cloud-init.disabled
-  ' </dev/null
-  incus config unset "$builder" cloud-init.user-data --project "$PROJECT"
-  incus stop "$builder" --project "$PROJECT"
-  incus publish "$builder" --project "$PROJECT" --alias "$alias" --reuse \
-    description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
-  incus delete "$builder" --project "$PROJECT"
-  if warm_image "$alias" "$alias_warm"; then
-    note "published and warmed '$alias' (images are shared via the default project)"
-  else
-    note "published '$alias'; warning: couldn't warm it, so the first box launch will unpack it"
-  fi
-}
-
-if [ -n "$STAGE_BASE" ]; then
-  command -v incus >/dev/null 2>&1 || die "incus is not installed; run setup-host.sh first"
-  incus storage show default >/dev/null 2>&1 || die "storage pool 'default' does not exist; run setup-host.sh first"
-  check_pool_and_bridge
-  incus project show "$PROJECT" >/dev/null 2>&1 || die "project '$PROJECT' does not exist; run setup-host.sh first"
-  step "Building staged image '$STAGE_BASE' (shared 'agent-base' and default profile untouched)"
-  build_base_image "$STAGE_BASE"
-  fp=$(incus image alias list --format csv | awk -F, -v a="$STAGE_BASE" '$1 == a { print $2; exit }')
-  note "staged fingerprint: ${fp:-unknown}"
-  note "verify with: provision/verify-base-image.sh --candidate $STAGE_BASE  (or --remote pc from the laptop)"
-  note "discard with: incus image delete $STAGE_BASE"
-  trap - EXIT
-  exit 0
 fi
 
 # Overrides are checked before they are used: whole numbers, and sizes like 12GiB.
@@ -500,6 +389,42 @@ else
   fi
 fi
 
+# Warm an image in the btrfs pool's images/<fp> cache so later launches copy from it quickly.
+# On Incus 7.6 (2026-11-24, btrfs + GHSA-5pgx-q9xx-j3qv), a concurrent `incus config set`
+# (e.g. from boxtray's 5s tick in Full, or in Shared for instances launched without Shared's
+# limits.cpu/limits.cpu.priority keys) while EnsureImage is still unpacking the tarball runs
+# UpdateInstanceBackupFile -> btrfs MountVolume -> EnsureMountPath, creating
+# containers/<project>_<name> as a plain directory before `btrfs subvolume snapshot` runs.
+# btrfs then nests the snapshot inside that directory (<name>/<fp>/rootfs), which
+# stripInstanceMetadata rejects with "Instance metadata contained disallowed entries" and leaves
+# the empty plain directory behind.
+# Warm in the default project: `agents` has features.images=false so both share storage pool
+# `default` and its images/<fp> cache, while avoiding `agents`'s caps and boxtray's ticks.
+# Still absorb that exact error once and rmdir any leftover plain dir in case of a race.
+warm_image() {
+  local img=$1 name=$2 dir="/var/lib/incus/storage-pools/default/containers/$2" out
+  incus delete --force "$name" --project default >/dev/null 2>&1 || true
+  rmdir "$dir" 2>/dev/null || true
+  if ! out=$(incus init "$img" "$name" --project default 2>&1); then
+    if [[ $out == *"Instance metadata contained disallowed entries"* ]]; then
+      note "absorbed Incus 7.6 btrfs first-launch metadata race while warming $img; retrying once"
+      incus delete --force "$name" --project default >/dev/null 2>&1 || true
+      rmdir "$dir" 2>/dev/null || true
+      if ! out=$(incus init "$img" "$name" --project default 2>&1); then
+        out=${out##*$'\n'}
+        if (( ${#out} > 400 )); then out="${out:0:400}..."; fi
+        printf '%s\n' "$out" >&2
+        return 1
+      fi
+    else
+      printf '%s\n' "$out" >&2
+      return 1
+    fi
+  fi
+  incus delete --force "$name" --project default >/dev/null || return 1
+  rmdir "$dir" 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------- agent-base
 if [ "$BUILD_BASE" -eq 1 ]; then
   step "Building image 'agent-base'"
@@ -508,7 +433,46 @@ if [ "$BUILD_BASE" -eq 1 ]; then
     warm_image agent-base agent-base-warm \
       || note "warning: couldn't warm agent-base; the first box launch will unpack it"
   else
-    build_base_image agent-base
+    builder=agent-base-build
+    incus delete --force "$builder" --project "$PROJECT" >/dev/null 2>&1 || true
+    rmdir "/var/lib/incus/storage-pools/default/containers/${PROJECT}_${builder}" 2>/dev/null || true
+    warm_image images:ubuntu/24.04/cloud agent-base-build-warm \
+      || note "warning: couldn't warm base Ubuntu image; continuing"
+    incus launch images:ubuntu/24.04/cloud "$builder" --project "$PROJECT" < "$HERE/agent-base.yaml"
+    note "waiting for cloud-init (installs Go, Node, JDK, ...); this takes a few minutes"
+    until incus exec "$builder" --project "$PROJECT" -- true >/dev/null 2>&1; do sleep 2; done
+    incus exec "$builder" --project "$PROJECT" -- cloud-init status --wait --long \
+      || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
+    # A box is thrown away, so nothing in it updates itself or runs idle housekeeping: apt's
+    # timers and unattended-upgrades hold the dpkg lock and change packages mid-job. Masked, not
+    # just disabled, so no package postinst turns them back on. Kept: networkd, resolved, journald,
+    # logind, udevd, dbus, cron. The image is updated by rebuilding it.
+    incus exec "$builder" --project "$PROJECT" -- systemctl mask --now \
+      unattended-upgrades.service apt-daily.timer apt-daily.service \
+      apt-daily-upgrade.timer apt-daily-upgrade.service motd-news.timer ua-timer.timer \
+      dpkg-db-backup.timer e2scrub_all.timer fstrim.timer \
+      systemd-sysupdate.timer systemd-sysupdate-reboot.timer rsyslog.service polkit.service </dev/null
+    # Toolchains, profile.d and netplan (/etc/netplan/50-cloud-init.yaml) are baked into the image
+    # now. Scrub the builder's per-instance identity (truncate /etc/machine-id so systemd generates
+    # a fresh one per box and DHCPv4 DUIDs don't collide; remove any SSH host keys) while preserving
+    # netplan, then disable cloud-init so launches skip ssh-keygen, apt_configure and runcmd and
+    # don't delay systemd-networkd (#194).
+    incus exec "$builder" --project "$PROJECT" -- bash -c '
+      rm -f /etc/machine-id /etc/ssh/ssh_host_*
+      : > /etc/machine-id
+      [ -L /var/lib/dbus/machine-id ] || rm -f /var/lib/dbus/machine-id
+      touch /etc/cloud/cloud-init.disabled
+    ' </dev/null
+    incus config unset "$builder" cloud-init.user-data --project "$PROJECT"
+    incus stop "$builder" --project "$PROJECT"
+    incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
+    incus delete "$builder" --project "$PROJECT"
+    if warm_image agent-base agent-base-warm; then
+      note "published and warmed 'agent-base' (images are shared via the default project)"
+    else
+      note "published 'agent-base'; warning: couldn't warm it, so the first box launch will unpack it"
+    fi
   fi
 else
   step "Image 'agent-base'"

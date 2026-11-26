@@ -44,7 +44,7 @@ It sends one tar over SSH and pipes it into the distro with a `.cmd` (the distro
 
 Released builds update themselves (docs/releasing.md). `agent-box-update.timer` runs `update-boxd.sh` hourly: it takes GitHub's latest stable release when it is newer than the installed boxd, checks the release's `SHA256SUMS`, refuses a boxd whose `-version` doesn't say the tag, and installs through that release's `install-boxd.sh`. It never moves to an older release, and leaves alone a boxd that isn't one, such as `deploy-boxd.sh`'s. `AGENT_BOX_NO_UPDATE=1` in `/etc/agent-box/update.env` turns it off. To put a boxd on releases, or install a prerelease or an older one by hand, run `agent-box-update-boxd <tag>` as root in the distro.
 
-Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume), `agent-base.yaml` (build-only cloud-init passed during `--build-base` / `--rebuild-base` / `--stage-base`, disabled in the published image), `verify-base-image.sh` (non-disruptive baseline vs. staged candidate verifier; see `docs/testing.md`), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
+Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume), `agent-base.yaml` (build-only cloud-init passed during `--build-base` / `--rebuild-base`, disabled in the published image), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
 ## What changes on the PC, and how to undo it
 
