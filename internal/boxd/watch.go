@@ -383,8 +383,8 @@ func (w *Watcher) settle(key string, j *dash.Job, before dash.Job) {
 
 func (w *Watcher) newJob(key, id, box string, started time.Time, in Instance, m *meta) *dash.Job {
 	sz := mode.SizeOf(in.Config)
-	j := &dash.Job{Key: key, ID: id, Box: box, Machine: w.MachineID, State: dash.JobRunning, StartedAt: started,
-		Size: sz.Name, GPU: sz.GPU}
+	j := &dash.Job{Key: key, ID: id, Box: box, BoxUID: boxUID(in), Machine: w.MachineID, State: dash.JobRunning,
+		StartedAt: started, Size: sz.Name, GPU: sz.GPU}
 	if m != nil {
 		fillMeta(j, m)
 		if t, err := time.Parse(time.RFC3339, m.QueuedAt); err == nil {
@@ -394,6 +394,16 @@ func (w *Watcher) newJob(key, id, box string, started time.Time, in Instance, m 
 	}
 	j.Kind = dash.Classify(j.Command, j.GPU)
 	return j
+}
+
+// boxUID is in's dash.Box UID: Incus's volatile.uuid, made when the instance is, or its creation
+// time where the instance has none. A job's files are on the box it ran on, so the box a scan
+// finds a job on is its box, whatever the clocks say.
+func boxUID(in Instance) string {
+	if u := in.Config["volatile.uuid"]; u != "" {
+		return u
+	}
+	return in.CreatedAt.UTC().Format(time.RFC3339Nano)
 }
 
 func fillMeta(j *dash.Job, m *meta) {
@@ -431,7 +441,7 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 		}
 	}
 	b := dash.Box{Name: in.Name, Machine: w.MachineID, Size: sz.Name, GPU: sz.GPU, State: strings.ToLower(in.Status),
-		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC()}
+		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC(), UID: boxUID(in)}
 	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil {
 		t = mode.Held(in.Config, t).UTC() // when the reaper deletes it
 		b.ExpiresAt = &t

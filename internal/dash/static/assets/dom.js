@@ -2,7 +2,7 @@
 // text only, as Murmur's does, so nothing an agent wrote (a reason, a command, a log) can become
 // markup: kids that are strings become text nodes.
 
-export { h, s, icon, clock, ago, until, dur, bytes, pct, stamp, shortRepo, plural, timeEl, tickTimes };
+export { h, s, icon, clock, ago, until, dur, bytes, pct, stamp, hhmm, shortRepo, plural, timeEl, tickTimes };
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -46,6 +46,7 @@ const shapes = {
   back: [["path", { d: "m12 19-7-7 7-7" }], ["path", { d: "M19 12H5" }]],
   user: [["circle", { cx: 12, cy: 8, r: 4 }], ["path", { d: "M20 21a8 8 0 0 0-16 0" }]],
   hourglass: [["path", { d: "M5 22h14M5 2h14" }], ["path", { d: "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" }], ["path", { d: "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" }]],
+  chevron: [["path", { d: "m9 18 6-6-6-6" }]],
   front: [["path", { d: "M5 3h14" }], ["path", { d: "m18 13-6-6-6 6" }], ["path", { d: "M12 7v14" }]],
 };
 
@@ -111,6 +112,13 @@ function tickTimes(root) {
 
 function stamp(t) {
   return new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// A time of day, "16:02", for a time today; the stamp for one before.
+function hhmm(t) {
+  const d = new Date(t);
+  if (d.toDateString() !== new Date(clock.now()).toDateString()) return stamp(t);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function bytes(n) {

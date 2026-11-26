@@ -2,7 +2,7 @@
 // opens, and update, which redraws it when something changes; a view with an input or a log
 // redraws only around them, so typing and scrolling survive the stream's events.
 
-import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, timeEl } from "./dom.js";
+import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl } from "./dom.js";
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 import { hint, hideTip } from "./tip.js";
 
@@ -108,6 +108,15 @@ const JOB_BOX_GRACE_MS = 10 * 60 * 1000;
 function jobBox(j) {
   const b = boxOf(j.machine, j.box);
   return b && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + JOB_BOX_GRACE_MS ? b : null;
+}
+// ranOn says whether j ran on b, as dash.Job.RanOn does: by the box's uid, which a later box of
+// the name doesn't share. A job recorded before jobs carried boxUid (2026-11-25) has none, and
+// for those alone a time rule stands in: a start no earlier than dash.BoxJobSkew before the box.
+const BOX_JOB_SKEW_MS = 60 * 1000;
+function ranOn(j, b) {
+  if (j.box !== b.name || j.machine !== b.machine) return false;
+  if (j.boxUid) return j.boxUid === b.uid;
+  return Date.parse(j.startedAt) >= Date.parse(b.createdAt) - BOX_JOB_SKEW_MS;
 }
 
 function sizeLabel(size, gpu, sep = " ") {
@@ -448,7 +457,11 @@ function expiry(b) {
 }
 
 function boxRow(b, full) {
-  const job = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"))[0];
+  const job = jobsOf((j) => (j.state === "running" || j.state === "paused") && ranOn(j, b))[0];
+  const open = full && opened.has(boxKey(b));
+  // A reconnect replaces the jobs the stream held, so what the history gave may have missed some.
+  const seen = open && boxJobs.get(boxKey(b));
+  if (seen && seen.state !== "loading" && seen.gen !== S.gen) loadBoxJobs(b);
   const controls = full
     ? h(
         "div",
@@ -466,13 +479,13 @@ function boxRow(b, full) {
         control("del-" + b.name, hint("Deletes the box now, after you confirm. A job running on it is lost (it stays listed in Jobs), and anything on the box that wasn't pushed is gone.", { class: "btn btn-xs btn-danger-ghost", onclick: () => deleteBox(b) }), "Delete"),
       )
     : h("div", { class: "row-control" }, boxBadge(b));
-  return h(
+  const row = h(
     "div",
-    { class: "row row-grid" },
+    { class: "row row-grid" + (full ? " box-row" : ""), onclick: full ? (e) => rowClick(e, b) : null },
     h(
       "div",
       null,
-      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, "box-" + b.name + "-size"), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is usually deleted 30 minutes after that run ends, or sooner if another run needs the room. An extend holds it until the time it sets.", { class: "badge" }, "box-" + b.name + "-throwaway"), "throwaway") : null),
+      h("p", { class: "row-title" }, full ? boxToggle(b, open) : b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, "box-" + b.name + "-size"), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is usually deleted 30 minutes after that run ends, or sooner if another run needs the room. An extend holds it until the time it sets.", { class: "badge" }, "box-" + b.name + "-throwaway"), "throwaway") : null),
       h(
         "div",
         { class: "meta" },
@@ -482,10 +495,152 @@ function boxRow(b, full) {
         expiry(b),
         full ? timeEl("ago", b.createdAt, "made ") : null,
       ),
-      job ? h("a", { class: "meta", href: jobLink(job) }, h("span", null, "running: ", job.reason || job.command)) : null,
+      job && !open ? h("a", { class: "meta", href: jobLink(job) }, h("span", null, "running: ", job.reason || job.command)) : null,
       full ? h("div", hint("Memory in use, as a share of what the box's size allows.", { class: "bar" }, "box-" + b.name + "-membar"), h("i", { "data-w": pct(b.memUsed, b.memLimit) })) : null,
     ),
     controls,
+  );
+  return open ? [row, boxDetail(b, job)] : row;
+}
+
+// Boxes: a row opens in place (#184) to show what its box is doing, from the jobs the page already
+// has and the box's finished jobs from history (/api/jobs?box=&uid=), matched by its uid. A box is
+// one generation of its name, so what is open is keyed by its createdAt too.
+const opened = new Set();
+// by boxKey: { state: loading|ok|error, jobs, last, more, error, gen, shown }. last is the box's
+// job that ended last, from boxd; shown is what the row listed when last drawn.
+const boxJobs = new Map();
+const BOX_JOBS = 20;
+
+function boxKey(b) {
+  return b.machine + "/" + b.name + "/" + b.createdAt;
+}
+
+function toggleBox(b) {
+  const k = boxKey(b);
+  if (opened.delete(k)) return changed();
+  opened.add(k);
+  if (boxJobs.get(k)?.state !== "ok" || boxJobs.get(k).gen !== S.gen) loadBoxJobs(b);
+  changed();
+}
+
+// A click anywhere on the row opens it, except on its own controls, links and hints, and except
+// the end of a drag that selected text.
+function rowClick(e, b) {
+  const own = e.target.closest("a, button, [tabindex]");
+  if ((own && e.currentTarget.contains(own)) || String(window.getSelection?.() || "")) return;
+  toggleBox(b);
+}
+
+function loadBoxJobs(b) {
+  const k = boxKey(b);
+  const prev = boxJobs.get(k);
+  // Until boxd answers, the row keeps what it showed: after a reconnect the stream holds a new
+  // snapshot, which may lack jobs the old one had.
+  const mine = { state: "loading", jobs: prev?.shown || prev?.jobs || [], last: prev?.last || null, more: prev?.more || false, gen: S.gen };
+  boxJobs.set(k, mine);
+  const p = new URLSearchParams({ box: b.name, machine: b.machine, uid: b.uid || "", created: b.createdAt, limit: String(BOX_JOBS) });
+  api("/api/jobs?" + p)
+    .then((page) => {
+      if (boxJobs.get(k) !== mine) return;
+      Object.assign(mine, { state: "ok", jobs: page.jobs || [], last: page.last || null, more: !!page.more, shown: null });
+    })
+    .catch((e) => {
+      if (boxJobs.get(k) !== mine) return;
+      Object.assign(mine, { state: "error", error: e.message });
+    })
+    .finally(changed);
+}
+
+function boxToggle(b, open) {
+  return h(
+    "button",
+    hint(open ? "Hides this box's jobs." : "Shows what this box is running now, or since when it has been idle, and the jobs it ran before.", {
+      class: "box-toggle",
+      "aria-expanded": open ? "true" : "false",
+      "aria-controls": open ? "box-detail-" + b.name : null,
+      "data-key": "open-" + b.name,
+      onclick: () => toggleBox(b),
+    }),
+    icon("chevron"),
+    b.name,
+  );
+}
+
+function exitText(j) {
+  if (j.state === "lost") return "was lost";
+  return j.exit == null ? "ended" : "exited " + j.exit;
+}
+
+function ended(j) {
+  return j.state === "done" || j.state === "lost";
+}
+
+// The box's finished jobs: history's, with the stream's newer copies and the ones that ended since.
+function boxDone(b) {
+  const by = new Map();
+  for (const j of boxJobs.get(boxKey(b))?.jobs || []) by.set(j.key, j);
+  for (const j of S.jobs.values()) if (ended(j) && ranOn(j, b)) by.set(j.key, j);
+  return [...by.values()].sort((a, c) => Date.parse(c.startedAt) - Date.parse(a.startedAt));
+}
+
+function endedMs(j) {
+  return Date.parse(j.endedAt || j.startedAt);
+}
+
+function lastEnded(js) {
+  return js.reduce((m, j) => (j && (!m || endedMs(j) > endedMs(m)) ? j : m), null);
+}
+
+function boxJobRow(j) {
+  return h(
+    "a",
+    { class: "box-job", href: jobLink(j), "data-key": "bjob-" + j.key },
+    jobBadge(j),
+    h("span", { class: "box-job-title" }, j.reason || j.command),
+    h("span", { class: "box-job-when" }, untitled(timeEl("ago", j.endedAt || j.startedAt)), " · " + elapsed(j)),
+  );
+}
+
+function boxDetail(b, job) {
+  const load = boxJobs.get(boxKey(b));
+  const all = boxDone(b);
+  if (load) load.shown = all;
+  const done = all.slice(0, BOX_JOBS);
+  // Jobs overlap, so the one that ended last, not the one that started last, says since when the
+  // box is idle: boxd names it (last), and the stream adds any that ended since.
+  const last = lastEnded([load?.last, ...all]);
+  // Without its history, an idle time is stated only from a job of this box that is known: one the
+  // stream has, or the last job boxd named before (kept through a reconnect's reload).
+  const known = load?.state === "ok" || !!load?.last || [...S.jobs.values()].some((j) => ended(j) && ranOn(j, b));
+  let now;
+  if (job) now = runningRow(job);
+  else if (!known) {
+    const why = load?.state === "error" ? " Its job history couldn't load, so since when isn't known." : "";
+    now = h("p", { class: "box-idle" }, h("span", { class: "dot dot-off" }), h("span", null, "Idle." + why));
+  } else {
+    const since = last ? last.endedAt || last.startedAt : b.createdAt;
+    const tail = last
+      ? [", last job ", h("a", { href: jobLink(last), "data-key": "blast-" + last.key }, last.id), " " + exitText(last) + "."]
+      : ", when it was made. It hasn't run a job yet.";
+    now = h("p", { class: "box-idle" }, h("span", { class: "dot dot-off" }), h("span", null, "Idle since ", h("span", { title: stamp(since) }, hhmm(since)), tail));
+  }
+  let before = null;
+  if (done.length) before = [done.map(boxJobRow), load?.more || all.length > BOX_JOBS ? h("p", { class: "row-empty" }, "Its last " + BOX_JOBS + " jobs; Jobs has the rest.") : null];
+  else if (load?.state === "loading") before = h("p", { class: "row-empty" }, "Loading its jobs…");
+  else if (load?.state !== "error") before = h("p", { class: "row-empty" }, "No finished jobs on this box yet.");
+  const err =
+    load?.state === "error"
+      ? h("p", { class: "row-empty row-error" }, "Couldn't load its earlier jobs: " + load.error + " ", control("bjobs-retry-" + b.name, { class: "btn btn-xs btn-outline", onclick: () => (loadBoxJobs(b), changed()) }, "Try again"))
+      : null;
+  return h(
+    "div",
+    { class: "box-detail", id: "box-detail-" + b.name, role: "region", "aria-label": b.name + ": its jobs" },
+    h("p", { class: "box-detail-label" }, job ? "Running now" : "Now"),
+    now,
+    h("p", { class: "box-detail-label" }, "Ran before"),
+    before,
+    err,
   );
 }
 
@@ -526,11 +681,15 @@ const boxes = {
   },
   update(el) {
     const bx = [...S.boxes.values()].sort((a, b) => a.name.localeCompare(b.name));
+    // A box that went closes, and its jobs are let go.
+    const live = new Set(bx.map(boxKey));
+    for (const k of opened) if (!live.has(k)) opened.delete(k);
+    for (const k of boxJobs.keys()) if (!live.has(k)) boxJobs.delete(k);
     el.replaceChildren(
       h(
         "div",
         { class: "page" },
-        h("div", { class: "page-head" }, h("h2", null, "Boxes"), h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs.")),
+        h("div", { class: "page-head" }, h("h2", null, "Boxes"), h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs. Open one to see its jobs.")),
         bx.length ? h("div", { class: "group" }, bx.map((b) => boxRow(b, true))) : empty("box", "No boxes", "Agents make them with box run or box new. Nothing is using the PC now."),
       ),
     );

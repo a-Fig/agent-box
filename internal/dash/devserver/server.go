@@ -153,7 +153,8 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleJobs filters the finished jobs as boxd's history will: by repo (its URL or last path
-// element), agent (the session), kind, machine, result, q (a substring of the reason, command or
+// element), agent (the session), kind, machine, result, box (one box, by box, machine, uid and
+// created; the page also gets the box's last-ended job), q (a substring of the reason, command or
 // branch) and limit. before is the last job of the page before, by key: the jobs after it in
 // (startedAt, key) order, newest first, so jobs that started in the same second aren't skipped.
 func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -180,10 +181,24 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "result must be one of "+strings.Join(dash.Results, ", "))
 		return
 	}
+	var box dash.Box
+	if q.Get("box") != "" || q.Get("uid") != "" {
+		b, err := dash.ParseBoxQuery(q)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, err.Error())
+			return
+		}
+		box = b
+	}
 	text := q.Get("q")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	page := dash.JobsPage{Jobs: []dash.Job{}}
+	for _, j := range s.done {
+		if box.UID != "" && j.RanOn(box) && (page.Last == nil || endOf(j).After(endOf(*page.Last))) {
+			page.Last = &j
+		}
+	}
 	for _, j := range s.done {
 		u := strings.TrimSuffix(strings.TrimSuffix(j.Repo, "/"), ".git")
 		short := u[strings.LastIndex(u, "/")+1:]
@@ -193,6 +208,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 			q.Get("kind") != "" && q.Get("kind") != j.Kind,
 			q.Get("machine") != "" && q.Get("machine") != j.Machine,
 			q.Get("result") != "" && q.Get("result") != j.Result(),
+			box.UID != "" && !j.RanOn(box),
 			before != nil && newest(*before, j) >= 0,
 			text != "" && !matchesText(text, j.Reason, j.Command, j.Branch):
 			continue
@@ -204,6 +220,13 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		page.Jobs = append(page.Jobs, j)
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func endOf(j dash.Job) time.Time {
+	if j.EndedAt != nil {
+		return *j.EndedAt
+	}
+	return j.StartedAt
 }
 
 func (s *server) findJob(key string) (*dash.Job, bool) {

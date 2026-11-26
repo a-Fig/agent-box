@@ -93,7 +93,9 @@ answers, the window goes to it (2026-11-24).
 - each box: name, repo, size, state, memory and CPU use, and its expiry;
 - running jobs: command, agent, repo and branch, how long they have run, and a live log tail.
 
-**Boxes**: every box with its full state.
+**Boxes**: every box with its full state. A row opens in place (a click, or Enter on its name) to
+show the job running there now, with its log's last lines, or how long the box has been idle, and
+the jobs it ran before, each linked to its page (#184, 2026-11-25).
 
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
@@ -284,6 +286,20 @@ JSON over HTTPS, on the same origin as the page.
   start before it launches the box, so a throwaway's `createdAt` is a few seconds after its job's
   `startedAt`. A box of the name made later is a reuse of the name, not the job's: its log is gone,
   and the page shows the kept `tail`.
+- **A box's jobs** are the ones whose `boxUid` is its `uid` (`dash.Job.RanOn`). boxd records the
+  `uid` (Incus's `volatile.uuid`, else `createdAt` to the nanosecond) with a job when it first finds
+  the job's files on a box, so no clock decides it. A time rule can't be right both ways: one loose
+  enough for `box run --new` (the ID is stamped before the bundle and launch, and the laptop's clock
+  may be off) lets a replacement box made seconds later list its predecessor's jobs, and a tight one
+  hides the box's own. Jobs recorded before 2026-11-25 have no `boxUid`; for them alone the old
+  rule stands: a start no earlier than `createdAt` less one minute (`dash.BoxJobSkew`). The page
+  asks boxd with `box`, `machine`, `uid` and `created`, and merges the stream's jobs by the same
+  rule. After a reconnect it asks again, since the new snapshot holds only the last 50, and keeps
+  showing what it had until boxd answers.
+- **A box's idle time** comes from the job of it that ended last, which boxd returns as the page's
+  `last` (jobs overlap, so a page ordered by start may not hold it), or a later one from the stream.
+  When the history can't load, the row says so with a retry, and states an idle time only from a job
+  of the box it knows (from the stream, or the `last` of an earlier answer).
 - **A box control names its box** by name and `createdAt`, for the same reason: delete and extend
   send `{createdAt}` (the box the page saw), `boxd` compares it with the box's own under the same
   lock as the change, and answers 409 `code: "gone"` when the name now belongs to another box. The
@@ -307,7 +323,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 |---|---|
 | `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
-| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
+| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&uid=&created=&q=&before=&limit=` | `{jobs, more, last}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` with `machine`, `uid` and `created` (its `createdAt`) one box: its jobs as above, and `last`, the one of them that ended last (400 without all four), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |
@@ -340,9 +356,9 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   so instead (2026-11-25).
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
   key never written, or one holding a value boxtray doesn't write.
-- **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
-  memLimit, cpus, cpuPct}`
-- **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
+- **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, uid, expiresAt, memUsed,
+  memLimit, cpus, cpuPct}`. `uid` tells it from other boxes of its name.
+- **`Job`:** `{key, id, box, boxUid, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
   reason, command, kind, repo, branch, commit, agent: {client, session, host, worktree}, size, gpu, tail,
   queuedAt, position, why}`. `queuedAt` is set on a job that went through the queue. While it waits,
   `startedAt` is `queuedAt`, `position` is its place from 1, and `why` is one of the refusal causes;
