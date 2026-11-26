@@ -65,10 +65,14 @@ func (id jobID) resolveHost(defaultHost fleetHost, hosts []fleetHost) (fleetHost
 	if id.hostTag == "" {
 		return defaultHost, nil
 	}
+	return resolveJobHost(id.hostTag, defaultHost, hosts)
+}
+
+func resolveJobHost(hostTag string, defaultHost fleetHost, hosts []fleetHost) (fleetHost, error) {
 	var match fleetHost
 	for _, host := range hosts {
 		tag, err := jobHostTag(host)
-		if err != nil || tag != id.hostTag {
+		if err != nil || tag != hostTag {
 			continue
 		}
 		if match.Remote == "" {
@@ -76,7 +80,7 @@ func (id jobID) resolveHost(defaultHost fleetHost, hosts []fleetHost) (fleetHost
 			continue
 		}
 		if match.Remote != host.Remote || match.Project != host.Project {
-			return fleetHost{}, fmt.Errorf("multiple destinations match job host %s", id.hostTag)
+			return fleetHost{}, fmt.Errorf("multiple destinations match job host %s", hostTag)
 		}
 		if match.DashboardURL == "" {
 			match.DashboardURL = host.DashboardURL
@@ -87,8 +91,8 @@ func (id jobID) resolveHost(defaultHost fleetHost, hosts []fleetHost) (fleetHost
 	if match.Remote != "" {
 		return match, nil
 	}
-	if tag, err := jobHostTag(defaultHost); err == nil && tag == id.hostTag {
+	if tag, err := jobHostTag(defaultHost); err == nil && tag == hostTag {
 		return defaultHost, nil
 	}
-	return fleetHost{}, fmt.Errorf("job host %s is not configured", id.hostTag)
+	return fleetHost{}, fmt.Errorf("job host %s is not configured", hostTag)
 }

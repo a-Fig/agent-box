@@ -31,6 +31,7 @@ const (
 type JobInfo struct {
 	Job      string    `json:"job"`
 	Box      string    `json:"box"`
+	Host     string    `json:"host,omitempty"`
 	State    string    `json:"state"`
 	Code     *int      `json:"exitCode,omitempty"` // when done
 	Started  time.Time `json:"started"`
@@ -165,8 +166,15 @@ func printJobs(a *App, jobs []JobInfo) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
+	fleet := jobs[0].Host != ""
+	if fleet {
+		fmt.Fprint(w, "HOST\t")
+	}
 	fmt.Fprintln(w, "JOB\tSTATE\tSTARTED\tLOG")
 	for _, j := range jobs {
+		if fleet {
+			fmt.Fprintf(w, "%s\t", j.Host)
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%dB\n", j.Job, j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
 	}
 	return w.Flush()
@@ -175,7 +183,6 @@ func printJobs(a *App, jobs []JobInfo) error {
 // Page is a piece of a job's log.
 type Page struct {
 	JobInfo
-	Host       string `json:"host,omitempty"`
 	Offset     int64  `json:"offset"`
 	NextOffset int64  `json:"nextOffset"`
 	More       bool   `json:"more"` // the log goes on past this page, or the job is still writing it
