@@ -90,7 +90,7 @@ var tools = []tool{
 	{"box_cancel", "Stop a running job's process session, or take a queued job off the queue. A cancelled job exits 130.", obj(map[string]any{
 		"id": str("Job ID."),
 	}, "id"), nil},
-	{"box_pull", "Copy a file or directory (test reports, coverage, build output) from a box into a local directory, as <localDir>/<name>. It never replaces an existing file and drops symlinks. Pull right after the job (or run with new: true): if a later job replaced the repo box's checkout, pulling from the earlier job ID refuses instead of returning the wrong files.", obj(map[string]any{
+	{"box_pull", "Copy a file or directory (test reports, coverage, build output) from a box into a local directory, as <localDir>/<name>. It never replaces an existing file and drops symlinks. Pull right after the job (or run with fresh: true): if a later job replaced the repo box's checkout, pulling from the earlier job ID refuses instead of returning the wrong files.", obj(map[string]any{
 		"from":       str("Job ID, or a box name."),
 		"remotePath": str("Linux path in the box. A relative path starts at the job's checkout (/work/<repo>); an absolute path starts with /."),
 		"localDir":   str("Absolute path of the local directory to copy into; created if missing."),
