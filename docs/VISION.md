@@ -105,21 +105,94 @@ Recorded as of 2026-11-26; each could change.
   (`ideas.md`, Appendix C).
 - **A CI system.** Boxes serve agents mid-task, not pull requests.
 
-## Nearby projects
+## Similar projects, and what to steal
 
-Found 2026-11-26, from their own pages; none tried. [prior-art.md](prior-art.md) covers the
-systems the fleet takes ideas from (Bazel remote execution, Buildbarn, Cloudflare Sandbox, ...).
+Read 2026-11-26 from each project's own README, docs or blog; none was tried, and no claim was checked
+against source code. "Already in ideas.md" marks an idea that doc already has, now with a second
+source. [prior-art.md](prior-art.md) covers the systems the fleet takes ideas from (Bazel remote
+execution, Buildbarn, Cloudflare Sandbox, ...) and isn't repeated here.
 
-- **Crabbox** (openclaw): leases remote machines, syncs the repo, runs commands and streams output back,
-  for expensive tests and for AI agents. The closest match found.
-- **Offload** (Imbue): runs a test suite across many Modal cloud sandboxes in parallel. Rented compute
-  only.
-- **The many "agentbox" projects** (gbrindisi, swamp-dev, tsilva, rcarmo, bjro and others): sandboxes
-  that run an agent in a local container. A different problem: isolation, not compute.
-- **Coder, Perry, lfg, sandboxed.sh**: run agent sessions on your own hardware.
+**Crabbox** (openclaw; [README](https://github.com/openclaw/crabbox),
+[sync](https://github.com/openclaw/crabbox/blob/main/docs/features/sync.md),
+[security](https://github.com/openclaw/crabbox/blob/main/docs/security.md)). The closest match:
+"warm a box, sync the diff, run the suite", for coding agents and heavy builds. Its machines can be
+cloud VMs (AWS, Hetzner, ...), local containers or VMs (Incus among them), your own SSH hosts, or
+rented sandboxes (E2B, Cloudflare). Sync is rsync over SSH of tracked and non-ignored untracked
+files. Agents get a generated skill; no MCP server was found. Its trust model is "trusted operators
+on a shared team". Nothing was found about a machine its owner is also using.
 
-What none of these appears to do: use a machine its owner still uses every day, and give that owner
-control.
+- *Send only the diff.* The runner fetches the base commit from origin, so only local changes cross
+  the wire. A fingerprint of HEAD and the changed files skips a sync when nothing changed. (ideas.md
+  asks whether our bundle is incremental.)
+- *`.crabboxignore`*, with ordered `!` re-includes, for files a run doesn't need.
+- *A mass-deletion guard* on sync.
+- *Ready pools*: warm boxes that are borrowed, heartbeated and returned.
+- *Many providers behind one command*: the shape our compute table points at.
+
+**Offload** (Imbue; [blog](https://imbue.com/blog/offload),
+[how it works](https://imbue.com/blog/offload-how-it-works),
+[README](https://docs.rs/crate/offload/0.4.1/source/README.md)). A Rust CLI "your agents invoke
+directly" that splits a test suite across many Modal sandboxes. Its backends are Modal, local
+processes, or any provider you can script with shell commands for prepare, create, exec and destroy.
+
+- *Discover locally, run remotely*: list the tests with the framework's own collect command, then
+  feed batches to sandboxes from a queue, longest first, using timings from earlier runs. (Timing
+  splitting is already in ideas.md.)
+- *Flaky is its own result*: retries run in parallel and stop at the first pass, and a test that
+  passed on retry exits 2, not 0. (Already in ideas.md.)
+- *Logs by test ID*, "to avoid flooding agent context".
+- *Snapshot a prepared setup, apply a small diff per run*: the per-repo warm image ideas.md §4
+  describes.
+- *An onboarding skill* that sets a repo up for the tool and flags what it changed.
+
+**Perry** ([README](https://github.com/Gricha/perry)). Self-hosted Docker workspaces with Claude
+Code, OpenCode and Codex, reached over Tailscale, SSH or a web UI. Install is one `curl | bash` and
+`perry agent run`.
+
+- *An explicit host-access switch* (`--no-host-access`), a cousin of our modes.
+- *One tailnet name per workspace*, so a dev server in it is reachable directly (compare #190's
+  preview URLs).
+
+**omg.dev**, formerly lfg ([README](https://github.com/BennyKok/omg.dev)). Runs agent sessions on
+your own computer or server and drives them from a phone, through Tailscale. Isolation isn't
+described.
+
+- *Linked devices*: an agent asks another machine to run an action, and the owner approves it on that
+  machine.
+- *`omg doctor`* writes a sanitized report for support. (`box doctor` is already in ideas.md.)
+
+**Ferryx** ([README](https://raw.githubusercontent.com/Indosaram/ferryx/HEAD/README.md); its license
+is source-available and limits commercial use, so take ideas, not code). A terminal for coding agents,
+with remote Linux machines paired as hosts.
+
+- *An outbound-only relay*, with a direct QUIC path when both ends can reach each other: a home PC
+  behind NAT needs no port forwarding or VPN. A candidate for cloud agents, which can't join a
+  tailnet.
+- *Sequenced output*, so a client that reattaches replays only what it missed.
+
+**NVIDIA OpenShell** ([remote GPU](https://perspectives.nvidia.com/nvidia-openshell/run-coding-agents-gpu-remote-machine/),
+[self-hosted](https://perspectives.nvidia.com/nvidia-openshell/self-hosted-runtime-ai-coding-agents-no-third-party-cloud/);
+the pages say they are AI-generated and may contain errors). Agent sandboxes in Docker, Apache 2.0.
+
+- *Bootstrap over SSH*: `openshell gateway start --remote user@host` needs only Docker on the remote
+  machine. A shape for our "I have this machine" recipes.
+- *Landlock file rules and default-deny network* inside the sandbox, on top of the container.
+
+**mattolson/agent-sandbox** ([README](https://github.com/mattolson/agent-sandbox)) and **littlebox**,
+formerly gbrindisi/agentbox ([README](https://github.com/gbrindisi/agentbox)). Local Docker sandboxes
+for running an agent, so isolation rather than compute.
+
+- *Tokens never enter the box*: a proxy injects headers from secret files only it can read. (Already
+  in ideas.md, and #192 in prior-art.md.)
+- *Default-deny egress, checked at every container start*, and a blocked request says which domain
+  was blocked.
+
+**Coder Agents** ([InfoQ](https://infoq.com/news/2026/05/coder-agents-self-hosted-ai)). Runs agent
+sessions on self-hosted Coder workspaces, started from chat, an API, CI or Slack. The article gives
+little detail; there was nothing specific to take.
+
+What none of these was found to do: use a machine its owner still uses every day, and leave that
+owner in charge of it.
 
 ## Priorities
 
