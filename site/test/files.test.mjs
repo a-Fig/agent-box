@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { previewAssets } from '../preview.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = path.join(ROOT, 'site');
@@ -35,6 +36,24 @@ test('PR previews use a dedicated Worker and a staging directory', () => {
   assert.equal(config.preview_urls, true);
   assert.equal(config.routes, undefined);
   assert.equal(config.assets.directory, './assets');
+});
+
+test('PR preview export takes regular public assets with portable paths', () => {
+  const object = 'a'.repeat(40);
+  const tree = [
+    ['100644', 'site/index.html'],
+    ['100755', 'site/images/logo.svg'],
+    ['120000', 'site/linked.html'],
+    ['100644', 'site/NuL.svg'],
+    ['100644', 'site/COM1.assets/index.html'],
+    ['100644', 'site/images./logo.svg'],
+    ['100644', 'site/../other.html'],
+    ['100644', 'site/test/private.js'],
+    ['100644', 'site/.env'],
+    ['100644', 'site/wrangler.jsonc'],
+    ['100644', 'other/index.html'],
+  ].map(([mode, file]) => `${mode} blob ${object}\t${file}\0`).join('');
+  assert.deepEqual(previewAssets(tree), [{ path: 'index.html', object }, { path: 'images/logo.svg', object }]);
 });
 
 test('index.html internal links and asset references resolve', () => {

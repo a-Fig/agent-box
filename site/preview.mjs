@@ -1,17 +1,31 @@
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, extname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = 'a-Fig/agent-box';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const assetExtensions = new Set(['.css', '.gif', '.html', '.ico', '.jpeg', '.jpg', '.js', '.png', '.svg', '.txt', '.webp', '.woff2', '.xml']);
+const windowsDevice = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 
 function isAsset(path) {
   const parts = path.split('/');
-  return parts.every((part) => /^[a-z0-9][a-z0-9_.-]*$/i.test(part)) &&
+  return parts.every((part) => /^[a-z0-9][a-z0-9_.-]*$/i.test(part) && !part.endsWith('.') && !windowsDevice.test(part)) &&
     !['node_modules', 'test'].includes(parts[0].toLowerCase()) && assetExtensions.has(extname(path).toLowerCase());
+}
+
+export function previewAssets(tree) {
+  const assets = [];
+  for (const entry of tree.split('\0').filter(Boolean)) {
+    const tab = entry.indexOf('\t');
+    const [mode, , object] = entry.slice(0, tab).split(' ');
+    const source = entry.slice(tab + 1);
+    if (!['100644', '100755'].includes(mode) || !source.startsWith('site/')) continue;
+    const path = source.slice(5);
+    if (isAsset(path)) assets.push({ path, object });
+  }
+  return assets;
 }
 
 function git(...args) {
@@ -37,12 +51,8 @@ function main() {
   const tempRoot = realpathSync(tmpdir());
   const staging = mkdtempSync(join(tempRoot, 'fano-preview-'));
   try {
-    const entries = git('ls-tree', '-r', '-z', head, '--', 'site/').toString().split('\0').filter(Boolean);
-    for (const entry of entries) {
-      const tab = entry.indexOf('\t');
-      const [mode, , object] = entry.slice(0, tab).split(' ');
-      const path = entry.slice(tab + 1 + 'site/'.length);
-      if (!['100644', '100755'].includes(mode) || !isAsset(path)) continue;
+    const tree = git('ls-tree', '-r', '-z', head, '--', 'site/').toString();
+    for (const { path, object } of previewAssets(tree)) {
       const target = join(staging, 'assets', path);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, git('cat-file', 'blob', object), { flag: 'wx' });
@@ -62,9 +72,11 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error.message);
-  process.exitCode = 1;
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }
