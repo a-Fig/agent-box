@@ -54,6 +54,13 @@ func (a *App) claimIdleThrowaway(ctx context.Context, insts []instance, repoKey,
 	return ""
 }
 
+func (a *App) poolEnabled(ctx context.Context) bool {
+	probe, cancel := context.WithTimeout(ctx, refusalTimeout)
+	defer cancel()
+	status, _, err := a.boxdDo(probe, http.MethodGet, "/api/throwaway-pool", "", nil)
+	return err == nil && status == http.StatusNoContent
+}
+
 func (a *App) poolPost(ctx context.Context, box, action string, req any) (int, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -74,10 +81,7 @@ func (a *App) evictPooled(ctx context.Context, in instance) bool {
 	return err == nil && status == http.StatusNoContent
 }
 
-// poolExpiry returns false only for an older host without the pool route.
-// A transport failure can leave a live pool on the other end, so it never
-// falls back to a write without the ownership check.
-func (a *App) poolExpiry(ctx context.Context, box, job string, ended bool) bool {
-	status, err := a.poolPost(ctx, box, "pool-expiry", dash.PoolExpiryBody{Job: job, Ended: ended})
-	return err != nil || status != http.StatusNotFound
+func (a *App) poolExpiry(ctx context.Context, box, job string, ended bool) {
+	// boxd also observes the job files, so losing this hint is safe.
+	a.poolPost(ctx, box, "pool-expiry", dash.PoolExpiryBody{Job: job, Ended: ended})
 }

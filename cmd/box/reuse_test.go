@@ -48,6 +48,13 @@ func TestRunClaimsMatchingThrowawayOrLaunches(t *testing.T) {
 			defer cancel()
 			claims := 0
 			a.HTTP = func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/api/throwaway-pool" && r.Method == http.MethodGet {
+					status := http.StatusNoContent
+					if tt.status == http.StatusNotFound {
+						status = http.StatusNotFound
+					}
+					return &http.Response{StatusCode: status, Body: http.NoBody}, nil
+				}
 				if strings.HasSuffix(r.URL.Path, "/pool-expiry") {
 					var req dash.PoolExpiryBody
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Job == "" {
@@ -80,7 +87,7 @@ func TestRunClaimsMatchingThrowawayOrLaunches(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || r.Code != 0 || (claims == 0) != tt.fresh || claims > 1 {
+			if err != nil || r.Code != 0 || (claims == 0) != (tt.fresh || tt.status == http.StatusNotFound) || claims > 1 {
 				t.Fatalf("run = %+v, %v; %d claims\n%s", r, err, claims, out)
 			}
 			if tt.status == http.StatusNoContent {
@@ -91,6 +98,33 @@ func TestRunClaimsMatchingThrowawayOrLaunches(t *testing.T) {
 			} else if len(f.launches) != 1 || r.Box == candidate {
 				t.Fatalf("fallback result = %+v, launches = %d\n%s", r, len(f.launches), out)
 			}
+			if tt.status == http.StatusNotFound && f.insts[1].Config[jobrun.ThrowawayRepoKey] != "" {
+				t.Fatal("left pool metadata on a host without pooling")
+			}
 		})
+	}
+}
+
+func TestMarkIdleUsesOwnerCheckedExpiryForPooledBox(t *testing.T) {
+	const box, job = "my-repo-9999", "my-repo-9999.20261123-120000-0001"
+	f := &fakePC{t: t, remotes: testRemotes}
+	a, _ := testApp(f)
+	deadline := a.Now().Add(jobTTL).Format(time.RFC3339)
+	f.insts = []instance{{Name: box, Status: "Running", Config: map[string]string{
+		jobrun.ThrowawayRepoKey: "pool",
+		jobrun.ExpiresKey:       deadline,
+	}}}
+	post := false
+	a.HTTP = func(r *http.Request) (*http.Response, error) {
+		var got dash.PoolExpiryBody
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil || got.Job != job || !got.Ended {
+			t.Fatalf("expiry request = %+v, %v", got, err)
+		}
+		post = r.URL.Path == "/api/boxes/"+box+"/pool-expiry"
+		return &http.Response{StatusCode: http.StatusConflict, Body: http.NoBody}, nil
+	}
+	a.markIdle(context.Background(), box, job)
+	if !post || f.insts[0].Config[jobrun.ExpiresKey] != deadline {
+		t.Fatalf("older job changed expiry after boxd refused it: %v", f.insts[0].Config)
 	}
 }

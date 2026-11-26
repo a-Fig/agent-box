@@ -1000,6 +1000,9 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 		if ttl == idleTTL && !o.Fresh {
 			repoKey = throwawayRepoKey(info.Repo, sz)
+			if repoKey != "" && !a.poolEnabled(ctx) {
+				repoKey = ""
+			}
 		}
 		claimCtx, cancel := context.WithTimeout(ctx, jobrun.ThrowawayClaimTTL)
 		defer cancel()
@@ -1098,7 +1101,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	switch {
 	case !o.New:
 	case err == nil && r.State == stateDone:
-		a.cleanup(ctx, box, job, true, repoKey != "")
+		a.cleanup(ctx, box, true, repoKey != "")
 	case sz.GPU && r.State == statePaused && a.gpuStopped(ctx, box) != "":
 		// attach said the GPU box was stopped: there is nothing to reattach (#118).
 	default:
@@ -1208,7 +1211,7 @@ func (a *App) removeQuietly(ctx context.Context, box string) {
 
 // cleanup deletes a throwaway box once no job is running in it. ours says
 // the caller created it; otherwise the box's throwaway mark decides.
-func (a *App) cleanup(ctx context.Context, box, job string, ours, pooled bool) {
+func (a *App) cleanup(ctx context.Context, box string, ours, pooled bool) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
 	if !ours {
@@ -1222,7 +1225,7 @@ func (a *App) cleanup(ctx context.Context, box, job string, ours, pooled bool) {
 		}
 		pooled = strings.TrimSpace(key) != ""
 	}
-	if pooled && a.poolExpiry(ctx, box, job, true) {
+	if pooled {
 		return
 	}
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
@@ -1326,7 +1329,7 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 		}
 	}
 	if err == nil && r.State == stateDone {
-		a.cleanup(ctx, box, job, false, false)
+		a.cleanup(ctx, box, false, false)
 	}
 	return r, err
 }
@@ -1570,7 +1573,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 			return "", 1, "", fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
 		ended := a.Now()
-		a.markIdle(ctx, box)
+		a.markIdle(ctx, box, job)
 		a.reportEnded(ctx, job, code, ended, tail.String())
 		dg = ef.digest()
 		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
@@ -1634,9 +1637,17 @@ func (a *App) probeCtx(ctx context.Context) (context.Context, context.CancelFunc
 
 // markIdle shortens the box's expiry to idleTTL once a job has ended, unless
 // another job is still running there (it would lose its jobTTL window).
-func (a *App) markIdle(ctx context.Context, box string) {
+func (a *App) markIdle(ctx context.Context, box, job string) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
+	repoKey, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.ThrowawayRepoKey)
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(repoKey) != "" {
+		a.poolExpiry(ctx, box, job, true)
+		return
+	}
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil || len(strings.Fields(out)) > 0 {
 		return

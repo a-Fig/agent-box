@@ -56,6 +56,7 @@ type Watcher struct {
 	starting  string               // the queued job being started, one at a time
 	startDone time.Time            // when the last start finished
 	noRoom    map[string]time.Time // queued job -> not before, after Incus refused its launch
+	promoting map[string]bool      // box -> a claimed job's expiry write is in flight
 	started   map[string]dash.Job  // queued jobs started, until a scan sees them
 	lastIns   []Instance
 	lastProj  Project
@@ -79,6 +80,7 @@ func (w *Watcher) init() {
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
 	w.died, w.qview = map[string]time.Time{}, map[string]dash.Job{}
 	w.noRoom, w.started = map[string]time.Time{}, map[string]dash.Job{}
+	w.promoting = map[string]bool{}
 	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName, Boxd: w.Version, Config: HostConfig(false)}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
@@ -352,8 +354,9 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			if j.Repo != "" {
 				w.repoOf[box] = j.Repo
 			}
-			if !ok && s.State == "running" && in.Config[jobrun.ThrowawayOwnerKey] == s.Job &&
-				in.Config[jobrun.ThrowawayClaimKey] != "" {
+			if s.State == "running" && in.Config[jobrun.ThrowawayOwnerKey] == s.Job &&
+				in.Config[jobrun.ThrowawayClaimKey] != "" && !w.promoting[box] {
+				w.promoting[box] = true
 				go w.promotePoolJob(box, s.Job)
 			}
 			before := *j
@@ -408,6 +411,11 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 // A client can drop its connection just as the start script runs. The
 // scanner promotes a claimed owner it finds running in that case.
 func (w *Watcher) promotePoolJob(box, job string) {
+	defer func() {
+		w.mu.Lock()
+		delete(w.promoting, box)
+		w.mu.Unlock()
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), controlTimeout)
 	defer cancel()
 	if _, err := w.setPoolExpiry(ctx, box, job, false); err != nil {

@@ -30,6 +30,8 @@ type Config struct {
 	// unless set.
 	MachineID   string `json:"machineId"`
 	MachineName string `json:"machineName"`
+	// ReuseThrowaways enables pooling after all clients on this host are upgraded.
+	ReuseThrowaways bool `json:"reuseThrowaways"`
 }
 
 // DefaultListen is the port docs/ui.md picked, so nothing else on the

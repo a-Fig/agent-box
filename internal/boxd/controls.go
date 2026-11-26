@@ -28,12 +28,25 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/jobs/{key}/cancel", control(http.HandlerFunc(s.cancelJob)))
 	mux.Handle("POST /api/boxes/{name}/delete", control(http.HandlerFunc(s.deleteBox)))
 	mux.Handle("POST /api/boxes/{name}/extend", control(http.HandlerFunc(s.extendBox)))
+	mux.HandleFunc("GET /api/throwaway-pool", s.throwawayPool)
 	mux.Handle("POST /api/boxes/{name}/claim", control(http.HandlerFunc(s.claimThrowaway)))
 	mux.Handle("POST /api/boxes/{name}/evict-idle", control(http.HandlerFunc(s.evictThrowaway)))
 	mux.Handle("POST /api/boxes/{name}/pool-expiry", control(http.HandlerFunc(s.poolExpiry)))
 }
 
+func (s *Server) throwawayPool(w http.ResponseWriter, _ *http.Request) {
+	if !s.ReuseThrowaways {
+		writeError(w, http.StatusNotFound, dash.CodeNotFound, "throwaway pooling is disabled")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) claimThrowaway(w http.ResponseWriter, r *http.Request) {
+	if !s.ReuseThrowaways {
+		s.throwawayPool(w, r)
+		return
+	}
 	var req dash.ClaimThrowawayBody
 	if !decode(w, r, &req) {
 		return

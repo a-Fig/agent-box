@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ func TestClaimThrowawayChecksAndReservesIdleBox(t *testing.T) {
 	for _, scenario := range []string{"idle", "wrong repo", "wrong size", "starting", "no finished job", "hold during claim"} {
 		t.Run(scenario, func(t *testing.T) {
 			r := newQueueRig(t, nil)
+			srv := httptest.NewServer((&Server{W: r.w, ReuseThrowaways: true}).Handler())
+			t.Cleanup(srv.Close)
 			in := inst("widget-1234", "Running", "small", t0)
 			in.Config[jobrun.ThrowawayKey] = "true"
 			in.Config[jobrun.ThrowawayRepoKey] = key
@@ -42,7 +45,7 @@ func TestClaimThrowawayChecksAndReservesIdleBox(t *testing.T) {
 			claim := func() int {
 				t.Helper()
 				body, _ := json.Marshal(req)
-				request, err := http.NewRequest(http.MethodPost, r.srv.URL+"/api/boxes/"+in.Name+"/claim", bytes.NewReader(body))
+				request, err := http.NewRequest(http.MethodPost, srv.URL+"/api/boxes/"+in.Name+"/claim", bytes.NewReader(body))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -116,5 +119,22 @@ func TestPooledEvictionAndOldCleanupLoseToClaim(t *testing.T) {
 				t.Fatalf("stale %s changed the owner's config: %v", action, current.Config)
 			}
 		})
+	}
+}
+
+func TestThrowawayPoolIsDisabledByDefault(t *testing.T) {
+	srv := (&Server{}).Handler()
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/throwaway-pool"},
+		{http.MethodPost, "/api/boxes/widget-1234/claim"},
+	} {
+		req := httptest.NewRequest(route.method, route.path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(dash.ControlHeader, "1")
+		res := httptest.NewRecorder()
+		srv.ServeHTTP(res, req)
+		if res.Code != http.StatusNotFound {
+			t.Fatalf("%s %s returned %d, want disabled", route.method, route.path, res.Code)
+		}
 	}
 }
