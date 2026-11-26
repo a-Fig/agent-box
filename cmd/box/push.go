@@ -59,7 +59,12 @@ const (
 	tailLines  = 20
 	// endedLines is how much of the tail a failure with no digest is pushed with.
 	endedLines = 10
-	endedKeep  = jobrun.EndedKeep
+	// endedLinesAfterDigest is how many of the log's last lines follow a
+	// failure digest; reasonChars is how much of the reason a push's first
+	// line keeps.
+	endedLinesAfterDigest = 3
+	reasonChars           = 80
+	endedKeep             = jobrun.EndedKeep
 )
 
 // Pusher sends a message into a T3 thread as its next turn.
@@ -187,6 +192,9 @@ type jobEnd struct {
 	Took    int64  `json:"tookSeconds"`
 	Tail    string `json:"tail,omitempty"`
 	Digest  string `json:"digest,omitempty"` // a test run's failure digest
+	// NoDigest: the digest wasn't read (boxd's copy of a queued job's end),
+	// so an exit 0 can't be called a clean pass from the digest alone.
+	NoDigest bool `json:"noDigest,omitempty"`
 }
 
 // thread is the T3 thread of this session, or "".
@@ -587,13 +595,16 @@ func (r jobRecord) context() string {
 // always has the full result, and the message says so.
 func endedMessage(r jobRecord, e jobEnd) string {
 	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second))
+	if why := shortReason(r.Reason); why != "" {
+		head += " (" + why + ")" // which run this is, after compaction or among parallel runs
+	}
 	where := fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull, before this repo's next run.", r.Job)
 	if r.New {
 		where = fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull; box and log kept up to %d minutes (a queued job or another launch that needs the room takes them sooner).", r.Job, int(endedKeep.Minutes()))
 	}
 	digest := strings.TrimRight(mask.Mask(e.Digest), "\n")
 	failed := testsFailed(digest)
-	if e.Code == 0 && !failed {
+	if e.Code == 0 && !failed && !e.NoDigest {
 		if digest != "" {
 			head += ": " + strings.Join(strings.Split(digest, "\n"), "; ")
 		}
@@ -603,15 +614,30 @@ func endedMessage(r jobRecord, e jobEnd) string {
 	if digest != "" {
 		msg += digest + "\n"
 	}
-	if !failed {
-		if tail := lastLines(mask.Mask(e.Tail), endedLines); tail != "" {
-			msg += tail + "\n"
-		}
+	// After a failure digest only the log's last few lines follow: they carry
+	// what came after the tests, like a cancel from the dashboard or a later
+	// step's error.
+	n := endedLines
+	if failed {
+		n = endedLinesAfterDigest
+	}
+	if tail := lastLines(mask.Mask(e.Tail), n); tail != "" {
+		msg += tail + "\n"
 	}
 	if e.Code == exitPaused {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
 	return msg + where
+}
+
+// shortReason is the agent's reason for a run, masked, on one line and cut to
+// reasonChars, to say which run a push is about.
+func shortReason(reason string) string {
+	s := strings.Join(strings.Fields(mask.Mask(reason)), " ")
+	if r := []rune(s); len(r) > reasonChars {
+		s = strings.TrimRight(string(r[:reasonChars-1]), " ") + "…"
+	}
+	return s
 }
 
 // testsFailed says whether a digest reports failed tests or packages.
