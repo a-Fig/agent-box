@@ -102,6 +102,13 @@ func main() {
 		}
 	}
 
+	drop := &cacheDrop{
+		run: func(ctx context.Context) error {
+			_, err := wslRoot(ctx, "sh", "-c", dropCachesScript)
+			return err
+		},
+		logf: lg.Printf,
+	}
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
 			mgr.SetChosen(m)
@@ -125,6 +132,8 @@ func main() {
 				defer cancel()
 				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
 					lg.Printf("release memory: wsl --terminate: %v", err)
+				} else {
+					drop.arm() // once the distro is back, drop its page cache (#214)
 				}
 				poke()
 			}()
@@ -133,6 +142,7 @@ func main() {
 	sl := &statusLog{logf: lg.Printf}
 	report := func(st mode.Status) {
 		sl.observe(st)
+		drop.observe(st)
 		if t != nil {
 			t.setStatus(st)
 		}
