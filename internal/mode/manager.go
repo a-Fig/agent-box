@@ -544,3 +544,8 @@ func (m *Manager) StartHost(ctx context.Context, start func(context.Context) err
 	}
 	return true, err
 }
+
+// Releasing says whether a Release memory is in progress, so tray work
+// that calls wsl.exe (the post-release page-cache drop) can stay out of
+// its way: any wsl.exe call would start the distro again.
+func (m *Manager) Releasing() bool { return m.releasing.Load() }

@@ -104,6 +104,14 @@ func main() {
 	}
 
 	var releases sync.WaitGroup // Release memory runs in flight
+	drop := &cacheDrop{
+		run: func(ctx context.Context) error {
+			_, err := wslRoot(ctx, "sh", "-c", dropCachesScript)
+			return err
+		},
+		logf: lg.Printf,
+		busy: mgr.Releasing,
+	}
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
 			mgr.SetChosen(m)
@@ -120,9 +128,14 @@ func main() {
 			go func() {
 				defer releases.Done()
 				releaseMemory(mgr, func() error {
+					drop.stop() // no drop's wsl.exe call may restart the distro during the terminate
 					ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
 					defer cancel()
-					return hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run()
+					if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
+						return err
+					}
+					drop.arm() // once the distro is back, drop its page cache (#214)
+					return nil
 				}, poke, lg.Printf)
 			}()
 		},
@@ -130,6 +143,7 @@ func main() {
 	sl := &statusLog{logf: lg.Printf}
 	report := func(st mode.Status) {
 		sl.observe(st)
+		drop.observe(st)
 		if t != nil {
 			t.setStatus(st)
 		}
