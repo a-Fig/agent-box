@@ -167,6 +167,11 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 	}
 	if strings.HasPrefix(script, "# running jobs") {
 		f.runChecks++
+		for _, in := range f.ins {
+			if in.Name == box && in.Status == "Stopped" {
+				return nil, &ExitError{Code: 1, Stderr: "Instance is not running"}
+			}
+		}
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
 			if j.state == "running" {

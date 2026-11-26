@@ -339,12 +339,17 @@ func TestQueueNoMetaAndInstanceCap(t *testing.T) {
 // room short is a box, or disk (#103: the fake's disk is 50 of 200GiB used,
 // so a 66GiB cap leaves 16, and a small box needs 18).
 func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
-	for _, short := range []string{"limits.instances=2", "limits.disk=66GiB"} {
-		t.Run(short, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, short) })
+	for _, tt := range []struct{ name, limit string }{
+		{"short of instances", "limits.instances=2"},
+		{"short of disk", "limits.disk=66GiB"},
+		{"already stopped", "limits.instances=2"},
+		{"stopped by first delete attempt", "limits.instances=2"},
+	} {
+		t.Run(tt.name, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, tt.limit, tt.name) })
 	}
 }
 
-func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
+func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short, scenario string) {
 	cfg := map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "10"}
 	k, v, _ := strings.Cut(short, "=")
 	cfg[k] = v
@@ -404,9 +409,26 @@ func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
 	if len(r.f.cli) != 0 {
 		t.Fatalf("made room from a held box: %v", r.f.cli)
 	}
+	deletes := 1
+	switch scenario {
+	case "already stopped":
+		r.f.set(func() { r.f.ins[1].Status = "Stopped" })
+	case "stopped by first delete attempt":
+		deletes = 2
+		r.f.set(func() {
+			r.f.cliErr = func(args []string) error {
+				if args[0] != "delete" {
+					return nil
+				}
+				r.f.ins[1].Status = "Stopped"
+				r.f.cliErr = nil
+				return errors.New(`Instance is busy running a "update" operation`)
+			}
+		})
+	}
 	r.c.add(10 * time.Minute)
 	r.poll()
-	if len(r.f.cli) < 2 || r.f.cli[0] != "delete fresh-0001 --force" || !strings.HasPrefix(r.f.cli[1], "launch agent-base job-") {
+	if len(r.f.cli) <= deletes || r.f.cli[deletes-1] != "delete fresh-0001 --force" || !strings.HasPrefix(r.f.cli[deletes], "launch agent-base job-") {
 		t.Fatalf("cli: %v", r.f.cli)
 	}
 	if q := r.w.Queued(); len(q) != 0 {
@@ -437,6 +459,54 @@ func idleRepoRig(t *testing.T, cfg map[string]string) *queueRig {
 	r.c.add(3 * time.Second)
 	r.poll()
 	return r
+}
+
+func TestQueueKeepsReplacedThrowaway(t *testing.T) {
+	for _, when := range []string{"during scan", "before delete retry"} {
+		t.Run(when, func(t *testing.T) {
+			r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.instances": "2"})
+			r.f.set(func() {
+				r.f.ins[0].Config["user.box.throwaway"] = "true"
+				r.f.ins[0].Config["user.expires"] = r.c.now().Add(20 * time.Minute).Format(time.RFC3339)
+				replace := func() {
+					in := r.f.ins[0]
+					in.Config = maps.Clone(in.Config)
+					in.Config["volatile.uuid"] = "replacement"
+					r.f.ins[0] = in
+					r.f.jobs[in.Name] = nil
+				}
+				if when == "during scan" {
+					r.f.onScan = func(box string) {
+						if box == "murmur" {
+							replace()
+							r.f.onScan = nil
+						}
+					}
+				} else {
+					r.f.cliErr = func(args []string) error {
+						if args[0] != "delete" {
+							return nil
+						}
+						replace()
+						r.f.cliErr = nil
+						return errors.New(`Instance is busy running a "update" operation`)
+					}
+				}
+			})
+			if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+				t.Fatalf("enqueue: %d %+v", code, rep)
+			}
+			r.c.add(3 * time.Second)
+			r.poll()
+			replacement, ok := r.f.instance("murmur")
+			if !ok || replacement.Config["volatile.uuid"] != "replacement" {
+				t.Fatalf("replacement instance = %+v, exists = %v", replacement, ok)
+			}
+			if q := r.w.Queued(); len(q) != 1 {
+				t.Fatalf("queued: %+v", q)
+			}
+		})
+	}
 }
 
 // A queued job short of room takes an idle repo box, as it takes a kept

@@ -88,8 +88,8 @@ laptop and agent reaches.
   boxes idle since their last job (one ended in boxd's history, none running or being started, the
   idle expiry, no hold), the longest idle first, as `box`'s launch takes them (#187): a repo box is
   a cache, and losing it costs that repo's next run a fresh checkout and a cold build cache. boxd
-  takes the fewest spare boxes that make room, or none, and checks a repo box has no job running
-  just before deleting it, since `box run` may have reused it since the poll. Each deletion is a
+  takes the fewest spare boxes that make room, or none. Before each delete attempt, boxd checks
+  that the selected box still has the same UID, is idle, and has no hold. Each deletion is a
   history control `evict` (target the box, by the queued job), and `GET /api/queue/{job}` gives an
   ended job whose box went that way `evicted`: the queued job's name. `box pull` and `box job` then
   say the box was deleted for that job's room, instead of Incus's "Instance not found" (#143).
