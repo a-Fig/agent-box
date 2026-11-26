@@ -24,8 +24,8 @@ type StatusReport struct {
 	Boxes     int    `json:"boxes"`
 	MaxBoxes  int    `json:"maxBoxes"`  // -1: no limit
 	SlotsFree int    `json:"slotsFree"` // -1: no limit
-	// Replaceable is how many boxes SlotsFree counts as free: expired, or throwaways whose job
-	// ended, which the next launch deletes first.
+	// Replaceable is how many boxes SlotsFree counts as free: expired, throwaways whose job
+	// ended, or idle repo boxes, which a launch short of room deletes first.
 	Replaceable int        `json:"replaceable,omitempty"`
 	Sizes       []SizeRoom `json:"sizes"`
 	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none (disk: 205GiB of 210GiB allocated)"; "no limit"
@@ -74,7 +74,7 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 	s.Boxes = len(insts)
 	s.Mode = a.mode(ctx)
 	kept := map[string]bool{}
-	for _, in := range a.keptThrowaways(ctx, insts) {
+	for _, in := range a.spareBoxes(ctx, insts) { // kept throwaways and idle repo boxes
 		kept[in.Name] = true
 	}
 	evictable := func(in instance) bool { return reclaimable(in, a.Now()) || kept[in.Name] } // the next launch deletes it first
@@ -381,7 +381,7 @@ func writeStatus(w io.Writer, s StatusReport) {
 	if s.MaxBoxes >= 0 {
 		free := fmt.Sprintf("%d free", s.SlotsFree)
 		if s.Replaceable > 0 { // "4 of 10 (8 free)" read as a bug (#82)
-			free += fmt.Sprintf(", %d of them taken by finished throwaways or expired boxes a launch replaces", s.Replaceable)
+			free += fmt.Sprintf(", %d of them taken by finished throwaways, idle repo boxes or expired boxes a launch replaces", s.Replaceable)
 		}
 		fmt.Fprintf(w, "boxes: %d of %d (%s)\n", s.Boxes, s.MaxBoxes, free)
 	} else {

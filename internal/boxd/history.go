@@ -389,6 +389,21 @@ func (h *History) EndedOn(in Instance) map[string]bool {
 	return out
 }
 
+// EndedHere says whether a job recorded on in, by its UID (ranOnInstance),
+// has ended. A job recorded without a UID never counts: ranOn's fallback by
+// name and creation time could credit a predecessor's job to a same-name box
+// made within the grace (holds), one whose first job is still starting.
+func (h *History) EndedHere(in Instance) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, j := range h.jobs {
+		if j.BoxUID != "" && (j.State == dash.JobDone || j.State == dash.JobLost) && ranOnInstance(*j, in) {
+			return true
+		}
+	}
+	return false
+}
+
 // LastEnded is the job that started last of those recorded on the box
 // on the box in, if it has ended: the one whose 24h the box holds. A
 // queued job's name is when it was queued, so the newest name may not be it.

@@ -59,6 +59,7 @@ type fakePC struct {
 	cancelled    bool              // the .cancelled probe finds the mark
 	followErr    int               // this many follows fail with a transport error
 	kept         map[string]bool   // boxes the kept-jobs check finds kept
+	afterKept    func(box string)  // runs after each kept-jobs check, under f.mu
 	refuseOnce   bool              // refuse applies to the first launch only
 	digest       string            // canned digest.Script output the follow reports
 	etagFails    int               // this many config sets fail as if another write came first
@@ -257,7 +258,12 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 				}
 				return Result{}, nil
 			case isScript(c, "# kept jobs"):
-				if f.kept[strings.TrimPrefix(args[1], "pc:")] {
+				box := strings.TrimPrefix(args[1], "pc:")
+				kept := f.kept[box]
+				if f.afterKept != nil {
+					f.afterKept(box)
+				}
+				if kept {
 					return Result{Stdout: "kept\n"}, nil
 				}
 				return Result{}, nil
