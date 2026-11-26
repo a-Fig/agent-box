@@ -343,7 +343,7 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 		case j.State == dash.JobDone && j.Exit != nil:
 			// It ran and ended while nobody watched: boxd has the result, and
 			// its kept box may be gone already.
-			e := &jobEnd{Code: *j.Exit, Tail: lastLines(j.Tail, tailLines), NoDigest: true}
+			e := &jobEnd{Code: *j.Exit, Tail: lastLines(j.Tail, tailLines)}
 			if j.EndedAt != nil {
 				e.Took = int64(j.EndedAt.Sub(j.StartedAt) / time.Second)
 			}

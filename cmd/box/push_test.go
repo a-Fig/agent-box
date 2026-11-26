@@ -298,7 +298,7 @@ func TestExitCode75IsSaidToBeTheCommands(t *testing.T) {
 // result is (#182).
 func TestPassIsPushedAsOneLine(t *testing.T) {
 	r := jobRecord{Job: "my-repo.20261123-120000-0001", Reason: "Why.", Command: "go test ./...", Worktree: "w"}
-	end := jobEnd{Took: 372, Tail: "ok  p  0.1s\n", Digest: "PASS: 2325 tests passed, 28 skipped (go test)\nPASS: 4 tests passed (vitest)\n"}
+	end := jobEnd{Took: 372, DigestRead: true, Tail: "ok  p  0.1s\n", Digest: "PASS: 2325 tests passed, 28 skipped (go test)\nPASS: 4 tests passed (vitest)\n"}
 	want := "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.): PASS: 2325 tests passed, 28 skipped (go test); PASS: 4 tests passed (vitest). From box, not your user. Full result: box_job id my-repo.20261123-120000-0001. Artifacts: box_pull, before this repo's next run."
 	if got := endedMessage(r, end); got != want {
 		t.Errorf("message =\n%s\nwant\n%s", got, want)
@@ -343,9 +343,33 @@ func TestFailureDigestKeepsTheLogsLastLines(t *testing.T) {
 // isn't called a pass: the tail shows what the run printed.
 func TestExitZeroWithoutReadDigestKeepsTheTail(t *testing.T) {
 	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
-	got := endedMessage(r, jobEnd{Tail: "--- FAIL: TestQ\nFAIL p\n", NoDigest: true})
+	got := endedMessage(r, jobEnd{Tail: "--- FAIL: TestQ\nFAIL p\n"})
 	if !strings.Contains(got, "\n--- FAIL: TestQ\nFAIL p\nFull result:") {
 		t.Errorf("message = %q", got)
+	}
+}
+
+// The follow's digest line, empty for a run with no test report, is what
+// says the digest was read.
+func TestEmptyDigestLineMeansRead(t *testing.T) {
+	var out strings.Builder
+	ef := &exitFilter{w: &out}
+	ef.Write([]byte("hello\n" + exitMarker + "0\n"))
+	if ef.digestRead() {
+		t.Fatal("digest read before its line came")
+	}
+	ef.Write([]byte(digestMarker + "\n"))
+	if !ef.digestRead() || ef.digest() != "" || out.String() != "hello\n" {
+		t.Errorf("digestRead %v, digest %q, out %q", ef.digestRead(), ef.digest(), out.String())
+	}
+}
+
+// A reason given in no box_run is the command, masked before it is cut, so
+// the cut can't take the part of a secret the mask needs to find it.
+func TestMissingReasonMasksBeforeCutting(t *testing.T) {
+	cmd := "curl https://user:" + strings.Repeat("ab12", 16) + "@example.com/x"
+	if got := missingReason(cmd); strings.Contains(got, "ab12ab12") {
+		t.Errorf("missingReason = %q", got)
 	}
 }
 

@@ -192,9 +192,11 @@ type jobEnd struct {
 	Took    int64  `json:"tookSeconds"`
 	Tail    string `json:"tail,omitempty"`
 	Digest  string `json:"digest,omitempty"` // a test run's failure digest
-	// NoDigest: the digest wasn't read (boxd's copy of a queued job's end),
-	// so an exit 0 can't be called a clean pass from the digest alone.
-	NoDigest bool `json:"noDigest,omitempty"`
+	// DigestRead: the follow read the digest (empty for a run with no test
+	// report). Only then is an exit 0 without failed tests pushed as a pass:
+	// an end from boxd, a record from before it, or a follow cut off before
+	// its digest line shows its tail instead.
+	DigestRead bool `json:"digestRead,omitempty"`
 }
 
 // thread is the T3 thread of this session, or "".
@@ -604,7 +606,7 @@ func endedMessage(r jobRecord, e jobEnd) string {
 	}
 	digest := strings.TrimRight(mask.Mask(e.Digest), "\n")
 	failed := testsFailed(digest)
-	if e.Code == 0 && !failed && !e.NoDigest {
+	if e.Code == 0 && !failed && e.DigestRead {
 		if digest != "" {
 			head += ": " + strings.Join(strings.Split(digest, "\n"), "; ")
 		}
@@ -813,7 +815,11 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
-			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest}, true
+			end := jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest}
+			if rec, ok := a.recordedEnd(job); ok { // attach's record says whether it read the digest
+				end.DigestRead = rec.DigestRead
+			}
+			return end, true
 		case err == nil && res.State == statePaused && rec.GPU:
 			return lost() // a GPU box is stopped in My PC, not frozen
 		case err == nil && res.State == statePaused:
