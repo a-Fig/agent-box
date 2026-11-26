@@ -711,6 +711,9 @@ func isGone(err error) bool {
 	return strings.Contains(s, "Instance not found") || strings.Contains(s, "instance is already stopped")
 }
 
+// Incus looks up the image before submitting the instance create request.
+var imageLookupEOF = regexp.MustCompile(`^Error: Get "https?://[^/"]+/1[.]0/images/[^/?"]+(\?[^"]*)?": EOF$`)
+
 func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra []string) error {
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
@@ -721,11 +724,17 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	// Unqualified, the image would be looked up on the local (laptop) remote.
 	flags, devices := jobrun.LaunchFlags(sz, a.Now().Add(ttl), throwaway, extra...)
 	args := append([]string{"launch", a.target(a.Image), a.target(name)}, flags...)
-	var stdin io.Reader
-	if devices != "" {
-		stdin = strings.NewReader(devices)
+	run := func() (Result, error) {
+		var stdin io.Reader
+		if devices != "" {
+			stdin = strings.NewReader(devices)
+		}
+		return a.incus(ctx, Cmd{Args: args, Stdin: stdin})
 	}
-	res, err := a.incus(ctx, Cmd{Args: args, Stdin: stdin})
+	res, err := run()
+	if err == nil && res.Code != 0 && ctx.Err() == nil && imageLookupEOF.MatchString(strings.TrimSpace(res.Stderr)) {
+		res, err = run()
+	}
 	if err == nil && res.Code != 0 {
 		err = fmt.Errorf("incus launch: %s", strings.TrimSpace(res.Stderr))
 	}
