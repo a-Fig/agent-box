@@ -202,6 +202,26 @@ func bytesOf(v string) int64 {
 
 func ptr[T any](v T) *T { return &v }
 
+// uidOf is a made-up volatile.uuid for the box of name made at created. It is drawn from a hash,
+// not w.rnd, so each scenario's other choices stay as they were.
+func uidOf(name string, created time.Time) string {
+	h := fnv.New128a()
+	h.Write([]byte(name + "@" + created.UTC().Format(time.RFC3339Nano)))
+	x := fmt.Sprintf("%x", h.Sum(nil))
+	return x[:8] + "-" + x[8:12] + "-" + x[12:16] + "-" + x[16:20] + "-" + x[20:]
+}
+
+// boxUIDAt is the UID of the box of name a job that started at started ran on: the live box of
+// that name if it was made by then, else an earlier box of the name, gone now.
+func (w *world) boxUIDAt(name string, started time.Time) string {
+	for _, b := range w.boxes {
+		if b.Name == name && !b.CreatedAt.After(started) {
+			return b.UID
+		}
+	}
+	return uidOf(name, started.Truncate(24*time.Hour))
+}
+
 func (w *world) hex(n int) string {
 	const digits = "0123456789abcdef"
 	b := make([]byte, n)
@@ -218,6 +238,7 @@ func (w *world) box(name, size string, r *repo, state string, throwaway bool, ag
 		Name: name, Machine: machineID, Size: size, GPU: sz.GPU, State: state, Throwaway: throwaway,
 		Repo: r.url, CreatedAt: w.now.Add(-age), MemLimit: bytesOf(sz.Memory),
 	}
+	b.UID = uidOf(b.Name, b.CreatedAt)
 	if expires != 0 {
 		b.ExpiresAt = ptr(w.now.Add(expires))
 	}
@@ -237,7 +258,7 @@ func (w *world) running(b *dash.Box, r *repo, ri int, branch string, ago time.Du
 	started := w.now.Add(-ago)
 	id := started.Format("20060102-150405") + "-" + w.hex(4)
 	j := dash.Job{
-		Key: dash.JobKey(b.Name, id, started), ID: id, Box: b.Name, Machine: machineID, State: state,
+		Key: dash.JobKey(b.Name, id, started), ID: id, Box: b.Name, BoxUID: b.UID, Machine: machineID, State: state,
 		StartedAt: started, Reason: rn.reason, Command: rn.command, Kind: dash.Classify(rn.command, b.GPU),
 		Repo: r.url, Branch: branch, Commit: w.hex(40), Agent: agentFor(r, w.rnd), Size: b.Size, GPU: b.GPU,
 	}
@@ -307,6 +328,7 @@ func (w *world) history(since time.Time, perDay int) {
 			Size: rn.size, GPU: rn.gpu,
 		}
 		j.Key = dash.JobKey(boxName, id, j.StartedAt)
+		j.BoxUID = w.boxUIDAt(boxName, j.StartedAt)
 		// About one in six waited in the queue first, for up to 25 minutes. It is drawn from
 		// the ID, not w.rnd, so the rest of each scenario stays as it was.
 		hv := fnv.New32a()
@@ -786,7 +808,7 @@ func buildLost(w *world) {
 	rn := sparrow.runs[1]
 	ended := w.now.Add(-8 * time.Minute)
 	j := dash.Job{
-		Key: dash.JobKey("sparrow-ml-51ee", id, started), ID: id, Box: "sparrow-ml-51ee", Machine: machineID,
+		Key: dash.JobKey("sparrow-ml-51ee", id, started), ID: id, Box: "sparrow-ml-51ee", BoxUID: uidOf("sparrow-ml-51ee", started), Machine: machineID,
 		State: dash.JobLost, StartedAt: started, EndedAt: &ended, Reason: rn.reason, Command: rn.command,
 		Kind: dash.KindGPU, Repo: sparrow.url, Branch: "exp/lora-rank", Commit: w.hex(40), Agent: agents[4],
 		Size: "gpu", GPU: true,
@@ -919,6 +941,7 @@ func (p *Player) StartQueued(now time.Time, q dash.Job) (dash.Box, dash.Job) {
 	w.load(b, 0.2+0.3*w.rnd.Float64(), 0.6+0.35*w.rnd.Float64())
 	j := q
 	j.Key, j.State, j.StartedAt, j.Position, j.Why = dash.JobKey(q.Box, q.ID, w.now), dash.JobRunning, w.now, 0, ""
+	j.BoxUID = b.UID
 	return *b, j
 }
 

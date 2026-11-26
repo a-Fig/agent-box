@@ -10,6 +10,32 @@ import (
 	"github.com/a-Fig/agent-box/internal/dash"
 )
 
+// A box's jobs come by its UID, and its Last is the job that ended last, which a page ordered by
+// start may not hold: jobs on a box overlap.
+func TestHistoryBoxJobsAndLast(t *testing.T) {
+	h, err := OpenHistory(t.TempDir(), func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit0 := 0
+	add := func(id, uid string, start, end time.Duration) {
+		e := t0.Add(end)
+		j := dash.Job{Key: dash.JobKey("a", id, t0.Add(start)), ID: id, Box: "a", BoxUID: uid, Machine: "pc", State: dash.JobDone,
+			Exit: &exit0, StartedAt: t0.Add(start), EndedAt: &e}
+		h.Record(record{Type: recJobEnd, At: e, Job: &j})
+	}
+	add("long", "u1", -60*time.Minute, -5*time.Minute)
+	add("short", "u1", -30*time.Minute, -25*time.Minute)
+	add("other", "u2", -20*time.Minute, -time.Minute) // a later box of the name
+	p := h.Finished(Filter{Box: dash.Box{Name: "a", Machine: "pc", UID: "u1", CreatedAt: t0.Add(-2 * time.Hour)}, Limit: 1})
+	if len(p.Jobs) != 1 || p.Jobs[0].ID != "short" || !p.More || p.Last == nil || p.Last.ID != "long" {
+		t.Fatalf("page %+v, last %+v", p.Jobs, p.Last)
+	}
+	if p := h.Finished(Filter{Limit: 5}); p.Last != nil || len(p.Jobs) != 3 {
+		t.Fatalf("a query without a box: %+v", p)
+	}
+}
+
 func TestHistoryRangeAndPrune(t *testing.T) {
 	dir := t.TempDir()
 	now := t0
@@ -54,19 +80,17 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 	if p := h.Finished(Filter{Q: "", Result: "fail"}); len(p.Jobs) != 1 {
 		t.Fatalf("fail filter: %+v", p)
 	}
-	if p := h.Finished(Filter{Box: "a", Since: t0.Add(-100 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
-		t.Fatalf("box since filter: %+v", p)
+	// Jobs 1 and 2 were recorded before jobs carried their box's UID: a box asks for them by the
+	// time rule, from dash.BoxJobSkew before it was made.
+	boxA := dash.Box{Name: "a", UID: "u-a", CreatedAt: t0.Add(-90*time.Minute + time.Minute)}
+	if p := h.Finished(Filter{Box: boxA}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" || p.Last == nil || p.Last.ID != "2" {
+		t.Fatalf("legacy jobs by time: %+v", p)
 	}
-	// A box made at 12:03 doesn't list the 12:00 job of the box it replaced: Since is the
-	// box's creation less dash.BoxJobSkew, and the boundary itself is in.
-	created := t0.Add(-90*time.Minute + 3*time.Minute)
-	if p := h.Finished(Filter{Box: "a", Since: created.Add(-dash.BoxJobSkew)}); len(p.Jobs) != 0 {
-		t.Fatalf("replacement box listed an older box's job: %+v", p)
+	boxA.CreatedAt = t0.Add(-90*time.Minute + dash.BoxJobSkew + time.Second)
+	if p := h.Finished(Filter{Box: boxA}); len(p.Jobs) != 0 || p.Last != nil {
+		t.Fatalf("legacy job before the skew listed: %+v", p)
 	}
-	if p := h.Finished(Filter{Box: "a", Since: t0.Add(-90 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
-		t.Fatalf("since is inclusive: %+v", p)
-	}
-	if p := h.Finished(Filter{Box: "b"}); len(p.Jobs) != 0 {
+	if p := h.Finished(Filter{Box: dash.Box{Name: "b", UID: "u-b"}}); len(p.Jobs) != 0 {
 		t.Fatalf("box filter: %+v", p)
 	}
 	first := h.Finished(Filter{Limit: 1}).Jobs[0]

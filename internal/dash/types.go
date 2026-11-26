@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 )
 
@@ -123,14 +124,17 @@ const (
 
 // Box is one Incus container in project agents.
 type Box struct {
-	Name      string     `json:"name"`
-	Machine   string     `json:"machine"`
-	Size      string     `json:"size"`
-	GPU       bool       `json:"gpu"`
-	State     string     `json:"state"`
-	Throwaway bool       `json:"throwaway"`
-	Repo      string     `json:"repo"`
-	CreatedAt time.Time  `json:"createdAt"`
+	Name      string    `json:"name"`
+	Machine   string    `json:"machine"`
+	Size      string    `json:"size"`
+	GPU       bool      `json:"gpu"`
+	State     string    `json:"state"`
+	Throwaway bool      `json:"throwaway"`
+	Repo      string    `json:"repo"`
+	CreatedAt time.Time `json:"createdAt"`
+	// UID tells this box from others of its name: Incus's volatile.uuid, or its createdAt
+	// (RFC3339, to the nanosecond) where Incus gave none. A job's BoxUID is its box's UID.
+	UID       string     `json:"uid,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt"`
 	MemUsed   int64      `json:"memUsed"`
 	MemLimit  int64      `json:"memLimit"`
@@ -169,9 +173,12 @@ type Agent struct {
 
 // Job is one command run on a box.
 type Job struct {
-	Key       string     `json:"key"` // box/id/startedAt: names and IDs get reused
-	ID        string     `json:"id"`
-	Box       string     `json:"box"`
+	Key string `json:"key"` // box/id/startedAt: names and IDs get reused
+	ID  string `json:"id"`
+	Box string `json:"box"`
+	// BoxUID is the UID of the box the job ran on, recorded when boxd first saw it there. Jobs
+	// recorded before 2026-11-25 have "" (see RanOn).
+	BoxUID    string     `json:"boxUid,omitempty"`
 	Machine   string     `json:"machine"`
 	State     string     `json:"state"`
 	Exit      *int       `json:"exit"`
@@ -210,11 +217,25 @@ const TailBytes = 2 << 10
 // startedAt + JobBoxGrace; a box of that name made later is a reuse of the name.
 const JobBoxGrace = 10 * time.Minute
 
-// BoxJobSkew is how much before its box's creation a job may have started and still be listed as
-// the box's. It is the same inequality as JobBoxGrace read from the box's side, but tighter: a
-// wrongly refused log link costs a click, while a replacement box that lists the job of the box it
-// replaced shows someone else's work. A throwaway's job starts seconds before its box.
+// BoxJobSkew is, for a job without a BoxUID, how much before its box's creation it may have
+// started and still count as the box's (RanOn). It is JobBoxGrace's inequality read from the box's
+// side, but tighter: a replacement box that lists its predecessor's jobs shows someone else's work.
 const BoxJobSkew = time.Minute
+
+// RanOn says whether j ran on b: by the box's UID, which a box made later under the same name
+// doesn't share. A job recorded before boxd kept BoxUID (2026-11-25) has none, and for those
+// alone a time rule stands in: the box's name and a start no earlier than BoxJobSkew before the
+// box was made. That rule can't be right both ways (box run --new names a job before it launches
+// the box, and the laptop's clock may be off), which is why jobs now carry the UID.
+func (j Job) RanOn(b Box) bool {
+	if j.Box != b.Name || j.Machine != b.Machine {
+		return false
+	}
+	if j.BoxUID != "" {
+		return j.BoxUID == b.UID
+	}
+	return !j.StartedAt.Before(b.CreatedAt.Add(-BoxJobSkew))
+}
 
 // JobKey makes a job's key from its box, ID and start.
 func JobKey(box, id string, started time.Time) string {
@@ -248,11 +269,29 @@ type State struct {
 // FinishedInState is how many finished jobs State.Jobs keeps.
 const FinishedInState = 50
 
+// ParseBoxQuery reads the box GET /api/jobs asks about: box (its name), machine, uid and created
+// (its createdAt, RFC3339, for jobs recorded before BoxUID; see RanOn). All four are needed.
+func ParseBoxQuery(q url.Values) (Box, error) {
+	b := Box{Name: q.Get("box"), Machine: q.Get("machine"), UID: q.Get("uid")}
+	if b.Name == "" || b.Machine == "" || b.UID == "" {
+		return Box{}, fmt.Errorf("box needs machine, uid and created as well")
+	}
+	t, err := time.Parse(time.RFC3339, q.Get("created"))
+	if err != nil {
+		return Box{}, fmt.Errorf("created must be an RFC3339 time")
+	}
+	b.CreatedAt = t
+	return b, nil
+}
+
 // JobsPage is GET /api/jobs: finished jobs, newest first. More is true when
 // asking again with before set to the last job's startedAt returns more.
 type JobsPage struct {
 	Jobs []Job `json:"jobs"`
 	More bool  `json:"more"`
+	// Last, when the query names one box (uid), is that box's job that ended last of all its
+	// history: jobs overlap, so it may not be on a page ordered by start.
+	Last *Job `json:"last,omitempty"`
 }
 
 // LogChunk is GET /api/jobs/{key}/log?offset=: at most MaxLogChunk bytes

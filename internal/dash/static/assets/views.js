@@ -105,15 +105,18 @@ function elapsed(j) {
 // (dash.JobBoxGrace: box run --new starts the job's clock before it launches the box). Names get
 // reused, and a later box of that name holds none of this job's log.
 const JOB_BOX_GRACE_MS = 10 * 60 * 1000;
-// A box's jobs use the tighter dash.BoxJobSkew: a log link that is wrongly refused costs a click,
-// but a replacement box that lists its predecessor's jobs shows someone else's work.
-const BOX_JOB_SKEW_MS = 60 * 1000;
 function jobBox(j) {
   const b = boxOf(j.machine, j.box);
-  return b && ranOn(j, b) ? b : null;
+  return b && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + JOB_BOX_GRACE_MS ? b : null;
 }
-function ranOn(j, b, grace = JOB_BOX_GRACE_MS) {
-  return j.box === b.name && j.machine === b.machine && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + grace;
+// ranOn says whether j ran on b, as dash.Job.RanOn does: by the box's uid, which a later box of
+// the name doesn't share. A job recorded before jobs carried boxUid (2026-11-25) has none, and
+// for those alone a time rule stands in: a start no earlier than dash.BoxJobSkew before the box.
+const BOX_JOB_SKEW_MS = 60 * 1000;
+function ranOn(j, b) {
+  if (j.box !== b.name || j.machine !== b.machine) return false;
+  if (j.boxUid) return j.boxUid === b.uid;
+  return Date.parse(j.startedAt) >= Date.parse(b.createdAt) - BOX_JOB_SKEW_MS;
 }
 
 function sizeLabel(size, gpu, sep = " ") {
@@ -454,7 +457,7 @@ function expiry(b) {
 }
 
 function boxRow(b, full) {
-  const job = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"))[0];
+  const job = jobsOf((j) => (j.state === "running" || j.state === "paused") && ranOn(j, b))[0];
   const open = full && opened.has(boxKey(b));
   // A reconnect replaces the jobs the stream held, so what the history gave may have missed some.
   const seen = open && boxJobs.get(boxKey(b));
@@ -501,10 +504,12 @@ function boxRow(b, full) {
 }
 
 // Boxes: a row opens in place (#184) to show what its box is doing, from the jobs the page already
-// has and the box's finished jobs from history (/api/jobs?box=&since=). A box is one generation of
-// its name, so what is open is keyed by its createdAt too.
+// has and the box's finished jobs from history (/api/jobs?box=&uid=), matched by its uid. A box is
+// one generation of its name, so what is open is keyed by its createdAt too.
 const opened = new Set();
-const boxJobs = new Map(); // by boxKey: { state: loading|ok|error, jobs, more, error }
+// by boxKey: { state: loading|ok|error, jobs, last, more, error, gen, shown }. last is the box's
+// job that ended last, from boxd; shown is what the row listed when last drawn.
+const boxJobs = new Map();
 const BOX_JOBS = 20;
 
 function boxKey(b) {
@@ -530,14 +535,15 @@ function rowClick(e, b) {
 function loadBoxJobs(b) {
   const k = boxKey(b);
   const prev = boxJobs.get(k);
-  const mine = { state: "loading", jobs: prev?.jobs || [], more: prev?.more || false, gen: S.gen };
+  // Until boxd answers, the row keeps what it showed: after a reconnect the stream holds a new
+  // snapshot, which may lack jobs the old one had.
+  const mine = { state: "loading", jobs: prev?.shown || prev?.jobs || [], last: prev?.last || null, more: prev?.more || false, gen: S.gen };
   boxJobs.set(k, mine);
-  const since = new Date(Date.parse(b.createdAt) - BOX_JOB_SKEW_MS).toISOString();
-  const p = new URLSearchParams({ box: b.name, machine: b.machine, since, limit: String(BOX_JOBS) });
+  const p = new URLSearchParams({ box: b.name, machine: b.machine, uid: b.uid || "", created: b.createdAt, limit: String(BOX_JOBS) });
   api("/api/jobs?" + p)
     .then((page) => {
       if (boxJobs.get(k) !== mine) return;
-      Object.assign(mine, { state: "ok", jobs: page.jobs || [], more: !!page.more });
+      Object.assign(mine, { state: "ok", jobs: page.jobs || [], last: page.last || null, more: !!page.more, shown: null });
     })
     .catch((e) => {
       if (boxJobs.get(k) !== mine) return;
@@ -566,16 +572,24 @@ function exitText(j) {
   return j.exit == null ? "ended" : "exited " + j.exit;
 }
 
+function ended(j) {
+  return j.state === "done" || j.state === "lost";
+}
+
 // The box's finished jobs: history's, with the stream's newer copies and the ones that ended since.
 function boxDone(b) {
   const by = new Map();
   for (const j of boxJobs.get(boxKey(b))?.jobs || []) by.set(j.key, j);
-  for (const j of S.jobs.values()) if ((j.state === "done" || j.state === "lost") && ranOn(j, b, BOX_JOB_SKEW_MS)) by.set(j.key, j);
+  for (const j of S.jobs.values()) if (ended(j) && ranOn(j, b)) by.set(j.key, j);
   return [...by.values()].sort((a, c) => Date.parse(c.startedAt) - Date.parse(a.startedAt));
 }
 
 function endedMs(j) {
   return Date.parse(j.endedAt || j.startedAt);
+}
+
+function lastEnded(js) {
+  return js.reduce((m, j) => (j && (!m || endedMs(j) > endedMs(m)) ? j : m), null);
 }
 
 function boxJobRow(j) {
@@ -591,20 +605,24 @@ function boxJobRow(j) {
 function boxDetail(b, job) {
   const load = boxJobs.get(boxKey(b));
   const all = boxDone(b);
+  if (load) load.shown = all;
   const done = all.slice(0, BOX_JOBS);
-  // Jobs overlap, so the one that ended last, not the one that started last, says since when the box is idle.
-  const last = all.reduce((m, j) => (!m || endedMs(j) > endedMs(m) ? j : m), null);
+  // Jobs overlap, so the one that ended last, not the one that started last, says since when the
+  // box is idle: boxd names it (last), and the stream adds any that ended since.
+  const last = lastEnded([load?.last, ...all]);
+  // Without its history, an idle time is stated only from a job of this box that is known: one the
+  // stream has, or the last job boxd named before (kept through a reconnect's reload).
+  const known = load?.state === "ok" || !!load?.last || [...S.jobs.values()].some((j) => ended(j) && ranOn(j, b));
   let now;
   if (job) now = runningRow(job);
-  else {
+  else if (!known) {
+    const why = load?.state === "error" ? " Its job history couldn't load, so since when isn't known." : "";
+    now = h("p", { class: "box-idle" }, h("span", { class: "dot dot-off" }), h("span", null, "Idle." + why));
+  } else {
     const since = last ? last.endedAt || last.startedAt : b.createdAt;
     const tail = last
       ? [", last job ", h("a", { href: jobLink(last), "data-key": "blast-" + last.key }, last.id), " " + exitText(last) + "."]
-      : load?.state === "loading"
-        ? "."
-        : load?.state === "error"
-          ? ", when it was made. Its job history couldn't load, so it may have run jobs."
-          : ", when it was made. It hasn't run a job yet.";
+      : ", when it was made. It hasn't run a job yet.";
     now = h("p", { class: "box-idle" }, h("span", { class: "dot dot-off" }), h("span", null, "Idle since ", h("span", { title: stamp(since) }, hhmm(since)), tail));
   }
   let before = null;

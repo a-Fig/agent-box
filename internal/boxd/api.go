@@ -106,14 +106,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := Filter{Repo: q.Get("repo"), Agent: q.Get("agent"), Kind: q.Get("kind"), Machine: q.Get("machine"),
-		Result: q.Get("result"), Q: q.Get("q"), Box: q.Get("box"), Limit: 50}
-	if v := q.Get("since"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
+		Result: q.Get("result"), Q: q.Get("q"), Limit: 50}
+	if q.Get("box") != "" || q.Get("uid") != "" {
+		b, err := dash.ParseBoxQuery(q)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "since must be an RFC3339 time")
+			writeError(w, http.StatusBadRequest, dash.CodeBadRequest, err.Error())
 			return
 		}
-		f.Since = t
+		f.Box = b
 	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v[strings.LastIndex(v, "/")+1:])

@@ -195,23 +195,40 @@ func TestJobsFilter(t *testing.T) {
 	}
 }
 
-// box and since ask for one box's jobs: those of its name started from since on.
+// box, machine, uid and created ask for one box's jobs, by its UID, and its last-ended job.
 func TestJobsOfBox(t *testing.T) {
 	s, ts := start(t, "week")
-	j := s.done[len(s.done)/2]
-	_, _, body := call(t, ts, "GET", "/api/jobs?limit=200&box="+url.QueryEscape(j.Box)+"&since="+url.QueryEscape(j.StartedAt.Format(time.RFC3339)), "", false)
-	var p dash.JobsPage
-	json.Unmarshal(body, &p)
-	if len(p.Jobs) == 0 {
-		t.Fatal("no jobs")
-	}
-	for _, x := range p.Jobs {
-		if x.Box != j.Box || x.StartedAt.Before(j.StartedAt) {
-			t.Errorf("%s started %v doesn't match", x.Box, x.StartedAt)
+	var b dash.Box
+	var n int
+	for _, x := range s.sc.State.Boxes {
+		if c := len(slices.DeleteFunc(slices.Clone(s.done), func(j dash.Job) bool { return !j.RanOn(x) })); c > n {
+			b, n = x, c
 		}
 	}
-	if code, _, _ := call(t, ts, "GET", "/api/jobs?since=soon", "", false); code != 400 {
-		t.Errorf("bad since: %d", code)
+	if n < 2 {
+		t.Fatalf("no box with finished jobs in the fixture")
+	}
+	// A job of another box of the name, which started after this one was made: not this box's.
+	stray := s.done[0]
+	stray.Key, stray.Box, stray.BoxUID, stray.StartedAt = "stray", b.Name, "another", b.CreatedAt.Add(time.Minute)
+	s.done = append(s.done, stray)
+	p := url.Values{"box": {b.Name}, "machine": {b.Machine}, "uid": {b.UID}, "created": {b.CreatedAt.Format(time.RFC3339)}, "limit": {"200"}}
+	_, _, body := call(t, ts, "GET", "/api/jobs?"+p.Encode(), "", false)
+	var page dash.JobsPage
+	json.Unmarshal(body, &page)
+	if len(page.Jobs) != n || page.Last == nil {
+		t.Fatalf("%d jobs (want %d), last %v", len(page.Jobs), n, page.Last)
+	}
+	for _, j := range page.Jobs {
+		if j.BoxUID != b.UID {
+			t.Errorf("%s is box %s's", j.Key, j.BoxUID)
+		}
+		if j.EndedAt.After(*page.Last.EndedAt) {
+			t.Errorf("%s ended after the last job", j.Key)
+		}
+	}
+	if code, _, _ := call(t, ts, "GET", "/api/jobs?box="+b.Name, "", false); code != 400 {
+		t.Errorf("box without uid: %d", code)
 	}
 }
 
