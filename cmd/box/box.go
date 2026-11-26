@@ -1024,6 +1024,18 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		// job may resume, so it keeps its job ID below.
 		if insts, lerr := a.list(ctx); lerr == nil {
 			if in := find(insts, box); in != nil && in.Status == "Frozen" {
+				if strings.Contains(err.Error(), "Instance is frozen") {
+					// Incus refused the exec, so the start script never ran
+					// and there is no job to resume: refuse (or queue) it
+					// like a box that was already frozen before the run.
+					_, paused := a.check(ctx, box)
+					if paused == "" {
+						paused = box + " is paused"
+					}
+					return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+				}
+				// Any other failure may have happened after the script
+				// started the job, so keep the job ID: it may resume.
 				if sz.GPU {
 					fmt.Fprintln(a.Err, pausedGPU(job))
 				} else {

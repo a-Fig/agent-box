@@ -38,6 +38,7 @@ type fakePC struct {
 	pushHang     bool            // file push waits until its context ends
 	freeze       bool            // follow freezes the box and fails
 	freezeStart  bool            // start exec freezes the box and fails as frozen
+	freezeDrop   bool            // start exec freezes the box and drops the connection
 	launchErr    bool            // the connection drops after creating an instance
 	refuse       string          // launch fails with this Incus error, creating nothing
 	launches     [][]string      // arguments of each launch
@@ -227,6 +228,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			case f.freezeStart && len(c.Args) > 0 && strings.Contains(c.Args[len(c.Args)-1], "setsid nohup"):
 				f.inst(args[1]).Status = "Frozen"
 				return Result{Stderr: "Error: Instance is frozen", Code: 1}, nil
+			case f.freezeDrop && len(c.Args) > 0 && strings.Contains(c.Args[len(c.Args)-1], "setsid nohup"):
+				f.inst(args[1]).Status = "Frozen"
+				return Result{}, errors.New("connection reset")
 			case isScript(c, "# follow"):
 				if f.followErr > 0 {
 					f.followErr--
