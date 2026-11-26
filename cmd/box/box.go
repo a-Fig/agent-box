@@ -37,7 +37,7 @@ const exitDetached = 130
 
 const (
 	idleTTL    = 2 * time.Hour
-	jobTTL     = jobrun.JobTTL
+	jobTTL     = 24 * time.Hour
 	expiresKey = "user.expires"
 )
 
@@ -634,23 +634,6 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	return err
 }
 
-// expiry reads box's user.expires.
-func (a *App) expiry(ctx context.Context, box string) (string, error) {
-	out, err := a.incusOK(ctx, "config", "get", a.target(box), expiresKey)
-	return strings.TrimSpace(out), err
-}
-
-// extended is a box's expiry cur, when it is later than the job that
-// started at started gave it: an extend from the dashboard or by hand, which
-// outlives the job (jobrun.EndedExpiry). Otherwise it is "".
-func extended(cur string, started time.Time) string {
-	t, err := time.Parse(time.RFC3339, cur)
-	if err != nil || !t.After(started.Add(jobTTL+jobrun.JobExpirySlack)) {
-		return ""
-	}
-	return t.UTC().Format("2006-01-02 15:04 UTC")
-}
-
 func (a *App) expiryConfig(ttl time.Duration) string {
 	return expiresKey + "=" + a.Now().Add(ttl).UTC().Format(time.RFC3339)
 }
@@ -963,7 +946,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	switch {
 	case !o.New:
 	case err == nil && r.State == stateDone:
-		a.cleanup(ctx, box, job, true)
+		a.cleanup(ctx, box, true)
 	case sz.GPU && r.State == statePaused && a.gpuStopped(ctx, box) != "":
 		// attach said the GPU box was stopped: there is nothing to reattach (#118).
 	default:
@@ -1067,10 +1050,9 @@ func (a *App) removeQuietly(ctx context.Context, box string) {
 	}
 }
 
-// cleanup deletes a throwaway box once no job is running in it, or keeps it
-// KeepEnded. ours says the caller created it; otherwise the box's throwaway
-// mark decides. A box extended past job's own expiry keeps that expiry.
-func (a *App) cleanup(ctx context.Context, box, job string, ours bool) {
+// cleanup deletes a throwaway box once no job is running in it. ours says
+// the caller created it; otherwise the box's throwaway mark decides.
+func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
 	if !ours {
@@ -1088,21 +1070,10 @@ func (a *App) cleanup(ctx context.Context, box, job string, ours bool) {
 		fmt.Fprintf(a.Err, "box: keeping %s: still running %s\n", box, strings.Join(running, " "))
 		return
 	}
-	cur, err := a.expiry(ctx, box)
-	if err != nil {
-		a.warn(fmt.Sprintf("box: warning: keeping %s: %v", box, err))
-		return
-	}
-	if until := extended(cur, jobStart(job)); until != "" {
-		fmt.Fprintf(a.Err, "box: keeping %s until %s, as it was extended; box rm %s deletes it now\n", box, until, box)
-		return
-	}
 	if a.KeepEnded > 0 {
-		if _, ok := jobrun.EndedExpiry(cur, jobStart(job), a.Now(), a.KeepEnded); ok {
-			if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
-				a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
-				return
-			}
+		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
+			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+			return
 		}
 		fmt.Fprintf(a.Err, "box: kept %s for box pull for up to %d minutes, unless a queued job or another launch needs the room; box rm %s deletes it now\n", box, int(a.KeepEnded.Minutes()), box)
 		return
@@ -1191,7 +1162,7 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 		}
 	}
 	if err == nil && r.State == stateDone {
-		a.cleanup(ctx, box, job, false)
+		a.cleanup(ctx, box, false)
 	}
 	return r, err
 }
@@ -1435,7 +1406,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 			return "", 1, "", fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
 		ended := a.Now()
-		a.markIdle(ctx, box, job)
+		a.markIdle(ctx, box)
 		a.reportEnded(ctx, job, code, ended, tail.String())
 		dg = ef.digest()
 		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
@@ -1497,22 +1468,13 @@ func (a *App) probeCtx(ctx context.Context) (context.Context, context.CancelFunc
 	return context.WithTimeout(context.WithoutCancel(ctx), d)
 }
 
-// markIdle shortens the box's expiry to idleTTL once job has ended, unless
-// another job is still running there (it would lose its jobTTL window) or
-// the box was extended past job's own expiry (jobrun.EndedExpiry).
-func (a *App) markIdle(ctx context.Context, box, job string) {
+// markIdle shortens the box's expiry to idleTTL once a job has ended, unless
+// another job is still running there (it would lose its jobTTL window).
+func (a *App) markIdle(ctx context.Context, box string) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil || len(strings.Fields(out)) > 0 {
-		return
-	}
-	cur, err := a.expiry(ctx, box)
-	if err != nil {
-		a.warn(fmt.Sprintf("box: warning: reading expiry of %s: %v", box, err))
-		return
-	}
-	if _, ok := jobrun.EndedExpiry(cur, jobStart(job), a.Now(), idleTTL); !ok {
 		return
 	}
 	if err := a.setExpiry(ctx, box, idleTTL); err != nil {

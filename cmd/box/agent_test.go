@@ -195,7 +195,7 @@ func TestJobsListsNewestFirst(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{expiresKey: "2026-11-24T12:00:00Z"}}}, script: "cancelled 130\n"}
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running"}}, script: "cancelled 130\n"}
 	a, _ := testApp(f)
 	ok, code, err := a.Cancel(context.Background(), "my-repo.20261123-120000-0001")
 	if err != nil || !ok || code != 130 {

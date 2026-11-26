@@ -262,7 +262,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("cancel %s: bad exit code %q", job, f[1])
 	}
 	if f[0] == "cancelled" {
-		a.markIdle(ctx, box, job)
+		a.markIdle(ctx, box)
 		a.markNotified(job, "cancel") // the agent cancelled it: no push of its end
 	}
 	return f[0] == "cancelled", code, nil

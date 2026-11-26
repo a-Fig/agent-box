@@ -25,8 +25,8 @@ import (
 
 const (
 	workRoot  = "/work"
-	idleTTL   = 2 * time.Hour // a box launched for a job, as box new gives it
-	jobTTL    = jobrun.JobTTL // while a job runs, as box run sets it
+	idleTTL   = 2 * time.Hour  // a box launched for a job, as box new gives it
+	jobTTL    = 24 * time.Hour // while a job runs, as box run sets it
 	startTime = 10 * time.Minute
 )
 
@@ -599,8 +599,9 @@ func (w *Watcher) boxBusy(box, own string) bool {
 }
 
 // jobExpirySlack is how far past its start plus jobTTL a job's own expiry
-// may be (jobrun.JobExpirySlack).
-const jobExpirySlack = jobrun.JobExpirySlack
+// may be: box run sets it a few seconds after the job's ID, and again once
+// the job runs.
+const jobExpirySlack = 10 * time.Minute
 
 // endedExpiry is the expiry a box gets once the job that started at started
 // has ended, and whether to write it: only to shorten an expiry no later
@@ -610,9 +611,17 @@ func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 	if !holds(in.CreatedAt, started) {
 		return time.Time{}, false
 	}
+	cur, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	if err != nil || cur.After(started.Add(jobTTL+jobExpirySlack)) {
+		return time.Time{}, false // not this job's expiry: a later job's, or set by hand
+	}
 	ttl := idleTTL
 	if in.Config[jobrun.ThrowawayKey] == "true" {
 		ttl = jobrun.EndedKeep // its result is in boxd's history too
 	}
-	return jobrun.EndedExpiry(in.Config[jobrun.ExpiresKey], started, now, ttl)
+	until := now.Add(ttl).Truncate(time.Second)
+	if !cur.After(until) {
+		return time.Time{}, false // already as short: box read the exit, or an extend
+	}
+	return until, true
 }

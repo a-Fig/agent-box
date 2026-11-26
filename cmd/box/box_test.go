@@ -444,7 +444,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file file config exec config exec exec config config exec" {
+	if got := f.callList(); got != "list project start file file config exec config exec exec config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -464,7 +464,7 @@ func TestRunRetriesExpiryOnETagRace(t *testing.T) {
 	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := strings.Count(f.callList(), "config"); got != 6 { // 2 lost, the start's, the run's, the idle read and write
+	if got := strings.Count(f.callList(), "config"); got != 5 { // 2 lost, the start's, the run's, the idle one
 		t.Errorf("config calls = %d: %s", got, f.callList())
 	}
 }
@@ -476,7 +476,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config exec config exec exec config config exec exec config delete" {
+	if got := f.callList(); got != "list project launch file file config exec config exec exec config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -783,50 +783,6 @@ func TestRunKeepsJobExpiryWhileAnotherJobRuns(t *testing.T) {
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
 		t.Errorf("expiry = %q, want the 24h job expiry kept", got)
-	}
-}
-
-// An extend from the dashboard while a job runs outlives the job: box
-// shortens only the job's own 24h expiry, as boxd does (#185).
-func TestEndedJobKeepsAnExtend(t *testing.T) {
-	const job = "my-repo.20261123-120000-0001"
-	own, ext := "2026-11-24T12:00:05Z", "2026-11-24T16:00:00Z"
-	for name, tc := range map[string]struct {
-		expires, want string
-		keep          time.Duration
-		throwaway     bool
-		gone          bool
-	}{
-		"idle, own expiry":            {expires: own, want: "2026-11-23T14:00:00Z"},
-		"idle, extended":              {expires: ext, want: ext},
-		"throwaway kept, own expiry":  {expires: own, want: "2026-11-23T12:30:00Z", keep: endedKeep, throwaway: true},
-		"throwaway kept, extended":    {expires: ext, want: ext, keep: endedKeep, throwaway: true},
-		"throwaway deleted, own":      {expires: own, throwaway: true, gone: true},
-		"throwaway deleted, extended": {expires: ext, want: ext, throwaway: true},
-	} {
-		f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{expiresKey: tc.expires}}}}
-		a, out := testApp(f)
-		a.KeepEnded = tc.keep
-		if tc.throwaway {
-			a.cleanup(context.Background(), "my-repo", job, true)
-		} else {
-			a.markIdle(context.Background(), "my-repo", job)
-		}
-		if tc.gone {
-			if f.names() != "" {
-				t.Errorf("%s: boxes = %q, want it deleted", name, f.names())
-			}
-			continue
-		}
-		if f.names() != "my-repo" {
-			t.Fatalf("%s: box deleted\n%s", name, out)
-		}
-		if got := f.inst("my-repo").Config[expiresKey]; got != tc.want {
-			t.Errorf("%s: expiry = %q, want %q\n%s", name, got, tc.want, out)
-		}
-		if tc.throwaway && tc.expires == ext && !strings.Contains(out.String(), "keeping my-repo until 2026-11-24 16:00 UTC, as it was extended") {
-			t.Errorf("%s: output = %q", name, out)
-		}
 	}
 }
 
