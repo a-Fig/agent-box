@@ -7,12 +7,17 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/jobrun"
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 func TestEndedExpiry(t *testing.T) {
 	started := t0                              // the job's start
 	own := started.Add(jobTTL + 5*time.Second) // what box run set
 	now := started.Add(time.Hour)              // the job ended an hour in
+	held := func(in Instance, until time.Time) Instance {
+		in.Config[mode.HoldKey] = until.Format(time.RFC3339)
+		return in
+	}
 	box := func(throwaway bool, expires time.Time, created time.Time) Instance {
 		in := inst("w", "Running", "small", created)
 		in.Config["user.expires"] = expires.Format(time.RFC3339)
@@ -31,6 +36,8 @@ func TestEndedExpiry(t *testing.T) {
 		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), time.Time{}},
 		"extended from the page":      {box(true, own.Add(4*time.Hour), started), time.Time{}},
 		"another box of that name":    {box(true, own, started.Add(time.Hour)), time.Time{}},
+		"held past the keep":          {held(box(true, own, started), now.Add(3*time.Hour)), now.Add(3 * time.Hour)},
+		"held, but not that long":     {held(box(true, own, started), now.Add(time.Minute)), now.Add(30 * time.Minute)},
 	} {
 		got, ok := endedExpiry(tc.in, started, now)
 		if ok != !tc.want.IsZero() || (ok && !got.Equal(tc.want)) {

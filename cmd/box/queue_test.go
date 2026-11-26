@@ -317,6 +317,18 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 	}
 }
 
+// A kept throwaway a person extended isn't kept for room: it is held (#198).
+func TestHeldThrowawayIsntTakenForRoom(t *testing.T) {
+	soon := "2026-11-23T12:20:00Z"
+	f := &fakePC{t: t, kept: map[string]bool{"held-0001": true}, insts: []instance{
+		{Name: "held-0001", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: soon, mode.HoldKey: soon}},
+	}}
+	a, _ := testApp(f)
+	if kept := a.keptThrowaways(context.Background(), f.insts); len(kept) != 0 {
+		t.Errorf("kept = %v", kept)
+	}
+}
+
 // A launch that deleting every kept throwaway still couldn't fit leaves them
 // alone, for their own box pull (#87).
 func TestKeptThrowawaysStayWhenTheyCantMakeRoom(t *testing.T) {

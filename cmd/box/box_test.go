@@ -444,7 +444,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file file config exec config exec exec config exec" {
+	if got := f.callList(); got != "list project start file file config config exec config config exec exec config config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -452,6 +452,24 @@ func TestRunReusesRepoBox(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "ok\n") || !strings.Contains(out.String(), "job my-repo.20261123-120000-0001") {
 		t.Errorf("output = %q", out)
+	}
+}
+
+// A box a person extended (mode.HoldKey) keeps that time through a job's
+// start and end: box writes the later of its own deadline and the hold (#198).
+func TestRunKeepsTheHold(t *testing.T) {
+	for hold, want := range map[string]string{
+		"2026-11-23T18:00:00Z": "2026-11-23T18:00:00Z", // later than the 2h idle expiry
+		"2026-11-23T13:00:00Z": "2026-11-23T14:00:00Z", // passed by then
+	} {
+		f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{mode.HoldKey: hold}}}, log: "ok\n", exit: "0\n"}
+		a, out := testApp(f)
+		if r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}}); err != nil || r.Code != 0 {
+			t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
+		}
+		if got := f.inst("my-repo").Config[expiresKey]; got != want {
+			t.Errorf("held until %s: expiry after the job = %q, want %q", hold, got, want)
+		}
 	}
 }
 
@@ -464,7 +482,7 @@ func TestRunRetriesExpiryOnETagRace(t *testing.T) {
 	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := strings.Count(f.callList(), "config"); got != 5 { // 2 lost, the start's, the run's, the idle one
+	if got := strings.Count(f.callList(), "config"); got != 10 { // each a read of the hold and a write: 2 lost, the start's, the run's, the idle one
 		t.Errorf("config calls = %d: %s", got, f.callList())
 	}
 }
@@ -476,7 +494,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config exec config exec exec config exec exec delete" {
+	if got := f.callList(); got != "list project launch file file config config exec config config exec exec config config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -576,6 +594,9 @@ func TestNewSetsExpiry(t *testing.T) {
 	}
 	if exp := f.insts[0].Config["user.expires"]; exp != "2026-11-23T20:00:00Z" {
 		t.Errorf("user.expires = %q", exp)
+	}
+	if hold := f.insts[0].Config[mode.HoldKey]; hold != "2026-11-23T20:00:00Z" {
+		t.Errorf("box new's TTL doesn't hold the box: %s = %q", mode.HoldKey, hold)
 	}
 	if _, err := a.New(context.Background(), "Bad;name", 0, "", ""); err == nil {
 		t.Error("bad name accepted")

@@ -119,7 +119,7 @@ The same set everywhere, since everywhere is the same page.
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
 | Delete a box | `incus delete --force`, after a confirm on the page |
-| Extend a box | adds 1h, 4h or 24h to `user.expires`; a job that ends afterwards resets it (#198, 2026-11-25) |
+| Extend a box | adds 1h, 4h or 24h to `user.expires` and holds the box until then (`user.box.hold-until`): a job's end or a launch short of room won't take that time (#198) |
 | Move a queued job to the front | reorders boxd's queue (docs/queue.md) |
 | Cancel a queued job | takes it out of the queue and deletes its snapshot, after a confirm on the page |
 
@@ -330,7 +330,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. |
 | `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
 | `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
-| `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
+| `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |

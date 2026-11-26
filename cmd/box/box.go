@@ -269,9 +269,10 @@ func (a *App) New(ctx context.Context, name string, ttl time.Duration, size, rea
 			return "", err
 		}
 	}
-	var extra []string
+	// box new's TTL is the person's own ask, so it holds the box (mode.HoldKey).
+	extra := []string{"-c", mode.HoldKey + "=" + a.Now().Add(ttl).UTC().Format(time.RFC3339)}
 	if reason != "" {
-		extra = []string{"-c", reasonKey + "=" + reason}
+		extra = append(extra, "-c", reasonKey+"="+reason)
 	}
 	if err := a.launch(ctx, name, ttl, false, sz, extra...); err != nil {
 		return name, err
@@ -379,13 +380,14 @@ func (a *App) beingCreated(in instance) bool {
 // since they hold 8GiB of the project's memory and would block the next one:
 // stopped ones the tray marked (reclaimable) or that are past startup, and
 // running ones past startup that run no job. Otherwise a running, paused or
-// starting GPU box makes it return errGPUBusy.
+// starting GPU box makes it return errGPUBusy. A throwaway a person extended
+// (mode.Held) isn't deleted.
 func (a *App) claimGPU(ctx context.Context, insts []instance, except string) error {
 	for _, in := range insts {
 		if in.Name == except || !mode.IsGPU(in.Config) {
 			continue
 		}
-		throwaway := in.Config[throwawayKey] == "true"
+		throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
 		if in.Status == "Stopped" {
 			switch {
 			case a.beingCreated(in):
@@ -478,11 +480,12 @@ var projectLimitRefusal = jobrun.LimitRefusal
 // reclaimable says whether in is a throwaway GPU box the tray stopped in My
 // PC. It is kept for GPUStoppedTTL so box job can say why its job
 // died, but it still holds a GPU box's memory and disk against the project's
-// caps, so any launch that would not fit deletes it first.
+// caps, so any launch that would not fit deletes it first, unless a person
+// extended it (mode.Held at now).
 // Only the tray's mark counts: Incus creates a box stopped before starting
 // it, so an unmarked stopped box may be one a run is launching.
-func reclaimable(in instance) bool {
-	return in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true" && in.Config[mode.StoppedKey] != ""
+func reclaimable(in instance, now time.Time) bool {
+	return !mode.Held(in.Config, now).After(now) && in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true" && in.Config[mode.StoppedKey] != ""
 }
 
 // reclaim deletes every reclaimable box and says whether there was one.
@@ -493,7 +496,7 @@ func (a *App) reclaim(ctx context.Context) bool {
 	}
 	any := false
 	for _, in := range insts {
-		if reclaimable(in) {
+		if reclaimable(in, a.Now()) {
 			a.removeQuietly(ctx, in.Name)
 			any = true
 		}
@@ -524,13 +527,14 @@ exit 0
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
 // kept box is a running throwaway whose expiry is within the keep window,
 // with no job running and one that ended; a throwaway still being set up
-// for its job has none ended.
+// for its job has none ended. A held one (mode.Held) isn't kept: a person
+// extended it.
 func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 	var out []instance
 	for _, in := range insts {
 		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
 		if in.Config[throwawayKey] != "true" || in.Status != "Running" || err != nil ||
-			exp.After(a.Now().Add(endedKeep+time.Minute)) {
+			exp.After(a.Now().Add(endedKeep+time.Minute)) || mode.Held(in.Config, a.Now()).After(a.Now()) {
 			continue
 		}
 		look, cancel := a.probeCtx(ctx) // a box frozen since the list would hold the exec
@@ -634,16 +638,16 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	return err
 }
 
-func (a *App) expiryConfig(ttl time.Duration) string {
-	return expiresKey + "=" + a.Now().Add(ttl).UTC().Format(time.RFC3339)
-}
-
+// setExpiry sets the box's expiry to now plus ttl, or to its hold if that is
+// later (mode.Held): a person's extend outlives a job's start and end.
 // It retries a lost write race (jobrun.RetryETag): the tray sets a box's CPU
 // limits whenever they differ from the mode's, within a tick of a launch in
 // Full, just when box sets the job's expiry, or on any mode change.
 func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
 	return jobrun.RetryETag(ctx, func() error {
-		_, err := a.incusOK(ctx, "config", "set", a.target(box), a.expiryConfig(ttl))
+		hold, _ := a.incusOK(ctx, "config", "get", a.target(box), mode.HoldKey)
+		until := mode.Held(map[string]string{mode.HoldKey: strings.TrimSpace(hold)}, a.Now().Add(ttl))
+		_, err := a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+until.UTC().Format(time.RFC3339))
 		return err
 	})
 }

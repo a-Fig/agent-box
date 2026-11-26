@@ -167,7 +167,7 @@ func TestExtendRetryReadsTheNewExpiry(t *testing.T) {
 	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 200 {
 		t.Fatalf("extend: %d %s", code, b)
 	}
-	if last := r.f.cli[len(r.f.cli)-1]; last != "config set w user.expires=2026-11-26T04:00:00Z" {
+	if last := r.f.cli[len(r.f.cli)-1]; last != "config set w user.expires=2026-11-26T04:00:00Z user.box.hold-until=2026-11-26T04:00:00Z" {
 		t.Errorf("written after the lost race: %s", last)
 	}
 }

@@ -91,7 +91,7 @@ func withoutDisk(proj Project, gone []Instance) Project {
 // that needs its room comes first, as box's own claimGPU deletes an idle GPU
 // throwaway. A box launched for a job that hasn't started yet isn't one of
 // these: no job has ended there, and its launch expiry is 2h unless box run
-// was given a shorter --ttl.
+// was given a shorter --ttl. Nor is one a person extended (mode.Held).
 func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	busy := map[string]bool{}
 	for _, j := range w.live {
@@ -101,7 +101,8 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	for _, in := range ins {
 		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		if in.Config[jobrun.ThrowawayKey] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
-			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || mode.Held(in.Config, now).After(now) ||
+			w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
 			continue
 		}
 		out = append(out, in)
@@ -456,11 +457,11 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", tmp, box+remote+".meta"); err != nil {
 		return fmt.Errorf("push the .meta: %w", err)
 	}
-	// The tray sets a new box's CPU limits within a tick of its launch, just
-	// now (jobrun.RetryETag).
-	if err := jobrun.RetryETag(ctx, func() error {
-		_, err := w.Incus.CLI(ctx, "", "config", "set", box, jobrun.ExpiresKey+"="+now.Add(jobTTL).Format(time.RFC3339))
-		return err
+	// The job's 24h, or the box's hold if later. SetExpiryIf retries the ETag
+	// race with the tray, which sets a new box's CPU limits within a tick of
+	// its launch, just now.
+	if _, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
+		return mode.Held(in.Config, now.Add(jobTTL)), true
 	}); err != nil {
 		return fmt.Errorf("set the expiry: %w", err)
 	}
@@ -605,8 +606,8 @@ const jobExpirySlack = 10 * time.Minute
 
 // endedExpiry is the expiry a box gets once the job that started at started
 // has ended, and whether to write it: only to shorten an expiry no later
-// than that job's own (a later job's 24h, or an extend, is left alone), on
-// the job's box.
+// than that job's own (a later job's 24h, or one set by hand, is left alone),
+// on the job's box, and never past its hold (mode.Held).
 func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 	if !holds(in.CreatedAt, started) {
 		return time.Time{}, false
@@ -619,7 +620,7 @@ func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
 	if in.Config[jobrun.ThrowawayKey] == "true" {
 		ttl = jobrun.EndedKeep // its result is in boxd's history too
 	}
-	until := now.Add(ttl).Truncate(time.Second)
+	until := mode.Held(in.Config, now.Add(ttl).Truncate(time.Second))
 	if !cur.After(until) {
 		return time.Time{}, false // already as short: box read the exit, or an extend
 	}
