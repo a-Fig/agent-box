@@ -426,6 +426,18 @@ func TestRunReportsBoxFrozenMidRun(t *testing.T) {
 	}
 }
 
+func TestRunReportsBoxFrozenAtStart(t *testing.T) {
+	f := &fakePC{t: t, freezeStart: true, insts: []instance{{Name: "my-repo", Status: "Running"}}}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}})
+	if err != nil || r.State != statePaused || r.Code != exitPaused || r.Job == "" {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if !strings.Contains(out.String(), "is paused (the PC's owner is using it)") || strings.Contains(out.String(), "Instance is frozen") {
+		t.Errorf("output lacks the paused message or leaks incus's error:\n%s", out)
+	}
+}
+
 func TestAttachReportsFrozenGPUBox(t *testing.T) {
 	f := &fakePC{t: t, block: true, insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{mode.SizeKey: mode.GPUSize}}}}
 	a, out := testApp(f)

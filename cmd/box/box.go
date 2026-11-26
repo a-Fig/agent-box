@@ -1022,13 +1022,19 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		// The tray stops GPU boxes in My PC, and another run may then
 		// delete one. Only then does the job surely not run: a frozen box's
 		// job may resume, so it keeps its job ID below.
-		if sz.GPU {
-			if insts, lerr := a.list(ctx); lerr == nil {
-				if in := find(insts, box); in == nil || in.Status == "Stopped" {
-					fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
-					r.State, r.Code = statePaused, exitPaused
-					return r, nil
+		if insts, lerr := a.list(ctx); lerr == nil {
+			if in := find(insts, box); in != nil && in.Status == "Frozen" {
+				if sz.GPU {
+					fmt.Fprintln(a.Err, pausedGPU(job))
+				} else {
+					fmt.Fprintln(a.Err, pausedMidRun(job))
 				}
+				r.State, r.Code = statePaused, exitPaused
+				return r, nil
+			} else if sz.GPU && (in == nil || in.Status == "Stopped") {
+				fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
+				r.State, r.Code = statePaused, exitPaused
+				return r, nil
 			}
 		}
 		if o.New {
