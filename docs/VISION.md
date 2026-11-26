@@ -1,8 +1,7 @@
 # Vision
 
 _Draft, 2026-11-26, from Tyler's description of the project. It records what the project is meant to
-become; `DESIGN.md` records how today's version works. The name "agent-box" is a placeholder (see
-[The name](#the-name))._
+become; `DESIGN.md` records how today's version works._
 
 ## What it is
 
@@ -121,16 +120,22 @@ Found 2026-11-26, from their own pages; none tried.
 What none of these appears to do: use a machine its owner still uses every day, and give that owner
 control.
 
+## Priorities
+
+Tyler's calls, 2026-11-26:
+
+- **Spare-PC owners first.** People with an idle gaming PC or an old laptop. Recipes and docs for
+  their machines come before homelab or cloud-budget cases.
+- **More compute before cloud agents.** Mac, wiped laptop and VPS recipes come before reaching
+  cloud-sandbox agents.
+- **Lending is a side effect.** It can happen, but the design stays single-owner.
+
 ## Open questions
 
-- Who is it for first: people like Tyler with a spare gaming PC, homelab people, or teams with cloud
-  budgets?
-- Is lending compute to friends (and borrowing theirs) a core feature or a side effect?
-- Should cloud agents (the hardest reach and trust case) come before more compute kinds?
 - Does "connect agents to compute" stop at running commands, or grow into running agents there too?
 
 ## The name
 
-"agent-box" describes today's version (agents get boxes) but not the bridge, and at least six other
-projects already use "agentbox" for agent sandboxes (2026-11-26). The CLI and MCP tools can stay `box`
-under any name. Candidates and the reasoning are in the PR or issue that settles it.
+"agent-box" stays for now (Tyler, 2026-11-26), and may change later. It describes today's version
+(agents get boxes) more than the bridge, and at least six other projects use "agentbox" for agent
+sandboxes (checked 2026-11-26). The CLI and MCP tools are `box` and could keep that under any name.
