@@ -1,0 +1,12 @@
+# Project Fano
+
+> Project Fano (repo: `a-Fig/agent-box`) turns a spare Linux server or Windows PC into on-demand, disposable Incus Linux containers that coding agents use for heavy test suites, `-race`, and builds. Its CLI and MCP server is `box`.
+
+Project Fano is in early development and built for one setup first. Nothing is sent to `fano.afig.dev` by `box`, `boxd`, or `boxtray`; all worktree snapshots and logs stay between your client machines and your own Incus host.
+
+## Links
+
+- [Repository and README](https://github.com/a-Fig/agent-box): overview, quick start, and `box` CLI / MCP reference
+- [Join a host (for coding agents)](https://raw.githubusercontent.com/a-Fig/agent-box/main/docs/agents/join.md): connect a client machine to an existing host
+- [install.sh](https://raw.githubusercontent.com/a-Fig/agent-box/main/install.sh): Linux and macOS installer
+- [install.ps1](https://raw.githubusercontent.com/a-Fig/agent-box/main/install.ps1): Windows PowerShell installer
