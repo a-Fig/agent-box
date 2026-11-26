@@ -193,9 +193,20 @@ func (s *Server) deleteBox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "createdAt names the box")
 		return
 	}
-	err := s.W.DeleteBox(r.Context(), r.PathValue("name"), b.CreatedAt, s.device(r))
+	err := s.W.DeleteBox(r.Context(), r.PathValue("name"), b.CreatedAt, b.Confirmed, s.device(r))
+	var nc *needsConfirmError
+	if errors.As(err, &nc) {
+		writeJSON(w, http.StatusConflict, dash.DeleteConflictBody{Error: nc.warning.Message(r.PathValue("name")), Code: dash.CodeNeedsConfirm, Warning: nc.warning})
+		return
+	}
 	writeControl(w, err, func() { w.WriteHeader(http.StatusNoContent) })
 }
+
+// needsConfirmError is an unconfirmed delete the guard refused (#247): the
+// box has work the page had not shown when it asked.
+type needsConfirmError struct{ warning dash.DeleteWarning }
+
+func (e *needsConfirmError) Error() string { return "delete needs confirmation" }
 
 func (s *Server) extendBox(w http.ResponseWriter, r *http.Request) {
 	var b dash.ExtendBody
@@ -330,18 +341,206 @@ func (w *Watcher) boxFor(name string, createdAt time.Time) (dash.Box, error) {
 	return b, nil
 }
 
+// deleteRisk is the warning for deleting b now, from the jobs boxd knows
+// ran on this instance: live ones, the history's bounded check, and queued
+// jobs a start has begun for (#247). Call it once the box has been probed,
+// so it also counts a job that started after the last poll.
+func (w *Watcher) deleteRisk(b dash.Box) dash.DeleteWarning {
+	now := w.Now().UTC()
+	var warn dash.DeleteWarning
+	if w.Hist != nil {
+		warn = w.Hist.DeleteRiskOn(b, now)
+	}
+	seen := map[string]bool{}
+	for _, j := range warn.Active {
+		seen[j.Key] = true
+	}
+	for _, j := range warn.Recent {
+		seen[j.Key] = true
+	}
+	add := func(j dash.Job, onBox bool) {
+		if !onBox || seen[j.Key] {
+			return
+		}
+		switch active, recent := j.DeleteClass(now); {
+		case active:
+			seen[j.Key] = true
+			warn.Active = append(warn.Active, j)
+		case recent:
+			seen[j.Key] = true
+			warn.Recent = append(warn.Recent, j)
+		}
+	}
+	w.mu.Lock()
+	live := make([]dash.Job, 0, len(w.live))
+	for _, j := range w.live {
+		live = append(live, *j)
+	}
+	w.mu.Unlock()
+	for _, j := range live {
+		add(j, ranOn(j, b))
+	}
+	if w.Queue != nil {
+		for _, j := range w.Queue.StartingFor(b.Name) {
+			add(j, j.Box == b.Name)
+		}
+	}
+	return warn
+}
+
+var errProbe = errors.New("the box's jobs could not be read")
+
+// classifyScan turns one box's fresh scan into the delete warning for this
+// request only. It writes nothing: folding the scan into live and the
+// history (applyJobs) would let an earlier poll whose scan predates a
+// newly started job settle that job as lost afterwards.
+func (w *Watcher) classifyScan(in Instance, jobs []scanned) dash.DeleteWarning {
+	now := w.Now().UTC()
+	var warn dash.DeleteWarning
+	for _, s := range jobs {
+		name, id, started := jobStart(s.Job)
+		if s.Meta != nil && s.Meta.QueuedAt != "" {
+			if t, err := time.Parse(time.RFC3339, s.Meta.StartedAt); err == nil {
+				started = t.UTC()
+			}
+		}
+		if name != in.Name || started.IsZero() || !holds(in.CreatedAt, started) {
+			continue
+		}
+		j := w.newJob(dash.JobKey(in.Name, id, started), id, in.Name, started, in, s.Meta)
+		if s.Tail != "" {
+			j.Tail = s.Tail
+		}
+		switch s.State {
+		case "done":
+			j.State, j.Exit, j.EndedAt = dash.JobDone, s.Exit, s.EndedAt
+			if j.EndedAt == nil {
+				j.EndedAt = &now
+			}
+		case "running", "starting":
+			j.State = dash.JobRunning
+			if in.Status == "Frozen" {
+				j.State = dash.JobPaused
+			}
+		// A "died" job's wrapper is gone with no exit written: it is not
+		// active, however old its log is. Only live and history classify a
+		// loss as recent, so a dead log left on a repo box can't warn forever.
+		default:
+			continue
+		}
+		switch active, recent := j.DeleteClass(now); {
+		case active:
+			warn.Active = append(warn.Active, *j)
+		case recent:
+			warn.Recent = append(warn.Recent, *j)
+		}
+	}
+	return warn
+}
+
+// probeDelete scans one box fresh for a delete and classifies the scan
+// (classifyScan); it changes no job state. Running boxes go through
+// scanAll, which drops a scan whose box was replaced while it was read.
+// A Frozen box's processes are paused, so it is read with a short exec
+// directly; failing that, its state is unknown. A Stopped box starts no
+// jobs and needs no probe. Any other status is transient or unknown, so
+// it is errProbe too: never a warningless delete.
+func (w *Watcher) probeDelete(ctx context.Context, in Instance) (dash.DeleteWarning, error) {
+	switch in.Status {
+	case "Running":
+		scans := w.scanAll(ctx, []Instance{in})
+		jobs, ok := scans[in.Name]
+		if !ok {
+			return dash.DeleteWarning{}, errProbe
+		}
+		return w.classifyScan(in, jobs), nil
+	case "Frozen":
+		var skip map[string]bool
+		if w.Hist != nil {
+			skip = w.Hist.EndedOn(in)
+		}
+		look, cancel := context.WithTimeout(ctx, execTimeout)
+		defer cancel()
+		out, err := w.Incus.Exec(look, in.Name, scanScript, slices.Collect(mapKeys(skip))...)
+		if err != nil {
+			return dash.DeleteWarning{}, errProbe
+		}
+		return w.classifyScan(in, parseScan(out, skip)), nil
+	case "Stopped":
+		return dash.DeleteWarning{}, nil
+	}
+	return dash.DeleteWarning{}, errProbe
+}
+
+func mergeWarning(warn *dash.DeleteWarning, more dash.DeleteWarning) {
+	seen := map[string]bool{}
+	for _, j := range warn.Active {
+		seen[j.Key] = true
+	}
+	for _, j := range warn.Recent {
+		seen[j.Key] = true
+	}
+	for _, j := range more.Active {
+		if !seen[j.Key] {
+			seen[j.Key] = true
+			warn.Active = append(warn.Active, j)
+		}
+	}
+	for _, j := range more.Recent {
+		if !seen[j.Key] {
+			seen[j.Key] = true
+			warn.Recent = append(warn.Recent, j)
+		}
+	}
+}
+
 // DeleteBox deletes a box after checking it is the one the page saw. Its
-// running jobs become lost on the next poll.
-func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Time, by string) error {
-	if _, err := w.boxFor(name, createdAt); err != nil {
+// running jobs become lost on the next poll. An unconfirmed delete is
+// refused with the warning when the box has active or recent jobs (#247);
+// a confirmed one deletes as before.
+//
+// The warning is not read off the last poll: a direct box run can start
+// after it, and a job can freeze before it. Before a warningless delete,
+// DeleteBox scans a Running or Frozen box fresh and classifies the scan
+// for this request (probeDelete — read-only, no live or history writes),
+// rechecks the box's identity after a successful probe, and merges the
+// scan with the known jobs. Known work warns. When the box's job state
+// cannot be verified at all, the answer is a retryable error: no delete,
+// and no warning to confirm past.
+//
+// What the guard can guarantee is still bounded by #217: Incus deletes by
+// name with no conditional delete. A job or a replacement can arrive after
+// the last check and before or during the delete call; that arrival is
+// not covered.
+func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Time, confirmed bool, by string) error {
+	b, err := w.boxFor(name, createdAt)
+	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
-	// Incus has no compare-and-delete; check again just before, so the window
-	// for a reuse of the name is the length of one call.
-	if _, err := w.checkCreated(ctx, name, createdAt); err != nil {
+	// Incus has no compare-and-delete; check identity again just before, so
+	// the window for a reuse of the name is the length of one call.
+	in, err := w.checkCreated(ctx, name, createdAt)
+	if err != nil {
 		return err
+	}
+	if !confirmed {
+		probed, probeErr := w.probeDelete(ctx, in)
+		if probeErr == nil && (in.Status == "Running" || in.Status == "Frozen") {
+			// The probe took time; the box it read must still be this one.
+			if _, err := w.checkCreated(ctx, name, createdAt); err != nil {
+				return err
+			}
+		}
+		warn := w.deleteRisk(b)
+		mergeWarning(&warn, probed)
+		if warn.Any() {
+			return &needsConfirmError{warning: warn}
+		}
+		if probeErr != nil {
+			return &controlError{http.StatusBadGateway, dash.CodeIncus, "couldn't check " + name + " for jobs, so nothing was deleted; try again"}
+		}
 	}
 	if err := w.delete(ctx, name); err != nil {
 		return err

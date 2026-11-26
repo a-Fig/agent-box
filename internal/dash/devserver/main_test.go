@@ -127,7 +127,12 @@ func TestControls(t *testing.T) {
 func TestDeleteLosesItsJobs(t *testing.T) {
 	s, ts := start(t, "busy")
 	made := s.sc.State.Boxes[s.findBox("lantern")].CreatedAt.Format(time.RFC3339)
-	if status, _, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`"}`, true); status != 204 {
+	// Unconfirmed, the running job refuses; confirmed, it deletes as before (#247).
+	status, e, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`"}`, true)
+	if status != 409 || e.Code != dash.CodeNeedsConfirm {
+		t.Fatalf("unconfirmed delete: %d %q", status, e.Code)
+	}
+	if status, _, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`","confirmed":true}`, true); status != 204 {
 		t.Fatalf("delete: %d", status)
 	}
 	if s.findBox("lantern") >= 0 {

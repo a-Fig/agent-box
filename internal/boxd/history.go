@@ -364,6 +364,30 @@ func (h *History) dropOldTails() {
 	}
 }
 
+// DeleteRiskOn is the delete warning from the recorded jobs on b: one pass
+// over the history that keeps only the jobs that count (#247), so a delete
+// never copies or sorts the whole history.
+func (h *History) DeleteRiskOn(b dash.Box, now time.Time) dash.DeleteWarning {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var w dash.DeleteWarning
+	for _, j := range h.jobs {
+		if !ranOn(*j, b) {
+			continue
+		}
+		switch active, recent := j.DeleteClass(now); {
+		case active:
+			w.Active = append(w.Active, *j)
+		case recent:
+			w.Recent = append(w.Recent, *j)
+		}
+	}
+	byStart := func(x, y dash.Job) int { return y.StartedAt.Compare(x.StartedAt) }
+	slices.SortFunc(w.Active, byStart)
+	slices.SortFunc(w.Recent, byStart)
+	return w
+}
+
 // Job returns a recorded job.
 func (h *History) Job(key string) (dash.Job, bool) {
 	h.mu.Lock()

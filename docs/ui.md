@@ -129,7 +129,7 @@ The same set everywhere, since everywhere is the same page.
 |---|---|
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
-| Delete a box | `incus delete --force`, after a confirm on the page |
+| Delete a box | `incus delete --force`. The page confirms only when a job on that box is starting, running or paused, or ended within the last 2 minutes (#247); otherwise the first click deletes. boxd rechecks on an unconfirmed request and refuses with the warning when work appeared after the page's last update |
 | Extend a box | adds 1h, 4h or 24h to `user.expires` and holds the box until then (`user.box.hold-until`): a job's end or a launch short of room won't take that time (#198) |
 | Move a queued job to the front | reorders boxd's queue (docs/queue.md) |
 | Cancel a queued job | takes it out of the queue and deletes its snapshot, after a confirm on the page |
@@ -342,7 +342,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |
 | `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. |
 | `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
-| `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
+| `POST /api/boxes/{name}/delete` | `{createdAt, confirmed?}`. 204. Its running jobs become `lost`. Without `confirmed`, boxd scans a Running or Frozen box fresh and classifies the scan for that request (read-only; a job can start or freeze after the last poll), rechecks identity after the scan, and answers 409 `needs-confirmation` with `{error, code, warning:{active, recent}}` when that box instance has a starting, running or paused job, or one that ended within 2 minutes. When the scan cannot establish the box's state — a probe failure, or a status besides Running, Frozen or Stopped — and no work is known, it answers 502 `incus` and deletes nothing, so the page retries rather than confirming past an unknown; with `confirmed` it deletes as before. Incus deletes by name: a job or a replacement can arrive after the final recheck and before or during the delete call, and that arrival is not covered (#217) |
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
