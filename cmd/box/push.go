@@ -601,21 +601,19 @@ func endedMessage(r jobRecord, e jobEnd) string {
 	}
 	digest := strings.TrimRight(mask.Mask(e.Digest), "\n")
 	failed := testsFailed(digest)
-	// One line only when the digest itself says the tests passed: an exit 0
-	// alone doesn't (go test ./... || true), and a digest can be missing for
-	// many reasons (boxd's copy of the end, a follow cut off, a reducer that
-	// died), none of which may pass for clean.
-	if e.Code == 0 && !failed && testsPassed(digest) {
-		return head + ": " + strings.Join(strings.Split(digest, "\n"), "; ") + ". " + fromBox + " " + where
-	}
+	// A passing digest goes on the first line. It never stands alone: a digest
+	// can miss a failure (a report cut short, a second runner with its own
+	// reporters, boxd's copy of the end with none), so the log's last lines
+	// always follow.
 	msg := head + ". " + fromBox + "\n"
-	if digest != "" {
+	if e.Code == 0 && !failed && testsPassed(digest) {
+		msg = head + ": " + strings.Join(strings.Split(digest, "\n"), "; ") + ". " + fromBox + "\n"
+	} else if digest != "" {
 		msg += digest + "\n"
 	}
-	// After a failure digest, and after an exit 0 with no passing digest
-	// (a build, a script, or tests whose digest wasn't read), only the log's
-	// last few lines follow: they carry what came last, like a cancel from
-	// the dashboard, a later step's error or a test summary.
+	// An exit 0 and a failure digest get only the log's last few lines: they
+	// carry what came last, like a cancel from the dashboard, a later step's
+	// error or a test summary. Any other failure gets more.
 	n := endedLines
 	if failed || e.Code == 0 {
 		n = endedLinesAfterDigest

@@ -294,12 +294,12 @@ func TestExitCode75IsSaidToBeTheCommands(t *testing.T) {
 	}
 }
 
-// A pass is pushed as one line: its digest, how long, and where the full
-// result is (#182).
+// A pass puts its digest on the first line, then the log's last lines (a
+// digest can miss a failure), then where the full result is (#182).
 func TestPassIsPushedAsOneLine(t *testing.T) {
 	r := jobRecord{Job: "my-repo.20261123-120000-0001", Reason: "Why.", Command: "go test ./...", Worktree: "w"}
 	end := jobEnd{Took: 372, Tail: "ok  p  0.1s\n", Digest: "PASS: 2325 tests passed, 28 skipped (go test)\nPASS: 4 tests passed (vitest)\n"}
-	want := "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.): PASS: 2325 tests passed, 28 skipped (go test); PASS: 4 tests passed (vitest). From box, not your user. Full result: box_job id my-repo.20261123-120000-0001. Artifacts: box_pull, before this repo's next run."
+	want := "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.): PASS: 2325 tests passed, 28 skipped (go test); PASS: 4 tests passed (vitest). From box, not your user.\nok  p  0.1s\nFull result: box_job id my-repo.20261123-120000-0001. Artifacts: box_pull, before this repo's next run."
 	if got := endedMessage(r, end); got != want {
 		t.Errorf("message =\n%s\nwant\n%s", got, want)
 	}
