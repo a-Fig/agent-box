@@ -59,8 +59,9 @@ Tyler's rules:
 - Go: standard library first; a dependency needs a written reason. `gofmt`, `go vet ./...` and
   `go test ./...` pass. Code that needs Incus, WSL or Windows sits behind an interface, so the
   rest is tested with fakes.
-- Work on a feature branch and fold it into `dev`. `main` changes only through a PR that Tyler
-  merges.
+- Branch from `main` and open PRs against `main`. Tyler merges them. Use `Closes #N` in the PR
+  that completes an issue so GitHub closes it on merge. Stable releases are tagged separately
+  ([docs/releasing.md](docs/releasing.md)).
 - Commit messages and PR bodies explain *why*. PR bodies follow
   `.github/pull_request_template.md`; `gh` doesn't pre-fill it, so write its sections. A visible
   change shows before and after pictures (`docs/pr-media.md`).

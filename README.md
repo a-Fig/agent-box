@@ -105,7 +105,7 @@ Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4,
 
 ## Website previews
 
-Run the preview command from a trusted checkout of `dev`, with `gh` and Wrangler signed in. Pass the PR number while staying on `dev`. The command prints a public preview link and a link pinned to this deployment.
+Run the preview command from a trusted checkout of `main`, with `gh` and Wrangler signed in. Pass the PR number while staying on `main`. The command prints a public preview link and a link pinned to this deployment.
 
 ```sh
 npm ci --prefix site
