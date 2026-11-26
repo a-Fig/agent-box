@@ -52,11 +52,12 @@ function place() {
 }
 
 // After each redraw: a replaced mark hands its tooltip to the mark now under the pointer that
-// showed it, or, if focus showed it, to the focused mark, with its text read again, so a figure
-// that moved shows its new value. With neither, it closes.
+// showed it, or, if the keyboard's focus showed it, to the focused mark (app.js puts the focus back
+// by data-key), with its text read again, so a figure that moved shows its new value. With
+// neither, it closes.
 function syncTip() {
   if (!at || at.isConnected) return;
-  const next = point ? document.elementFromPoint(point.x, point.y)?.closest?.("[data-tip]") : document.activeElement?.matches?.("[data-tip]") && document.activeElement;
+  const next = point ? document.elementFromPoint(point.x, point.y)?.closest?.("[data-tip]") : keyed();
   if (next) show(next, point);
   else hide();
 }
@@ -70,12 +71,15 @@ function rove(chart) {
 
 // A hint, added to an element's props: the tooltip's text, which screen readers get as the
 // element's description (its name stays its own). A word that does nothing else (term) becomes a
-// tab stop, so the keyboard can reach it, and is dotted underneath, so the eye can.
+// tab stop, so the keyboard can reach it, and is dotted underneath, so the eye can. Its data-key
+// lets a redraw put the focus back on it: term is that key where the same text shows more than
+// once on a page (one per box), or true to key it by its text.
 function hint(text, props = {}, term = false) {
   const out = { ...props, "data-tip": text, "aria-description": text.replace(/\n/g, " ") };
   if (term) {
     out.tabindex = 0;
     out.class = ((props.class || "") + " hint").trim();
+    out["data-key"] = "hint:" + (term === true ? text : term);
   }
   return out;
 }
@@ -104,14 +108,14 @@ document.addEventListener("pointerdown", (e) => {
   if (m) show(m, { x: e.clientX, y: e.clientY });
   else hide();
 });
-// The focused mark, however it was focused, is its chart's one tab stop. Its tooltip shows unless
-// the pointer is showing one and the focus isn't the keyboard's: a redraw puts the focus back on
-// the control clicked last, which mustn't take the tooltip from the hint being hovered.
+// The focused mark, however it was focused, is its chart's one tab stop. Its tooltip shows when
+// the keyboard focused it: a click focuses a button too, and a redraw or a closed dialog puts the
+// focus back on it, and neither should bring its hint back over the page.
 document.addEventListener("focusin", (e) => {
   const m = markOf(e);
   if (!m) return;
   chartOf(m)?.querySelectorAll("[data-tip]").forEach((o) => o.setAttribute("tabindex", o === m ? "0" : "-1"));
-  if (at !== m && (!point || m.matches(":focus-visible"))) show(m);
+  if (at !== m && m.matches(":focus-visible")) show(m);
 });
 document.addEventListener("focusout", (e) => markOf(e) === at && !point && hide());
 

@@ -105,7 +105,7 @@ const SIZE_HINTS = {
   large: "Hours large boxes existed: for big test suites and builds.",
   gpu: "Hours the GPU box existed: one at a time, with the PC's GPU.",
 };
-const REFUSED_HINT = "Runs box turned away: it exited 75 and nothing started. Each bar's tooltip says why: My PC, the limits full, or the GPU busy.";
+const REFUSED_HINT = "Runs box turned away: it exited 75 and nothing started, because of My PC, no room under the limits, or the GPU in use.";
 const QUEUED_HINT = "Runs that waited in the queue for room, counted when they joined it. They start by themselves once their size fits.";
 
 // Memory in use: a 2px line over a faint area. Use mostly sits far under the cap, so the scale

@@ -142,12 +142,15 @@ function drift(b, t) {
   const [newer, older, behind, ahead] = tb > tt ? [b, t, "tray", "boxd"] : [t, b, "boxd", "tray"];
   // Each updates itself only from a release, and only to a stable one (no "-nightly…" suffix).
   if (!older.tag) return { text: behind + " is a dev build, behind " + ahead, why: "A dev build doesn't update itself: install a release, or build both from the same commit." };
-  if (!newer.tag || newer.tag.includes("-")) return { text: ahead + " runs " + (newer.tag || "a dev build") + ", ahead of " + behind, why: "The hourly update installs only stable releases, so " + behind + " stays on " + older.tag + "." };
+  if (!newer.tag) return { text: ahead + " is a dev build, ahead of " + behind, why: "A dev build doesn't update itself, and " + behind + " follows stable releases only." };
+  if (newer.tag.includes("-")) return { text: ahead + " runs " + newer.tag + ", ahead of " + behind, why: "The hourly update installs only stable releases, so " + behind + " stays on " + older.tag + " until the next one." };
   // How long they have differed: since the later of boxd's start and the tray's last new build.
+  // A boxd restart starts the count again, so a tray stuck for days reads as pending for 2 hours
+  // after one; the warning comes back after that.
   const since = Math.max(b.since ? Date.parse(b.since) : 0, t.since ? Date.parse(t.since) : 0);
   const waited = since ? clock.now() - since : 0;
-  if (waited > BEHIND_WARN_MS) return { warn: true, text: behind + " still on " + older.tag + "; " + ahead + " has had " + newer.tag + " for " + dur(waited / 1000).split(" ")[0], why: behind + " checks for a release hourly, so it should have updated to " + newer.tag + " by now. Its log on the PC says why it hasn't." };
-  return { text: behind + " updates to " + newer.tag + " at its hourly check", why: behind + " checks for a new release hourly and installs it by itself." };
+  if (waited > BEHIND_WARN_MS) return { warn: true, text: behind + " still on " + older.tag + "; " + ahead + " has had " + newer.tag + " for " + dur(waited / 1000).split(" ")[0], why: behind + " checks for a stable release hourly, so it should have updated by now. Its log on the PC says why it hasn't." };
+  return { text: behind + " updates at its hourly check", why: behind + " checks for the latest stable release hourly and installs it by itself." };
 }
 
 function setDrawer(open) {

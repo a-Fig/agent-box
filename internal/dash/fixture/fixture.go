@@ -737,8 +737,8 @@ func buildFull(w *world) {
 	w.queued(orbit, 0, "fix/sync-retry", dash.RefusedFull, 2*time.Minute+40*time.Second)
 }
 
-// versions is boxd on release newer and the enforcer on older, a build behind, the two differing
-// since boxd started, behind ago.
+// versions puts boxd on release newer and the enforcer on release older, a build behind. They
+// have differed for behind: boxd started then, with the enforcer already on older.
 func (w *world) versions(newer, older string, behind time.Duration) (*dash.Version, *dash.Version) {
 	built := w.machine.Boxd.Time.Add(-3 * time.Hour)
 	since := w.now.Add(-behind) // boxd's start; the tray's key held its value already, so the same
