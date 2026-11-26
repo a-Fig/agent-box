@@ -398,10 +398,10 @@ var errNotIdle = errors.New("no longer idle")
 // stillIdle checks for running jobs, then reads the box again to verify its
 // UID, status, expiry and hold before each delete attempt.
 func (w *Watcher) stillIdle(ctx context.Context, in Instance) bool {
+	noRunningJobs := false
 	if in.Status == "Running" {
-		if out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot)); err != nil || strings.TrimSpace(string(out)) != "" {
-			return false
-		}
+		out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot))
+		noRunningJobs = err == nil && strings.TrimSpace(string(out)) == ""
 	}
 	ins, err := w.Incus.Instances(ctx)
 	if err != nil {
@@ -409,7 +409,7 @@ func (w *Watcher) stillIdle(ctx context.Context, in Instance) bool {
 	}
 	for _, current := range ins {
 		if current.Name == in.Name {
-			if boxUID(current) != boxUID(in) || current.Status != in.Status {
+			if boxUID(current) != boxUID(in) || (current.Status == "Running" && !noRunningJobs) {
 				return false
 			}
 			if in.Config[jobrun.ThrowawayKey] == "true" {
