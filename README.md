@@ -1,6 +1,8 @@
-# agent-box
+# Project Fano
 
-Turns a spare Linux machine, or a Windows gaming PC, into on-demand, disposable Linux boxes that coding agents run heavy work on: test suites, `-race`, builds.
+Turns a spare Linux server or Windows gaming PC into on-demand, disposable Linux boxes that coding agents run heavy work on: test suites, `-race`, and builds. Named for Robert Fano (1917–2016), who founded MIT's Project MAC in 1963 and pioneered time-sharing.
+
+> Early work in progress — built for daily use on one setup first and not ready for outside users yet. The site is at [fano.afig.dev](https://fano.afig.dev/); the repository and CLI still use `agent-box` and `box`.
 
 - **Incus** on the host does the boxes, API, auth and web UI.
 - **box** is a thin sync-and-run CLI + MCP for agents: `box run --new --reason "..." -- go test ./...`.

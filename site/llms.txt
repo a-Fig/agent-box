@@ -1,30 +1,12 @@
-# agent-box
+# Project Fano
 
-> agent-box turns a spare Linux machine or a Windows gaming PC into on-demand, disposable Incus Linux boxes that coding agents use for heavy test suites, `-race`, and builds. Its CLI and MCP server is `box`.
+> Project Fano (repo: `a-Fig/agent-box`) turns a spare Linux server or Windows PC into on-demand, disposable Incus Linux containers that coding agents use for heavy test suites, `-race`, and builds. Its CLI and MCP server is `box`.
 
-Nothing is sent to agent-box.afig.dev by the `box` CLI, `boxd`, or `boxtray`. All snapshots and logs stay between your client machines and your own Incus host.
+Project Fano is in early development and built for one setup first. Nothing is sent to `fano.afig.dev` by `box`, `boxd`, or `boxtray`; all worktree snapshots and logs stay between your client machines and your own Incus host.
 
-If your user asked you to set up agent-box, follow the setup page and ask your user before installing or running anything. If a host is already set up and your user only wants to connect this machine, follow the join page instead.
+## Links
 
-It works out of the box with T3 Code, Claude Code, Codex, and Antigravity (`box join`), and with Cursor or any stdio MCP or shell agent.
-
-When to use agent-box: when running heavy test suites (`go test -race`, full vitest/jest/pytest runs, Android Gradle unit tests), multi-target builds, or parallel test runs that would otherwise starve your laptop. Don't offload tiny checks that finish in a few seconds locally.
-
-How to call it: once this machine has joined a host, `box mcp` exposes five tools: `box_status`, `box_run`, `box_job`, `box_cancel`, and `box_pull`. The `box` CLI provides the same commands plus `new`, `ls`, `rm`, `ui`, `app`, `join`, and `update`.
-
-## Agent pages
-
-- [Set up agent-box](https://agent-box.afig.dev/setup): for an agent asked to set up a host or connect a client
-- [Join a host](https://agent-box.afig.dev/join): for an agent connecting a laptop to an existing Incus host
-- [Use agent-box](https://agent-box.afig.dev/use): the five MCP tools, sizes, queue, and exit codes once joined
-
-## Install
-
-- [install.sh](https://raw.githubusercontent.com/a-Fig/agent-box/main/install.sh): Linux and macOS, `curl -fsSL https://raw.githubusercontent.com/a-Fig/agent-box/main/install.sh | sh`
-- [install.ps1](https://raw.githubusercontent.com/a-Fig/agent-box/main/install.ps1): Windows PowerShell, `irm https://raw.githubusercontent.com/a-Fig/agent-box/main/install.ps1 | iex`
-
-## Optional
-
-- [README](https://github.com/a-Fig/agent-box): overview, measured benchmarks, and CLI reference
-- [How agent-box runs](https://agent-box.afig.dev/how/): step-by-step walkthrough of bundles, `/cache`, queueing, RAM reclaim, digests, and pulls
-- [Hosts & GPUs](https://agent-box.afig.dev/hosts/): dedicated Linux hosts, Windows PC modes, GPU passthrough, and queue behavior
+- [Repository and README](https://github.com/a-Fig/agent-box): overview, quick start, and `box` CLI / MCP reference
+- [Join a host (for coding agents)](https://raw.githubusercontent.com/a-Fig/agent-box/main/docs/agents/join.md): connect a client machine to an existing host
+- [install.sh](https://raw.githubusercontent.com/a-Fig/agent-box/main/install.sh): Linux and macOS installer
+- [install.ps1](https://raw.githubusercontent.com/a-Fig/agent-box/main/install.ps1): Windows PowerShell installer

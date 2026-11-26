@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://agent-box.afig.dev/sitemap.xml
+Sitemap: https://fano.afig.dev/sitemap.xml
