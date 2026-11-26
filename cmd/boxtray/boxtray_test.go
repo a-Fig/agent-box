@@ -68,12 +68,28 @@ func TestStatusText(t *testing.T) {
 }
 
 type fakeSensors struct {
-	mu    sync.Mutex
-	up    bool
-	awake []bool
+	mu     sync.Mutex
+	up     bool
+	starts int
+	awake  []bool
 }
 
-func (f *fakeSensors) HostUp(context.Context) bool { return f.up }
+func (f *fakeSensors) HostUp(context.Context) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.up
+}
+func (f *fakeSensors) StartHost(context.Context) error {
+	f.mu.Lock()
+	f.starts++
+	f.mu.Unlock()
+	return nil
+}
+func (f *fakeSensors) started() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.starts
+}
 func (f *fakeSensors) HoldAwake(on bool) {
 	f.mu.Lock()
 	f.awake = append(f.awake, on)
@@ -126,6 +142,37 @@ func TestRunSkipsIncusWhileHostDownAndHoldsAwake(t *testing.T) {
 	defer s.mu.Unlock()
 	if len(s.awake) < 3 || !s.awake[1] || s.awake[len(s.awake)-1] {
 		t.Fatalf("awake = %v", s.awake)
+	}
+}
+
+// A distro found down is started again (#204), at most once a minute, and
+// never while Release memory runs: it would undo the release.
+func TestRunStartsTheDistroOutsideARelease(t *testing.T) {
+	s := &fakeSensors{up: false}
+	m := mode.New(&noIncus{}, mode.MyPC)
+	if !m.BeginRelease() {
+		t.Fatal("BeginRelease")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wake := make(chan struct{})
+	results := make(chan mode.Status, 8)
+	go run(ctx, loopCfg{Manager: func() *mode.Manager { return m }}, s, time.Hour, wake, func(st mode.Status) { results <- st })
+
+	<-results
+	if n := s.started(); n != 0 {
+		t.Fatalf("started %d times during a release", n)
+	}
+	m.EndRelease()
+	wake <- struct{}{}
+	<-results
+	if n := s.started(); n != 1 {
+		t.Fatalf("started %d times after the release, want 1", n)
+	}
+	wake <- struct{}{}
+	<-results
+	if n := s.started(); n != 1 {
+		t.Fatalf("started %d times within a minute, want 1", n)
 	}
 }
 

@@ -481,3 +481,7 @@ func (m *Manager) BeginRelease() bool {
 
 // EndRelease lets ticks and reclaims call out again.
 func (m *Manager) EndRelease() { m.releasing.Store(false) }
+
+// Releasing reports whether a release is running (between BeginRelease and
+// EndRelease), when nothing may start the distro.
+func (m *Manager) Releasing() bool { return m.releasing.Load() }

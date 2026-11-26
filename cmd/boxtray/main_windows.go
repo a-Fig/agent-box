@@ -120,12 +120,14 @@ func main() {
 					lg.Printf("release memory: already running")
 					return
 				}
-				defer mgr.EndRelease()
 				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
 				defer cancel()
 				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
 					lg.Printf("release memory: wsl --terminate: %v", err)
 				}
+				// Ended before the poke, so the tick it wakes starts the
+				// distro again, without the boxes' memory (#204).
+				mgr.EndRelease()
 				poke()
 			}()
 		},
@@ -153,7 +155,7 @@ func main() {
 		}
 		t.close() // the message loop ends, the icon goes, main returns
 	})
-	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Maintain: up.maintain}
+	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Logf: lg.Printf, Maintain: up.maintain}
 	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
 	lg.Printf("mode loop started")
 

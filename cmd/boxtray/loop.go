@@ -11,9 +11,13 @@ import (
 
 // Sensors are the Windows-side inputs and outputs; fakes stand in for tests.
 type Sensors interface {
-	HostUp(context.Context) bool // the WSL distro is running (we never start it)
-	HoldAwake(on bool)           // keep the PC from sleeping
+	HostUp(context.Context) bool     // the WSL distro is running; asking never starts it
+	StartHost(context.Context) error // start the distro and keep it running
+	HoldAwake(on bool)               // keep the PC from sleeping
 }
+
+// hostStartEvery is how often run tries again to start a distro that stays down.
+const hostStartEvery = time.Minute
 
 // loopCfg is everything run needs besides the sensors.
 type loopCfg struct {
@@ -37,8 +41,10 @@ type loopCfg struct {
 // run polls until ctx ends. It ticks every interval and immediately on wake
 // (a menu click). report is called with every result (not while idle).
 //
-// While the distro is down it does nothing to Incus: any wsl.exe call would
-// start it again, undoing "Release memory".
+// While the distro is down it does nothing to Incus. It starts the distro
+// again (StartHost, at most every hostStartEvery), except while "Release
+// memory" runs: once that has finished, the distro comes back without the
+// boxes' memory, so agent-box stays reachable (#204).
 func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wake <-chan struct{}, report func(mode.Status)) {
 	logf := func(format string, args ...any) {
 		if cfg.Logf != nil {
@@ -46,6 +52,7 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 		}
 	}
 	var m *mode.Manager
+	var lastStart time.Time
 	tick := func() {
 		if cfg.Idle != nil && cfg.Idle() {
 			if m != nil {
@@ -71,6 +78,13 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 			}
 		} else {
 			st = mode.Status{Chosen: m.Chosen(), Down: true}
+			if now := time.Now(); !m.Releasing() && now.Sub(lastStart) >= hostStartEvery {
+				lastStart = now
+				logf("WSL distro is not running: starting it")
+				if err := s.StartHost(ctx); err != nil {
+					logf("starting the WSL distro: %v", err)
+				}
+			}
 		}
 		s.HoldAwake(st.Running > 0)
 		report(st)
