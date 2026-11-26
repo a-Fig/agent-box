@@ -7,6 +7,7 @@
 import { h, s, icon, dur, bytes, stamp, clock } from "./dom.js";
 import { api, changed } from "./store.js";
 import { empty, section, modeLabel } from "./views.js";
+import { rove } from "./tip.js";
 
 export { history };
 
@@ -40,8 +41,9 @@ async function load(range, force) {
 let W = 640;
 const sized = (w, make) => ((W = Math.max(260, Math.floor(w))), make());
 
-// A mark's tooltip text, for tip.js and, as one line, for screen readers; and a tab stop.
-const tip = (text, props) => ({ ...props, tabindex: 0, "data-tip": text, "aria-label": text.replace(/\n/g, "; ") });
+// A mark's tooltip text, for tip.js and, as one line, for screen readers. rove makes the first
+// mark of each chart its tab stop.
+const tip = (text, props) => ({ ...props, tabindex: -1, "data-tip": text, "aria-label": text.replace(/\n/g, "; ") });
 
 function label(b, range) {
   const d = new Date(b.start);
@@ -89,7 +91,7 @@ function columns(buckets, range, get, keys, color, fmt = String, height = 150) {
     if (i % every === 0) kids.push(s("text", { x: x + bw / 2, y: height - 4, "text-anchor": "middle" }, label(b, range)));
     kids.push(s("rect", tip(lines.length > 1 ? lines.join("\n") : lines[0] + ": none", { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
-  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group" }, kids);
+  return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group" }, kids));
 }
 
 function legend(keys, color, name = (k) => k) {
@@ -131,7 +133,7 @@ function memory(buckets, range) {
     if (i % every === 0) kids.push(s("text", { x: x(i), y: height - 4, "text-anchor": "middle" }, label(b, range)));
     kids.push(s("rect", tip(label(b, range) + ": " + bytes(b.memUsed) + " of " + bytes(b.memCap), { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
-  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group", "aria-label": "Memory in use against the cap" }, kids);
+  return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group", "aria-label": "Memory in use against the cap" }, kids));
 }
 
 // The mode timeline: a strip of the mode, and under it the runs turned away and the runs queued in
@@ -173,7 +175,7 @@ function timeline(d, range) {
   });
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => i % every === 0 && kids.push(s("text", { x: left + step * i + step / 2, y: 116, "text-anchor": "middle" }, label(b, range))));
-  return s("svg", { viewBox: `0 0 ${W} 120`, role: "group", "aria-label": "Mode timeline, refused runs and queued runs" }, kids);
+  return rove(s("svg", { viewBox: `0 0 ${W} 120`, role: "group", "aria-label": "Mode timeline, refused runs and queued runs" }, kids));
 }
 
 // Totals as horizontal bars, biggest first, labelled with their value.
@@ -181,13 +183,15 @@ function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "") {
   entries = entries.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return h("p", { class: "row-empty" }, "Nothing in this range.");
   const max = entries[0][1];
-  return h(
-    "div",
-    { class: "hbars" },
-    entries.slice(0, limit).map(([k, v], i) => {
-      const name = k || emptyLabel || "(none)";
-      return h("div", tip(name + ": " + fmt(v), { class: "hbar" }),h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
-    }),
+  return rove(
+    h(
+      "div",
+      { class: "hbars" },
+      entries.slice(0, limit).map(([k, v], i) => {
+        const name = k || emptyLabel || "(none)";
+        return h("div", tip(name + ": " + fmt(v), { class: "hbar", role: "img" }), h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
+      }),
+    ),
   );
 }
 
