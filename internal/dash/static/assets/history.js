@@ -1,8 +1,8 @@
 // History: charts over a day (hourly buckets) or a week (daily ones), drawn in plain SVG. Each
 // chart is one job: columns for counts over time, a line for memory, bars for totals, and a strip
 // for the mode timeline. Series colors are the reference palette's slots in a fixed order;
-// results wear the status colors. Every mark has a <title>, the browser's own hover tooltip, and
-// every chart with two or more series a legend, so nothing rests on color alone.
+// results wear the status colors. Every mark has a tooltip (tip.js), shown on hover, focus and tap,
+// and every chart with two or more series a legend, so nothing rests on color alone.
 
 import { h, s, icon, dur, bytes, stamp, clock } from "./dom.js";
 import { api, changed } from "./store.js";
@@ -39,6 +39,9 @@ async function load(range, force) {
 // each chart is made, from the page's width.
 let W = 640;
 const sized = (w, make) => ((W = Math.max(260, Math.floor(w))), make());
+
+// A mark's tooltip text, for tip.js and, as one line, for screen readers; and a tab stop.
+const tip = (text, props) => ({ ...props, tabindex: 0, "data-tip": text, "aria-label": text.replace(/\n/g, "; ") });
 
 function label(b, range) {
   const d = new Date(b.start);
@@ -84,9 +87,9 @@ function columns(buckets, range, get, keys, color, fmt = String, height = 150) {
       y -= hgt;
     });
     if (i % every === 0) kids.push(s("text", { x: x + bw / 2, y: height - 4, "text-anchor": "middle" }, label(b, range)));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: top, width: step, height: plotH }, s("title", null, lines.length > 1 ? lines.join("\n") : lines[0] + ": none")));
+    kids.push(s("rect", tip(lines.length > 1 ? lines.join("\n") : lines[0] + ": none", { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
-  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "img" }, kids);
+  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group" }, kids);
 }
 
 function legend(keys, color, name = (k) => k) {
@@ -115,7 +118,7 @@ function memory(buckets, range) {
     kids.push(s("line", { class: "axis", x1: left, x2: W, y1: y(v), y2: y(v) }), s("text", { x: left - 6, y: y(v) + 3, "text-anchor": "end" }, v ? gib(v) : "0"));
   }
   if (cap <= max) {
-    kids.push(s("line", { x1: left, x2: W, y1: y(cap), y2: y(cap), stroke: "var(--destructive-foreground)", "stroke-dasharray": "4 4", "stroke-width": 1 }, s("title", null, "Cap: " + bytes(cap))));
+    kids.push(s("line", tip("Cap: " + bytes(cap), { class: "mark", x1: left, x2: W, y1: y(cap), y2: y(cap), stroke: "var(--destructive-foreground)", "stroke-dasharray": "4 4", "stroke-width": 1 })));
   } else {
     kids.push(s("text", { x: W, y: top + 2, "text-anchor": "end" }, "cap " + bytes(cap) + " ↑"));
   }
@@ -126,9 +129,9 @@ function memory(buckets, range) {
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => {
     if (i % every === 0) kids.push(s("text", { x: x(i), y: height - 4, "text-anchor": "middle" }, label(b, range)));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: top, width: step, height: plotH }, s("title", null, label(b, range) + ": " + bytes(b.memUsed) + " of " + bytes(b.memCap))));
+    kids.push(s("rect", tip(label(b, range) + ": " + bytes(b.memUsed) + " of " + bytes(b.memCap), { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
-  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": "Memory in use against the cap" }, kids);
+  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group", "aria-label": "Memory in use against the cap" }, kids);
 }
 
 // The mode timeline: a strip of the mode, and under it the runs turned away and the runs queued in
@@ -143,7 +146,7 @@ function timeline(d, range) {
   for (const seg of d.segments || []) {
     const a = x(Date.parse(seg.start)), b = x(Date.parse(seg.end));
     if (b - a < 0.5) continue;
-    kids.push(s("rect", { x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] }, s("title", null, modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")")));
+    kids.push(s("rect", tip(modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")", { class: "mark", x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] })));
   }
   const max = Math.max(1, ...buckets.map((b) => sum(b.refusals.byWhy)));
   const step = (W - left) / buckets.length;
@@ -153,7 +156,7 @@ function timeline(d, range) {
     const bx = left + step * i + step * 0.2;
     if (n) kids.push(s("rect", { x: bx, y: 62 - (n / max) * 26, width: Math.max(2, step * 0.6), height: (n / max) * 26, rx: 2, fill: "var(--s8)" }));
     const why = Object.entries(b.refusals.byWhy || {}).map(([k, v]) => v + " " + (WHY[k] || k));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: 32, width: step, height: 30 }, s("title", null, label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"))));
+    kids.push(s("rect", tip(label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"), { class: "hit", x: left + step * i, y: 32, width: step, height: 30 })));
   });
   // Runs queued, counted when they were queued; a bucket's tooltip also gives the waits of the
   // queued runs that started in it.
@@ -166,11 +169,11 @@ function timeline(d, range) {
     if (n) kids.push(s("rect", { x: bx, y: 100 - (n / qmax) * 26, width: Math.max(2, step * 0.6), height: (n / qmax) * 26, rx: 2, fill: "var(--s7)" }));
     const lines = [label(b, range) + ": " + (n ? n + " queued" : "none queued")];
     if (q.started) lines.push(q.started + " started after a median wait of " + dur(q.medianWaitSeconds));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: 70, width: step, height: 30 }, s("title", null, lines.join("\n"))));
+    kids.push(s("rect", tip(lines.join("\n"), { class: "hit", x: left + step * i, y: 70, width: step, height: 30 })));
   });
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => i % every === 0 && kids.push(s("text", { x: left + step * i + step / 2, y: 116, "text-anchor": "middle" }, label(b, range))));
-  return s("svg", { viewBox: `0 0 ${W} 120`, role: "img", "aria-label": "Mode timeline, refused runs and queued runs" }, kids);
+  return s("svg", { viewBox: `0 0 ${W} 120`, role: "group", "aria-label": "Mode timeline, refused runs and queued runs" }, kids);
 }
 
 // Totals as horizontal bars, biggest first, labelled with their value.
@@ -183,7 +186,7 @@ function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "") {
     { class: "hbars" },
     entries.slice(0, limit).map(([k, v], i) => {
       const name = k || emptyLabel || "(none)";
-      return h("div", { class: "hbar", title: name + ": " + fmt(v) }, h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
+      return h("div", tip(name + ": " + fmt(v), { class: "hbar" }),h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
     }),
   );
 }
