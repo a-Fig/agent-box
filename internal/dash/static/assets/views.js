@@ -263,7 +263,7 @@ function jobName(j) {
 // The nudged badge, shown by the 1s ticker once its time comes (dom.js tickTimes).
 function nudgedBadge(j) {
   const at = new Date(Date.parse(j.queuedAt) + NUDGE_MS).toISOString();
-  return h("span", hint("It has waited 20+ minutes in the queue. An agent with a push channel is told it still waits, and that box_cancel takes it off.", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at) }, "q-" + j.key + "-nudged"), "nudged");
+  return h("span", hint("It has waited 20+ minutes in the queue. The agent may have been told it still waits, and box_cancel takes it off.", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at) }, "q-" + j.key + "-nudged"), "nudged");
 }
 
 function whyText(j) {
@@ -443,7 +443,7 @@ function untitled(el) {
 // job's own 24h, as an extend makes it (sched.go, endedExpiry).
 function expiry(b) {
   if (!b.expiresAt) return h("span", hint("Nothing deletes this box on a timer; delete it when it's no longer needed.", {}, "box-" + b.name + "-expiry"), "no expiry");
-  const tip = "Deleted " + stamp(b.expiresAt) + ", with anything on it. A job starting sets this a day ahead; when a job ends, it is reset to 2 hours from then (30 minutes for a throwaway), an extend included.";
+  const tip = "Deleted " + stamp(b.expiresAt) + ", with anything on it. A job starting sets this a day ahead; when a job ends it is usually reset to 2 hours from then (30 minutes for a throwaway), and that can undo an extend made while the job ran.";
   return h("span", hint(tip, {}, "box-" + b.name + "-expiry"), untitled(timeEl("until", b.expiresAt, "expires ")));
 }
 
@@ -458,7 +458,7 @@ function boxRow(b, full) {
           { class: "menu", role: "group", "aria-label": "Extend " + b.name },
           [1, 4, 24].map((hours) => {
             const tip = b.expiresAt
-              ? "Pushes this box's expiry back " + plural(hours, "hour") + ". A job that ends afterwards resets it (to 2 hours, 30 minutes for a throwaway), so extend an idle box, after its job, not during one."
+              ? "Pushes this box's expiry back " + plural(hours, "hour") + ". A job that ends afterwards can reset it (to 2 hours, 30 minutes for a throwaway), so to be sure, extend an idle box, after its job, not during one."
               : "This box has no expiry: this gives it one, " + plural(hours, "hour") + " from now, when it is deleted.";
             return control("ext-" + b.name + "-" + hours, hint(tip, { class: "btn btn-xs btn-outline", disabled: busy.has("ext-" + b.name), onclick: () => extendBox(b, hours) }), "+" + hours + "h");
           }),
@@ -472,7 +472,7 @@ function boxRow(b, full) {
     h(
       "div",
       null,
-      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, "box-" + b.name + "-size"), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is deleted 30 minutes after that run ends, or sooner if another run needs the room. An extend after the run keeps it longer.", { class: "badge" }, "box-" + b.name + "-throwaway"), "throwaway") : null),
+      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, "box-" + b.name + "-size"), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is usually deleted 30 minutes after that run ends, or sooner if another run needs the room. An extend after the run keeps it longer.", { class: "badge" }, "box-" + b.name + "-throwaway"), "throwaway") : null),
       h(
         "div",
         { class: "meta" },
