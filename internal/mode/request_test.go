@@ -217,3 +217,17 @@ func TestHandshakeOffTouchesNoRequestKeys(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestReleaseStoresAPickNoTickStored(t *testing.T) {
+	f := newFake()
+	m, _ := handshakeMgr(f, Full)
+	tick(m, 0) // synced: the project holds nothing newer
+	m.SetChosenAt(MyPC, t0.Add(time.Second))
+	if !m.BeginRelease(context.Background()) {
+		t.Fatal("BeginRelease")
+	}
+	defer m.EndRelease()
+	if v := storedChoice(t, f); v.Mode != MyPC || !v.At.Equal(t0.Add(time.Second)) {
+		t.Fatalf("stored %+v, want my-pc from the click", v)
+	}
+}

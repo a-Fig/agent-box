@@ -72,6 +72,9 @@ type fakeSensors struct {
 	up     bool
 	starts int
 	awake  []bool
+	// entered, if set, gets each start, which then blocks until its
+	// context ends, like a schtasks call Release memory cuts short.
+	entered chan struct{}
 }
 
 func (f *fakeSensors) HostUp(context.Context) bool {
@@ -79,10 +82,16 @@ func (f *fakeSensors) HostUp(context.Context) bool {
 	defer f.mu.Unlock()
 	return f.up
 }
-func (f *fakeSensors) StartHost(context.Context) error {
+func (f *fakeSensors) StartHost(ctx context.Context) error {
 	f.mu.Lock()
 	f.starts++
+	entered := f.entered
 	f.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return nil
 }
 func (f *fakeSensors) started() int {
@@ -150,7 +159,7 @@ func TestRunSkipsIncusWhileHostDownAndHoldsAwake(t *testing.T) {
 func TestRunStartsTheDistroOutsideARelease(t *testing.T) {
 	s := &fakeSensors{up: false}
 	m := mode.New(&noIncus{}, mode.MyPC)
-	if !m.BeginRelease() {
+	if !m.BeginRelease(context.Background()) {
 		t.Fatal("BeginRelease")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -173,6 +182,56 @@ func TestRunStartsTheDistroOutsideARelease(t *testing.T) {
 	<-results
 	if n := s.started(); n != 1 {
 		t.Fatalf("started %d times within a minute, want 1", n)
+	}
+}
+
+// A release that begins while a start runs cuts it short and waits for it,
+// and that start doesn't use up the minute: the tick after the release tries again.
+func TestRunStartCutShortByAReleaseIsRetriedAtOnce(t *testing.T) {
+	s := &fakeSensors{up: false, entered: make(chan struct{})}
+	m := mode.New(&noIncus{}, mode.MyPC)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wake := make(chan struct{})
+	results := make(chan mode.Status, 8)
+	go run(ctx, loopCfg{Manager: func() *mode.Manager { return m }}, s, time.Hour, wake, func(st mode.Status) { results <- st })
+
+	<-s.entered
+	if !m.BeginRelease(context.Background()) { // returns once the start has ended
+		t.Fatal("BeginRelease")
+	}
+	<-results
+	s.mu.Lock()
+	s.entered = nil
+	s.mu.Unlock()
+	m.EndRelease()
+	wake <- struct{}{}
+	<-results
+	if n := s.started(); n != 2 {
+		t.Fatalf("started %d times, want 2: the cut-short start spent the minute", n)
+	}
+}
+
+// At logon the tray takes over while the headless enforcer's tick runs: a
+// start asks Idle again just before it runs, and leaves the distro to the tray.
+func TestRunHeadlessLeavesTheStartToATrayThatJustStarted(t *testing.T) {
+	s := &fakeSensors{up: false}
+	var mu sync.Mutex
+	asks := 0
+	idle := func() bool { // the tray appears after the tick's first ask
+		mu.Lock()
+		defer mu.Unlock()
+		asks++
+		return asks > 1
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan mode.Status, 8)
+	m := mode.New(&noIncus{}, mode.Full)
+	go run(ctx, loopCfg{Manager: func() *mode.Manager { return m }, Idle: idle}, s, time.Hour, nil, func(st mode.Status) { results <- st })
+	<-results
+	if n := s.started(); n != 0 {
+		t.Fatalf("started %d times with a tray running", n)
 	}
 }
 

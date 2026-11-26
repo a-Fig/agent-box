@@ -116,7 +116,10 @@ func main() {
 			go func() {
 				// One release at a time; while it runs, no tick, reclaim or
 				// swap call starts a wsl.exe that would bring the distro back.
-				if !mgr.BeginRelease() {
+				// It also stores a pick not yet in the project (wslIncus
+				// bounds that write), so after Quit the headless enforcer
+				// applies it, not an older one.
+				if !mgr.BeginRelease(context.Background()) {
 					lg.Printf("release memory: already running")
 					return
 				}
