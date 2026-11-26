@@ -70,7 +70,9 @@ box run exits with the command's exit code, 124 when --timeout fired, or 75
 when the box was paused or stopped, the run wasn't queued, or it left the
 queue without running. A job paused mid-run resumes if the PC's owner switches back within
 15 minutes (4 hours once its memory is moved to swap), else it is lost; box job
-reattaches. A relative remote path in box pull starts at the job's checkout.
+reattaches. In box pull, a relative remote path starts at the job's checkout and
+an absolute path starts with / (in Git Bash, set MSYS_NO_PATHCONV=1); pulling by
+job ID refuses if a later job replaced the checkout.
 The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
