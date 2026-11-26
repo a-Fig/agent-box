@@ -262,7 +262,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("cancel %s: bad exit code %q", job, f[1])
 	}
 	if f[0] == "cancelled" {
-		a.markIdle(ctx, box)
+		a.markIdle(ctx, box, job)
 		a.markNotified(job, "cancel") // the agent cancelled it: no push of its end
 	}
 	return f[0] == "cancelled", code, nil
@@ -283,7 +283,7 @@ func checkoutOwnerCheck(job string) string {
 	return fmt.Sprintf(`cur=$(cat %[1]s/.box/"$r".checkout 2>/dev/null)
 if [ -n "$cur" ] && [ "$cur" != %[2]s ]; then
   if [ -f %[1]s/.box/%[2]s.exit ] || [ -f %[1]s/.box/"$cur".exit ]; then
-    echo "job %[3]s's checkout %[1]s/$r was replaced by job $cur; pull right after a job, or run with --new (new: true)" >&2
+    echo "job %[3]s's checkout %[1]s/$r was replaced by job $cur; pull right after a job, or run with --fresh (fresh: true)" >&2
   else
     echo "checkout %[1]s/$r is in use by job $cur, not %[3]s yet" >&2
   fi
@@ -348,7 +348,7 @@ func (a *App) checkFileOwner(ctx context.Context, box, job, repo string) error {
 		}
 	}
 	if cur = strings.TrimSpace(cur); cur != "" && cur != job {
-		return fmt.Errorf("job %s's checkout %s/%s was replaced by job %s; pull right after a job, or run with --new (new: true)", job, workRoot, repo, cur)
+		return fmt.Errorf("job %s's checkout %s/%s was replaced by job %s; pull right after a job, or run with --fresh (fresh: true)", job, workRoot, repo, cur)
 	}
 	return nil
 }

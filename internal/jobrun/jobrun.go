@@ -178,3 +178,18 @@ done
 exit 0
 `, root)
 }
+
+// KeptScript prints "kept" when at least one job ended and none are running.
+func KeptScript(root string) string {
+	return "# kept jobs\n" + AliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
+ended=
+for p in *.pid; do
+  [ -e "$p" ] || continue
+  j=${p%%.pid}
+  if [ -e "$j.exit" ]; then ended=1; continue; fi
+  alive "$(cat "$p" 2>/dev/null)" "$j" && exit 0
+done
+[ -n "$ended" ] && echo kept
+exit 0
+`, root)
+}

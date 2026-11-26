@@ -13,12 +13,12 @@ description: Run heavy test suites and builds from your worktree on a disposable
    - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives starting "box: job …" (Claude Code: mid-turn); `box_job` has the rest.
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
    - **Subagents pass `push: false`** (it would wake the parent).
-4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; a snapshot waits, its result is pushed; `box_cancel` drops it.
+4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; snapshot waits for the host; `box_cancel` drops it.
 5. **`state: refused` (exit 75)**: nothing started (PC busy, paused or unreachable). Retry later, or smaller `size` if no room. A pushed "lost" job didn't finish; a "paused" one may resume (its end is pushed). `done` with exit 75 is the command's own.
 6. `go test`/vitest results lead with failures (file:line); `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
-7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel/isolated: `new: true`.
+7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel: `new: true`.
 
-Boxes are throwaway; `/cache` survives.
+CPU throwaways can be reused. `fresh: true` launches clean.
 An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).

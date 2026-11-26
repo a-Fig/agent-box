@@ -67,7 +67,7 @@ func main() {
 	defer stop()
 	go w.Run(ctx)
 
-	srv := &boxd.Server{W: w}
+	srv := &boxd.Server{W: w, ReuseThrowaways: cfg.ReuseThrowaways}
 	if *page != "" {
 		srv.Page = os.DirFS(*page)
 	}

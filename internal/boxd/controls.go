@@ -2,6 +2,7 @@ package boxd
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -27,6 +28,88 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/jobs/{key}/cancel", control(http.HandlerFunc(s.cancelJob)))
 	mux.Handle("POST /api/boxes/{name}/delete", control(http.HandlerFunc(s.deleteBox)))
 	mux.Handle("POST /api/boxes/{name}/extend", control(http.HandlerFunc(s.extendBox)))
+	mux.HandleFunc("GET /api/throwaway-pool", s.throwawayPool)
+	mux.Handle("POST /api/boxes/{name}/claim", control(http.HandlerFunc(s.claimThrowaway)))
+	mux.Handle("POST /api/boxes/{name}/evict-idle", control(http.HandlerFunc(s.evictThrowaway)))
+	mux.Handle("POST /api/boxes/{name}/pool-expiry", control(http.HandlerFunc(s.poolExpiry)))
+}
+
+func (s *Server) throwawayPool(w http.ResponseWriter, _ *http.Request) {
+	if !s.ReuseThrowaways {
+		writeError(w, http.StatusNotFound, dash.CodeNotFound, "throwaway pooling is disabled")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) claimThrowaway(w http.ResponseWriter, r *http.Request) {
+	if !s.ReuseThrowaways {
+		s.throwawayPool(w, r)
+		return
+	}
+	var req dash.ClaimThrowawayBody
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	key, badKey := hex.DecodeString(req.RepoKey)
+	sz, sized := mode.LookupSize(req.Size)
+	if !poolJobMatches(box, req.Job) || badKey != nil || len(key) != 32 || !sized || sz.GPU {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "claim needs a job, repository key and CPU size")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	claimed, err := s.W.claimThrowaway(ctx, box, req.RepoKey, sz.Name, req.Job)
+	poolReply(w, claimed, err)
+}
+
+func (s *Server) evictThrowaway(w http.ResponseWriter, r *http.Request) {
+	var req struct{ UID string }
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	if !validBoxName.MatchString(box) || req.UID == "" {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "eviction needs a box name and UID")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	evicted, err := s.W.evictPooled(ctx, box, req.UID)
+	poolReply(w, evicted, err)
+}
+
+func (s *Server) poolExpiry(w http.ResponseWriter, r *http.Request) {
+	var req dash.PoolExpiryBody
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	if !poolJobMatches(box, req.Job) {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "expiry needs this box's job ID")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	wrote, err := s.W.setPoolExpiry(ctx, box, req.Job, req.Ended)
+	poolReply(w, wrote, err)
+}
+
+func poolJobMatches(box, job string) bool {
+	name, _, started := jobStart(job)
+	return validBoxName.MatchString(box) && validJob.MatchString(job) && name == box && !started.IsZero()
+}
+
+func poolReply(w http.ResponseWriter, changed bool, err error) {
+	switch {
+	case err != nil:
+		writeError(w, http.StatusBadGateway, dash.CodeIncus, err.Error())
+	case !changed:
+		w.WriteHeader(http.StatusConflict)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // device names the asking device for the history and the mode request: its
