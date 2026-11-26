@@ -222,3 +222,30 @@ func TestMachineVersions(t *testing.T) {
 		}
 	}
 }
+
+// Machine.Config.GPU needs the device and a project that doesn't block GPU devices, and says
+// which is missing; a cap set to 0 is told apart from one that isn't set.
+func TestMachineConfigGPUAndCaps(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.instances": "0"})
+	m := r.w.Machine()
+	if m.Config.GPU || m.Config.GPUWhy != "device" {
+		t.Fatalf("no device: %+v", m.Config)
+	}
+	if !m.Config.Capped.Instances || m.Caps.Instances != 0 || m.Config.Capped.CPU {
+		t.Fatalf("caps: %+v %+v", m.Config.Capped, m.Caps)
+	}
+	r.w.HasGPU = func() bool { return true }
+	for _, c := range []struct {
+		key  string
+		gpu  bool
+		why  string
+		have bool
+	}{{"", true, "", true}, {"allow", true, "", true}, {"block", false, "blocked", true}, {"block", false, "both", false}} {
+		r.f.set(func() { r.f.cfg["restricted.devices.unix-char"] = c.key })
+		r.w.HasGPU = func() bool { return c.have }
+		r.poll()
+		if m := r.w.Machine(); m.Config.GPU != c.gpu || m.Config.GPUWhy != c.why {
+			t.Errorf("key %q device %v: %+v", c.key, c.have, m.Config)
+		}
+	}
+}

@@ -87,10 +87,10 @@ function buildCell(v, what) {
 function updates(m) {
   const note = drift(m.boxd, m.tray, trayAlive(m));
   return [
-    row("boxd", "The server behind this page. It follows stable releases and checks for one every hour.", buildCell(m.boxd, "running since")),
+    row("boxd", m.boxd?.tag ? "The server behind this page. It follows stable releases and checks for one every hour." : "The server behind this page. This is a dev build, not a release, so it doesn't update itself.", buildCell(m.boxd, "running since")),
     row(
       "Tray",
-      m.tray ? "Applies the mode on the PC. It updates itself from stable releases the same way." : "Nothing reports a tray build for this host, so there is no tray to update.",
+      !m.tray ? "Nothing reports a tray build for this host, so there is no tray to update." : m.tray.tag ? "Applies the mode on the PC. It updates itself from stable releases the same way." : "Applies the mode on the PC. This is a dev build, not a release, so it doesn't update itself.",
       m.tray ? buildCell(m.tray, "this build since") : value("not reporting"),
     ),
     note ? row(note.warn ? "Out of step" : "Different builds", note.why, h("span", { class: "badge " + (note.warn ? "badge-warn" : "") }, note.text)) : null,
@@ -118,21 +118,29 @@ function modeRows(m) {
 function limitRows(m) {
   const c = m.caps || {};
   const k = m.config || {};
-  const cap = (n, fmt = String) => value(n > 0 ? fmt(n) : "no limit");
+  // An unset cap doesn't limit; one set to 0 does, so it reads 0.
+  const cap = (key, fmt = String) => value(k.capped?.[key] ? fmt(c[key]) : "no limit");
   return [
-    row("Boxes", "Most boxes that may exist at once; a run that needs one more waits in the queue.", cap(c.instances)),
-    row("CPUs", "Most CPUs all boxes together may hold, counting each at its size's Full share.", cap(c.cpu)),
-    row("Memory", "Most memory all boxes together may be given. The tray sets it from the mode.", cap(c.memory, bytes)),
-    row("Disk", "Most disk all boxes together, and the image they start from, may use.", cap(c.disk, bytes)),
+    row("Boxes", "Most boxes that may exist at once; a run that needs one more waits in the queue.", cap("instances")),
+    row("CPUs", "Most CPUs all boxes together may hold, counting each at its size's Full share.", cap("cpu")),
+    row("Memory", "Most memory all boxes together may be given. The tray sets it from the mode.", cap("memory", bytes)),
+    row("Disk", "Most disk all boxes together, and the image they start from, may use.", cap("disk", bytes)),
     row("Idle expiry", "A box made for a run expires this long after it is made unless a job keeps it.", value(dur(k.idleExpiry))),
     row("Expiry during a job", "While a job runs, its box's expiry is pushed out to this long from the start.", value(dur(k.jobExpiry))),
-    row("Kept after a job", "A throwaway box and its log stay this long once the job ends, so an agent can pull what it built.", value(dur(k.keptAfterJob))),
+    row("Kept after a job", "A throwaway box and its log stay up to this long once the job ends, so an agent can pull what it built. A queued job, or another launch that needs the room, takes it sooner.", value(dur(k.keptAfterJob))),
   ];
 }
 
+const gpuWhy = (why) =>
+  ({
+    device: "the PC's GPU isn't visible in the Linux distro",
+    blocked: "the project blocks GPU devices",
+    both: "the PC's GPU isn't visible in the Linux distro and the project blocks GPU devices",
+  })[why] || "no device";
+
 function gpuRows(m) {
   const on = m.config?.gpu;
-  return [row("GPU boxes", on ? "This host can give a box a GPU. One runs at a time, always as a throwaway." : "This host has no GPU a box can use, so runs that ask for one are turned away.", h("span", { class: "badge " + (on ? "badge-on" : "badge-outline") }, on ? "Available" : "Not on this host"))];
+  return [row("GPU boxes", on ? "This host can give a box a GPU. One runs at a time, always as a throwaway." : "This host can't give a box a GPU (" + gpuWhy(m.config?.gpuWhy) + "), so runs that ask for one are turned away.", h("span", { class: "badge " + (on ? "badge-on" : "badge-outline") }, on ? "Available" : "Not on this host"))];
 }
 
 const settings = {

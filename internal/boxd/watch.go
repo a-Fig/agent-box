@@ -498,10 +498,30 @@ func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]das
 	w.boxes = boxes
 }
 
+// gpuProjectKey is the project key that tells a GPU host from one without (cmd/box's gpuKey):
+// setup-host.sh sets it to allow on WSL and to block elsewhere.
+const gpuProjectKey = "restricted.devices.unix-char"
+
 func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxes map[string]dash.Box) {
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
 		Boxd: w.Version, Config: HostConfig(w.HasGPU != nil && w.HasGPU())}
+	// A GPU box needs the device and the project's say-so, as box's own check reads it: only
+	// "block" refuses, and an unset key counts as a GPU host.
+	blocked := cfg[gpuProjectKey] == "block"
+	switch {
+	case blocked && !m.Config.GPU:
+		m.Config.GPUWhy = "both"
+	case blocked:
+		m.Config.GPUWhy = "blocked"
+	case !m.Config.GPU:
+		m.Config.GPUWhy = "device"
+	}
+	m.Config.GPU = m.Config.GPU && !blocked
+	for key, set := range map[string]*bool{"limits.cpu": &m.Config.Capped.CPU, "limits.memory": &m.Config.Capped.Memory,
+		"limits.instances": &m.Config.Capped.Instances, "limits.disk": &m.Config.Capped.Disk} {
+		*set = cfg[key] != ""
+	}
 	if v := cfg[mode.ProjectTrayVersionKey]; v != "" {
 		var tv dash.Version
 		if json.Unmarshal([]byte(v), &tv) == nil && tv.Commit != "" {

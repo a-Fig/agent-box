@@ -76,6 +76,12 @@
             }
           ],
           "gpu": true,
+          "capped": {
+            "cpu": true,
+            "memory": true,
+            "instances": true,
+            "disk": true
+          },
           "idleExpiry": 7200,
           "jobExpiry": 86400,
           "keptAfterJob": 1800

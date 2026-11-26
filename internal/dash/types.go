@@ -89,11 +89,26 @@ type Config struct {
 	Sizes []SizeSpec `json:"sizes"`
 	// GPU is whether this host can give a box a GPU: boxd found the device a GPU box needs.
 	GPU bool `json:"gpu"`
+	// GPUWhy is what rules the GPU out when GPU is false: "device" (no /dev/dxg in the distro),
+	// "blocked" (the project's restricted.devices.unix-char is block, as setup-host.sh sets it off
+	// WSL) or "both". Empty when GPU is true.
+	GPUWhy string `json:"gpuWhy,omitempty"`
+	// Capped says which of Machine.Caps the project sets. An unset cap doesn't limit, but a cap
+	// set to 0 does (no boxes, no CPUs): Caps alone can't tell the two apart.
+	Capped Capped `json:"capped"`
 	// Seconds: a throwaway box's expiry when it is made for a job and no job runs, the expiry
 	// while a job runs, and how long a throwaway outlives its job (for box_pull and the log).
 	IdleExpiry   int `json:"idleExpiry"`
 	JobExpiry    int `json:"jobExpiry"`
 	KeptAfterJob int `json:"keptAfterJob"`
+}
+
+// Capped is which project caps are set, beside Machine.Caps' values.
+type Capped struct {
+	CPU       bool `json:"cpu"`
+	Memory    bool `json:"memory"`
+	Instances bool `json:"instances"`
+	Disk      bool `json:"disk"`
 }
 
 // SizeSpec is one box size: the CPUs a box gets in Shared and in Full, and its memory and disk.
