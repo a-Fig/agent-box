@@ -277,21 +277,88 @@ func (a *App) wasCancelled(ctx context.Context, job string) bool {
 	return err == nil && strings.TrimSpace(res.Stdout) == "yes"
 }
 
+// checkoutOwnerCheck is the shell fragment that checks /work/.box/$r.checkout
+// against job: if another job owns /work/$r, it explains so on stderr and exits 4.
+func checkoutOwnerCheck(job string) string {
+	return fmt.Sprintf(`cur=$(cat %[1]s/.box/"$r".checkout 2>/dev/null)
+if [ -n "$cur" ] && [ "$cur" != %[2]s ]; then
+  if [ -f %[1]s/.box/%[2]s.exit ] || [ -f %[1]s/.box/"$cur".exit ]; then
+    echo "job %[3]s's checkout %[1]s/$r was replaced by job $cur; pull right after a job, or run with --new (new: true)" >&2
+  else
+    echo "checkout %[1]s/$r is in use by job $cur, not %[3]s yet" >&2
+  fi
+  exit 4
+fi
+`, workRoot, jobrun.Shq(job), job)
+}
+
 // checkoutScript prints the checkout a relative path in box pull starts
-// from: the job's /work/<repo>, or the only checkout in the box.
+// from: the job's /work/<repo>, or the only checkout in the box. When job is
+// set, it also checks that another job hasn't replaced that checkout (#197).
 func checkoutScript(job string) string {
 	s := "# checkout\nr=\n"
 	if job != "" {
 		s += fmt.Sprintf("test -f %[1]s/.box/%[2]s.log || { echo 'no job %[2]s' >&2; exit 3; }\nr=$(cat %[1]s/.box/%[2]s.repo 2>/dev/null)\n", workRoot, job)
 	}
-	return s + fmt.Sprintf(`if [ -z "$r" ]; then
+	s += fmt.Sprintf(`if [ -z "$r" ]; then
   set --
   for d in %[1]s/*/; do [ -d "$d" ] && set -- "$@" "$(basename "$d")"; done
   [ $# = 1 ] || { echo "box: $# checkouts in %[1]s; give an absolute path" >&2; exit 3; }
   r=$1
 fi
-echo %[1]s/"$r"
 `, workRoot)
+	if job != "" {
+		s += checkoutOwnerCheck(job)
+	}
+	return s + fmt.Sprintf("echo %s/\"$r\"\n", workRoot)
+}
+
+// checkoutOwnerScript checks that job still owns /work/<repo> before an
+// absolute-path pull reads from it (#197).
+func checkoutOwnerScript(job, repo string) string {
+	return "# checkout\n" + fmt.Sprintf("test -f %[1]s/.box/%[2]s.log || { echo 'no job %[2]s' >&2; exit 3; }\nr=%[3]s\n", workRoot, job, jobrun.Shq(repo)) + checkoutOwnerCheck(job)
+}
+
+// isWindowsPath says whether p looks like a Windows path (C:/..., C:\..., or
+// \...), as when a Windows path is passed as a remote path or Git Bash rewrites
+// a /... argument before box sees it (#197).
+func isWindowsPath(p string) bool {
+	if strings.HasPrefix(p, `\`) {
+		return true
+	}
+	return len(p) >= 3 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) &&
+		p[1] == ':' && (p[2] == '/' || p[2] == '\\')
+}
+
+func (a *App) checkStoppedOwner(ctx context.Context, box, job, repo string) error {
+	cur, err := a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+repo+".checkout", "-")
+	if err != nil {
+		return nil // older box without .checkout, or unreadable
+	}
+	if cur = strings.TrimSpace(cur); cur != "" && cur != job {
+		return fmt.Errorf("job %s's checkout %s/%s was replaced by job %s; pull right after a job, or run with --new (new: true)", job, workRoot, repo, cur)
+	}
+	return nil
+}
+
+func (a *App) execCheckoutScript(ctx context.Context, box, script string) (stdout string, stopped bool, err error) {
+	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", script}})
+	if err != nil {
+		return "", false, err
+	}
+	switch res.Code {
+	case 0:
+		return strings.TrimSpace(res.Stdout), false, nil
+	case 3, 4:
+		msg := strings.TrimSpace(res.Stderr)
+		if msg == "" {
+			msg = fmt.Sprintf("checkout lookup failed for %s", box)
+		}
+		return "", false, errors.New(msg)
+	default:
+		msg := strings.TrimSpace(res.Stderr)
+		return "", strings.Contains(msg, "Instance is not running"), fmt.Errorf("incus exec: %s", msg)
+	}
 }
 
 var windowsDeviceName = regexp.MustCompile(`(?i)^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³])$`)
@@ -324,6 +391,9 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	if remote == "" || strings.ContainsAny(remote, "\x00\n") {
 		return "", errors.New("give a remote path")
 	}
+	if isWindowsPath(remote) {
+		return "", fmt.Errorf("remote path %q is a Windows path, not a path in the Linux box (in Git Bash, pass a relative path or set MSYS_NO_PATHCONV=1 for /... paths)", remote)
+	}
 	if local == "" {
 		return "", errors.New("give a local directory")
 	}
@@ -337,8 +407,8 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 		return err
 	}
 	if !path.IsAbs(remote) {
-		base, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", checkoutScript(job))
-		if err != nil && job != "" && strings.Contains(err.Error(), "Instance is not running") {
+		base, stopped, err := a.execCheckoutScript(ctx, box, checkoutScript(job))
+		if err != nil && job != "" && stopped {
 			// A GPU box My PC stopped is kept for its files, and file pull
 			// reads a stopped box: the job's .repo names its checkout (#117).
 			var repo string
@@ -346,12 +416,33 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 			if repo = strings.TrimSpace(repo); err == nil && (repo == "" || strings.ContainsAny(repo, "/\x00\n") || repo == "." || repo == "..") {
 				err = fmt.Errorf("job %s names no checkout; give an absolute path", job)
 			}
+			if err == nil {
+				err = a.checkStoppedOwner(ctx, box, job, repo)
+			}
 			base = workRoot + "/" + repo
 		}
 		if err != nil {
 			return "", gone(err)
 		}
-		remote = path.Join(strings.TrimSpace(base), remote)
+		remote = path.Join(base, remote)
+	} else if job != "" {
+		cleaned := path.Clean(remote)
+		if rest, ok := strings.CutPrefix(cleaned, workRoot+"/"); ok {
+			repo, _, _ := strings.Cut(rest, "/")
+			if validBox.MatchString(repo) {
+				_, stopped, err := a.execCheckoutScript(ctx, box, checkoutOwnerScript(job, repo))
+				if err != nil && stopped {
+					if _, rerr := a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+job+".repo", "-"); rerr != nil {
+						err = rerr
+					} else {
+						err = a.checkStoppedOwner(ctx, box, job, repo)
+					}
+				}
+				if err != nil {
+					return "", gone(err)
+				}
+			}
+		}
 	}
 	remote = path.Clean(remote)
 	name := path.Base(remote)
@@ -381,7 +472,12 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	}
 	defer os.RemoveAll(staging)
 	if _, err := a.incusOK(ctx, "file", "pull", "-r", a.target(box)+remote, staging); err != nil {
-		return "", gone(err)
+		if job != "" && isGone(err) {
+			if by := a.evictedFor(ctx, job); by != "" {
+				return "", errors.New(evictedText(box, by))
+			}
+		}
+		return "", fmt.Errorf("pull %s from %s: %w", remote, box, err)
 	}
 	entries, err := os.ReadDir(staging)
 	if err != nil {

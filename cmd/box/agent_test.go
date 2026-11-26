@@ -306,6 +306,116 @@ func TestPullFromStoppedBox(t *testing.T) {
 	if _, err := a.Pull(context.Background(), job, "result.txt", t.TempDir()); err == nil || !strings.Contains(err.Error(), "names no checkout") {
 		t.Errorf("bad .repo: %v", err)
 	}
+	// A stopped box whose checkout was replaced by another job refuses pulls
+	// for the earlier job, for both relative and in-checkout absolute paths (#197).
+	other := "my-repo-725d.20261123-120500-0002"
+	f.files["pc:my-repo-725d/work/.box/"+job+".repo"] = "my-repo\n"
+	f.files["pc:my-repo-725d/work/.box/my-repo.checkout"] = other + "\n"
+	for _, remote := range []string{"result.txt", "/work/my-repo/result.txt"} {
+		if _, err := a.Pull(context.Background(), job, remote, t.TempDir()); err == nil || !strings.Contains(err.Error(), "was replaced by job "+other) {
+			t.Errorf("Pull(stopped, %q) = %v, want replaced error", remote, err)
+		}
+	}
+}
+
+func TestPullRejectsWindowsPathsAndNamesRemoteOnError(t *testing.T) {
+	f := &fakePC{t: t, pullErr: "Error: file does not exist"}
+	a, _ := testApp(f)
+	for _, p := range []string{
+		`C:/Program Files/Git/work/agent-box/internal/dash/testdata`,
+		`C:\work\agent-box\out.txt`,
+		`\work\agent-box\out.txt`,
+	} {
+		if _, err := a.Pull(context.Background(), "my-repo.20261123-120000-0001", p, t.TempDir()); err == nil ||
+			!strings.Contains(err.Error(), "Windows path") || !strings.Contains(err.Error(), "MSYS_NO_PATHCONV=1") {
+			t.Errorf("Pull(%q) = %v, want Windows-path guidance", p, err)
+		}
+	}
+	if c := f.callList(); c != "" {
+		t.Errorf("Windows paths should fail before calling incus, got %q", c)
+	}
+	if _, err := a.Pull(context.Background(), "my-repo", "/work/my-repo/missing.txt", t.TempDir()); err == nil ||
+		!strings.Contains(err.Error(), "pull /work/my-repo/missing.txt from my-repo") || !strings.Contains(err.Error(), "file does not exist") {
+		t.Errorf("missing file error = %v, want resolved remote path and incus error", err)
+	}
+}
+
+func TestPullDetectsReplacedCheckout(t *testing.T) {
+	bash := gitBash(t)
+	old := workRoot
+	workRoot = filepath.ToSlash(t.TempDir())
+	defer func() { workRoot = old }()
+
+	boxDir := filepath.Join(workRoot, ".box")
+	if err := os.MkdirAll(boxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(workRoot, "my-repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	job1 := "my-repo.20261123-120000-0001"
+	job2 := "my-repo.20261123-120500-0002"
+	for _, j := range []string{job1, job2} {
+		write(t, filepath.Join(boxDir, j+".log"), "ok\n")
+		write(t, filepath.Join(boxDir, j+".repo"), "my-repo\n")
+	}
+	ctx := context.Background()
+
+	// While job1 owns the checkout, both relative and in-checkout absolute scripts accept it.
+	write(t, filepath.Join(boxDir, "my-repo.checkout"), job1+"\n")
+	for _, script := range []string{checkoutScript(job1), checkoutOwnerScript(job1, "my-repo")} {
+		res, err := (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", script}})
+		if err != nil || res.Code != 0 {
+			t.Fatalf("owner script for active job1 = %+v, %v", res, err)
+		}
+	}
+
+	// While job1 is still running (no .exit) and job2 hasn't checked out yet (no .exit),
+	// pulling job2 says the checkout is still in use by job1.
+	res, err := (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", checkoutScript(job2)}})
+	if err != nil || res.Code != 4 || !strings.Contains(res.Stderr, "is in use by job "+job1+", not "+job2+" yet") {
+		t.Fatalf("waiting job2 script = %+v, %v", res, err)
+	}
+
+	// Once job1 finishes and job2 takes over the checkout, pulling job1 refuses clearly.
+	write(t, filepath.Join(boxDir, job1+".exit"), "0\n")
+	write(t, filepath.Join(boxDir, "my-repo.checkout"), job2+"\n")
+	for _, script := range []string{checkoutScript(job1), checkoutOwnerScript(job1, "my-repo")} {
+		res, err := (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", script}})
+		if err != nil || res.Code != 4 || !strings.Contains(res.Stderr, "was replaced by job "+job2) {
+			t.Fatalf("replaced job1 script = %+v, %v", res, err)
+		}
+	}
+
+	// Pulling by bare box name ignores job ownership and returns the current checkout.
+	res, err = (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", checkoutScript("")}})
+	if err != nil || res.Code != 0 || strings.TrimSpace(res.Stdout) != workRoot+"/my-repo" {
+		t.Fatalf("box-name checkout script = %+v, %v", res, err)
+	}
+}
+
+func TestPullAbsolutePathChecksCheckoutOnlyInsideWorkRepo(t *testing.T) {
+	job := "my-repo.20261123-120000-0001"
+	f := &fakePC{t: t, scriptRC: 4, scriptErr: "job " + job + "'s checkout /work/my-repo was replaced by job my-repo.20261123-120500-0002"}
+	f.pull = func(src, dst string) { write(t, filepath.Join(dst, filepath.Base(src)), "ok\n") }
+	a, _ := testApp(f)
+
+	// In-checkout absolute path checks ownership and refuses when replaced.
+	if _, err := a.Pull(context.Background(), job, "/work/my-repo/internal/dash/testdata", t.TempDir()); err == nil ||
+		!strings.Contains(err.Error(), "was replaced by job") {
+		t.Fatalf("in-checkout absolute pull = %v, want replaced error", err)
+	}
+	if len(f.pulls) != 0 {
+		t.Fatalf("pulled despite replaced checkout: %v", f.pulls)
+	}
+
+	// Absolute paths outside /work/<repo> (/tmp and /work/.box) skip the checkout check.
+	for _, p := range []string{"/tmp/out.txt", "/work/.box/" + job + ".log"} {
+		if _, err := a.Pull(context.Background(), job, p, t.TempDir()); err != nil {
+			t.Errorf("Pull(%q) = %v, want success outside /work/<repo>", p, err)
+		}
+	}
 }
 
 func TestPull(t *testing.T) {
