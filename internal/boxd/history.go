@@ -364,6 +364,18 @@ func (h *History) dropOldTails() {
 	}
 }
 
+// AllJobs returns every recorded job, newest first.
+func (h *History) AllJobs() []dash.Job {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]dash.Job, 0, len(h.jobs))
+	for _, j := range h.jobs {
+		out = append(out, *j)
+	}
+	slices.SortFunc(out, newest)
+	return out
+}
+
 // Job returns a recorded job.
 func (h *History) Job(key string) (dash.Job, bool) {
 	h.mu.Lock()

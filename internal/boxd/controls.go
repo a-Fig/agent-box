@@ -193,9 +193,20 @@ func (s *Server) deleteBox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "createdAt names the box")
 		return
 	}
-	err := s.W.DeleteBox(r.Context(), r.PathValue("name"), b.CreatedAt, s.device(r))
+	err := s.W.DeleteBox(r.Context(), r.PathValue("name"), b.CreatedAt, b.Confirmed, s.device(r))
+	var nc *needsConfirmError
+	if errors.As(err, &nc) {
+		writeJSON(w, http.StatusConflict, dash.DeleteConflictBody{Error: nc.warning.Message(r.PathValue("name")), Code: dash.CodeNeedsConfirm, Warning: nc.warning})
+		return
+	}
 	writeControl(w, err, func() { w.WriteHeader(http.StatusNoContent) })
 }
+
+// needsConfirmError is an unconfirmed delete the guard refused (#247): the
+// box has work the page had not shown when it asked.
+type needsConfirmError struct{ warning dash.DeleteWarning }
+
+func (e *needsConfirmError) Error() string { return "delete needs confirmation" }
 
 func (s *Server) extendBox(w http.ResponseWriter, r *http.Request) {
 	var b dash.ExtendBody
@@ -330,11 +341,64 @@ func (w *Watcher) boxFor(name string, createdAt time.Time) (dash.Box, error) {
 	return b, nil
 }
 
+// deleteRisk is the warning for deleting b now, from the jobs boxd knows
+// ran on this instance: live ones, the history, and queued jobs a start has
+// begun for. It reads current state, so a job that appeared after the page's
+// last update is counted even when the page never saw it (#247).
+func (w *Watcher) deleteRisk(b dash.Box) dash.DeleteWarning {
+	now := w.Now().UTC()
+	seen := map[string]bool{}
+	var warn dash.DeleteWarning
+	add := func(j dash.Job, onBox bool) {
+		if !onBox || seen[j.Key] {
+			return
+		}
+		switch active, recent := j.DeleteClass(now); {
+		case active:
+			seen[j.Key] = true
+			warn.Active = append(warn.Active, j)
+		case recent:
+			seen[j.Key] = true
+			warn.Recent = append(warn.Recent, j)
+		}
+	}
+	w.mu.Lock()
+	live := make([]dash.Job, 0, len(w.live))
+	for _, j := range w.live {
+		live = append(live, *j)
+	}
+	w.mu.Unlock()
+	for _, j := range live {
+		add(j, ranOn(j, b))
+	}
+	for _, j := range w.Hist.AllJobs() {
+		add(j, ranOn(j, b))
+	}
+	if w.Queue != nil {
+		for _, j := range w.Queue.StartingFor(b.Name) {
+			add(j, j.Box == b.Name)
+		}
+	}
+	return warn
+}
+
 // DeleteBox deletes a box after checking it is the one the page saw. Its
-// running jobs become lost on the next poll.
-func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Time, by string) error {
-	if _, err := w.boxFor(name, createdAt); err != nil {
+// running jobs become lost on the next poll. An unconfirmed delete is
+// refused with the warning when the box has active or recent jobs (#247);
+// a confirmed one deletes as before. What the guard can guarantee is
+// bounded by #217: Incus deletes by name with no conditional delete, so the
+// identity and warning are rechecked immediately before the delete and the
+// remaining window is that one call — a box replaced, or a job starting, in
+// that gap is not covered.
+func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Time, confirmed bool, by string) error {
+	b, err := w.boxFor(name, createdAt)
+	if err != nil {
 		return err
+	}
+	if !confirmed {
+		if warn := w.deleteRisk(b); warn.Any() {
+			return &needsConfirmError{warn}
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
@@ -342,6 +406,11 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	// for a reuse of the name is the length of one call.
 	if _, err := w.checkCreated(ctx, name, createdAt); err != nil {
 		return err
+	}
+	if !confirmed {
+		if warn := w.deleteRisk(b); warn.Any() {
+			return &needsConfirmError{warn}
+		}
 	}
 	if err := w.delete(ctx, name); err != nil {
 		return err

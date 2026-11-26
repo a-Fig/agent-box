@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -474,8 +475,94 @@ type BoxBody struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// DeleteBody is POST /api/boxes/{name}/delete; the reply is 204.
-type DeleteBody = BoxBody
+// RecentJobWindow is how long after a job ends deleting its box still
+// warns: the full log and any unpushed files go with the box, and only the
+// kept tail survives (#247).
+const RecentJobWindow = 2 * time.Minute
+
+// DeleteBody is POST /api/boxes/{name}/delete; the reply is 204, or 409
+// CodeNeedsConfirm with a DeleteConflictBody when Confirmed is false and the
+// box has active or recent jobs. Confirmed is what the page sends after the
+// warning dialog: the server then deletes as it always has.
+type DeleteBody struct {
+	CreatedAt time.Time `json:"createdAt"`
+	Confirmed bool      `json:"confirmed,omitempty"`
+}
+
+// DeleteWarning is the jobs that make deleting a box worth a warning: Active
+// would be interrupted, Recent ended within RecentJobWindow and would lose
+// its files and full log.
+type DeleteWarning struct {
+	Active []Job `json:"active"`
+	Recent []Job `json:"recent"`
+}
+
+// Any says whether the warning has anything in it.
+func (w DeleteWarning) Any() bool { return len(w.Active) > 0 || len(w.Recent) > 0 }
+
+// Message is the warning as a sentence for a person, for the server's 409
+// and the dialog alike.
+func (w DeleteWarning) Message(name string) string {
+	var parts []string
+	if n := len(w.Active); n > 0 {
+		parts = append(parts, pluralJobs(n, "job")+" on "+name+" would be interrupted and lost")
+	}
+	if n := len(w.Recent); n > 0 {
+		parts = append(parts, pluralJobs(n, "job")+" on "+name+" ended in the last 2 minutes; deleting now discards its files and full log (only the last lines are kept)")
+	}
+	if len(parts) == 0 {
+		return "Nothing on " + name + " needs a warning."
+	}
+	return strings.Join(parts, ". ") + "."
+}
+
+func pluralJobs(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// DeleteConflictBody is the 409 reply to an unconfirmed delete the server
+// refused: the warning the page should now show.
+type DeleteConflictBody struct {
+	Error   string        `json:"error"`
+	Code    string        `json:"code"`
+	Warning DeleteWarning `json:"warning"`
+}
+
+// DeleteClass says how one job counts toward a delete warning at now:
+// active (starting, running or paused) or recently finished.
+func (j Job) DeleteClass(now time.Time) (active, recent bool) {
+	switch {
+	case j.State == JobRunning || j.State == JobPaused || j.State == JobQueued:
+		return true, false
+	case (j.State == JobDone || j.State == JobLost) && j.EndedAt != nil &&
+		!j.EndedAt.After(now) && j.EndedAt.After(now.Add(-RecentJobWindow)):
+		return false, true
+	}
+	return false, false
+}
+
+// DeleteRisk splits jobs into the warning for deleting b at now, counting
+// only jobs that ran on this instance of the box (RanOn).
+func DeleteRisk(jobs []Job, b Box, now time.Time) DeleteWarning {
+	var w DeleteWarning
+	seen := map[string]bool{}
+	for _, j := range jobs {
+		if seen[j.Key] || !j.RanOn(b) {
+			continue
+		}
+		seen[j.Key] = true
+		switch active, recent := j.DeleteClass(now); {
+		case active:
+			w.Active = append(w.Active, j)
+		case recent:
+			w.Recent = append(w.Recent, j)
+		}
+	}
+	return w
+}
 
 // ExtendBody is POST /api/boxes/{name}/extend; the reply is the Box.
 type ExtendBody struct {
@@ -498,14 +585,15 @@ type ErrorBody struct {
 
 // Error codes, with the status each goes with.
 const (
-	CodeBadRequest = "bad-request" // 400
-	CodeForbidden  = "forbidden"   // 403: the caller isn't an owner
-	CodeNotFound   = "not-found"   // 404: the box or job is gone
-	CodeFrozen     = "frozen"      // 409: the box is frozen for My PC
-	CodeNotRunning = "not-running" // 409: the job has already ended
-	CodeGone       = "gone"        // 409: the box of that name is another one now
-	CodeIncus      = "incus"       // 502: Incus failed
-	CodeQueueFull  = "queue-full"  // 507: the queue's snapshots would pass QueueBytes
+	CodeBadRequest   = "bad-request"        // 400
+	CodeForbidden    = "forbidden"          // 403: the caller isn't an owner
+	CodeNotFound     = "not-found"          // 404: the box or job is gone
+	CodeFrozen       = "frozen"             // 409: the box is frozen for My PC
+	CodeNotRunning   = "not-running"        // 409: the job has already ended
+	CodeGone         = "gone"               // 409: the box of that name is another one now
+	CodeNeedsConfirm = "needs-confirmation" // 409: deleting needs the warning first (#247)
+	CodeIncus        = "incus"              // 502: Incus failed
+	CodeQueueFull    = "queue-full"         // 507: the queue's snapshots would pass QueueBytes
 )
 
 // SSE event names on GET /api/events. The first event is EventState; each

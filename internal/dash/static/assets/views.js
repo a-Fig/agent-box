@@ -236,16 +236,58 @@ function cancelJob(j) {
   });
 }
 
-function deleteBox(b) {
-  const running = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"));
+// Deleting warns only when work would be interrupted or recent output lost
+// (#247, dash.RecentJobWindow): a box with neither deletes on the first click.
+const RECENT_MS = 2 * 60 * 1000;
+
+function deleteRisk(b) {
+  const now = clock.now();
+  const active = jobsOf((j) => ranOn(j, b) && (j.state === "running" || j.state === "paused" || j.state === "queued"));
+  const recent = jobsOf((j) => ranOn(j, b) && (j.state === "done" || j.state === "lost") && j.endedAt && Date.parse(j.endedAt) <= now && Date.parse(j.endedAt) > now - RECENT_MS);
+  return { active, recent };
+}
+
+function deleteBodyText(name, { active, recent }) {
+  const parts = [];
+  if (active.length) parts.push(plural(active.length, "job") + " on it " + (active.length === 1 ? "is" : "are") + " still working and would be interrupted and lost.");
+  if (recent.length) parts.push(plural(recent.length, "job") + " on it ended in the last 2 minutes; deleting now discards its files and full log (only the last lines are kept).");
+  return parts.join(" ") + " Boxes are compute, not storage: anything on it that wasn't pushed is gone.";
+}
+
+function confirmDelete(b, risk) {
   confirmDialog({
     valid: () => sameBox(b),
     goneText: "Box " + b.name + " went away or was replaced, so nothing was deleted.",
     title: "Delete " + b.name + "?",
-    body: (running.length ? plural(running.length, "running job") + " on it will be lost. " : "") + "Boxes are compute, not storage: anything on it that wasn't pushed is gone.",
+    body: deleteBodyText(b.name, risk),
     action: "Delete box",
-    run: () => act("del-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete", { createdAt: b.createdAt }), () => S.boxes.delete(b.machine + "/" + b.name)),
+    run: () => act("del-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete", { createdAt: b.createdAt, confirmed: true }), () => S.boxes.delete(b.machine + "/" + b.name)),
   });
+}
+
+async function deleteBox(b) {
+  const risk = deleteRisk(b);
+  if (risk.active.length || risk.recent.length) {
+    confirmDelete(b, risk);
+    return;
+  }
+  // No warning needed. The server rechecks: work that appeared after this
+  // page's last update comes back as needs-confirmation, and only then does
+  // the dialog open.
+  const key = "del-" + b.name;
+  if (busy.has(key)) return;
+  busy.add(key);
+  changed();
+  try {
+    await post("/api/boxes/" + encodeURIComponent(b.name) + "/delete", { createdAt: b.createdAt, confirmed: false });
+    S.boxes.delete(b.machine + "/" + b.name);
+  } catch (e) {
+    if (e.code === "needs-confirmation" && e.warning) confirmDelete(b, { active: e.warning.active || [], recent: e.warning.recent || [] });
+    else toast(e.message || "That didn't work.", true);
+  } finally {
+    busy.delete(key);
+    changed();
+  }
 }
 
 function extendBox(b, hours) {
