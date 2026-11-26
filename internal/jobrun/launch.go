@@ -32,6 +32,33 @@ func IsDisallowedMetadata(err error) bool {
 // box run and boxd both move its expiry to now plus this; the reaper deletes it.
 const EndedKeep = 30 * time.Minute
 
+// JobTTL is a box's expiry while a job runs there: box run and boxd's
+// starter set it to the job's start plus this.
+const JobTTL = 24 * time.Hour
+
+// JobExpirySlack is how far past its start plus JobTTL a job's own expiry
+// may be: box run sets it a few seconds after the job's ID, and again once
+// the job runs.
+const JobExpirySlack = 10 * time.Minute
+
+// EndedExpiry is the expiry, now plus keep, that a box whose expiry is cur
+// gets once the job that started at started has ended, and whether to write
+// it. Only the job's own expiry, no later than started plus JobTTL (and
+// slack), is shortened: a later one is a later job's or an extend from the
+// dashboard or by hand, and stays. One already as short stays too. box
+// (markIdle, cleanup) and boxd (reapEnded) both follow this.
+func EndedExpiry(cur string, started, now time.Time, keep time.Duration) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, cur)
+	if err != nil || t.After(started.Add(JobTTL+JobExpirySlack)) {
+		return time.Time{}, false
+	}
+	until := now.Add(keep).UTC().Truncate(time.Second)
+	if !t.After(until) {
+		return time.Time{}, false
+	}
+	return until, true
+}
+
 // Instance keys a box is launched with (cmd/box reads them too).
 const (
 	ExpiresKey   = "user.expires"
