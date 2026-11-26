@@ -1,41 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="'Space Grotesk', system-ui, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="Inter, system-ui, sans-serif">
   <defs>
-    <radialGradient id="glow" cx="22%" cy="30%" r="60%">
-      <stop offset="0%" stop-color="#FF7A1A" stop-opacity="0.22"/>
-      <stop offset="100%" stop-color="#FF7A1A" stop-opacity="0"/>
+    <radialGradient id="glow" cx="50%" cy="26%" r="55%">
+      <stop offset="0%" stop-color="#FDEE8C" stop-opacity="0.55"/>
+      <stop offset="42%" stop-color="#4f82ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#225BFF" stop-opacity="0"/>
     </radialGradient>
     <pattern id="dots" width="34" height="34" patternUnits="userSpaceOnUse">
-      <circle cx="2" cy="2" r="1.4" fill="#9AA4B8" opacity="0.13"/>
+      <circle cx="2" cy="2" r="1.4" fill="#FFFBEA" opacity="0.1"/>
     </pattern>
   </defs>
-  <rect width="1200" height="630" fill="#0B0E14"/>
+  <rect width="1200" height="630" fill="#225BFF"/>
   <rect width="1200" height="630" fill="url(#dots)"/>
   <rect width="1200" height="630" fill="url(#glow)"/>
 
   <!-- cube mark -->
-  <g transform="translate(150 150) scale(4.2)">
-    <path d="M0 2.1 8.4 -2.7 8.4 1.9 0 6.7 -8.4 1.9 -8.4 -2.7Z" fill="#FF7A1A" opacity="0.22"/>
-    <path d="M0 2.1 0 6.7 -8.4 1.9 -8.4 -2.7Z" fill="#FF7A1A" opacity="0.5"/>
-    <path d="M0 2.1 8.4 -2.7 8.4 1.9 0 6.7Z" fill="#FF7A1A" opacity="0.32"/>
-    <g fill="none" stroke="#FF9A47" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
-      <path d="M0 -9.5 8.4 -4.7 8.4 4.9 0 9.7 -8.4 4.9 -8.4 -4.7Z"/><path d="M0 -9.5 0 0 8.4 4.9"/><path d="M0 0 -8.4 4.9"/>
+  <g transform="translate(92 92)">
+    <rect width="72" height="72" rx="16" fill="#1a49d6"/>
+    <g transform="translate(36 36) scale(2.25)" fill="none" stroke="#FFFBEA" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M0 -9.8 9.3 -5.2 0 -0.6 -9.3 -5.2Z"/><path d="M-9.3 -5.2V5.4L0 10V-0.6"/><path d="M9.3 -5.2V5.4L0 10"/>
     </g>
   </g>
-  <text x="222" y="162" font-size="40" font-weight="700" fill="#E6EAF2" letter-spacing="-1"><tspan fill="#9AA4B8">agent</tspan>-box</text>
+  <text x="180" y="138" font-size="40" font-weight="800" fill="#FFFBEA" letter-spacing="-1.5">agent-box</text>
 
-  <text x="92" y="330" font-size="70" font-weight="700" fill="#E6EAF2" letter-spacing="-2">Spare cores from a gaming PC,</text>
-  <text x="92" y="410" font-size="70" font-weight="700" fill="#FF7A1A" letter-spacing="-2">handed to your agents.</text>
+  <text x="92" y="330" font-size="76" font-weight="800" fill="#FFFBEA" letter-spacing="-3">Spare compute for your agents,</text>
+  <text x="92" y="420" font-size="76" font-weight="800" fill="#FDEE8C" letter-spacing="-3">from a gaming PC.</text>
 
-  <text x="92" y="478" font-size="27" fill="#9AA4B8" font-family="'JetBrains Mono', monospace">Disposable Linux boxes for coding agents. You dial the power. Games always win.</text>
+  <text x="92" y="492" font-size="27" fill="#dfe6ff">Disposable Linux boxes for coding agents. You choose the power. Games always win.</text>
 
-  <!-- throttle meter -->
-  <g transform="translate(92 520)">
-    <g fill="#1C2230">
-      <rect x="0" y="0" width="54" height="30" rx="2"/><rect x="62" y="0" width="54" height="30" rx="2"/><rect x="124" y="0" width="54" height="30" rx="2"/><rect x="186" y="0" width="54" height="30" rx="2"/><rect x="248" y="0" width="54" height="30" rx="2"/><rect x="310" y="0" width="54" height="30" rx="2"/><rect x="372" y="0" width="54" height="30" rx="2"/><rect x="434" y="0" width="54" height="30" rx="2"/>
-    </g>
-    <g fill="#FF7A1A">
-      <rect x="0" y="0" width="54" height="30" rx="2"/><rect x="62" y="0" width="54" height="30" rx="2"/><rect x="124" y="0" width="54" height="30" rx="2"/><rect x="186" y="0" width="54" height="30" rx="2"/><rect x="248" y="0" width="54" height="30" rx="2"/><rect x="310" y="0" width="54" height="30" rx="2"/>
-    </g>
-  </g>
-  <text x="596" y="542" font-size="22" fill="#39E0C8" font-family="'JetBrains Mono', monospace">Full power</text>
+  <text x="92" y="566" font-size="21" fill="#c7d3ff" font-family="ui-monospace, Menlo, monospace">$ box run --new -- go test -race ./...</text>
 </svg>
