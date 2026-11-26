@@ -516,6 +516,32 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	}
 }
 
+func TestLaunchRetriesOnlyImageLookupEOF(t *testing.T) {
+	const lookupEOF = `Error: Get "https://example.test:8443/1.0/images/abc?project=agents": EOF`
+	for _, tt := range []struct {
+		name, stderr string
+		once         bool
+		launches     int
+		wantErr      bool
+	}{
+		{"transient image lookup", lookupEOF, true, 2, false},
+		{"persistent image lookup", lookupEOF, false, 2, true},
+		{"ambiguous create failure", `Error: Post "https://example.test:8443/1.0/instances?project=agents": EOF`, true, 1, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakePC{t: t, refuse: tt.stderr, refuseOnce: tt.once}
+			a, _ := testApp(f)
+			err := a.launch(context.Background(), "scratch", time.Hour, true, mustSize(t, mode.GPUSize))
+			if (err != nil) != tt.wantErr || len(f.launches) != tt.launches {
+				t.Fatalf("launch = %v, attempts = %d; want error = %v, attempts = %d", err, len(f.launches), tt.wantErr, tt.launches)
+			}
+			if tt.launches == 2 && (f.launches[0][2] != f.launches[1][2] || f.stdins[0] == "" || f.stdins[0] != f.stdins[1]) {
+				t.Fatal("retry changed the instance name or GPU configuration")
+			}
+		})
+	}
+}
+
 func TestLaunchThrowawayRetriesOnceOnDisallowedMetadata(t *testing.T) {
 	const metaErr = "Error: Failed creating instance from image: Instance metadata contained disallowed entries: [/var/lib/incus/storage-pools/default/containers/agents_my-repo-0001/abc/rootfs/bin]"
 

@@ -5,9 +5,9 @@ description: Run heavy test suites and builds from your worktree on a disposable
 
 # box: offload heavy runs
 
-**Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, or several heavy runs at once; quick tests gain little.
+**Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, and parallel builds.
 
-1. `box_status` with your worktree as `dir` says whether it fits now.
+1. `box_status` with `dir` reports available room.
 2. `box_run` with `dir`, `command` and `reason` (the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` if it might hang (exit 124). With `pipefail`, `| head` can exit 141.
 3. A run ending within 30 s returns its result; else `running`:
    - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives starting "box: job …" (Claude Code: mid-turn); `box_job` has the rest.
@@ -19,6 +19,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
 7. `box_pull` fetches reports and builds before a later run replaces them. Parallel runs: `new: true`.
 
 Boxes are throwaway; `/cache` survives.
+An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).
 
