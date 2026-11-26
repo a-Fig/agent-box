@@ -20,21 +20,26 @@ type lookupRunner func(context.Context, Cmd) (Result, error)
 
 func (r lookupRunner) Run(ctx context.Context, cmd Cmd) (Result, error) { return r(ctx, cmd) }
 
-func lookupTestApp(t *testing.T) (*App, *bytes.Buffer, fleetHost, fleetHost) {
+func writeLookupTestHosts(t *testing.T, hosts ...fleetHost) {
 	t.Helper()
 	path := hostsTestPath(t)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	west := fleetHost{Name: "West", Remote: "west", Project: "work", DashboardURL: "https://west.example.com/dashboard/"}
-	east := fleetHost{Name: "East", Remote: "east", Project: "agents", DashboardURL: "https://east.example.com/panel"}
-	config, err := json.Marshal(map[string][]fleetHost{"hosts": {west, east}})
+	config, err := json.Marshal(map[string][]fleetHost{"hosts": hosts})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, config, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func lookupTestApp(t *testing.T, westProject string) (*App, *bytes.Buffer, fleetHost, fleetHost) {
+	t.Helper()
+	west := fleetHost{Name: "West", Remote: "west", Project: westProject, DashboardURL: "https://west.example.com/dashboard/"}
+	east := fleetHost{Name: "East", Remote: "east", Project: "agents", DashboardURL: "https://east.example.com/panel"}
+	writeLookupTestHosts(t, west, east)
 	out := new(bytes.Buffer)
 	a := newApp()
 	a.Remote, a.Project, a.Out, a.Err, a.StateDir = "east", "agents", out, io.Discard, t.TempDir()
@@ -68,7 +73,7 @@ func lookupTool(t *testing.T, a *App, id string, paged bool) (map[string]any, ma
 }
 
 func TestQualifiedJobLogRoutesByHost(t *testing.T) {
-	a, out, west, east := lookupTestApp(t)
+	a, out, west, east := lookupTestApp(t, "work")
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
 		if len(cmd.Args) != 8 || !strings.Contains(cmd.Args[7], testBareJobID) || strings.Contains(cmd.Args[7], "h1-") {
 			t.Fatalf("log call did not use the bare ID: %q", cmd.Args)
@@ -101,7 +106,7 @@ func TestQualifiedJobLogRoutesByHost(t *testing.T) {
 }
 
 func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
-	a, _, west, east := lookupTestApp(t)
+	a, _, west, east := lookupTestApp(t, "work")
 	posted := map[string]int{}
 	a.Post = func(_ context.Context, url string, body []byte) error {
 		var end dash.JobEndedBody
@@ -111,7 +116,10 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 		posted[url] = end.Exit
 		return nil
 	}
-	a.HTTP = func(*http.Request) (*http.Response, error) {
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "east.example.com" {
+			t.Fatalf("non-agents lookup contacted boxd: %s", req.URL)
+		}
 		return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
 	}
 	gone := false
@@ -135,13 +143,16 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 	})
 	westID := requireQualifiedJobID(t, west, testBareJobID).ID
 	eastID := requireQualifiedJobID(t, east, testBareJobID).ID
+	if err := writeJSON(a.statePath(westID, ".json"), jobRecord{Job: westID, Queued: true}); err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{westID, eastID, testBareJobID} {
 		res, data := lookupTool(t, a, id, false)
 		if res["isError"] != false || data["job"] != id || data["state"] != stateDone {
 			t.Fatalf("attach %s = %v", id, res)
 		}
 	}
-	if len(posted) != 2 || posted["https://west.example.com/dashboard/api/jobs/ended"] != 4 || posted["https://east.example.com/panel/api/jobs/ended"] != 7 {
+	if len(posted) != 1 || posted["https://east.example.com/panel/api/jobs/ended"] != 7 {
 		t.Fatalf("ended reports went to %v", posted)
 	}
 	gone = true
@@ -164,7 +175,7 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 }
 
 func TestQualifiedJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
-	a, _, west, _ := lookupTestApp(t)
+	a, _, west, _ := lookupTestApp(t, "agents")
 	id := requireQualifiedJobID(t, west, testBareJobID).ID
 	requests := 0
 	a.HTTP = func(req *http.Request) (*http.Response, error) {
@@ -179,7 +190,7 @@ func TestQualifiedJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(state))}, nil
 	}
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
-		if requests < 3 || cmd.Args[1] != "work" || cmd.Args[3] != "west:repo" {
+		if requests < 3 || cmd.Args[1] != "agents" || cmd.Args[3] != "west:repo" {
 			t.Fatalf("unexpected Incus call: %q", cmd.Args)
 		}
 		return Result{Code: 3}, nil // the queued job ended and its box is gone
@@ -194,7 +205,7 @@ func TestQualifiedJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 }
 
 func TestUnknownQualifiedJobHostNeverContactsDefault(t *testing.T) {
-	a, _, _, _ := lookupTestApp(t)
+	a, _, _, _ := lookupTestApp(t, "work")
 	id := requireQualifiedJobID(t, fleetHost{Remote: "west", Project: "other"}, testBareJobID).ID
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
 		t.Fatalf("unknown host called Incus: %q", cmd.Args)

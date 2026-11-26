@@ -81,6 +81,8 @@ type App struct {
 	HTTP func(*http.Request) (*http.Response, error)
 	// dashboardURL overrides the derived boxd address for a configured job host.
 	dashboardURL string
+	// boxdDisabled keeps a qualified lookup outside boxd's fixed project on Incus.
+	boxdDisabled bool
 	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
 	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
 	// per-job files. Any of them nil or empty means no push.

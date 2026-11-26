@@ -327,6 +327,9 @@ func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.
 }
 
 func (a *App) boxdURL(ctx context.Context, path string) string {
+	if a.boxdDisabled {
+		return ""
+	}
 	if a.dashboardURL != "" {
 		return strings.TrimRight(a.dashboardURL, "/") + path
 	}

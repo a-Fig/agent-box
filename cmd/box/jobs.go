@@ -247,7 +247,12 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("bad job id %q", job)
 	}
 	box, _, _ := strings.Cut(job, ".")
-	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", cancelScript(job)}})
+	return a.cancelJob(ctx, jobID{ID: job, Bare: job, Box: box})
+}
+
+func (a *App) cancelJob(ctx context.Context, id jobID) (cancelled bool, code int, err error) {
+	job, box := id.ID, id.Box
+	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", cancelScript(id.Bare)}})
 	if err != nil {
 		return false, 0, err
 	}
@@ -267,7 +272,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("cancel %s: bad exit code %q", job, f[1])
 	}
 	if f[0] == "cancelled" {
-		a.markIdle(ctx, box, job)
+		a.markIdle(ctx, box, id.Bare)
 		a.markNotified(job, "cancel") // the agent cancelled it: no push of its end
 	}
 	return f[0] == "cancelled", code, nil

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 type jobLookup struct {
@@ -32,11 +33,15 @@ func (a *App) lookupJob(raw string) (jobLookup, error) {
 	}
 	scoped := *a
 	scoped.Remote, scoped.Project, scoped.dashboardURL = host.Remote, host.Project, host.DashboardURL
+	scoped.boxdDisabled = host.Project != mode.Project
 	return jobLookup{app: &scoped, id: id, host: host.Name}, nil
 }
 
 // A qualified ID can come from another client, with no local queue marker.
 func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
+	if l.app.boxdDisabled {
+		return dash.Job{}, false, nil
+	}
 	local := l.app.wasQueued(l.id.ID)
 	if l.id.hostTag == "" && !local {
 		return dash.Job{}, false, nil
