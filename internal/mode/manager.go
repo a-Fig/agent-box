@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,31 @@ import (
 // ExpiresKey is the instance config key `box` sets to an RFC3339 UTC time after
 // which the instance is deleted.
 const ExpiresKey = "user.expires"
+
+// HoldKey is the RFC3339 UTC time a person asked a box to live until: an
+// extend from the dashboard, or box new --ttl. Only those write it. Whatever
+// sets ExpiresKey writes Held of its own deadline, the reapers delete a box
+// only once both times have passed, and nothing takes a held box for room.
+// Kept apart from ExpiresKey so a job's end can't mistake an extend for the
+// job's own deadline (#198), as Kubernetes keeps a finalizer apart from the
+// scheduler's state.
+const HoldKey = "user.box.hold-until"
+
+// holdFormat is the only hold Held and provision/reaper.sh accept: RFC3339 in
+// UTC, a dot before any fraction, nothing after the Z. Anything else is ignored
+// by both, so the two reapers agree.
+var holdFormat = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$`)
+
+// Held is the later of t and the hold in an instance's config. A box is held
+// at now when Held(cfg, now).After(now).
+func Held(cfg map[string]string, t time.Time) time.Time {
+	// UTC only, as the shell reaper reads it: a malformed hold is ignored.
+	v := cfg[HoldKey]
+	if h, err := time.Parse(time.RFC3339, v); err == nil && holdFormat.MatchString(v) && h.After(t) {
+		return h
+	}
+	return t
+}
 
 const (
 	// FrozenStop is how long an instance may stay frozen in My PC before it is
@@ -187,7 +213,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 	return st
 }
 
-// reap deletes every instance whose user.expires is in the past and returns
+// reap deletes every instance whose user.expires and hold (Held) are in the past and returns
 // the rest. It runs in every mode, My PC included, because deleting frees RAM
 // and disk. An instance with no user.expires is left alone; one with a value
 // that isn't RFC3339 is left alone and reported once. A failed delete is
@@ -216,7 +242,7 @@ func (m *Manager) reap(ctx context.Context, now time.Time, ins []Instance, errs 
 			continue
 		}
 		delete(m.badExpires, in.Name)
-		if !exp.Before(now) {
+		if !Held(in.Config, exp).Before(now) {
 			keep = append(keep, in)
 			continue
 		}
@@ -377,7 +403,9 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name string, pid in
 func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state string) (string, error) {
 	var errs []error
 	shorten := func() {
-		soon := now.Add(GPUStoppedTTL)
+		// Held: a hold keeps the box past GPUStoppedTTL, and the expiry that
+		// says so is already right, so it isn't rewritten every tick.
+		soon := Held(in.Config, now.Add(GPUStoppedTTL))
 		if exp, err := time.Parse(time.RFC3339, in.Config[ExpiresKey]); err != nil || exp.After(soon) {
 			if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, soon.UTC().Format(time.RFC3339)); err != nil {
 				errs = append(errs, err)

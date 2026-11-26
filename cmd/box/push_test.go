@@ -718,7 +718,7 @@ func TestThrowawayKeptAfterItsPushedJob(t *testing.T) {
 	if !strings.Contains(f.names(), box) {
 		t.Fatalf("the throwaway %s was deleted before the agent could pull from it", box)
 	}
-	want := strings.TrimPrefix(e.a.expiryConfig(endedKeep), expiresKey+"=")
+	want := e.a.Now().Add(endedKeep).UTC().Format(time.RFC3339)
 	if got := f.inst(box).Config[expiresKey]; got != want {
 		t.Errorf("expiry = %q, want %q", got, want)
 	}

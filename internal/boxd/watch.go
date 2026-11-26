@@ -32,6 +32,7 @@ type Watcher struct {
 	MachineID   string
 	MachineName string
 	WSLMemory   func() int64  // bytes the distro's VM holds; nil reads 0
+	HasGPU      func() bool   // whether this host can give a box a GPU; nil reads false
 	Version     *dash.Version // this boxd's build, shown as Machine.Boxd; nil if unknown
 	Logf        func(format string, args ...any)
 	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
@@ -55,6 +56,7 @@ type Watcher struct {
 	starting  string               // the queued job being started, one at a time
 	startDone time.Time            // when the last start finished
 	noRoom    map[string]time.Time // queued job -> not before, after Incus refused its launch
+	promoting map[string]bool      // box -> a claimed job's expiry write is in flight
 	started   map[string]dash.Job  // queued jobs started, until a scan sees them
 	lastIns   []Instance
 	lastProj  Project
@@ -78,7 +80,8 @@ func (w *Watcher) init() {
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
 	w.died, w.qview = map[string]time.Time{}, map[string]dash.Job{}
 	w.noRoom, w.started = map[string]time.Time{}, map[string]dash.Job{}
-	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName, Boxd: w.Version}
+	w.promoting = map[string]bool{}
+	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName, Boxd: w.Version, Config: HostConfig(false)}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
 		w.live[j.Key] = &j
@@ -154,6 +157,9 @@ func (w *Watcher) Poll(ctx context.Context) {
 	w.applyJobs(now, ins, scans, "")
 	w.sweepEnded(now, ins, scans)
 	for _, in := range ins {
+		if in.Status == "Frozen" {
+			w.promoteClaim(in)
+		}
 		boxes[in.Name] = w.box(now, in)
 	}
 	w.applyBoxes(now, ins, boxes)
@@ -176,7 +182,7 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 		if in.Status != "Running" {
 			continue
 		}
-		skip := w.Hist.EndedOn(in.Name, in.CreatedAt)
+		skip := w.Hist.EndedOn(in)
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
@@ -193,6 +199,27 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 		}(in.Name)
 	}
 	wg.Wait()
+	// A scan finds a box by name. If the box was replaced by one of the same name after ins was
+	// listed, its scan may have read the new box and must not be stamped with the old one's UID:
+	// such a box counts as not scanned this time. A successful list that confirms a box is gone
+	// keeps its last scan. If the list fails, none of the scans can be verified.
+	if len(out) == 0 {
+		return out
+	}
+	now, err := w.Incus.Instances(ctx)
+	if err != nil {
+		w.logf("boxd: verifying scans: %v", err)
+		return nil
+	}
+	uid := map[string]string{}
+	for _, in := range now {
+		uid[in.Name] = boxUID(in)
+	}
+	for _, in := range ins {
+		if u, ok := uid[in.Name]; ok && u != boxUID(in) {
+			delete(out, in.Name)
+		}
+	}
 	return out
 }
 
@@ -202,6 +229,23 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 // on the box decides the rest.
 func holds(created, started time.Time) bool {
 	return !created.After(started.Add(dash.JobBoxGrace))
+}
+
+// ranOnInstance says whether j ran on the box in is (ranOn). The reaper reads Incus instances,
+// not dash.Boxes, so the box is made the way the dashboard's is (boxUID).
+func ranOnInstance(j dash.Job, in Instance) bool {
+	return ranOn(j, dash.Box{Name: in.Name, Machine: j.Machine, UID: boxUID(in), CreatedAt: in.CreatedAt.UTC()})
+}
+
+// ranOn is dash.Job.RanOn for boxd's own paths: the watcher, the log endpoint and the reaper. A job
+// recorded without a BoxUID falls back to holds, the rule boxd used before jobs had one, and not
+// to the dashboard's tighter dash.BoxJobSkew: these paths act on running jobs, and the tighter
+// rule would mark a live one lost whose box was made minutes after it was named.
+func ranOn(j dash.Job, b dash.Box) bool {
+	if j.BoxUID == "" {
+		return j.Box == b.Name && j.Machine == b.Machine && holds(b.CreatedAt, j.StartedAt)
+	}
+	return j.RanOn(b)
 }
 
 // EndJob applies box's report of how a job ended (POST /api/jobs/ended). It
@@ -313,6 +357,9 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			if j.Repo != "" {
 				w.repoOf[box] = j.Repo
 			}
+			if s.State == "running" && in.Config[jobrun.ThrowawayOwnerKey] == s.Job {
+				w.promoteClaim(in)
+			}
 			before := *j
 			if s.Tail != "" {
 				j.Tail = s.Tail
@@ -345,7 +392,7 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 		in, ok := byName[j.Box]
 		before := *j
 		switch {
-		case !ok || !holds(in.CreatedAt, j.StartedAt):
+		case !ok || !ranOnInstance(*j, in):
 			j.State, j.EndedAt = dash.JobLost, &now // the box went (or is a new one by the same name)
 		case in.Status == "Frozen":
 			j.State = dash.JobPaused
@@ -359,6 +406,31 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			}
 		}
 		w.settle(key, j, before)
+	}
+}
+
+// With w.mu held. A frozen box can have started just before My PC paused it.
+func (w *Watcher) promoteClaim(in Instance) {
+	job := in.Config[jobrun.ThrowawayOwnerKey]
+	if in.Config[jobrun.ThrowawayClaimKey] == "" || w.promoting[in.Name] || !poolJobMatches(in.Name, job) {
+		return
+	}
+	w.promoting[in.Name] = true
+	go w.promotePoolJob(in.Name, job)
+}
+
+// Retry from a later poll if the client lost its connection at startup or
+// the current Incus lookup failed.
+func (w *Watcher) promotePoolJob(box, job string) {
+	defer func() {
+		w.mu.Lock()
+		delete(w.promoting, box)
+		w.mu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), controlTimeout)
+	defer cancel()
+	if _, err := w.setPoolExpiry(ctx, box, job, false); err != nil {
+		w.logf("boxd: promoting the claim for %s: %v", job, err)
 	}
 }
 
@@ -383,8 +455,8 @@ func (w *Watcher) settle(key string, j *dash.Job, before dash.Job) {
 
 func (w *Watcher) newJob(key, id, box string, started time.Time, in Instance, m *meta) *dash.Job {
 	sz := mode.SizeOf(in.Config)
-	j := &dash.Job{Key: key, ID: id, Box: box, Machine: w.MachineID, State: dash.JobRunning, StartedAt: started,
-		Size: sz.Name, GPU: sz.GPU}
+	j := &dash.Job{Key: key, ID: id, Box: box, BoxUID: boxUID(in), Machine: w.MachineID, State: dash.JobRunning,
+		StartedAt: started, Size: sz.Name, GPU: sz.GPU}
 	if m != nil {
 		fillMeta(j, m)
 		if t, err := time.Parse(time.RFC3339, m.QueuedAt); err == nil {
@@ -394,6 +466,16 @@ func (w *Watcher) newJob(key, id, box string, started time.Time, in Instance, m 
 	}
 	j.Kind = dash.Classify(j.Command, j.GPU)
 	return j
+}
+
+// boxUID is in's dash.Box UID: Incus's volatile.uuid, made when the instance is, or its creation
+// time where the instance has none. A job's files are on the box it ran on, so the box a scan
+// finds a job on is its box, whatever the clocks say.
+func boxUID(in Instance) string {
+	if u := in.Config["volatile.uuid"]; u != "" {
+		return u
+	}
+	return in.CreatedAt.UTC().Format(time.RFC3339Nano)
 }
 
 func fillMeta(j *dash.Job, m *meta) {
@@ -431,9 +513,9 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 		}
 	}
 	b := dash.Box{Name: in.Name, Machine: w.MachineID, Size: sz.Name, GPU: sz.GPU, State: strings.ToLower(in.Status),
-		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC()}
+		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC(), UID: boxUID(in)}
 	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil {
-		t = t.UTC()
+		t = mode.Held(in.Config, t).UTC() // when the reaper deletes it
 		b.ExpiresAt = &t
 	}
 	b.MemLimit, _ = mode.ParseBytes(cfg["limits.memory"])
@@ -487,10 +569,40 @@ func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]das
 	w.boxes = boxes
 }
 
+// gpuProjectKey is the project key that tells a GPU host from one without (cmd/box's gpuKey):
+// setup-host.sh sets it to allow on WSL and to block elsewhere.
+const gpuProjectKey = "restricted.devices.unix-char"
+
+// incusTrue reads an Incus boolean as Incus does (shared/util/boolean.go): true, 1, yes or on,
+// in any case.
+func incusTrue(v string) bool {
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxes map[string]dash.Box) {
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
-		Boxd: w.Version}
+		Boxd: w.Version, Config: HostConfig(w.HasGPU != nil && w.HasGPU())}
+	// A GPU box needs the device and the project's say-so, as box's own check reads it: "block"
+	// refuses, and so does an unset key on a restricted project, where Incus defaults it to block.
+	blocked := cfg[gpuProjectKey] == "block" || (cfg[gpuProjectKey] == "" && incusTrue(cfg["restricted"]))
+	switch {
+	case blocked && !m.Config.GPU:
+		m.Config.GPUWhy = "both"
+	case blocked:
+		m.Config.GPUWhy = "blocked"
+	case !m.Config.GPU:
+		m.Config.GPUWhy = "device"
+	}
+	m.Config.GPU = m.Config.GPU && !blocked
+	for key, set := range map[string]*bool{"limits.cpu": &m.Config.Capped.CPU, "limits.memory": &m.Config.Capped.Memory,
+		"limits.instances": &m.Config.Capped.Instances, "limits.disk": &m.Config.Capped.Disk} {
+		*set = cfg[key] != ""
+	}
 	if v := cfg[mode.ProjectTrayVersionKey]; v != "" {
 		var tv dash.Version
 		if json.Unmarshal([]byte(v), &tv) == nil && tv.Commit != "" {

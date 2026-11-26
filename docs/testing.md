@@ -1,5 +1,19 @@
 # Testing agent-box
 
+Pick the check by what changed.
+Unit tests prove the logic with fakes; they do not prove that Incus, WSL, Windows or the PC still agree with it.
+
+| Change | Check |
+|---|---|
+| Plain Go logic | `go test ./...` on a box; `go vet ./...` and `gofmt` in the same pass |
+| `cmd/box` behaviour | The unit tests, then the live smoke test's job, detach and pull checks |
+| Queue or dashboard behaviour | The unit tests, then the matching live check below |
+| Provisioning, tray or mode enforcement | The full live smoke test on the real PC, in Shared or Full |
+| Docs only | Links, headings and the reader path; no live run |
+
+If `box` refuses a run with exit 75, use the laptop path below.
+Do not run two heavyweight Go jobs on the laptop at once.
+
 ## On the laptop
 
 Tests, vet and builds run on a box (`box run`, CLAUDE.md). Go isn't on the laptop's PATH, and

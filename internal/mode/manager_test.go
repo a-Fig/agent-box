@@ -589,6 +589,37 @@ func TestReaperDeletesOnlyExpiredInEveryMode(t *testing.T) {
 	}
 }
 
+// A person's extend (HoldKey) outlives an expiry a job's end shortened: the
+// reaper waits for both (#198).
+func TestReaperWaitsForTheHold(t *testing.T) {
+	f := newFake("held", "Running", "done", "Running")
+	expiry(f, "held", t0.Add(-time.Minute))
+	f.setCfg("held", HoldKey, t0.Add(time.Hour).Format(time.RFC3339))
+	expiry(f, "done", t0.Add(-time.Minute))
+	f.setCfg("done", HoldKey, t0.Add(-time.Second).Format(time.RFC3339))
+	tick(New(f, Shared), 0)
+	var dels []string
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "delete ") {
+			dels = append(dels, c)
+		}
+	}
+	equal(t, dels, []string{"delete done"})
+}
+
+func TestHeld(t *testing.T) {
+	cfg := map[string]string{HoldKey: t0.Format(time.RFC3339)}
+	if got := Held(cfg, t0.Add(-time.Hour)); !got.Equal(t0) {
+		t.Errorf("Held before the hold = %v", got)
+	}
+	if got := Held(cfg, t0.Add(time.Hour)); !got.Equal(t0.Add(time.Hour)) {
+		t.Errorf("Held after the hold = %v", got)
+	}
+	if got := Held(map[string]string{HoldKey: "soon"}, t0); !got.Equal(t0) {
+		t.Errorf("Held with a bad hold = %v", got)
+	}
+}
+
 func TestReaperKeepsInstanceExpiringExactlyNow(t *testing.T) {
 	f := newFake("a", "Running")
 	expiry(f, "a", t0)

@@ -309,11 +309,23 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 	if names := f.names(); strings.Contains(names, "old-0001") || !strings.Contains(names, "fresh-0002") || !strings.Contains(names, "far-0003") {
 		t.Errorf("boxes left: %s (calls %s)", names, f.callList())
 	}
-	if calls := f.callList(); calls != "launch list list exec exec project project project project project delete launch" { // far-0003 isn't even checked; the projects are the room check (#87)
+	if calls := f.callList(); calls != "launch list list exec exec project project project project project exec list delete launch" {
 		t.Errorf("calls: %s", calls)
 	}
-	if !strings.Contains(out.String(), "box: deleting old-0001, kept after its job, for room") {
+	if !strings.Contains(out.String(), "box: deleted old-0001, kept after its job, to make room") {
 		t.Errorf("output %q", out)
+	}
+}
+
+// A kept throwaway a person extended isn't kept for room: it is held (#198).
+func TestHeldThrowawayIsntTakenForRoom(t *testing.T) {
+	soon := "2026-11-23T12:20:00Z"
+	f := &fakePC{t: t, kept: map[string]bool{"held-0001": true}, insts: []instance{
+		{Name: "held-0001", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: soon, mode.HoldKey: soon}},
+	}}
+	a, _ := testApp(f)
+	if kept := a.keptThrowaways(context.Background(), f.insts); len(kept) != 0 {
+		t.Errorf("kept = %v", kept)
 	}
 }
 
@@ -332,6 +344,97 @@ func TestKeptThrowawaysStayWhenTheyCantMakeRoom(t *testing.T) {
 		t.Fatalf("launch: %v\n%s", err, out)
 	}
 	if !strings.Contains(f.names(), "old-0001") || !strings.Contains(out.String(), "wouldn't make room for a large box; leaving them") {
+		t.Errorf("boxes %s, output %q", f.names(), out)
+	}
+}
+
+// A launch short of room deletes an idle repo box once no kept throwaway is
+// left, and says so (#187).
+func TestIdleRepoBoxGivesWayToALaunch(t *testing.T) {
+	idle := "2026-11-23T13:30:00Z" // within idleTTL of the test clock's 12:00
+	f := &fakePC{t: t, refuse: memoryRefusal, refuseOnce: true, kept: map[string]bool{"murmur": true},
+		insts: []instance{{Name: "murmur", Status: "Running", Config: map[string]string{expiresKey: idle}}}}
+	a, out := testApp(f)
+	if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "small")); err != nil {
+		t.Fatalf("launch: %v\n%s", err, out)
+	}
+	if strings.Contains(f.names(), "murmur") || !strings.Contains(out.String(), "box: deleted idle box murmur to make room") {
+		t.Errorf("boxes %s, output %q", f.names(), out)
+	}
+}
+
+// An idle repo box found busy or held when it is read again, just before the
+// delete, is left: box run started a job there, or a person extended it,
+// while the launch looked (#187).
+func TestIdleRepoBoxRecheckedBeforeDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(f *fakePC)
+	}{
+		{"job started", func(f *fakePC) { f.kept["murmur"] = false }},
+		{"held", func(f *fakePC) { f.insts[0].Config[mode.HoldKey] = "2026-11-23T15:00:00Z" }},
+		{"expiry set by a job", func(f *fakePC) { f.insts[0].Config[expiresKey] = "2026-11-24T12:00:00Z" }},
+	} {
+		f := &fakePC{t: t, refuse: memoryRefusal, kept: map[string]bool{"murmur": true},
+			insts: []instance{{Name: "murmur", Status: "Running", Config: map[string]string{expiresKey: "2026-11-23T13:30:00Z"}}}}
+		f.afterKept = func(string) { tc.change(f); f.afterKept = nil } // after the first look
+		a, out := testApp(f)
+		if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "small")); !isNoRoom(err) {
+			t.Fatalf("%s: launch: %v\n%s", tc.name, err, out)
+		}
+		if !strings.Contains(f.names(), "murmur") || strings.Contains(f.callList(), "delete") {
+			t.Errorf("%s: boxes %s, calls %s", tc.name, f.names(), f.callList())
+		}
+	}
+}
+
+// Only idle repo boxes are spare, kept throwaways first and then the longest
+// idle: never one held (an extend or box new --ttl), one with a job running
+// (keptScript says so), or one whose expiry a job has set (#187).
+func TestIdleRepoBoxes(t *testing.T) {
+	cfg := func(exp string, kv ...string) map[string]string {
+		c := map[string]string{expiresKey: exp}
+		for i := 0; i+1 < len(kv); i += 2 {
+			c[kv[i]] = kv[i+1]
+		}
+		return c
+	}
+	f := &fakePC{t: t, kept: map[string]bool{"newer": true, "older": true, "held": true, "job-24h": true, "old-0001": true},
+		insts: []instance{
+			{Name: "newer", Status: "Running", Config: cfg("2026-11-23T13:50:00Z")},
+			{Name: "older", Status: "Running", Config: cfg("2026-11-23T12:30:00Z")},
+			{Name: "held", Status: "Running", Config: cfg("2026-11-23T13:00:00Z", mode.HoldKey, "2026-11-23T13:00:00Z")},
+			{Name: "busy", Status: "Running", Config: cfg("2026-11-23T13:00:00Z")}, // a job runs: not kept
+			{Name: "job-24h", Status: "Running", Config: cfg("2026-11-24T12:00:00Z")},
+			{Name: "frozen", Status: "Frozen", Config: cfg("2026-11-23T13:00:00Z")},
+			{Name: "old-0001", Status: "Running", Config: cfg("2026-11-23T12:20:00Z", throwawayKey, "true")},
+		}}
+	a, _ := testApp(f)
+	var names []string
+	for _, in := range a.spareBoxes(context.Background(), f.insts) {
+		names = append(names, in.Name)
+	}
+	if got := strings.Join(names, " "); got != "old-0001 older newer" {
+		t.Errorf("spare = %q", got)
+	}
+}
+
+// Idle repo boxes that together still couldn't make room are all left (#187).
+func TestIdleRepoBoxesStayWhenTheyCantMakeRoom(t *testing.T) {
+	idle := "2026-11-23T13:30:00Z"
+	f := &fakePC{t: t, refuse: memoryRefusal, kept: map[string]bool{"murmur": true, "old-0001": true},
+		project: map[string]string{"limits.memory": "24GiB"},
+		insts: []instance{
+			{Name: "old-0001", Status: "Running", Config: map[string]string{throwawayKey: "true", expiresKey: "2026-11-23T12:20:00Z", "user.box.size": "small", "limits.memory": "2GiB"}},
+			{Name: "murmur", Status: "Running", Config: map[string]string{expiresKey: idle, "user.box.size": "small", "limits.memory": "2GiB"}},
+			{Name: "busy-0002", Status: "Running", Config: map[string]string{"user.box.size": "large", "limits.memory": "20GiB"}},
+		}}
+	a, out := testApp(f)
+	if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "large")); !isNoRoom(err) {
+		t.Fatalf("launch: %v\n%s", err, out)
+	}
+	if !strings.Contains(f.names(), "murmur") || !strings.Contains(f.names(), "old-0001") ||
+		!strings.Contains(out.String(), "deleting the 2 kept throwaways and idle boxes wouldn't make room for a large box; leaving them") {
 		t.Errorf("boxes %s, output %q", f.names(), out)
 	}
 }

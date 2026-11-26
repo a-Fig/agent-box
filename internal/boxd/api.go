@@ -19,8 +19,9 @@ import (
 
 // Server is boxd's HTTP API and page (docs/ui.md, "API"). Wrap it in Owners.
 type Server struct {
-	W    *Watcher
-	Page fs.FS // static.FS, or a folder while working on the page
+	W               *Watcher
+	Page            fs.FS // static.FS, or a folder while working on the page
+	ReuseThrowaways bool
 }
 
 // Handler routes the API and serves the page.
@@ -107,6 +108,14 @@ func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := Filter{Repo: q.Get("repo"), Agent: q.Get("agent"), Kind: q.Get("kind"), Machine: q.Get("machine"),
 		Result: q.Get("result"), Q: q.Get("q"), Limit: 50}
+	if q.Get("box") != "" || q.Get("uid") != "" {
+		b, err := dash.ParseBoxQuery(q)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, dash.CodeBadRequest, err.Error())
+			return
+		}
+		f.Box = b
+	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v[strings.LastIndex(v, "/")+1:])
 		if err != nil {
@@ -156,7 +165,7 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, ok := s.W.Box(j.Box)
-	if !ok || !holds(b.CreatedAt, j.StartedAt) {
+	if !ok || !ranOn(j, b) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "the job's box is gone")
 		return
 	}

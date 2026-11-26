@@ -180,6 +180,13 @@ func TestGPUClaimRemovesDeadThrowaways(t *testing.T) {
 			}
 		})
 	}
+	// A throwaway a person extended isn't deleted for the GPU (#198).
+	held := instance{Name: "held-1234", Status: "Stopped", Config: gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc", mode.HoldKey, "2026-11-23T13:00:00Z")}
+	f0 := &fakePC{t: t, mode: "shared", insts: []instance{held}}
+	a0, _ := testApp(f0)
+	if err := a0.claimGPU(context.Background(), f0.insts, ""); err != nil || f0.names() != "held-1234" {
+		t.Errorf("claimGPU = %v, boxes %q", err, f0.names())
+	}
 	// A stopped GPU box someone made with box new is left alone, and doesn't hold the GPU.
 	f := &fakePC{t: t, mode: "shared", insts: []instance{{Name: "mine", Status: "Stopped", Config: gpuConfig()}}, exit: "0"}
 	a, out := testApp(f)
@@ -395,6 +402,13 @@ func TestGPUHostDetection(t *testing.T) {
 		}
 	}
 
+	// Unset on a restricted project is Incus's default, block.
+	rf := &fakePC{t: t, mode: "shared", project: map[string]string{"restricted": "true"}}
+	ra, _ := testApp(rf)
+	if s := ra.Status(context.Background(), ""); s.GPU == "free" {
+		t.Errorf("restricted project, key unset: gpu = %q", s.GPU)
+	}
+
 	block := map[string]string{gpuKey: "block", "limits.instances": "6", "limits.cpu": "24", "limits.memory": "12GiB"}
 	for _, m := range []string{"shared", "mypc"} {
 		f := &fakePC{t: t, mode: m, project: block}
@@ -434,5 +448,25 @@ func TestGPUHostDetection(t *testing.T) {
 	}
 	if got := resp.String(); !strings.Contains(got, `"state":"refused"`) || !strings.Contains(got, `"exitCode":75`) || !strings.Contains(got, "no GPU for boxes") || len(f.launches) != 0 {
 		t.Errorf("box_run = %s", got)
+	}
+}
+
+// A stopped GPU throwaway a person extended (mode.HoldKey) isn't reclaimed, and
+// status doesn't count it as replaceable, until the hold passes.
+func TestHeldStoppedGPUThrowawayIsNotReclaimed(t *testing.T) {
+	for _, tc := range []struct {
+		hold      string
+		reclaimed bool
+	}{{"2026-11-23T14:00:00Z", false}, {"2026-11-23T11:00:00Z", true}, {"soon", true}} {
+		cfg := gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc", mode.HoldKey, tc.hold)
+		f := &fakePC{t: t, mode: "shared", project: map[string]string{"limits.instances": "2"},
+			insts: []instance{{Name: "gpu-1234", Status: "Stopped", Config: cfg}}}
+		a, out := testApp(f)
+		if s := a.Status(context.Background(), ""); (s.Replaceable == 1) != tc.reclaimed {
+			t.Errorf("hold %q: replaceable = %d\n%s", tc.hold, s.Replaceable, out)
+		}
+		if got := a.reclaim(context.Background()); got != tc.reclaimed || (f.names() == "") != tc.reclaimed {
+			t.Errorf("hold %q: reclaim = %v, boxes %q", tc.hold, got, f.names())
+		}
 	}
 }

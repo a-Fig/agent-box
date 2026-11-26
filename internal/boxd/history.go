@@ -376,28 +376,43 @@ func (h *History) Job(key string) (dash.Job, bool) {
 }
 
 // EndedOn names the jobs ("<box>.<id>", as box names their files) recorded as
-// ended on the box created at created, so a scan can skip their details.
-func (h *History) EndedOn(box string, created time.Time) map[string]bool {
+// ended on the box in, so a scan can skip their details.
+func (h *History) EndedOn(in Instance) map[string]bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string]bool{}
 	for _, j := range h.jobs {
-		if j.Box == box && (j.State == dash.JobDone || j.State == dash.JobLost) && holds(created, j.StartedAt) {
-			out[box+"."+j.ID] = true
+		if j.Box == in.Name && (j.State == dash.JobDone || j.State == dash.JobLost) && ranOnInstance(*j, in) {
+			out[in.Name+"."+j.ID] = true
 		}
 	}
 	return out
 }
 
+// EndedHere says whether a job recorded on in, by its UID (ranOnInstance),
+// has ended. A job recorded without a UID never counts: ranOn's fallback by
+// name and creation time could credit a predecessor's job to a same-name box
+// made within the grace (holds), one whose first job is still starting.
+func (h *History) EndedHere(in Instance) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, j := range h.jobs {
+		if j.BoxUID != "" && (j.State == dash.JobDone || j.State == dash.JobLost) && ranOnInstance(*j, in) {
+			return true
+		}
+	}
+	return false
+}
+
 // LastEnded is the job that started last of those recorded on the box
-// created at created, if it has ended: the one whose 24h the box holds. A
+// on the box in, if it has ended: the one whose 24h the box holds. A
 // queued job's name is when it was queued, so the newest name may not be it.
-func (h *History) LastEnded(box string, created time.Time) (dash.Job, bool) {
+func (h *History) LastEnded(in Instance) (dash.Job, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out dash.Job
 	for _, j := range h.jobs {
-		if j.Box == box && holds(created, j.StartedAt) && j.StartedAt.After(out.StartedAt) {
+		if j.Box == in.Name && ranOnInstance(*j, in) && j.StartedAt.After(out.StartedAt) {
 			out = *j
 		}
 	}
@@ -436,6 +451,10 @@ func (h *History) LastMode() *modeRec {
 // Filter is GET /api/jobs's query.
 type Filter struct {
 	Repo, Agent, Kind, Machine, Result, Q string
+	// Box, when its UID is set, keeps the jobs that ran on that one box
+	// (dash.Job.RanOn), not those of another box of its name, and asks for
+	// the page's Last.
+	Box dash.Box
 	// Before is the last job of the page before: the page is the jobs after
 	// it in newest-first order.
 	Before *dash.Job
@@ -456,7 +475,8 @@ func (f Filter) match(j *dash.Job) bool {
 		return false
 	}
 	if (f.Agent != "" && f.Agent != j.Agent.Session) || (f.Kind != "" && f.Kind != j.Kind) ||
-		(f.Machine != "" && f.Machine != j.Machine) || (f.Result != "" && f.Result != j.Result()) {
+		(f.Machine != "" && f.Machine != j.Machine) || (f.Result != "" && f.Result != j.Result()) ||
+		(f.Box.UID != "" && !j.RanOn(f.Box)) {
 		return false
 	}
 	if f.Before != nil && newest(*f.Before, *j) >= 0 {
@@ -473,20 +493,45 @@ func (h *History) Finished(f Filter) dash.JobsPage {
 	if f.Limit <= 0 {
 		f.Limit = 50
 	}
+	var p dash.JobsPage
 	h.mu.Lock()
 	var all []dash.Job
 	for _, j := range h.jobs {
-		if (j.State == dash.JobDone || j.State == dash.JobLost) && f.match(j) {
+		if j.State != dash.JobDone && j.State != dash.JobLost {
+			continue
+		}
+		if f.match(j) {
 			all = append(all, *j)
+		}
+		if f.Box.UID != "" && j.RanOn(f.Box) && (p.Last == nil || lastEnded(*j, *p.Last)) {
+			last := *j
+			p.Last = &last
 		}
 	}
 	h.mu.Unlock()
 	slices.SortFunc(all, newest)
-	p := dash.JobsPage{Jobs: all[:min(len(all), f.Limit)], More: len(all) > f.Limit}
+	p.Jobs, p.More = all[:min(len(all), f.Limit)], len(all) > f.Limit
 	if p.Jobs == nil {
 		p.Jobs = []dash.Job{}
 	}
 	return p
+}
+
+// lastEnded says whether a ended after b, ties broken by key so the answer
+// doesn't depend on map order.
+func lastEnded(a, b dash.Job) bool {
+	ea, eb := endOf(a), endOf(b)
+	if !ea.Equal(eb) {
+		return ea.After(eb)
+	}
+	return a.Key > b.Key
+}
+
+func endOf(j dash.Job) time.Time {
+	if j.EndedAt != nil {
+		return *j.EndedAt
+	}
+	return j.StartedAt
 }
 
 // repoShort is a repo's last path element without .git, as the page names it.

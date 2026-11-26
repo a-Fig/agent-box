@@ -49,8 +49,8 @@ type queued struct {
 
 	view     dash.Job // the job as the page sees it, from Meta
 	starting bool
-	restored bool     // loaded with Starting set, and no start has looked in its box since
-	evict    []string // kept throwaways to delete for its room (spareThrowaways)
+	restored bool       // loaded with Starting set, and no start has looked in its box since
+	evict    []Instance // kept throwaways and idle repo boxes to delete for its room (spareBoxes)
 }
 
 // Queue is the store. Its methods are safe to call at once.
