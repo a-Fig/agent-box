@@ -1,5 +1,10 @@
 # agent-box design (v2: Incus-native)
 
+This page records how agent-box works today and why it is built that way.
+For a task-first route through all the docs, see the [documentation map](README.md).
+For the product direction, see [VISION.md](VISION.md); for setup steps, start with the root
+[README](../README.md#quick-start-a-linux-server) and [provision/README.md](../provision/README.md).
+
 On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq1v`: Ryzen 5 3600 6c/12t, 32 GB, RTX 3070).
 **Never wipe, repartition or dual-boot the PC.** Everything runs on top of Windows.
 **Reuse, don't rebuild:** Incus provides the API, auth, dashboard and box lifecycle. We write only glue.
@@ -99,7 +104,11 @@ box app [--url U] [--wait]       # the same page in a window of its own (interna
 2. Runs the command with `incus exec ... -- bash -lc`, under `nohup` with output going to `/work/.box/<job>.log`, so a dropped connection loses nothing. `box job <id>` reattaches with `tail -f`.
 3. Exits with the remote exit code, or 75 when the run can't go ahead and wasn't queued (`--no-queue`, a box paused mid-run, the PC out of reach), so callers can fall back to running locally.
 
-By default it reuses one box per repo, which keeps caches and `node_modules` warm. `--new` creates a throwaway box. `--size` sets the size of a box the run launches (medium by default); when the repo's box exists in another size, the run uses a throwaway of the requested size and says so.
+By default it reuses one box per repo, which keeps caches and `node_modules` warm. `--new` uses a throwaway box. A CPU run can claim an idle throwaway for the same HTTP(S) Git origin and size through boxd. boxd uses the same Incus reservation for reuse and eviction, and checks the job owner before changing expiry. Fresh launches work with older hosts. `--fresh` always launches a fresh throwaway. `--size` sets the size of a box the run launches (medium by default); when the repo's box exists in another size, the run uses a throwaway of the requested size and says so.
+
+Pooling is off until the host advertises it. Upgrade the clients that can mutate the Incus project
+and let their older commands finish before setting `"reuseThrowaways": true` in `boxd.json`.
+For a rollback, turn pooling off and wait for existing pooled boxes to expire before downgrading.
 
 `box app` is a window around the page `box ui` opens, as `mur app` is in Murmur: the system's web view (WebView2 on Windows) through [glaze](https://github.com/crgimenes/glaze), which loads it at run time with purego, so there is no cgo and `box` still cross-compiles. glaze (and purego under it) is box's one dependency beyond `golang.org/x/sys`. The reason is the same as Murmur's app: a native window needs the platform's web view, and glaze is the cgo-free way to it that Murmur already runs on Windows; it raised `go.mod` to Go 1.27.1. Linux builds get the window only with `-tags desktop`, because purego makes the binary link glibc dynamically; macOS has none yet. When the PC doesn't answer, the window shows the page's "PC unreachable" screen from the copy of `internal/dash/static` built into `box`, served on loopback, whose `/api/state` checks the PC each time the page retries (every 10s) and sends the window there once it answers. Every 10s the window asks its document where it is; one that doesn't answer (an error page has no bindings), a 5xx, or another site sends the window back to the loopback page. In another site's document the init script cuts the bridge to the window before that page's own scripts run.
 

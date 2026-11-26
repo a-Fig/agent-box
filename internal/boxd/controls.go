@@ -2,6 +2,7 @@ package boxd
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -27,6 +28,88 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/jobs/{key}/cancel", control(http.HandlerFunc(s.cancelJob)))
 	mux.Handle("POST /api/boxes/{name}/delete", control(http.HandlerFunc(s.deleteBox)))
 	mux.Handle("POST /api/boxes/{name}/extend", control(http.HandlerFunc(s.extendBox)))
+	mux.HandleFunc("GET /api/throwaway-pool", s.throwawayPool)
+	mux.Handle("POST /api/boxes/{name}/claim", control(http.HandlerFunc(s.claimThrowaway)))
+	mux.Handle("POST /api/boxes/{name}/evict-idle", control(http.HandlerFunc(s.evictThrowaway)))
+	mux.Handle("POST /api/boxes/{name}/pool-expiry", control(http.HandlerFunc(s.poolExpiry)))
+}
+
+func (s *Server) throwawayPool(w http.ResponseWriter, _ *http.Request) {
+	if !s.ReuseThrowaways {
+		writeError(w, http.StatusNotFound, dash.CodeNotFound, "throwaway pooling is disabled")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) claimThrowaway(w http.ResponseWriter, r *http.Request) {
+	if !s.ReuseThrowaways {
+		s.throwawayPool(w, r)
+		return
+	}
+	var req dash.ClaimThrowawayBody
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	key, badKey := hex.DecodeString(req.RepoKey)
+	sz, sized := mode.LookupSize(req.Size)
+	if !poolJobMatches(box, req.Job) || badKey != nil || len(key) != 32 || !sized || sz.GPU {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "claim needs a job, repository key and CPU size")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	claimed, err := s.W.claimThrowaway(ctx, box, req.RepoKey, sz.Name, req.Job)
+	poolReply(w, claimed, err)
+}
+
+func (s *Server) evictThrowaway(w http.ResponseWriter, r *http.Request) {
+	var req struct{ UID string }
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	if !validBoxName.MatchString(box) || req.UID == "" {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "eviction needs a box name and UID")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	evicted, err := s.W.evictPooled(ctx, box, req.UID)
+	poolReply(w, evicted, err)
+}
+
+func (s *Server) poolExpiry(w http.ResponseWriter, r *http.Request) {
+	var req dash.PoolExpiryBody
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	if !poolJobMatches(box, req.Job) {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "expiry needs this box's job ID")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	wrote, err := s.W.setPoolExpiry(ctx, box, req.Job, req.Ended)
+	poolReply(w, wrote, err)
+}
+
+func poolJobMatches(box, job string) bool {
+	name, _, started := jobStart(job)
+	return validBoxName.MatchString(box) && validJob.MatchString(job) && name == box && !started.IsZero()
+}
+
+func poolReply(w http.ResponseWriter, changed bool, err error) {
+	switch {
+	case err != nil:
+		writeError(w, http.StatusBadGateway, dash.CodeIncus, err.Error())
+	case !changed:
+		w.WriteHeader(http.StatusConflict)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // device names the asking device for the history and the mode request: its
@@ -300,10 +383,11 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	// the expiry (a job starting there, or another extend), and the new
 	// expiry is counted from the one Incus holds now.
 	var until time.Time
-	if err := jobrun.RetryETag(ctx, func() error {
-		in, err := w.checkCreated(ctx, name, createdAt)
-		if err != nil {
-			return err
+	var replaced bool
+	wrote, err := w.Incus.SetConfigIf(ctx, name, func(in Instance) map[string]string {
+		replaced = !in.CreatedAt.Equal(createdAt)
+		if replaced {
+			return nil
 		}
 		from := w.Now().UTC()
 		if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
@@ -311,15 +395,27 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 		}
 		until = mode.Held(in.Config, from).UTC().Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
 		at := until.Format(time.RFC3339)
-		_, err = w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+at, mode.HoldKey+"="+at)
-		return err
-	}); err != nil {
+		return map[string]string{jobrun.ExpiresKey: at, mode.HoldKey: at}
+	})
+	if err != nil {
 		return b, err
+	}
+	if replaced {
+		return b, errNameNew
+	}
+	if !wrote {
+		return b, errBoxGone
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.record(record{Type: recControl, Control: &controlRec{Action: "extend " + itoa(hours) + "h", Target: name, By: by}})
 	if cur, ok := w.boxes[name]; ok && cur.CreatedAt.Equal(createdAt) {
+		// Only protect a deadline published while this request was in flight.
+		// The original cache entry may predate a job's expiry shortening.
+		if cur.ExpiresAt != nil && (b.ExpiresAt == nil || !cur.ExpiresAt.Equal(*b.ExpiresAt)) &&
+			!until.After(*cur.ExpiresAt) {
+			return cur, nil
+		}
 		cur.ExpiresAt = &until
 		w.boxes[name] = cur
 		w.emit(dash.Event{Name: dash.EventBox, Data: cur})

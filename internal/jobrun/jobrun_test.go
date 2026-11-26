@@ -52,3 +52,13 @@ func TestPayloadIncludesDigestWrappers(t *testing.T) {
 		}
 	}
 }
+
+func TestStartScriptRecordsCheckoutOwnerUnderLock(t *testing.T) {
+	got := StartScript("/work", "my-repo.20261125-120000-abcd", "20261125-120000-abcd", "my-repo", "true")
+	lockAt := strings.Index(got, "flock 9 || exit 1")
+	ownerAt := strings.Index(got, "/work/.box/my-repo.checkout.tmp && mv /work/.box/my-repo.checkout.tmp /work/.box/my-repo.checkout")
+	gitAt := strings.Index(got, "git init -q /work/my-repo")
+	if lockAt < 0 || ownerAt < 0 || gitAt < 0 || !(lockAt < ownerAt && ownerAt < gitAt) {
+		t.Fatalf("checkout owner write must run after flock and before git checkout:\n%s", got)
+	}
+}

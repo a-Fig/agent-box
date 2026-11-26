@@ -19,8 +19,9 @@ import (
 
 // Server is boxd's HTTP API and page (docs/ui.md, "API"). Wrap it in Owners.
 type Server struct {
-	W    *Watcher
-	Page fs.FS // static.FS, or a folder while working on the page
+	W               *Watcher
+	Page            fs.FS // static.FS, or a folder while working on the page
+	ReuseThrowaways bool
 }
 
 // Handler routes the API and serves the page.

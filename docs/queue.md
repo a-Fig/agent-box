@@ -1,13 +1,18 @@
 # The queue
 
-Planned 2026-11-24. Tyler asked for it; the design below is Claude's, built first and reviewed by
-Tyler afterwards.
+A run that cannot start now can wait on the host instead of falling back to the laptop.
+`box job <id>` follows it, and `box cancel <id>` takes it off.
+For the commands, start with [Using `box`](../README.md#using-box); this page covers queue
+behaviour, storage, scheduling and the API.
+
+_Origin: planned 2026-11-24 at Tyler's request; the design below is Claude's, built first and
+reviewed by Tyler afterwards._
 
 ## Why
 
 Before the queue, a run with no room (the caps were full) or a paused PC (My PC) got exit 75,
 and the agent ran the command on the laptop, often the starving laptop that offloading exists to
-spare. Once results arrive as a pushed turn (see the push design in DESIGN.md), an agent doesn't need
+spare. Once results arrive as a pushed turn (see the push design in [DESIGN.md](DESIGN.md#pushing-results-to-the-agent)), an agent doesn't need
 to sit and wait. So it can hand the run to a queue and keep working.
 
 ## Behaviour
@@ -88,8 +93,8 @@ laptop and agent reaches.
   boxes idle since their last job (one ended in boxd's history, none running or being started, the
   idle expiry, no hold), the longest idle first, as `box`'s launch takes them (#187): a repo box is
   a cache, and losing it costs that repo's next run a fresh checkout and a cold build cache. boxd
-  takes the fewest spare boxes that make room, or none, and checks a repo box has no job running
-  just before deleting it, since `box run` may have reused it since the poll. Each deletion is a
+  takes the fewest spare boxes that make room, or none. Before each delete attempt, boxd checks
+  that the selected box still has the same UID, is idle, and has no hold. Each deletion is a
   history control `evict` (target the box, by the queued job), and `GET /api/queue/{job}` gives an
   ended job whose box went that way `evicted`: the queued job's name. `box pull` and `box job` then
   say the box was deleted for that job's room, instead of Incus's "Instance not found" (#143).
