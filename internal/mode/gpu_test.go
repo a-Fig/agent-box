@@ -124,11 +124,16 @@ func TestGPUStopRespectsHold(t *testing.T) {
 		"set g user.box.stopped=mypc", "stop g", "set g user.expires=2026-01-01T14:00:00Z",
 		"pause a",
 	})
+	// Stopped and held, the expiry already says the hold: no write each tick.
+	tick(m, 5*time.Second)
+	if calls := strings.Join(f.take(), " | "); strings.Contains(calls, "set g user.expires") {
+		t.Errorf("second tick rewrote the expiry: %s", calls)
+	}
 }
 
 func TestHeldIgnoresMalformedHold(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	for _, hold := range []string{"", "soon", "2026-01-01T14:00:00+02:00", "2026-01-01 14:00:00Z", "\"2026-01-01T14:00:00Z\""} {
+	for _, hold := range []string{"", "soon", "2026-01-01T14:00:00+02:00", "2026-01-01 14:00:00Z", "\"2026-01-01T14:00:00Z\"", "2026-01-01T14:00:00,5Z", "2026-01-01T14:00:00Z\nnote"} {
 		if got := Held(map[string]string{HoldKey: hold}, t0); !got.Equal(t0) {
 			t.Errorf("Held(%q) = %v, want it ignored", hold, got)
 		}

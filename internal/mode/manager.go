@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,12 +25,17 @@ const ExpiresKey = "user.expires"
 // scheduler's state.
 const HoldKey = "user.box.hold-until"
 
+// holdFormat is the only hold Held and provision/reaper.sh accept: RFC3339 in
+// UTC, a dot before any fraction, nothing after the Z. Anything else is ignored
+// by both, so the two reapers agree.
+var holdFormat = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$`)
+
 // Held is the later of t and the hold in an instance's config. A box is held
 // at now when Held(cfg, now).After(now).
 func Held(cfg map[string]string, t time.Time) time.Time {
 	// UTC only, as the shell reaper reads it: a malformed hold is ignored.
 	v := cfg[HoldKey]
-	if h, err := time.Parse(time.RFC3339, v); err == nil && strings.HasSuffix(v, "Z") && h.After(t) {
+	if h, err := time.Parse(time.RFC3339, v); err == nil && holdFormat.MatchString(v) && h.After(t) {
 		return h
 	}
 	return t
@@ -397,9 +403,11 @@ func (m *Manager) freeze(ctx context.Context, now time.Time, name string, pid in
 func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state string) (string, error) {
 	var errs []error
 	shorten := func() {
-		soon := now.Add(GPUStoppedTTL)
+		// Held: a hold keeps the box past GPUStoppedTTL, and the expiry that
+		// says so is already right, so it isn't rewritten every tick.
+		soon := Held(in.Config, now.Add(GPUStoppedTTL))
 		if exp, err := time.Parse(time.RFC3339, in.Config[ExpiresKey]); err != nil || exp.After(soon) {
-			if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, Held(in.Config, soon).UTC().Format(time.RFC3339)); err != nil {
+			if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, soon.UTC().Format(time.RFC3339)); err != nil {
 				errs = append(errs, err)
 			}
 		}
