@@ -10,7 +10,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
 1. `box_status` with your worktree as `dir`: its first line says whether it fits now.
 2. `box_run` with `dir`, `command` and `reason` (the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` if it might hang (exit 124). With `pipefail`, `| head` can exit 141.
 3. A run ending within 30 s returns its result; else `running`:
-   - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives starting "box: job …" (Claude Code: mid-turn).
+   - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives starting "box: job …" (Claude Code: mid-turn): a pass in one line, a failure as its failed tests or last 10 lines. It is enough to act on; `box_job` gives the full result if you need more.
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
    - **Subagents pass `push: false`** (it would wake the parent).
 4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; a snapshot waits, its result is pushed; `box_cancel` drops it.
