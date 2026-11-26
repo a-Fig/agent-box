@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -11,9 +12,17 @@ import (
 
 // Sensors are the Windows-side inputs and outputs; fakes stand in for tests.
 type Sensors interface {
-	HostUp(context.Context) bool // the WSL distro is running (we never start it)
-	HoldAwake(on bool)           // keep the PC from sleeping
+	HostUp(context.Context) bool     // the WSL distro is running; asking never starts it
+	StartHost(context.Context) error // start the distro and keep it running
+	HoldAwake(on bool)               // keep the PC from sleeping
 }
+
+// hostStartEvery is how often run tries again to start a distro that stays
+// down. A try that a release cut short doesn't count.
+const hostStartEvery = time.Minute
+
+// errStandAside is what a start returns when a tray appeared just before it.
+var errStandAside = errors.New("an interactive tray is running")
 
 // loopCfg is everything run needs besides the sensors.
 type loopCfg struct {
@@ -37,8 +46,10 @@ type loopCfg struct {
 // run polls until ctx ends. It ticks every interval and immediately on wake
 // (a menu click). report is called with every result (not while idle).
 //
-// While the distro is down it does nothing to Incus: any wsl.exe call would
-// start it again, undoing "Release memory".
+// While the distro is down it does nothing to Incus. It starts the distro
+// again (StartHost, at most every hostStartEvery), but never while "Release
+// memory" runs: once that has finished, the distro comes back without the
+// boxes' memory, so agent-box stays reachable (#204).
 func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wake <-chan struct{}, report func(mode.Status)) {
 	logf := func(format string, args ...any) {
 		if cfg.Logf != nil {
@@ -46,6 +57,7 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 		}
 	}
 	var m *mode.Manager
+	var lastStart time.Time
 	tick := func() {
 		if cfg.Idle != nil && cfg.Idle() {
 			if m != nil {
@@ -71,6 +83,28 @@ func run(ctx context.Context, cfg loopCfg, s Sensors, interval time.Duration, wa
 			}
 		} else {
 			st = mode.Status{Chosen: m.Chosen(), Down: true}
+			if now := time.Now(); now.Sub(lastStart) >= hostStartEvery {
+				// Under the manager's guard, so the start and this
+				// enforcer's release never overlap. Idle is asked again
+				// there: a tray that has just started owns the release.
+				tried, err := m.StartHost(ctx, func(ctx context.Context) error {
+					if cfg.Idle != nil && cfg.Idle() {
+						return errStandAside
+					}
+					logf("WSL distro is not running: starting it")
+					return s.StartHost(ctx)
+				})
+				switch {
+				case errors.Is(err, errStandAside):
+				case tried:
+					lastStart = now
+					if err != nil {
+						logf("starting the WSL distro: %v", err)
+					}
+				case err != nil:
+					logf("starting the WSL distro, cut short by Release memory: %v", err)
+				}
+			}
 		}
 		s.HoldAwake(st.Running > 0)
 		report(st)

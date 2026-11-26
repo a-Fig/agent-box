@@ -265,7 +265,7 @@ func (t *tray) showMenu() {
 	}
 	add(mfSeparator, 0, "")
 	add(0, idRelease, "Release memory")
-	add(0, idQuit, "Quit")
+	add(0, idQuit, "Quit (agent-box keeps running in the background)")
 
 	var pt point
 	u32("GetCursorPos").Call(uintptr(unsafe.Pointer(&pt)))

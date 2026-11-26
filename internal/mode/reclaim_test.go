@@ -282,6 +282,7 @@ func TestReclaimIsResetWhenABoxIsPausedAgainOrRecreated(t *testing.T) {
 type blockingList struct {
 	*fake
 	entered chan struct{}
+	left    chan struct{} // closed when that List returns
 	lists   atomic.Int32
 }
 
@@ -289,6 +290,7 @@ func (b *blockingList) List(ctx context.Context) ([]Instance, error) {
 	if b.lists.Add(1) == 1 {
 		close(b.entered)
 		<-ctx.Done()
+		close(b.left)
 		return nil, ctx.Err()
 	}
 	return b.fake.List(ctx)
@@ -297,21 +299,24 @@ func (b *blockingList) List(ctx context.Context) ([]Instance, error) {
 func TestReleaseCancelsATickInFlightAndBlocksNewOnes(t *testing.T) {
 	f := newFake("a", "Running")
 	f.setCfg("a", MemoryCapKey, "4GiB")
-	inc := &blockingList{fake: f, entered: make(chan struct{})}
+	inc := &blockingList{fake: f, entered: make(chan struct{}), left: make(chan struct{})}
 	m := New(inc, MyPC)
 	m.Reclaim = newFakeReclaim()
 	done := make(chan Status, 1)
 	go func() { done <- m.Tick(context.Background(), t0) }()
 	<-inc.entered
-	if !m.BeginRelease() {
+	if !m.BeginRelease(context.Background()) {
 		t.Fatal("first release refused")
 	}
+	// Checked on the List, not on done: Tick's result is sent after it
+	// unlocks, so done may still be empty when BeginRelease returns.
 	select {
-	case <-done: // BeginRelease waited for the cancelled tick
+	case <-inc.left: // BeginRelease waited for the cancelled tick
 	default:
 		t.Fatal("BeginRelease returned before the tick ended")
 	}
-	if m.BeginRelease() {
+	<-done
+	if m.BeginRelease(context.Background()) {
 		t.Fatal("a second release ran while one is held")
 	}
 	f.take()
@@ -335,7 +340,7 @@ func TestReleaseDropsReclaimsAndStartsNone(t *testing.T) {
 	m.Tick(context.Background(), t0)
 	m.SetChosen(MyPC)
 	m.Tick(context.Background(), t0.Add(time.Second))
-	m.BeginRelease() // returns once the blocked reclaim was cancelled and ended
+	m.BeginRelease(context.Background()) // returns once the blocked reclaim was cancelled and ended
 	r.mu.Lock()
 	r.block = false
 	r.mu.Unlock()
@@ -467,4 +472,41 @@ func TestReclaimWaitsForSwapAndStoppedBoxesSkipTheBatch(t *testing.T) {
 	equal(t, r.take(), nil)
 	rtick(m, 3*time.Second)
 	equal(t, r.take(), []string{"a/1000"})
+}
+
+func TestStartHostAndReleaseNeverOverlap(t *testing.T) {
+	m := New(newFake(), MyPC)
+	entered, ended := make(chan struct{}), make(chan struct{})
+	type result struct {
+		tried bool
+		err   error
+	}
+	got := make(chan result, 1)
+	go func() {
+		tried, err := m.StartHost(context.Background(), func(ctx context.Context) error {
+			close(entered)
+			<-ctx.Done() // a schtasks call the release cuts short
+			close(ended)
+			return ctx.Err()
+		})
+		got <- result{tried, err}
+	}()
+	<-entered
+	m.BeginRelease(context.Background())
+	select {
+	case <-ended: // the release waited for the start to end
+	default:
+		t.Fatal("BeginRelease returned while the start ran")
+	}
+	if r := <-got; r.tried || r.err == nil {
+		t.Fatalf("cut-short start: tried %v, err %v", r.tried, r.err)
+	}
+	called := false
+	if tried, _ := m.StartHost(context.Background(), func(context.Context) error { called = true; return nil }); tried || called {
+		t.Fatal("a start ran during the release")
+	}
+	m.EndRelease()
+	if tried, err := m.StartHost(context.Background(), func(context.Context) error { called = true; return nil }); !tried || err != nil || !called {
+		t.Fatalf("after the release: tried %v, err %v, called %v", tried, err, called)
+	}
 }
