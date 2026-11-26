@@ -618,7 +618,8 @@ func endedMessage(r jobRecord, e jobEnd) string {
 	if failed || e.Code == 0 {
 		n = endedLinesAfterDigest
 	}
-	if tail := lastLines(mask.Mask(e.Tail), n); tail != "" {
+	// Trailing blank lines (CRLF ones too) would take the place of the last real ones.
+	if tail := lastLines(strings.TrimRight(mask.Mask(e.Tail), " \t\r\n"), n); tail != "" {
 		msg += tail + "\n"
 	}
 	if e.Code == exitPaused {

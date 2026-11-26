@@ -331,6 +331,16 @@ func TestFailureWithPassingDigestKeepsTheTail(t *testing.T) {
 	}
 }
 
+// Trailing blank lines, CRLF ones included, don't take the place of the
+// log's last real lines.
+func TestTailSkipsTrailingBlankLines(t *testing.T) {
+	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
+	got := endedMessage(r, jobEnd{Tail: "a\r\nb\r\nFAIL\r\n\r\n\r\n\r\n"})
+	if !strings.Contains(got, "a\r\nb\r\nFAIL\nFull result:") {
+		t.Errorf("message = %q", got)
+	}
+}
+
 // A failure digest is followed by the log's last few lines, which say what
 // came after the tests, like a cancel from the dashboard.
 func TestFailureDigestKeepsTheLogsLastLines(t *testing.T) {
