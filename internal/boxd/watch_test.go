@@ -31,8 +31,9 @@ type fakeIncus struct {
 	execs  int
 	cli    []string
 	cliErr func(args []string) error
+	files  map[string]string
 	cancel string // the last cancel script
-	// SetExpiryIf: each write made, as "<box> <expiry>", and a write that
+	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
 	expirySets []string
 	between    func(cfg map[string]string)
@@ -50,17 +51,17 @@ type fakeJob struct {
 	endedAt     int64
 }
 
-// SetExpiryIf decides on a copy, without the lock (decide runs Exec), as
+// SetConfigIf decides on a copy, without the lock (decide runs Exec), as
 // the real one decides between its GET and its PATCH. Writes replace the
 // config map, so a Poll reading an earlier copy never races them.
-func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+func (f *fakeIncus) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
 	for try := 0; try < 5; try++ {
 		read, ok := f.instance(name)
 		if !ok {
 			return false, nil
 		}
-		until, ok := decide(read)
-		if !ok {
+		config := decide(read)
+		if len(config) == 0 {
 			return false, nil
 		}
 		f.mu.Lock()
@@ -75,11 +76,16 @@ func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(In
 			f.ins[i].Config, f.between = c, nil
 			f.mu.Unlock()
 			continue
+		case !maps.Equal(f.ins[i].Config, read.Config):
+			f.mu.Unlock()
+			continue
 		}
 		c := maps.Clone(f.ins[i].Config)
-		c[jobrun.ExpiresKey] = until.UTC().Format(time.RFC3339)
+		maps.Copy(c, config)
 		f.ins[i].Config = c
-		f.expirySets = append(f.expirySets, name+" "+c[jobrun.ExpiresKey])
+		if exp, ok := config[jobrun.ExpiresKey]; ok {
+			f.expirySets = append(f.expirySets, name+" "+exp)
+		}
 		f.mu.Unlock()
 		return true, nil
 	}
@@ -165,6 +171,19 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if strings.HasPrefix(script, "# kept jobs") {
+		ended := false
+		for _, j := range f.jobs[box] {
+			if j.state == "running" || j.state == "starting" {
+				return nil, nil
+			}
+			ended = ended || j.state == "done"
+		}
+		if ended {
+			return []byte("kept\n"), nil
+		}
+		return nil, nil
+	}
 	if strings.HasPrefix(script, "# running jobs") {
 		f.runChecks++
 		for _, in := range f.ins {
@@ -215,6 +234,13 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 		return nil, f.cliErr(args)
 	}
 	switch args[0] {
+	case "file":
+		if args[1] == "pull" {
+			if data, ok := f.files[args[2]]; ok {
+				return []byte(data), nil
+			}
+			return nil, &ExitError{Code: 1, Stderr: "file does not exist"}
+		}
 	case "launch":
 		size := "medium"
 		for i, a := range args {

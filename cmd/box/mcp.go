@@ -71,7 +71,8 @@ var tools = []tool{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
-		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept up to 30 minutes after the run for box_pull, then deleted; a queued job or another launch that needs the room deletes it sooner. Use it for parallel runs on one repo, which otherwise take turns."},
+		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box for parallel runs. An idle CPU throwaway for the same repo and size may be reused. Pull artifacts promptly with box_pull; later runs can reuse that checkout."},
+		"fresh":   map[string]any{"type": "boolean", "description": "Always launch a fresh throwaway. Use for clean-build checks or to keep a separate box for artifacts."},
 		"size":    sizeArg,
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),
@@ -89,9 +90,9 @@ var tools = []tool{
 	{"box_cancel", "Stop a running job's process session, or take a queued job off the queue. A cancelled job exits 130.", obj(map[string]any{
 		"id": str("Job ID."),
 	}, "id"), nil},
-	{"box_pull", "Copy a file or directory (test reports, coverage, build output) from a box into a local directory, as <localDir>/<name>. It never replaces an existing file and drops symlinks. Pull right after the job: the next job on the same repo replaces the checkout.", obj(map[string]any{
+	{"box_pull", "Copy a file or directory (test reports, coverage, build output) from a box into a local directory, as <localDir>/<name>. It never replaces an existing file and drops symlinks. Pull right after the job (or run with fresh: true): if a later job replaced the repo box's checkout, pulling from the earlier job ID refuses instead of returning the wrong files.", obj(map[string]any{
 		"from":       str("Job ID, or a box name."),
-		"remotePath": str("Path in the box. A relative path starts at the job's checkout (/work/<repo>)."),
+		"remotePath": str("Linux path in the box. A relative path starts at the job's checkout (/work/<repo>); an absolute path starts with /."),
 		"localDir":   str("Absolute path of the local directory to copy into; created if missing."),
 	}, "from", "remotePath", "localDir"), nil},
 }
@@ -273,6 +274,7 @@ type toolArgs struct {
 	Command string            `json:"command"`
 	Box     string            `json:"box"`
 	New     bool              `json:"new"`
+	Fresh   bool              `json:"fresh"`
 	Size    string            `json:"size"`
 	GPU     bool              `json:"gpu"`
 	ID      string            `json:"id"`
@@ -500,7 +502,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		// Only a run whose result can be pushed is queued: nothing else
 		// would hear when it starts (docs/queue.md).
 		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
-		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
+		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Fresh: args.Fresh, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
 		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
 		switch {
 		case err != nil:
@@ -520,7 +522,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			r.Push = &push
 		case r.Job != "" && (r.State == stateDetached || r.State == statePaused):
 			if push {
-				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New, false)
+				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New || args.Fresh, false)
 			}
 			r.Push = &push
 		}

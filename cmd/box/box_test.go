@@ -49,8 +49,10 @@ type fakePC struct {
 	memory       string            // the default profile's limits.memory
 	jobs         map[string]string // canned "# jobs" output by box
 	script       string            // canned output of the page, cancel and checkout scripts
+	scriptErr    string
 	scriptRC     int
 	pull         func(src, dst string) // file pull -r src dst
+	pullErr      string                // canned stderr when file pull -r fails
 	pulls        []string
 	stdins       []string          // stdin of each launch ("" when none)
 	launched     func(f *fakePC)   // runs after each successful launch, under f.mu
@@ -58,6 +60,7 @@ type fakePC struct {
 	stillRunning bool              // with stopFor: incus still lists the box Running
 	remotes      string            // output of incus remote list --format json
 	files        map[string]string // content of each pushed file, by its target
+	fileReadErr  map[string]string // incus errors when reading individual files
 	cancelled    bool              // the .cancelled probe finds the mark
 	followErr    int               // this many follows fail with a transport error
 	kept         map[string]bool   // boxes the kept-jobs check finds kept
@@ -157,8 +160,7 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		if args[1] == "get" {
 			return Result{Stdout: inst.Config[args[3]] + "\n"}, nil
 		}
-		k, v, ok := strings.Cut(args[3], "=")
-		if args[1] != "set" || !ok {
+		if args[1] != "set" {
 			f.t.Fatalf("unexpected incus config arguments: %q", args)
 		}
 		if f.etagFails > 0 {
@@ -168,7 +170,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		if inst.Config == nil {
 			inst.Config = make(map[string]string)
 		}
-		inst.Config[k] = v
+		for _, arg := range args[3:] {
+			k, v, ok := strings.Cut(arg, "=")
+			if !ok {
+				f.t.Fatalf("unexpected incus config argument: %q", arg)
+			}
+			inst.Config[k] = v
+		}
 	case "delete":
 		name := strings.TrimPrefix(args[1], "pc:")
 		for i := range f.insts {
@@ -180,6 +188,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 	case "file":
 		if args[1] == "pull" && args[3] == "-" { // one file to stdout
 			f.pulls = append(f.pulls, args[2])
+			if msg := f.fileReadErr[args[2]]; msg != "" {
+				return Result{Code: 1, Stderr: msg}, nil
+			}
 			if s, ok := f.files[args[2]]; ok {
 				return Result{Stdout: s}, nil
 			}
@@ -187,6 +198,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 		if args[1] == "pull" {
 			f.pulls = append(f.pulls, args[3])
+			if f.pullErr != "" {
+				return Result{Code: 1, Stderr: f.pullErr}, nil
+			}
 			if f.pull != nil {
 				f.pull(args[3], args[4])
 			}
@@ -215,6 +229,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{Stderr: `Error: Failed to fetch instance "x" in project "agents": Instance not found`, Code: 1}, nil
 		}
 		for _, in := range f.insts {
+			if "pc:"+in.Name == args[1] && in.Status == "Frozen" && isScript(c, "# checkout") {
+				return Result{Stderr: "Error: Instance is frozen", Code: 1}, nil
+			}
 			if "pc:"+in.Name == args[1] && in.Status == "Stopped" {
 				if c.Stderr != nil { // incus streams it there, as the real runner does
 					io.WriteString(c.Stderr, "Error: Instance is not running\n")
@@ -280,7 +297,7 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			case isScript(c, "# jobs"):
 				return Result{Stdout: f.jobs[strings.TrimPrefix(args[1], "pc:")]}, nil
 			case isScript(c, "# page"), isScript(c, "# cancel"), isScript(c, "# checkout"):
-				return Result{Stdout: f.script, Code: f.scriptRC}, nil
+				return Result{Stdout: f.script, Stderr: f.scriptErr, Code: f.scriptRC}, nil
 			case argv[0] == "cat":
 				return Result{Stdout: f.exit}, nil
 			case f.startErr:
@@ -458,7 +475,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file file config config exec config config exec exec config config exec" {
+	if got := f.callList(); got != "list project start file file config config exec config config exec config exec config config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -496,7 +513,7 @@ func TestRunRetriesExpiryOnETagRace(t *testing.T) {
 	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := strings.Count(f.callList(), "config"); got != 10 { // each a read of the hold and a write: 2 lost, the start's, the run's, the idle one
+	if got := strings.Count(f.callList(), "config"); got != 11 { // pool lookup plus five hold/read and set attempts
 		t.Errorf("config calls = %d: %s", got, f.callList())
 	}
 }
@@ -508,7 +525,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config config exec config config exec exec config config exec exec delete" {
+	if got := f.callList(); got != "list project launch file file config config exec config config exec config exec config config exec exec delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -757,6 +774,11 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	if n := strings.Count(f.callList(), "launch"); n != 1 {
 		t.Errorf("launched %d times, want 1", n)
+	}
+	// Run 2 replaced /work/my-repo, so pulling from run 1 refuses clearly (#197).
+	if _, err := a.Pull(ctx, "my-repo.20261123-120000-0001", "a.txt", t.TempDir()); err == nil ||
+		!strings.Contains(err.Error(), "was replaced by job my-repo.20261123-120000-0002") {
+		t.Errorf("Pull from replaced job 1 = %v, want replaced error", err)
 	}
 
 	// Reattaching to a finished job replays its log and exit code.

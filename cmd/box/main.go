@@ -59,6 +59,8 @@ medium). A reused box of another size isn't resized: the run gets a throwaway.
 --gpu is --size gpu: the PC's GPU, one GPU box at a time; on a host without
 one (box status: gpu: none) it exits 75. box run --gpu uses a throwaway. The
 tray stops a GPU box in My PC.
+CPU throwaways reuse an idle box for the same repo and size when available.
+--fresh bypasses the pool and launches a new throwaway.
 If the Incus image lookup ends with EOF, box retries the launch once.
 
 A run that can't start now (no room, the GPU taken, My PC) waits in the PC's
@@ -70,7 +72,9 @@ box run exits with the command's exit code, 124 when --timeout fired, or 75
 when the box was paused or stopped, the run wasn't queued, or it left the
 queue without running. A job paused mid-run resumes if the PC's owner switches back within
 15 minutes (4 hours once its memory is moved to swap), else it is lost; box job
-reattaches. A relative remote path in box pull starts at the job's checkout.
+reattaches. In box pull, a relative remote path starts at the job's checkout and
+an absolute path starts with / (in Git Bash, set MSYS_NO_PATHCONV=1); pulling by
+job ID refuses if a later job replaced the checkout.
 The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
@@ -164,6 +168,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	case "run":
 		box := fs.String("box", "", "box to use (default: the repo's own box)")
 		isNew := fs.Bool("new", false, "use a throwaway box, kept up to 30 minutes after the job for box pull, unless another run needs the room")
+		fresh := fs.Bool("fresh", false, "launch a new throwaway without reusing an idle box")
 		ttl := fs.Duration("ttl", idleTTL, "initial lifetime of a --new box before the job starts")
 		timeout := fs.Duration("timeout", 0, "kill the command after this long (exit 124)")
 		size := fs.String("size", "", "size of a box this run launches: "+mode.SizeNames()+" (default "+mode.DefaultSize+")")
@@ -175,8 +180,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if fs.Parse(args[1:]) != nil {
 			return 2
 		}
-		if *box != "" && *isNew {
-			fmt.Fprintln(a.Err, "box: --box and --new don't mix")
+		if *box != "" && (*isNew || *fresh) {
+			fmt.Fprintln(a.Err, "box: --box cannot be used with --new or --fresh")
 			return 2
 		}
 		if !gpuSize(a, size, *gpu) {
@@ -191,7 +196,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if err != nil {
 			return fail(err)
 		}
-		r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why, Queue: !*noQueue})
+		r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, Fresh: *fresh, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why, Queue: !*noQueue})
 		if err == nil && r.State == stateQueued {
 			// This process follows the job through the queue and into its box (#93).
 			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}}
