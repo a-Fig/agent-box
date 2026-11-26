@@ -37,6 +37,7 @@ type fakeIncus struct {
 	expirySets []string
 	between    func(cfg map[string]string)
 	running    map[string][]string // jobs the running-jobs script sees that no scan has yet
+	runChecks  int                 // running-jobs scripts run
 }
 
 type fakeJob struct {
@@ -160,6 +161,7 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		return []byte(b.String()), nil
 	}
 	if strings.HasPrefix(script, "# running jobs") {
+		f.runChecks++
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
 			if j.state == "running" {

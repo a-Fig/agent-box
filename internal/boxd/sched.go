@@ -531,10 +531,11 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 
 // sweepEnded catches the reapEnded that settle missed: a box whose jobs had
 // all ended in boxd's history before this poll (the scan skipped every one),
-// with none of them live, whose expiry is still its last job's. A boxd
-// restarted while the job ended, or stopped before reapEnded's write, left a
-// throwaway its 24h (#156). The check is endedExpiry alone, so a box once
-// shortened costs nothing more; reapEnded does the rest as it would.
+// with none of them live, whose expiry is still its last job's own 24h. A
+// boxd restarted while the job ended, or stopped before reapEnded's write,
+// left a throwaway that 24h (#156). An expiry shortened already, or extended
+// from the page since, is no longer the job's, so the sweep leaves it and
+// costs a history lookup a poll; reapEnded does the rest as it would.
 // With w.mu held.
 func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]scanned) {
 	for _, in := range ins {
@@ -542,18 +543,25 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 		if in.Status != "Running" || len(jobs) == 0 || w.boxBusy(in.Name, "") {
 			continue
 		}
-		var last dash.Job
+		ended := true
 		for _, s := range jobs {
-			if !s.Skipped || s.State != "done" {
-				last = dash.Job{}
-				break // one boxd hasn't recorded as ended goes through settle
-			}
-			if j, ok := w.Hist.EndedJob(s.Job, in.CreatedAt); ok && !j.StartedAt.Before(last.StartedAt) {
-				last = dash.Job{Box: j.Box, ID: j.ID, StartedAt: j.StartedAt}
+			if !s.Skipped || s.State == "running" || s.State == "starting" {
+				ended = false // one boxd hasn't recorded as ended goes through settle
+				break
 			}
 		}
-		if last.Box == "" {
+		if !ended {
 			continue
+		}
+		// Names sort by start (a queued job's by when it was queued), so the
+		// last job scanned is the one whose 24h the box has.
+		last, ok := w.Hist.EndedJob(jobs[len(jobs)-1].Job, in.CreatedAt)
+		if !ok {
+			continue
+		}
+		cur, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+		if err != nil || cur.Before(last.StartedAt.Add(jobTTL-jobExpirySlack)) {
+			continue // not the job's 24h: shortened already, or extended from the page since
 		}
 		if _, ok := endedExpiry(in, last.StartedAt, now); ok {
 			w.reapEnded(&last)

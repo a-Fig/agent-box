@@ -2,6 +2,7 @@ package boxd
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -97,7 +98,7 @@ func TestReapEndedUnreadJob(t *testing.T) {
 // A job that ended while boxd's reapEnded didn't get to write (a restart cut
 // it short; here another job looked to be running) leaves its throwaway the
 // job's 24 hours. A boxd started again sweeps it to 30 minutes, once nothing
-// runs there (#156).
+// runs there (#156), and leaves an extend from the page after that be.
 func TestSweepEndedAfterRestart(t *testing.T) {
 	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
 	job := "w-0001.20261124-180000-ab12"
@@ -115,14 +116,27 @@ func TestSweepEndedAfterRestart(t *testing.T) {
 		r.f.jobs["w-0001"][0].state, r.f.jobs["w-0001"][0].exit = "done", "0"
 		r.f.running = map[string][]string{"w-0001": {"w-0001.20261124-185000-cd34"}}
 	})
-	r.poll()
-	expires := func() string {
+	expires := func() (string, int, int) {
 		r.f.mu.Lock()
 		defer r.f.mu.Unlock()
-		return r.f.ins[0].Config["user.expires"]
+		return r.f.ins[0].Config["user.expires"], r.f.runChecks, len(r.f.expirySets)
 	}
-	time.Sleep(100 * time.Millisecond) // the declined reap
-	if got := expires(); got != own {
+	// waitChecks waits for the running-jobs check of n reaps in all; a reap
+	// reads the clock before it.
+	waitChecks := func(n int) {
+		t.Helper()
+		for i := 0; i < 200; i++ {
+			if _, c, _ := expires(); c >= n {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("no reap ran its check %d", n)
+	}
+	r.poll()
+	waitChecks(1)
+	time.Sleep(20 * time.Millisecond) // its decline
+	if got, _, _ := expires(); got != own {
 		t.Fatalf("reaped while another job ran: %s", got)
 	}
 
@@ -130,22 +144,30 @@ func TestSweepEndedAfterRestart(t *testing.T) {
 	r.c.add(time.Hour)
 	w := r.restart()
 	w.Poll(context.Background())
+	waitChecks(2)
 	want := r.c.now().Add(jobrun.EndedKeep).UTC().Format(time.RFC3339)
-	for i := 0; i < 50 && expires() != want; i++ {
+	for i := 0; i < 50; i++ {
+		if got, _, _ := expires(); got == want {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := expires(); got != want {
+	if got, _, _ := expires(); got != want {
 		t.Fatalf("after restart: expires %s, want %s", got, want)
 	}
-	sets := func() []string {
-		r.f.mu.Lock()
-		defer r.f.mu.Unlock()
-		return append([]string(nil), r.f.expirySets...)
-	}
-	n := len(sets())
-	w.Poll(context.Background()) // shortened already: no second write
+
+	// +4h from the page: no longer the job's 24h, so no reap starts.
+	extended := r.c.now().Add(4 * time.Hour).UTC().Format(time.RFC3339)
+	r.f.set(func() {
+		c := maps.Clone(r.f.ins[0].Config)
+		c["user.expires"] = extended
+		r.f.ins[0].Config = c
+	})
+	_, checks, sets := expires()
+	r.c.add(time.Minute)
+	w.Poll(context.Background())
 	time.Sleep(50 * time.Millisecond)
-	if got := sets(); len(got) != n {
-		t.Errorf("wrote again: %v", got)
+	if got, c, n := expires(); got != extended || c != checks || n != sets {
+		t.Errorf("after an extend: expires %s (want %s), checks %d→%d, writes %d→%d", got, extended, checks, c, sets, n)
 	}
 }
