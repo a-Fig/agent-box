@@ -117,7 +117,7 @@ The same set everywhere, since everywhere is the same page.
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
 | Delete a box | `incus delete --force`, after a confirm on the page |
-| Extend a box | adds 1h, 4h or 24h to `user.expires` |
+| Extend a box | adds 1h, 4h or 24h to `user.expires`; a job that ends afterwards resets it (#198, 2026-11-25) |
 | Move a queued job to the front | reorders boxd's queue (docs/queue.md) |
 | Cancel a queued job | takes it out of the queue and deletes its snapshot, after a confirm on the page |
 

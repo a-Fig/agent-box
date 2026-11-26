@@ -163,7 +163,9 @@ function nextMark(m, key) {
 const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if (at && !point) closed = keyOf(document.activeElement);
+    // The focused element's hint stays closed, whether it or the pointer showed the tooltip:
+    // otherwise the next redraw, or the pointer leaving, brings it back.
+    if ((at && !point) || keyed()) closed = keyOf(document.activeElement);
     return hide();
   }
   const m = markOf(e);

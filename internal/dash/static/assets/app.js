@@ -152,8 +152,8 @@ function drift(b, t, trayUp) {
   if (!c) return { text: "boxd and tray are different builds", why: "Both say " + b.tag + " but were built from different commits." };
   const [newer, older, behind, ahead] = c > 0 ? [b, t, "tray", "boxd"] : [t, b, "boxd", "tray"];
   if (behind === "tray" && !trayUp) return { text: "tray is behind boxd", why: "The tray isn't running, so it can't update; it checks for the latest stable release hourly while it runs." };
-  // Each updates itself only to the latest stable release (no "-nightly…" suffix).
-  if (newer.tag.includes("-")) return { text: ahead + " runs " + newer.tag + ", ahead of " + behind, why: "The hourly update installs only stable releases, so " + behind + " stays on " + older.tag + " until the next one." };
+  // A prerelease (a nightly or test build) was installed by hand: state both, predict nothing.
+  if (newer.tag.includes("-")) return { text: ahead + " runs " + newer.tag + ", " + behind + " " + older.tag, why: "boxd runs " + b.tag + " and the tray " + t.tag + ". Each updates itself from stable releases only." };
   // How long they have differed: since the later of boxd's start and the tray's last new build.
   // A boxd restart starts the count again, so a tray stuck for days reads as pending for 2 hours
   // after one; the warning comes back after that.
