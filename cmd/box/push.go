@@ -503,7 +503,10 @@ func (a *App) recordEnd(job string, end jobEnd) {
 // recordedEnd is a job's recorded end: the exit box read, else the end the
 // watcher recorded if it ran to an exit code.
 func (a *App) recordedEnd(job string) (jobEnd, bool) {
-	if a.StateDir == "" || !validJob.MatchString(job) {
+	if a.StateDir == "" {
+		return jobEnd{}, false
+	}
+	if _, err := parseJobID(job); err != nil {
 		return jobEnd{}, false
 	}
 	for _, ext := range []string{".result", ".ended"} {

@@ -32,14 +32,14 @@ const stateQueued = "queued"
 // since a snapshot can be large.
 const queueTimeout = 15 * time.Second
 
-// boxdDo sends a request to boxd on the PC (pcHost) and returns the status
+// boxdDo sends a request to the selected boxd and returns the status
 // and body. A transport failure, or no host, is an error.
 func (a *App) boxdDo(ctx context.Context, method, path, contentType string, body io.Reader) (int, []byte, error) {
-	host := a.pcHost(ctx)
-	if host == "" {
+	address := a.boxdURL(ctx, path)
+	if address == "" {
 		return 0, nil, errors.New("no address for boxd (incus remote " + a.Remote + ")")
 	}
-	return a.boxdRequest(ctx, method, "https://"+host+path, contentType, body)
+	return a.boxdRequest(ctx, method, address, contentType, body)
 }
 
 func (a *App) boxdRequest(ctx context.Context, method, url, contentType string, body io.Reader) (int, []byte, error) {
@@ -294,22 +294,26 @@ func (a *App) jobInBox(ctx context.Context, job string) bool {
 // agent once at dash.QueueNudge. ok is false when ctx ended or the agent
 // cancelled the job.
 func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, ok bool) {
-	queuedAt := jobStart(rec.Job) // boxd names a queued job by when it was queued
+	return a.waitQueuedJob(ctx, rec, rec.Job, false)
+}
+
+func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, seen bool) (out queueOutcome, ok bool) {
+	queuedAt := jobStart(bare) // boxd names a queued job by when it was queued
 	dropped := func() (queueOutcome, bool) {
 		return queueOutcome{end: &jobEnd{Code: exitPaused, Lost: true, Dropped: true, Took: int64(a.Now().Sub(queuedAt) / time.Second)}}, true
 	}
 	backoff := 15 * time.Second
-	seen, gone := false, 0 // boxd has answered queued; 404s in a row since
+	gone := 0 // 404s in a row since boxd answered queued
 	for ctx.Err() == nil {
 		if a.exists(rec.Job, ".notified") {
 			return out, false // box_cancel took it off the queue
 		}
-		j, found, err := a.queuedJob(ctx, rec.Job)
+		j, found, err := a.queuedJob(ctx, bare)
 		switch {
 		case err != nil:
 			// Out of reach: keep waiting, but not past the queue's own limit.
 			if a.Now().Sub(queuedAt) > dash.QueueMaxAge+time.Hour {
-				if a.jobInBox(ctx, rec.Job) {
+				if a.jobInBox(ctx, bare) {
 					return out, true
 				}
 				return dropped()
@@ -322,7 +326,7 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 			// restart forgets a start it hasn't scanned yet), the box says the
 			// rest. A job boxd had queued that is in no box was taken off the
 			// queue (from the page): it never ran.
-			if !seen || a.jobInBox(ctx, rec.Job) {
+			if !seen || a.jobInBox(ctx, bare) {
 				return out, true
 			}
 			if gone++; gone >= 2 {
@@ -376,11 +380,17 @@ func (a *App) recordQueued(info jobMeta, job string, gpu, throwaway bool) {
 // as box job does. Interrupted, it leaves the job queued and says how to
 // get back to it.
 func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
+	box, _, _ := strings.Cut(job, ".")
+	return a.followQueuedJob(ctx, jobID{ID: job, Bare: job, Box: box}, false)
+}
+
+func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResult, error) {
+	job, box := id.ID, id.Box
 	rec := jobRecord{Job: job, Queued: true}
 	readJSON(a.statePath(job, ".json"), &rec)
+	rec.Job = job
 	rec.Thread = "" // whoever follows here sees the job; no nudge is pushed
-	out, ok := a.waitQueued(ctx, rec)
-	box, _, _ := strings.Cut(job, ".")
+	out, ok := a.waitQueuedJob(ctx, rec, id.Bare, seen)
 	switch {
 	case !ok && a.notifiedBy(job) == "cancel":
 		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
@@ -396,22 +406,14 @@ func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
 	case out.end != nil:
 		// It ran and ended between two looks: its kept box has the full log
 		// and digest; boxd's tail is the fallback once the box is gone.
-		if r, err := a.Job(ctx, job, 0); err == nil && r.State == stateDone {
+		if r, err := a.job(ctx, id, 0); err == nil && r.State == stateDone {
 			return r, nil // not a pause: a kept box frozen by My PC doesn't undo an end boxd has
 		}
 		io.WriteString(a.Out, out.end.Tail+"\n")
 		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code}, nil
 	}
 	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box)
-	return a.Job(ctx, job, 0)
-}
-
-// stillQueued says whether job may still wait in boxd's queue: boxd says so,
-// or can't be asked, in which case waitQueued rides out the outage. box job
-// follows such a job through the queue; any other is the box's to report.
-func (a *App) stillQueued(ctx context.Context, job string) bool {
-	j, found, err := a.queuedJob(ctx, job)
-	return err != nil || found && j.State == dash.JobQueued
+	return a.job(ctx, id, 0)
 }
 
 // notifiedBy is who wrote job's .notified ("cancel", "watcher", "box run",
