@@ -117,6 +117,8 @@ For multiple hosts, create `agent-box/hosts.json` in your user config directory 
 
 `project` defaults to `BOX_PROJECT`. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs. A host's queue shows as `unknown` if its dashboard is unavailable. `BOX_REMOTE` and `BOX_PROJECT` still select where `box run` sends a job and determine the `box status` exit code. An absent or empty registry keeps the usual single-host behavior.
 
+`box jobs` and `box_job` without an ID list jobs on the default and configured hosts. Jobs on the default keep their bare IDs so existing result and watcher records still match. Other hosts have qualified IDs. `box jobs --box` looks up a box on the default host.
+
 ## Website previews
 
 Run the preview command from a trusted checkout of `main`, with `gh` and Wrangler signed in. Pass the PR number while staying on `main`. The command prints a public preview link and a link pinned to this deployment.

@@ -79,7 +79,7 @@ var tools = []tool{
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
 	}, "dir", "command", "reason"), jobOutput},
-	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept up to 30 minutes after its job ends (for box_pull), unless another run needs the room. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs, newest first, with state, start time and log size; use it to find a job ID you lost. " + pausedHint, obj(map[string]any{
+	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept up to 30 minutes after its job ends (for box_pull), unless another run needs the room. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs newest first on the default and configured hosts. Fleet listings name each host and qualify job IDs outside the default. " + pausedHint, obj(map[string]any{
 		"id":     str("Job ID from box_run. Omit to list jobs."),
 		"wait":   str(`Stop waiting after this long. Default 10m.`),
 		"offset": integer("Read the log from this byte offset, without waiting. Default 0."),
@@ -543,7 +543,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		return jobResult(r, err, log, warnings)
 	case "box_job":
 		if args.ID == "" && args.Offset == nil && args.Limit == nil {
-			jobs, err := a.Jobs(ctx, "")
+			jobs, err := a.listJobs(ctx, "")
 			if err != nil {
 				return textResult(withWarnings(err.Error()), true)
 			}
@@ -556,7 +556,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			var b strings.Builder
 			fmt.Fprintf(&b, "%d job(s), %d running\n", len(jobs), running)
 			for _, j := range jobs {
-				fmt.Fprintf(&b, "%s %s, started %s, log %dB\n", j.Job, j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
+				fmt.Fprint(&b, j.Job)
+				if j.Host != "" {
+					fmt.Fprintf(&b, " on %s", j.Host)
+				}
+				fmt.Fprintf(&b, " %s, started %s, log %dB\n", j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
 			}
 			res := textResult(withWarnings(strings.TrimRight(b.String(), "\n")), false)
 			res["structuredContent"] = map[string]any{"jobs": append([]JobInfo{}, jobs...), "warnings": append([]string{}, warnings...)}

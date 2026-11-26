@@ -28,7 +28,7 @@ const usage = `usage:
   box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m]
           [--no-queue] -- <cmd...>          sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
-  box jobs [--box name]                     list jobs, newest first
+  box jobs [--box name]                     list fleet jobs, newest first (--box uses the default host)
   box cancel <id>                           stop a running job, or take a queued one off the queue
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
@@ -275,7 +275,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
-		jobs, err := a.Jobs(ctx, *box)
+		jobs, err := a.listJobs(ctx, *box)
 		if err != nil {
 			return fail(err)
 		}
