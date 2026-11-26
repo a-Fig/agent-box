@@ -282,6 +282,7 @@ func TestReclaimIsResetWhenABoxIsPausedAgainOrRecreated(t *testing.T) {
 type blockingList struct {
 	*fake
 	entered chan struct{}
+	left    chan struct{} // closed when that List returns
 	lists   atomic.Int32
 }
 
@@ -289,6 +290,7 @@ func (b *blockingList) List(ctx context.Context) ([]Instance, error) {
 	if b.lists.Add(1) == 1 {
 		close(b.entered)
 		<-ctx.Done()
+		close(b.left)
 		return nil, ctx.Err()
 	}
 	return b.fake.List(ctx)
@@ -297,7 +299,7 @@ func (b *blockingList) List(ctx context.Context) ([]Instance, error) {
 func TestReleaseCancelsATickInFlightAndBlocksNewOnes(t *testing.T) {
 	f := newFake("a", "Running")
 	f.setCfg("a", MemoryCapKey, "4GiB")
-	inc := &blockingList{fake: f, entered: make(chan struct{})}
+	inc := &blockingList{fake: f, entered: make(chan struct{}), left: make(chan struct{})}
 	m := New(inc, MyPC)
 	m.Reclaim = newFakeReclaim()
 	done := make(chan Status, 1)
@@ -306,11 +308,14 @@ func TestReleaseCancelsATickInFlightAndBlocksNewOnes(t *testing.T) {
 	if !m.BeginRelease() {
 		t.Fatal("first release refused")
 	}
+	// Checked on the List, not on done: Tick's result is sent after it
+	// unlocks, so done may still be empty when BeginRelease returns.
 	select {
-	case <-done: // BeginRelease waited for the cancelled tick
+	case <-inc.left: // BeginRelease waited for the cancelled tick
 	default:
 		t.Fatal("BeginRelease returned before the tick ended")
 	}
+	<-done
 	if m.BeginRelease() {
 		t.Fatal("a second release ran while one is held")
 	}
