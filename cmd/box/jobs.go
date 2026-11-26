@@ -424,19 +424,26 @@ func localPullName(name string) bool {
 }
 
 // Pull copies a file or directory from a box into the local directory
-// local, as local/<base name>. target is a job ID or a box name. A relative
+// local, as local/<base name>. target is a qualified or bare job ID, or a box name. A relative
 // remote path starts at the job's checkout (or the box's only checkout).
 // Nothing is written outside local: the copy lands in a staging directory
 // inside it, symlinks and special files are dropped, and an existing
 // local/<base name> is never replaced.
 func (a *App) Pull(ctx context.Context, target, remote, local string) (string, error) {
-	box, job := target, ""
-	if validJob.MatchString(target) {
-		box, _, _ = strings.Cut(target, ".")
-		job = target
-	} else if !validBox.MatchString(target) {
+	if validBox.MatchString(target) {
+		return a.pull(ctx, target, "", remote, local)
+	}
+	if !validJob.MatchString(target) && !strings.ContainsRune(target, '~') {
 		return "", fmt.Errorf("bad job id or box name %q", target)
 	}
+	lookup, err := a.lookupJob(target)
+	if err != nil {
+		return "", err
+	}
+	return lookup.app.pull(ctx, lookup.id.Box, lookup.id.Bare, remote, local)
+}
+
+func (a *App) pull(ctx context.Context, box, job, remote, local string) (string, error) {
 	if remote == "" || strings.ContainsAny(remote, "\x00\n") {
 		return "", errors.New("give a remote path")
 	}
