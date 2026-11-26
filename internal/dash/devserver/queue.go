@@ -135,9 +135,11 @@ func (s *server) stepQueue() {
 func (s *server) startQueued(q dash.Job) {
 	box, job := s.player.StartQueued(s.now(), q)
 	s.removeQueued(q.Key)
-	if s.findBox(box.Name) < 0 {
+	if i := s.findBox(box.Name); i < 0 {
 		s.sc.State.Boxes = append(s.sc.State.Boxes, box)
 		s.reallot()
+	} else {
+		job.BoxUID = s.sc.State.Boxes[i].UID
 	}
 	s.sc.State.Jobs = append([]dash.Job{job}, s.sc.State.Jobs...)
 	s.logs[job.Key] = "$ " + job.Command + "\n"

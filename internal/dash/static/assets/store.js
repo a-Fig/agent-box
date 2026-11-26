@@ -16,6 +16,7 @@ const S = {
   nextTry: 0,
   machines: new Map(),
   boxes: new Map(),
+  gen: 0, // counts snapshots (a reconnect replaces the jobs, so what was fetched before may be stale)
   jobs: new Map(), // by key: running, paused and the last finished, from the state and events
   toast: null,
 };
@@ -66,6 +67,7 @@ function applyState(st) {
   S.machines = new Map((st.machines || []).map((m) => [m.id, m]));
   S.boxes = new Map((st.boxes || []).map((b) => [b.machine + "/" + b.name, b]));
   S.jobs = new Map((st.jobs || []).map((j) => [j.key, j]));
+  S.gen++;
   S.conn = "live";
 }
 

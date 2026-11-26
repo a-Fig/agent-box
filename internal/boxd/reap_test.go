@@ -6,13 +6,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/jobrun"
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 func TestEndedExpiry(t *testing.T) {
 	started := t0                              // the job's start
 	own := started.Add(jobTTL + 5*time.Second) // what box run set
 	now := started.Add(time.Hour)              // the job ended an hour in
+	held := func(in Instance, until time.Time) Instance {
+		in.Config[mode.HoldKey] = until.Format(time.RFC3339)
+		return in
+	}
 	box := func(throwaway bool, expires time.Time, created time.Time) Instance {
 		in := inst("w", "Running", "small", created)
 		in.Config["user.expires"] = expires.Format(time.RFC3339)
@@ -31,15 +37,17 @@ func TestEndedExpiry(t *testing.T) {
 		"already short (box read it)": {box(true, now.Add(30*time.Minute), started), time.Time{}},
 		"extended from the page":      {box(true, own.Add(4*time.Hour), started), time.Time{}},
 		"another box of that name":    {box(true, own, started.Add(time.Hour)), time.Time{}},
+		"held past the keep":          {held(box(true, own, started), now.Add(3*time.Hour)), now.Add(3 * time.Hour)},
+		"held, but not that long":     {held(box(true, own, started), now.Add(time.Minute)), now.Add(30 * time.Minute)},
 	} {
-		got, ok := endedExpiry(tc.in, started, now)
+		got, ok := endedExpiry(tc.in, dash.Job{Box: "w", StartedAt: started}, now)
 		if ok != !tc.want.IsZero() || (ok && !got.Equal(tc.want)) {
 			t.Errorf("%s: %v %v, want %v", name, got, ok, tc.want)
 		}
 	}
 	bad := box(true, own, started)
 	bad.Config["user.expires"] = "soon"
-	if _, ok := endedExpiry(bad, started, now); ok {
+	if _, ok := endedExpiry(bad, dash.Job{Box: "w", StartedAt: started}, now); ok {
 		t.Error("wrote over an expiry it can't read")
 	}
 }
@@ -176,5 +184,37 @@ func TestSweepEndedAfterRestart(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got, c, n := expires(); got != extended || c != checks || n != sets {
 		t.Errorf("a later poll: expires %s (want %s), checks %d→%d, writes %d→%d", got, extended, checks, c, sets, n)
+	}
+}
+
+// A job belongs to the box it ran on by that box's UID: a box made seconds later under the same
+// name doesn't hold it (the reaper would skip its scan or shorten its expiry for a job that isn't
+// its own), while a job recorded before jobs had a UID still falls back to the time rule.
+func TestJobHeldByUID(t *testing.T) {
+	withUUID := func(in Instance, u string) Instance { in.Config["volatile.uuid"] = u; return in }
+	first := withUUID(inst("w", "Running", "small", t0), "u1")
+	repl := withUUID(inst("w", "Running", "small", t0.Add(40*time.Second)), "u2")
+	ended := t0.Add(30 * time.Second)
+	job := dash.Job{ID: "a", Box: "w", Machine: "pc", BoxUID: "u1", State: dash.JobDone, StartedAt: t0.Add(10 * time.Second), EndedAt: &ended}
+	old := job
+	old.ID, old.BoxUID = "b", "" // recorded before BoxUID: the time rule decides
+	h := &History{jobs: map[string]*dash.Job{"a": &job, "b": &old}}
+
+	if got := h.EndedOn(first); !got["w.a"] || !got["w.b"] {
+		t.Errorf("first box holds %v", got)
+	}
+	if got := h.EndedOn(repl); got["w.a"] {
+		t.Errorf("the replacement holds the first box's job: %v", got)
+	}
+	if j, ok := h.LastEnded(repl); ok && j.ID == "a" {
+		t.Error("the replacement's last job is the first box's")
+	}
+	if j, ok := h.LastEnded(first); !ok || j.StartedAt.IsZero() {
+		t.Error("the first box has no last job")
+	}
+	own := job.StartedAt.Add(jobTTL + 5*time.Second)
+	repl.Config["user.expires"] = own.Format(time.RFC3339)
+	if _, ok := endedExpiry(repl, job, t0.Add(time.Hour)); ok {
+		t.Error("shortened the replacement's expiry for the first box's job")
 	}
 }

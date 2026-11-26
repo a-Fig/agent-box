@@ -1,9 +1,14 @@
 # The dashboard: a page and an app for people
 
-Planned 2026-11-24, and revised the same day after a Fable review. Tyler: "a UI & app, like I have
+The dashboard shows what machines, boxes and jobs are doing, and gives the owner the same
+controls from the laptop, the PC and a phone.
+Open it with `box ui` or `box app`; start with [Shape](#shape) for the moving parts, or jump to
+[When the PC can't be reached](#when-the-pc-cant-be-reached) when it does not open.
+
+_Origin: planned 2026-11-24, and revised the same day after a Fable review. Tyler: "a UI & app, like I have
 with murmur. Something very clean & modern & light weight that gives me visibility & control into
 machines, boxes, agents, what they are doing, historical data & use cases", running on the laptop
-and on the PC, "both [with] the same level of control".
+and on the PC, "both [with] the same level of control"._
 
 ## Shape
 
@@ -19,7 +24,7 @@ One server, one page, three ways in.
 - **The page** is static files embedded in `boxd`: plain HTML, CSS and JS with no framework and no
   build step, like Murmur's `internal/web/static`. It follows Murmur's look (Tyler, 2026-11-23):
   its tokens and components, and its three themes, Dim by default (Tyler's choice) with Light and
-  Dark, switched in the sidebar and remembered in the browser's `localStorage`.
+  Dark, switched on the Settings page and remembered in the browser's `localStorage`.
 - **Ways in:**
   - `box ui` (laptop) opens the page in the browser.
   - `box app` (laptop) opens it in a window of its own, through
@@ -93,10 +98,18 @@ answers, the window goes to it (2026-11-24).
 - each box: name, repo, size, state, memory and CPU use, and its expiry;
 - running jobs: command, agent, repo and branch, how long they have run, and a live log tail.
 
-**Boxes**: every box with its full state.
+**Boxes**: every box with its full state. A row opens in place (a click, or Enter on its name) to
+show the job running there now, with its log's last lines, or how long the box has been idle, and
+the jobs it ran before, each linked to its page (#184, 2026-11-25).
 
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
+
+**Settings** (2026-11-26, #158): the theme, a control that saves at once in the browser; and, read-only,
+each host's builds of boxd and the tray, its mode and enforcer, the CPUs a box of each size gets in
+Shared and Full, the caps and expiry times, and whether it has a GPU. Nothing there writes to the PC:
+the mode stays on Overview and in the tray, the caps in the host's setup. `Machine.Config` carries
+the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
 
 **History**: charts over a day or a week:
 - jobs per day by result;
@@ -117,7 +130,7 @@ The same set everywhere, since everywhere is the same page.
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
 | Delete a box | `incus delete --force`, after a confirm on the page |
-| Extend a box | adds 1h, 4h or 24h to `user.expires`; a job that ends afterwards resets it (#198, 2026-11-25) |
+| Extend a box | adds 1h, 4h or 24h to `user.expires` and holds the box until then (`user.box.hold-until`): a job's end or a launch short of room won't take that time (#198) |
 | Move a queued job to the front | reorders boxd's queue (docs/queue.md) |
 | Cancel a queued job | takes it out of the queue and deletes its snapshot, after a confirm on the page |
 
@@ -284,6 +297,22 @@ JSON over HTTPS, on the same origin as the page.
   start before it launches the box, so a throwaway's `createdAt` is a few seconds after its job's
   `startedAt`. A box of the name made later is a reuse of the name, not the job's: its log is gone,
   and the page shows the kept `tail`.
+- **A box's jobs** are the ones whose `boxUid` is its `uid` (`dash.Job.RanOn`). boxd records the
+  `uid` (Incus's `volatile.uuid`, else `createdAt` to the nanosecond) with a job when it first finds
+  the job's files on a box, so no clock decides it. A time rule can't be right both ways: one loose
+  enough for `box run --new` (the ID is stamped before the bundle and launch, and the laptop's clock
+  may be off) lets a replacement box made seconds later list its predecessor's jobs, and a tight one
+  hides the box's own. Jobs recorded before 2026-11-25 have no `boxUid`; for them alone the old
+  rule stands: a start no earlier than `createdAt` less one minute (`dash.BoxJobSkew`); boxd's
+  watcher, log endpoint and reaper keep their looser ten minutes (`dash.JobBoxGrace`), since they act
+  on running jobs. A scan whose box was replaced after the poll listed it is dropped. The page
+  asks boxd with `box`, `machine`, `uid` and `created`, and merges the stream's jobs by the same
+  rule. After a reconnect it asks again, since the new snapshot holds only the last 50, and keeps
+  showing what it had until boxd answers.
+- **A box's idle time** comes from the job of it that ended last, which boxd returns as the page's
+  `last` (jobs overlap, so a page ordered by start may not hold it), or a later one from the stream.
+  When the history can't load, the row says so with a retry, and states an idle time only from a job
+  of the box it knows (from the stream, or the `last` of an earlier answer).
 - **A box control names its box** by name and `createdAt`, for the same reason: delete and extend
   send `{createdAt}` (the box the page saw), `boxd` compares it with the box's own under the same
   lock as the change, and answers 409 `code: "gone"` when the name now belongs to another box. The
@@ -307,14 +336,14 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 |---|---|
 | `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
-| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
+| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&uid=&created=&q=&before=&limit=` | `{jobs, more, last}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` with `machine`, `uid` and `created` (its `createdAt`) one box: its jobs as above, and `last`, the one of them that ended last (400 without all four), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |
 | `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. |
 | `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
 | `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
-| `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`. 200 with the `Box`. |
+| `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
@@ -340,9 +369,9 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   so instead (2026-11-25).
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
   key never written, or one holding a value boxtray doesn't write.
-- **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,
-  memLimit, cpus, cpuPct}`
-- **`Job`:** `{key, id, box, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
+- **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, uid, expiresAt, memUsed,
+  memLimit, cpus, cpuPct}`. `uid` tells it from other boxes of its name.
+- **`Job`:** `{key, id, box, boxUid, machine, state: running|done|paused|lost|queued, exit, startedAt, endedAt,
   reason, command, kind, repo, branch, commit, agent: {client, session, host, worktree}, size, gpu, tail,
   queuedAt, position, why}`. `queuedAt` is set on a job that went through the queue. While it waits,
   `startedAt` is `queuedAt`, `position` is its place from 1, and `why` is one of the refusal causes;

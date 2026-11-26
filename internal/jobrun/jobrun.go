@@ -73,7 +73,8 @@ exit "$status"`, secs, Shq("exec 2>&4 3>&- 4>&-\n"+cmd))
 
 // StartScript checks the bundle out in /work/<repo> and starts the payload
 // detached, logging to /work/.box/<job>.log and writing its exit code to
-// <job>.exit. <job>.repo names the checkout, for box pull.
+// <job>.exit. <job>.repo names the checkout, and <repo>.checkout records which
+// job currently owns /work/<repo>, both for box pull.
 // ref names the snapshot in the bundle (refs/agent-box/<ref>). Jobs on the
 // same repo in the same box take turns (flock), since they share the
 // checkout. The payload runs without the lock's FD, so a background child it
@@ -85,6 +86,7 @@ func StartScript(root, job, ref, repo, payload string) string {
 echo "$$" > %[2]s.pid.tmp && mv %[2]s.pid.tmp %[2]s.pid || exit 1
 exec 9>%[1]s/.box/%[3]s.lock
 flock 9 || exit 1
+echo %[6]s > %[1]s/.box/%[3]s.checkout.tmp && mv %[1]s/.box/%[3]s.checkout.tmp %[1]s/.box/%[3]s.checkout || exit 1
 if git init -q %[1]s/%[3]s && cd %[1]s/%[3]s &&
    git fetch -q %[2]s.bundle refs/agent-box/%[4]s &&
    git checkout -q --force --detach FETCH_HEAD && git clean -fdq; then
@@ -99,7 +101,7 @@ fi
 rm -f %[2]s.bundle
 echo $code > %[2]s.exit.tmp && ln %[2]s.exit.tmp %[2]s.exit 2>/dev/null
 rm -f %[2]s.exit.tmp
-`, w, f, repo, ref, payload)
+`, w, f, repo, ref, payload, Shq(job))
 	// The log is created before the job starts, so a follow that begins at
 	// once never sees "no job".
 	return JobPIDFn + fmt.Sprintf("mkdir -p %[1]s/.box && : > %[3]s.log && echo %[4]s > %[3]s.repo && { setsid nohup bash -lc %[2]s >> %[3]s.log 2>&1 < /dev/null & } && [ -n \"$(jobpid %[3]s)\" ]",
@@ -173,6 +175,21 @@ for p in *.pid; do
   [ -e "$j.exit" ] && continue
   alive "$(cat "$p" 2>/dev/null)" "$j" && echo "$j"
 done
+exit 0
+`, root)
+}
+
+// KeptScript prints "kept" when at least one job ended and none are running.
+func KeptScript(root string) string {
+	return "# kept jobs\n" + AliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
+ended=
+for p in *.pid; do
+  [ -e "$p" ] || continue
+  j=${p%%.pid}
+  if [ -e "$j.exit" ]; then ended=1; continue; fi
+  alive "$(cat "$p" 2>/dev/null)" "$j" && exit 0
+done
+[ -n "$ended" ] && echo kept
 exit 0
 `, root)
 }

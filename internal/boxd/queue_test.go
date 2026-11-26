@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/mode"
 )
 
 func queueMeta(session string) json.RawMessage {
@@ -124,7 +126,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	box, _, _ := strings.Cut(rep.Job, ".")
 	for _, want := range []string{"launch agent-base " + box + " -c user.expires=", "user.box.size=small", "user.box.throwaway=true",
 		"file push --create-dirs " + bundle + " " + box + "/work/.box/" + rep.Job + ".bundle",
-		".meta.tmp " + box + "/work/.box/" + rep.Job + ".meta", "config set " + box + " user.expires=", "exec " + box + " -- bash -lc "} {
+		".meta.tmp " + box + "/work/.box/" + rep.Job + ".meta", "exec " + box + " -- bash -lc "} {
 		if !strings.Contains(cli, want) {
 			t.Errorf("no %q in\n%s", want, cli)
 		}
@@ -164,8 +166,9 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.f.mu.Lock()
 	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 1 || sets[0] != want {
-		t.Fatalf("throwaway's expiry: %v, want %s", sets, want)
+	start := box + " " + r.c.now().Add(-6*time.Second).UTC().Add(24*time.Hour).Format(time.RFC3339)
+	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 2 || sets[0] != start || sets[1] != want {
+		t.Fatalf("throwaway's expiry: %v, want the job's %s then %s", sets, start, want)
 	}
 	var h dash.History
 	resp, _ := http.Get(r.srv.URL + "/api/history?range=day")
@@ -336,12 +339,17 @@ func TestQueueNoMetaAndInstanceCap(t *testing.T) {
 // room short is a box, or disk (#103: the fake's disk is 50 of 200GiB used,
 // so a 66GiB cap leaves 16, and a small box needs 18).
 func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
-	for _, short := range []string{"limits.instances=2", "limits.disk=66GiB"} {
-		t.Run(short, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, short) })
+	for _, tt := range []struct{ name, limit string }{
+		{"short of instances", "limits.instances=2"},
+		{"short of disk", "limits.disk=66GiB"},
+		{"already stopped", "limits.instances=2"},
+		{"stopped by first delete attempt", "limits.instances=2"},
+	} {
+		t.Run(tt.name, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, tt.limit, tt.name) })
 	}
 }
 
-func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
+func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short, scenario string) {
 	cfg := map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "10"}
 	k, v, _ := strings.Cut(short, "=")
 	cfg[k] = v
@@ -393,13 +401,201 @@ func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+
+	// A person extended it (#198): it isn't spare until the hold passes.
+	r.f.set(func() { r.f.ins[1].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339) })
 	r.c.add(3 * time.Second)
 	r.poll()
-	if len(r.f.cli) < 2 || r.f.cli[0] != "delete fresh-0001 --force" || !strings.HasPrefix(r.f.cli[1], "launch agent-base job-") {
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a held box: %v", r.f.cli)
+	}
+	deletes := 1
+	switch scenario {
+	case "already stopped":
+		r.f.set(func() { r.f.ins[1].Status = "Stopped" })
+	case "stopped by first delete attempt":
+		deletes = 2
+		r.f.set(func() {
+			r.f.cliErr = func(args []string) error {
+				if args[0] != "delete" {
+					return nil
+				}
+				r.f.ins[1].Status = "Stopped"
+				r.f.cliErr = nil
+				return errors.New(`Instance is busy running a "update" operation`)
+			}
+		})
+	}
+	r.c.add(10 * time.Minute)
+	r.poll()
+	if len(r.f.cli) <= deletes || r.f.cli[deletes-1] != "delete fresh-0001 --force" || !strings.HasPrefix(r.f.cli[deletes], "launch agent-base job-") {
 		t.Fatalf("cli: %v", r.f.cli)
 	}
 	if q := r.w.Queued(); len(q) != 0 {
 		t.Fatalf("still queued: %+v", q)
+	}
+}
+
+// idleRepoRig has two repo boxes whose jobs ended: murmur idle, and widget
+// with another job still running. Both have the idle expiry (#187).
+func idleRepoRig(t *testing.T, cfg map[string]string) *queueRig {
+	r := newQueueRig(t, cfg)
+	r.f.set(func() {
+		for _, name := range []string{"murmur", "widget"} {
+			r.f.ins = append(r.f.ins, inst(name, "Running", "small", t0))
+			r.f.jobs[name] = []fakeJob{{name: name + ".20261124-180000-cccc", state: "running", log: "ok\n", meta: metaJSON}}
+		}
+		r.f.jobs["widget"] = append(r.f.jobs["widget"], fakeJob{name: "widget.20261124-180000-dddd", state: "running", log: "ok\n", meta: metaJSON})
+	})
+	r.poll()
+	r.f.set(func() {
+		for _, name := range []string{"murmur", "widget"} {
+			r.f.jobs[name][0].state, r.f.jobs[name][0].exit = "done", "0"
+		}
+		for i := range r.f.ins {
+			r.f.ins[i].Config["user.expires"] = r.c.now().Add(time.Hour).Format(time.RFC3339)
+		}
+	})
+	r.c.add(3 * time.Second)
+	r.poll()
+	return r
+}
+
+func TestQueueKeepsReplacedThrowaway(t *testing.T) {
+	for _, when := range []string{"during scan", "before delete retry"} {
+		t.Run(when, func(t *testing.T) {
+			r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.instances": "2"})
+			r.f.set(func() {
+				r.f.ins[0].Config["user.box.throwaway"] = "true"
+				r.f.ins[0].Config["user.expires"] = r.c.now().Add(20 * time.Minute).Format(time.RFC3339)
+				replace := func() {
+					in := r.f.ins[0]
+					in.Config = maps.Clone(in.Config)
+					in.Config["volatile.uuid"] = "replacement"
+					r.f.ins[0] = in
+					r.f.jobs[in.Name] = nil
+				}
+				if when == "during scan" {
+					r.f.onScan = func(box string) {
+						if box == "murmur" {
+							replace()
+							r.f.onScan = nil
+						}
+					}
+				} else {
+					r.f.cliErr = func(args []string) error {
+						if args[0] != "delete" {
+							return nil
+						}
+						replace()
+						r.f.cliErr = nil
+						return errors.New(`Instance is busy running a "update" operation`)
+					}
+				}
+			})
+			if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+				t.Fatalf("enqueue: %d %+v", code, rep)
+			}
+			r.c.add(3 * time.Second)
+			r.poll()
+			replacement, ok := r.f.instance("murmur")
+			if !ok || replacement.Config["volatile.uuid"] != "replacement" {
+				t.Fatalf("replacement instance = %+v, exists = %v", replacement, ok)
+			}
+			if q := r.w.Queued(); len(q) != 1 {
+				t.Fatalf("queued: %+v", q)
+			}
+		})
+	}
+}
+
+// A queued job short of room takes an idle repo box, as it takes a kept
+// throwaway: never one held, or one with a job running (#187).
+func TestQueueDeletesIdleRepoBoxForRoom(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() { r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339) })
+	r.c.add(3 * time.Second)
+	r.poll()
+	code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B")
+	if code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a held box, or one with a job running: %v", r.f.cli)
+	}
+	r.c.add(10 * time.Minute)
+	r.poll()
+	if len(r.f.cli) < 2 || r.f.cli[0] != "delete murmur --force" || !strings.HasPrefix(r.f.cli[1], "launch agent-base job-") {
+		t.Fatalf("cli: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 0 {
+		t.Fatalf("still queued: %+v", q)
+	}
+}
+
+// An idle repo box is read again just before its delete: one a person
+// extended since the poll that found it idle is left (#187).
+func TestQueueRechecksIdleRepoBoxBeforeDelete(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		r.f.afterRun = func(box string) {
+			if box == "murmur" {
+				r.f.ins[0].Config = maps.Clone(r.f.ins[0].Config)
+				r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
+				r.f.afterRun = nil
+			}
+		}
+	})
+	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("deleted a box extended since the poll: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 1 {
+		t.Fatalf("queued: %+v", q)
+	}
+}
+
+// A same-name box made in place of an idle one isn't idle on its
+// predecessor's ended job: its own first job may still be starting (#187).
+func TestQueueKeepsReplacedRepoBox(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		in := inst("murmur", "Running", "small", r.c.now())
+		in.Config["user.expires"] = r.c.now().Add(time.Hour).Format(time.RFC3339)
+		r.f.ins[0] = in
+		r.f.jobs["murmur"] = nil
+	})
+	r.c.add(3 * time.Second)
+	r.poll()
+	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("deleted the replacement box: %v", r.f.cli)
+	}
+}
+
+// Idle repo boxes that together still wouldn't make room are all left (#187).
+func TestQueueLeavesIdleRepoBoxesThatCantMakeRoom(t *testing.T) {
+	// 8GiB of 10GiB held: deleting murmur frees 4GiB, short of a large box's 8GiB.
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "10GiB", "limits.instances": "10"})
+	req := small("job", "quiet-otter")
+	req.Size = "large"
+	if code, rep, _ := r.enqueue(req, "B"); code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("deleted boxes that couldn't make room: %v", r.f.cli)
 	}
 }
 
@@ -611,5 +807,33 @@ func TestQueueReuseWritesActualBoxSizeInMeta(t *testing.T) {
 	}
 	if j, ok := r.w.QueuedView(rep.Job); !ok || j.Size != "small" || j.GPU || j.Kind != dash.KindGoTest {
 		t.Fatalf("started view = %+v, ok=%v", j, ok)
+	}
+}
+
+// A delete Incus refuses because an extend holds the box is retried, but only after reading the box
+// again: the extend's hold, written meanwhile, keeps it (#187).
+func TestQueueRechecksIdleRepoBoxBeforeARetriedDelete(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		r.f.cliErr = func(args []string) error {
+			if args[0] != "delete" {
+				return nil
+			}
+			r.f.ins[0].Config = maps.Clone(r.f.ins[0].Config)
+			r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
+			r.f.cliErr = nil
+			return errors.New(`Instance is busy running a "update" operation`)
+		}
+	})
+	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 1 {
+		t.Fatalf("retried the delete of an extended box: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 1 {
+		t.Fatalf("queued: %+v", q)
 	}
 }

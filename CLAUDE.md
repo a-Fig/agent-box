@@ -62,7 +62,8 @@ Tyler's rules:
 - Work on a feature branch and fold it into `dev`. `main` changes only through a PR that Tyler
   merges.
 - Commit messages and PR bodies explain *why*. PR bodies follow
-  `.github/pull_request_template.md`; `gh` doesn't pre-fill it, so write its sections.
+  `.github/pull_request_template.md`; `gh` doesn't pre-fill it, so write its sections. A visible
+  change shows before and after pictures (`docs/pr-media.md`).
 - Keep what agents read lean and current: the `box` skill, MCP tool descriptions, `box` help text
   and the README. A behavior change updates them in the same PR. They load into other agents next
   to real work, so each line earns its place.

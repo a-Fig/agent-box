@@ -9,7 +9,7 @@ import (
 func TestStatusSaysFreeCountsReplaceableBoxes(t *testing.T) {
 	var b strings.Builder
 	writeStatus(&b, StatusReport{Advice: "available", Reachable: true, Mode: "full", Boxes: 4, MaxBoxes: 10, SlotsFree: 8, Replaceable: 2})
-	if want := "boxes: 4 of 10 (8 free, 2 of them taken by finished throwaways or expired boxes a launch replaces)"; !strings.Contains(b.String(), want) {
+	if want := "boxes: 4 of 10 (8 free, 2 of them taken by finished throwaways, idle repo boxes or expired boxes a launch replaces)"; !strings.Contains(b.String(), want) {
 		t.Fatalf("got:\n%s", b.String())
 	}
 	b.Reset()

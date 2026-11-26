@@ -61,13 +61,13 @@ func main() {
 	}
 	w := &boxd.Watcher{Version: ver, Queue: queue, Whois: boxd.TailscaleWhois,
 		Incus: boxd.NewSocket(*socket, mode.Project), Hist: hist, Now: time.Now,
-		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, Logf: log.Printf,
+		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, HasGPU: hasGPU, Logf: log.Printf,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go w.Run(ctx)
 
-	srv := &boxd.Server{W: w}
+	srv := &boxd.Server{W: w, ReuseThrowaways: cfg.ReuseThrowaways}
 	if *page != "" {
 		srv.Page = os.DirFS(*page)
 	}
@@ -110,4 +110,11 @@ func wslMemory() int64 {
 		}
 	}
 	return total - free
+}
+
+// hasGPU is whether this distro can give a box a GPU: WSL's /dev/dxg, which a GPU box gets as a
+// device (mode.GPUDevices).
+func hasGPU() bool {
+	_, err := os.Stat("/dev/dxg")
+	return err == nil
 }

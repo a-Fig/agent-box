@@ -1,7 +1,12 @@
-# Releasing and updating (plan, 2026-11-25)
+# Releasing and updating
 
-Status: decided, being built. Tyler asked for a release process "clean and auto-updating, like
-Murmur's" (2026-11-25). Murmur's is in a-Fig/murmur `docs/releasing.md` and `internal/update`.
+Cut a stable release by tagging `main`; every shipped part then checks for a newer stable
+release and updates itself.
+Use [Cutting a release](#cutting-a-release) for the steps, and [Safety](#safety) before changing
+the process.
+
+_History: planned 2026-11-25. Tyler asked for a release process "clean and auto-updating, like
+Murmur's" (2026-11-25). Murmur's is in a-Fig/murmur `docs/releasing.md` and `internal/update`._
 
 ## Why
 

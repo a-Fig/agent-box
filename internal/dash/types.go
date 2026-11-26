@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 )
 
@@ -78,6 +79,46 @@ type Machine struct {
 	WSLMemory     int64        `json:"wslMemory"` // bytes the distro's VM holds now
 	Boxd          *Version     `json:"boxd"`      // the boxd serving this; null if its build has no commit
 	Tray          *Version     `json:"tray"`      // the enforcer's build, user.agent-box.tray-version; null: unknown
+	Config        Config       `json:"config"`    // how this host is set up, for the Settings page
+}
+
+// Config is how a host is set up, read-only: what the Settings page shows of it. The sizes and
+// durations are boxd's own constants, the caps are Machine.Caps. Nothing here is written from the
+// page: the tray owns the mode and its CPUs, the project holds the caps.
+type Config struct {
+	Sizes []SizeSpec `json:"sizes"`
+	// GPU is whether this host can give a box a GPU: boxd found the device a GPU box needs.
+	GPU bool `json:"gpu"`
+	// GPUWhy is what rules the GPU out when GPU is false: "device" (no /dev/dxg in the distro),
+	// "blocked" (the project's restricted.devices.unix-char is block, as setup-host.sh sets it off
+	// WSL) or "both". Empty when GPU is true.
+	GPUWhy string `json:"gpuWhy,omitempty"`
+	// Capped says which of Machine.Caps the project sets. An unset cap doesn't limit, but a cap
+	// set to 0 does (no boxes, no CPUs): Caps alone can't tell the two apart.
+	Capped Capped `json:"capped"`
+	// Seconds: a throwaway box's expiry when it is made for a job and no job runs, the expiry
+	// while a job runs, and how long a throwaway outlives its job (for box_pull and the log).
+	IdleExpiry   int `json:"idleExpiry"`
+	JobExpiry    int `json:"jobExpiry"`
+	KeptAfterJob int `json:"keptAfterJob"`
+}
+
+// Capped is which project caps are set, beside Machine.Caps' values.
+type Capped struct {
+	CPU       bool `json:"cpu"`
+	Memory    bool `json:"memory"`
+	Instances bool `json:"instances"`
+	Disk      bool `json:"disk"`
+}
+
+// SizeSpec is one box size: the CPUs a box gets in Shared and in Full, and its memory and disk.
+type SizeSpec struct {
+	Name       string `json:"name"`
+	SharedCPUs int    `json:"sharedCpus"`
+	FullCPUs   int    `json:"fullCpus"`
+	Memory     int64  `json:"memory"`
+	Disk       int64  `json:"disk"`
+	GPU        bool   `json:"gpu"`
 }
 
 // Version is the commit a binary was built from, so the page can show when
@@ -123,14 +164,17 @@ const (
 
 // Box is one Incus container in project agents.
 type Box struct {
-	Name      string     `json:"name"`
-	Machine   string     `json:"machine"`
-	Size      string     `json:"size"`
-	GPU       bool       `json:"gpu"`
-	State     string     `json:"state"`
-	Throwaway bool       `json:"throwaway"`
-	Repo      string     `json:"repo"`
-	CreatedAt time.Time  `json:"createdAt"`
+	Name      string    `json:"name"`
+	Machine   string    `json:"machine"`
+	Size      string    `json:"size"`
+	GPU       bool      `json:"gpu"`
+	State     string    `json:"state"`
+	Throwaway bool      `json:"throwaway"`
+	Repo      string    `json:"repo"`
+	CreatedAt time.Time `json:"createdAt"`
+	// UID tells this box from others of its name: Incus's volatile.uuid, or its createdAt
+	// (RFC3339, to the nanosecond) where Incus gave none. A job's BoxUID is its box's UID.
+	UID       string     `json:"uid,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt"`
 	MemUsed   int64      `json:"memUsed"`
 	MemLimit  int64      `json:"memLimit"`
@@ -169,9 +213,12 @@ type Agent struct {
 
 // Job is one command run on a box.
 type Job struct {
-	Key       string     `json:"key"` // box/id/startedAt: names and IDs get reused
-	ID        string     `json:"id"`
-	Box       string     `json:"box"`
+	Key string `json:"key"` // box/id/startedAt: names and IDs get reused
+	ID  string `json:"id"`
+	Box string `json:"box"`
+	// BoxUID is the UID of the box the job ran on, recorded when boxd first saw it there. Jobs
+	// recorded before 2026-11-25 have "" (see RanOn).
+	BoxUID    string     `json:"boxUid,omitempty"`
 	Machine   string     `json:"machine"`
 	State     string     `json:"state"`
 	Exit      *int       `json:"exit"`
@@ -210,6 +257,26 @@ const TailBytes = 2 << 10
 // startedAt + JobBoxGrace; a box of that name made later is a reuse of the name.
 const JobBoxGrace = 10 * time.Minute
 
+// BoxJobSkew is, for a job without a BoxUID, how much before its box's creation it may have
+// started and still count as the box's (RanOn). It is JobBoxGrace's inequality read from the box's
+// side, but tighter: a replacement box that lists its predecessor's jobs shows someone else's work.
+const BoxJobSkew = time.Minute
+
+// RanOn says whether j ran on b: by the box's UID, which a box made later under the same name
+// doesn't share. A job recorded before boxd kept BoxUID (2026-11-25) has none, and for those
+// alone a time rule stands in: the box's name and a start no earlier than BoxJobSkew before the
+// box was made. That rule can't be right both ways (box run --new names a job before it launches
+// the box, and the laptop's clock may be off), which is why jobs now carry the UID.
+func (j Job) RanOn(b Box) bool {
+	if j.Box != b.Name || j.Machine != b.Machine {
+		return false
+	}
+	if j.BoxUID != "" {
+		return j.BoxUID == b.UID
+	}
+	return !j.StartedAt.Before(b.CreatedAt.Add(-BoxJobSkew))
+}
+
 // JobKey makes a job's key from its box, ID and start.
 func JobKey(box, id string, started time.Time) string {
 	return box + "/" + id + "/" + started.UTC().Format(time.RFC3339)
@@ -242,11 +309,29 @@ type State struct {
 // FinishedInState is how many finished jobs State.Jobs keeps.
 const FinishedInState = 50
 
+// ParseBoxQuery reads the box GET /api/jobs asks about: box (its name), machine, uid and created
+// (its createdAt, RFC3339, for jobs recorded before BoxUID; see RanOn). All four are needed.
+func ParseBoxQuery(q url.Values) (Box, error) {
+	b := Box{Name: q.Get("box"), Machine: q.Get("machine"), UID: q.Get("uid")}
+	if b.Name == "" || b.Machine == "" || b.UID == "" {
+		return Box{}, fmt.Errorf("box needs machine, uid and created as well")
+	}
+	t, err := time.Parse(time.RFC3339, q.Get("created"))
+	if err != nil {
+		return Box{}, fmt.Errorf("created must be an RFC3339 time")
+	}
+	b.CreatedAt = t
+	return b, nil
+}
+
 // JobsPage is GET /api/jobs: finished jobs, newest first. More is true when
 // asking again with before set to the last job's startedAt returns more.
 type JobsPage struct {
 	Jobs []Job `json:"jobs"`
 	More bool  `json:"more"`
+	// Last, when the query names one box (uid), is that box's job that ended last of all its
+	// history: jobs overlap, so it may not be on a page ordered by start.
+	Last *Job `json:"last,omitempty"`
 }
 
 // LogChunk is GET /api/jobs/{key}/log?offset=: at most MaxLogChunk bytes
@@ -349,6 +434,19 @@ type RefusalBody struct {
 	GPU    bool   `json:"gpu"`
 	Repo   string `json:"repo"`
 	Agent  string `json:"agent"`
+}
+
+// ClaimThrowawayBody identifies the matching repo and size for a client-side claim.
+type ClaimThrowawayBody struct {
+	RepoKey string `json:"repoKey"`
+	Size    string `json:"size"`
+	Job     string `json:"job"`
+}
+
+// PoolExpiryBody asks boxd to set the deadline for the current pool owner.
+type PoolExpiryBody struct {
+	Job   string `json:"job"`
+	Ended bool   `json:"ended"`
 }
 
 // JobEndedBody is POST /api/jobs/ended, sent by box as a best effort (2s timeout) once it has

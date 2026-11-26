@@ -31,13 +31,16 @@ type fakeIncus struct {
 	execs  int
 	cli    []string
 	cliErr func(args []string) error
+	files  map[string]string
 	cancel string // the last cancel script
-	// SetExpiryIf: each write made, as "<box> <expiry>", and a write that
+	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
 	expirySets []string
 	between    func(cfg map[string]string)
 	running    map[string][]string // jobs the running-jobs script sees that no scan has yet
 	runChecks  int                 // running-jobs scripts run
+	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
+	onScan     func(box string)    // runs, under the lock, as a scan of box starts
 }
 
 type fakeJob struct {
@@ -48,17 +51,17 @@ type fakeJob struct {
 	endedAt     int64
 }
 
-// SetExpiryIf decides on a copy, without the lock (decide runs Exec), as
+// SetConfigIf decides on a copy, without the lock (decide runs Exec), as
 // the real one decides between its GET and its PATCH. Writes replace the
 // config map, so a Poll reading an earlier copy never races them.
-func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+func (f *fakeIncus) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
 	for try := 0; try < 5; try++ {
 		read, ok := f.instance(name)
 		if !ok {
 			return false, nil
 		}
-		until, ok := decide(read)
-		if !ok {
+		config := decide(read)
+		if len(config) == 0 {
 			return false, nil
 		}
 		f.mu.Lock()
@@ -73,11 +76,16 @@ func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(In
 			f.ins[i].Config, f.between = c, nil
 			f.mu.Unlock()
 			continue
+		case !maps.Equal(f.ins[i].Config, read.Config):
+			f.mu.Unlock()
+			continue
 		}
 		c := maps.Clone(f.ins[i].Config)
-		c[jobrun.ExpiresKey] = until.UTC().Format(time.RFC3339)
+		maps.Copy(c, config)
 		f.ins[i].Config = c
-		f.expirySets = append(f.expirySets, name+" "+c[jobrun.ExpiresKey])
+		if exp, ok := config[jobrun.ExpiresKey]; ok {
+			f.expirySets = append(f.expirySets, name+" "+exp)
+		}
 		f.mu.Unlock()
 		return true, nil
 	}
@@ -137,6 +145,9 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		return nil, &ExitError{Code: 3}
 	}
 	if strings.HasPrefix(script, "# boxd scan") {
+		if f.onScan != nil {
+			f.onScan(box)
+		}
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
 			meta, tail := "-", "-"
@@ -160,8 +171,26 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if strings.HasPrefix(script, "# kept jobs") {
+		ended := false
+		for _, j := range f.jobs[box] {
+			if j.state == "running" || j.state == "starting" {
+				return nil, nil
+			}
+			ended = ended || j.state == "done"
+		}
+		if ended {
+			return []byte("kept\n"), nil
+		}
+		return nil, nil
+	}
 	if strings.HasPrefix(script, "# running jobs") {
 		f.runChecks++
+		for _, in := range f.ins {
+			if in.Name == box && in.Status == "Stopped" {
+				return nil, &ExitError{Code: 1, Stderr: "Instance is not running"}
+			}
+		}
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
 			if j.state == "running" {
@@ -170,6 +199,9 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		for _, name := range f.running[box] {
 			fmt.Fprintln(&b, name)
+		}
+		if f.afterRun != nil {
+			f.afterRun(box)
 		}
 		return []byte(b.String()), nil
 	}
@@ -202,6 +234,13 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 		return nil, f.cliErr(args)
 	}
 	switch args[0] {
+	case "file":
+		if args[1] == "pull" {
+			if data, ok := f.files[args[2]]; ok {
+				return []byte(data), nil
+			}
+			return nil, &ExitError{Code: 1, Stderr: "file does not exist"}
+		}
 	case "launch":
 		size := "medium"
 		for i, a := range args {
@@ -380,6 +419,66 @@ func TestWatcherFollowsAJobFromStartToEnd(t *testing.T) {
 	}
 }
 
+// A job is the box's it was first seen on, by that box's volatile.uuid: a box made seconds later
+// under the same name doesn't take its jobs, and a job named before its box was made (box run
+// --new, or the laptop's clock behind) is still its box's.
+func TestJobsCarryTheirBoxUID(t *testing.T) {
+	dir := t.TempDir()
+	c := &clock{t: t0}
+	withUUID := func(in Instance, u string) Instance { in.Config["volatile.uuid"] = u; return in }
+	f := &fakeIncus{
+		ins: []Instance{withUUID(inst("widget", "Running", "medium", t0), "u1")},
+		cfg: map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.cpu": "24", "limits.instances": "10", "limits.disk": "210GiB"},
+		jobs: map[string][]fakeJob{"widget": {
+			{name: "widget.20261124-175940-aa01", state: "done", exit: "0", endedAt: t0.Add(30 * time.Second).Unix(), meta: metaJSON},
+			{name: "widget.20261124-180040-bb02", state: "done", exit: "0", endedAt: t0.Add(50 * time.Second).Unix(), meta: metaJSON},
+		}},
+	}
+	w := newWatcher(t, dir, f, c)
+	c.add(52 * time.Second)
+	w.Poll(context.Background())
+	if b, _ := w.Box("widget"); b.UID != "u1" {
+		t.Fatalf("box UID %q", b.UID)
+	}
+	// The replacement, made 5s after the last job ended, runs a job its agent named 3s before it.
+	repl := t0.Add(55 * time.Second)
+	f.set(func() {
+		f.ins = []Instance{withUUID(inst("widget", "Running", "medium", repl), "u2")}
+		f.jobs = map[string][]fakeJob{"widget": {{name: "widget.20261124-180052-cc03", state: "running", meta: metaJSON}}}
+	})
+	c.add(5 * time.Second)
+	w.Poll(context.Background())
+	f.set(func() {
+		f.jobs["widget"][0].state, f.jobs["widget"][0].exit = "done", "0"
+		f.jobs["widget"][0].endedAt = t0.Add(90 * time.Second).Unix()
+	})
+	c.add(40 * time.Second)
+	w.Poll(context.Background())
+
+	ids := func(b dash.Box) (out []string, last string) {
+		p := w.Hist.Finished(Filter{Box: b})
+		for _, j := range p.Jobs {
+			out = append(out, j.ID)
+		}
+		if p.Last != nil {
+			last = p.Last.ID
+		}
+		return out, last
+	}
+	if got, last := ids(dash.Box{Name: "widget", Machine: "pc", UID: "u2", CreatedAt: repl}); strings.Join(got, ",") != "20261124-180052-cc03" || last != got[0] {
+		t.Fatalf("the replacement's jobs: %v, last %s", got, last)
+	}
+	if got, last := ids(dash.Box{Name: "widget", Machine: "pc", UID: "u1", CreatedAt: t0}); strings.Join(got, ",") != "20261124-180040-bb02,20261124-175940-aa01" || last != got[0] {
+		t.Fatalf("the first box's jobs: %v, last %s", got, last)
+	}
+
+	// Without a volatile.uuid, a box's UID is its creation time to the nanosecond.
+	in := inst("bare", "Running", "small", t0.Add(123*time.Millisecond))
+	if got := boxUID(in); got != "2026-11-24T18:00:00.123Z" {
+		t.Fatalf("UID without volatile.uuid: %q", got)
+	}
+}
+
 func TestWatcherPausesAndLosesJobs(t *testing.T) {
 	dir := t.TempDir()
 	c := &clock{t: t0.Add(5 * time.Minute)}
@@ -539,7 +638,8 @@ func TestAPI(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, "events-2026-11-24.jsonl")); strings.Contains(string(b), "abcdefgh12345") {
 		t.Fatal("secret written to the history")
 	}
-	if get("/api/history?range=year", nil) != 400 || get("/api/jobs?limit=500", nil) != 400 {
+	if get("/api/history?range=year", nil) != 400 || get("/api/jobs?limit=500", nil) != 400 ||
+		get("/api/jobs?box=widget", nil) != 400 || get("/api/jobs?box=widget&machine=pc&uid=u1&created=soon", nil) != 400 {
 		t.Fatal("bad queries accepted")
 	}
 	var page dash.JobsPage
