@@ -739,3 +739,31 @@ func TestQueueReuseWritesActualBoxSizeInMeta(t *testing.T) {
 		t.Fatalf("started view = %+v, ok=%v", j, ok)
 	}
 }
+
+// A delete Incus refuses because an extend holds the box is retried, but only after reading the box
+// again: the extend's hold, written meanwhile, keeps it (#187).
+func TestQueueRechecksIdleRepoBoxBeforeARetriedDelete(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		r.f.cliErr = func(args []string) error {
+			if args[0] != "delete" {
+				return nil
+			}
+			r.f.ins[0].Config = maps.Clone(r.f.ins[0].Config)
+			r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
+			r.f.cliErr = nil
+			return errors.New(`Instance is busy running a "update" operation`)
+		}
+	})
+	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 1 {
+		t.Fatalf("retried the delete of an extended box: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 1 {
+		t.Fatalf("queued: %+v", q)
+	}
+}

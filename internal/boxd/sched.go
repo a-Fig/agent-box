@@ -394,6 +394,9 @@ func (w *Watcher) dropQueued(it *queued, now time.Time, why string) {
 	w.emit(dash.Event{Name: dash.EventJob, Data: j})
 }
 
+// errNotIdle is a repo box that took a job or a hold before its delete.
+var errNotIdle = errors.New("no longer idle")
+
 // stillIdle reads repo box in again, just before a delete: no job running
 // there, and the same box (its UID), its expiry still the idle one and not
 // held. A box another delete took first is no longer idle either.
@@ -422,14 +425,25 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Inst
 		box, what := in.Name, "kept throwaway"
 		if in.Config[jobrun.ThrowawayKey] != "true" {
 			// box run reuses a repo box, and may have started a job there,
-			// or a person extended it, since the poll that found it idle.
+			// or a person extended it, since the poll that found it idle. It
+			// is read again before each try: a refused delete may have met
+			// an extend's write.
 			what = "idle box"
-			if !w.stillIdle(ctx, in) {
+			err = jobrun.RetryETag(ctx, func() error {
+				if !w.stillIdle(ctx, in) {
+					return errNotIdle
+				}
+				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
+				return err
+			})
+			if errors.Is(err, errNotIdle) {
 				err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
 				break
 			}
+		} else {
+			err = w.delete(ctx, box)
 		}
-		if err = w.delete(ctx, box); err != nil {
+		if err != nil {
 			err = fmt.Errorf("%w: deleting %s %s for room: %v", errNoRoom, what, box, err)
 			break
 		}

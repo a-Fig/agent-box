@@ -647,10 +647,23 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 			break
 		}
 		gone := spare[0]
-		if gone.Config[throwawayKey] != "true" && !a.stillIdle(ctx, gone.Name) {
-			continue // the next pass looks again, without it
+		var rerr error
+		if gone.Config[throwawayKey] == "true" {
+			rerr = a.Rm(context.WithoutCancel(ctx), gone.Name)
+		} else {
+			// Read again before each try: a refused delete may have met an extend's write.
+			rerr = jobrun.RetryETag(context.WithoutCancel(ctx), func() error {
+				if !a.stillIdle(ctx, gone.Name) {
+					return errNotIdle
+				}
+				_, err := a.incusOK(context.WithoutCancel(ctx), "delete", a.target(gone.Name), "--force")
+				return err
+			})
+			if errors.Is(rerr, errNotIdle) {
+				continue // the next pass looks again, without it
+			}
 		}
-		if rerr := a.Rm(context.WithoutCancel(ctx), gone.Name); rerr != nil && !isGone(rerr) {
+		if rerr != nil && !isGone(rerr) {
 			a.warn(fmt.Sprintf("box: warning: removing %s: %v", gone.Name, rerr))
 			break // it would be listed again
 		}
@@ -687,6 +700,9 @@ func (a *App) fitsWithout(ctx context.Context, insts, gone []instance, sz mode.S
 	}
 	return true
 }
+
+// errNotIdle is a repo box that took a job or a hold before its delete.
+var errNotIdle = errors.New("no longer idle")
 
 // isGone says whether a delete failed because another delete got there
 // first: the box is gone, or already stopped by that delete (#87).
