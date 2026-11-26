@@ -327,11 +327,15 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
   gpu}, wslMemory, boxd: Version | null, tray: Version | null}`.
-  `Version` is `{commit, time, modified}`, the commit a binary was built from (`internal/version`).
-  `boxd` is the serving boxd's; `tray` is `user.agent-box.tray-version`, which the active enforcer
-  writes when it starts enforcing. The sidebar's foot shows both, with a quiet note when their commits
-  differ ("boxd e823842 (3h newer than tray)"): on 2026-11-25 the PC twice ran a boxd hours older than
-  the repo, and nothing showed it.
+  `Version` is `{commit, time, modified, tag, since}`, the commit and release a binary was built
+  from (`internal/version`). `boxd` is the serving boxd's; `tray` is `user.agent-box.tray-version`,
+  which the active enforcer writes when it starts enforcing. `since` is when boxd first saw that build
+  run: its own start, or when the tray's key took its value. The sidebar's foot shows both, with a
+  note when they differ: on 2026-11-25 the PC twice ran a boxd hours older than the repo, and nothing
+  showed it. Both update hourly to the latest stable release, so the note says which one updates to
+  what ("tray updates to v0.3.1 at its hourly check"), and it turns to a warning only when the two
+  have differed for over 2 hours. A dev build or a nightly never updates by itself, and the note says
+  that instead (2026-11-25).
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
   key never written, or one holding a value boxtray doesn't write.
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,

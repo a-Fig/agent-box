@@ -4,8 +4,9 @@
 
 import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, timeEl } from "./dom.js";
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
+import { hint, hideTip } from "./tip.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold };
+export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, MODE_HINTS, RESULT_HINTS };
 
 const MODES = [
   ["full", "Full"],
@@ -17,6 +18,30 @@ const RESULTS = ["pass", "fail", "cancelled", "lost"];
 
 function modeLabel(m) {
   return (MODES.find(([id]) => id === m) || [m, m])[1];
+}
+
+// Hints (tip.js) for agent-box's words and controls, written for someone who hasn't read the docs.
+// Each says what the code does: internal/mode for the modes, internal/boxd for the controls.
+const MODE_HINTS = {
+  full: "Boxes run at full speed: each gets its size's Full CPUs, more than in Shared, at a higher priority. For when nobody is using the PC.",
+  shared: "Boxes run beside you: each gets its size's Shared CPUs at normal priority, so the PC stays smooth to use.",
+  mypc: "Every box is paused, so the PC is all yours; new runs wait in the queue or are turned away. A job paused too long is lost.",
+};
+const RESULT_HINTS = {
+  pass: "The command exited 0.",
+  fail: "The command exited with a code other than 0 or 130: usually tests failed or a build broke.",
+  cancelled: "Exit 130: the job was cancelled, from this page or by its agent, or the command was interrupted.",
+  lost: "The job stopped before it finished, and no exit code was read: its box was deleted, stopped or went away.",
+};
+
+// What an exit code means here. 75 and 124 are box's own: box exits 75 when it couldn't run a
+// job now and nothing started (cmd/box exitPaused), and 124 when --timeout fired (exitTimeout).
+function exitHint(code) {
+  if (code === 0) return RESULT_HINTS.pass;
+  if (code === 130) return RESULT_HINTS.cancelled;
+  if (code === 124) return "Exit 124: timed out. box killed the command when the run's time limit (--timeout) ran out.";
+  if (code === 75) return "The command itself exited 75. box also uses 75 to say it couldn't run something now, but such runs never start: they show in History as refused, not here.";
+  return "The command exited " + code + ": usually tests failed or a build broke.";
 }
 
 // Shared pieces.
@@ -35,23 +60,32 @@ function result(j) {
   return j.exit === 0 ? "pass" : j.exit === 130 ? "cancelled" : "fail";
 }
 
-function jobBadge(j) {
+// A job's badge sits inside the row's link on Overview and Jobs, so it carries its hint for the
+// pointer only: a tab stop inside a link would be a second one for the same row.
+function jobBadge(j, term = false) {
+  const tip = (text, props) => hint(text, props, term);
   switch (j.state) {
     case "running":
-      return h("span", { class: "badge badge-info" }, h("span", { class: "dot dot-on dot-live" }), "running");
+      return h("span", tip("The command is running on its box now.", { class: "badge badge-info" }), h("span", { class: "dot dot-on dot-live" }), "running");
     case "paused":
-      return h("span", { class: "badge badge-warn" }, "paused");
+      return h("span", tip("Its box is paused because the PC is in My PC. It carries on if the mode goes back to Shared or Full soon; paused too long, it is lost.", { class: "badge badge-warn" }), "paused");
     case "lost":
-      return h("span", { class: "badge badge-warn" }, "lost");
+      return h("span", tip(RESULT_HINTS.lost, { class: "badge badge-warn" }), "lost");
   }
   const r = result(j);
   const cls = { pass: "badge-on", fail: "badge-bad", cancelled: "" }[r] ?? "";
-  return h("span", { class: "badge " + cls }, r === "fail" ? "exit " + j.exit : r);
+  return h("span", r ? tip(exitHint(j.exit), { class: "badge " + cls }) : { class: "badge " + cls }, r === "fail" ? "exit " + j.exit : r);
 }
+
+const BOX_STATE_HINTS = {
+  frozen: "Paused because the PC is in My PC. It resumes when the mode goes back to Shared or Full.",
+  stopped: "Stopped by My PC: a GPU box at once, others after a long pause. A job that was running on it is lost.",
+};
 
 function boxBadge(b) {
   const cls = { running: "badge-on", frozen: "badge-warn", stopped: "" }[b.state] ?? "";
-  return h("span", { class: "badge " + cls }, b.state);
+  const tip = BOX_STATE_HINTS[b.state];
+  return h("span", tip ? hint(tip, { class: "badge " + cls }, true) : { class: "badge " + cls }, b.state);
 }
 
 // The reason is the job's headline; a job from before box run asked has none.
@@ -155,6 +189,7 @@ function confirmDialog({ title, body, action, danger = true, run, valid = () => 
     h("div", { class: "dialog", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "dlg-t" }, h("h2", { id: "dlg-t" }, title), h("p", null, body), h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-sm btn-ghost", onclick: close }, "Keep it"), go)),
   );
   dialog?.close();
+  hideTip(); // a tap on the button that opened it showed its hint, which would sit on the dialog
   document.addEventListener("keydown", onKey);
   document.body.append(scrim);
   dialog = { close, valid, goneText };
@@ -225,7 +260,7 @@ function jobName(j) {
 // The nudged badge, shown by the 1s ticker once its time comes (dom.js tickTimes).
 function nudgedBadge(j) {
   const at = new Date(Date.parse(j.queuedAt) + NUDGE_MS).toISOString();
-  return h("span", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at), title: "The agent was told it still waits and that box_cancel takes it off" }, "nudged");
+  return h("span", hint("It has waited 20 minutes, so its agent was told it still waits and that box_cancel takes it off.", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at) }, true), "nudged");
 }
 
 function whyText(j) {
@@ -263,7 +298,7 @@ function queueRow(j) {
     h(
       "div",
       { class: "queue-item" },
-      h("span", { class: "queue-pos num", title: "Place in line" }, String(j.position)),
+      h("span", hint("Its place in the queue. 1 starts first, as soon as a box of its size fits.", { class: "queue-pos num" }, true), String(j.position)),
       h(
         "div",
         null,
@@ -275,7 +310,7 @@ function queueRow(j) {
           h("span", null, icon("user"), j.agent?.session || "unknown agent", j.agent?.client ? h("span", { class: "muted" }, "· " + j.agent.client) : null),
           h("span", null, icon("branch"), shortRepo(j.repo), j.branch ? "@" + j.branch : ""),
           h("span", null, icon("box"), j.box + " · " + sizeLabel(j.size, j.gpu)),
-          h("span", { title: "Queued " + stamp(j.queuedAt) }, icon("hourglass"), timeEl("elapsed", j.queuedAt, "waiting "), h("span", { class: "muted" }, " · " + why)),
+          h("span", hint("Queued " + stamp(j.queuedAt) + ". It waits because " + why + ", and starts by itself once that clears.", {}, true), icon("hourglass"), timeEl("elapsed", j.queuedAt, "waiting "), h("span", { class: "muted" }, " · " + why)),
         ),
       ),
     ),
@@ -283,8 +318,8 @@ function queueRow(j) {
       "div",
       { class: "row-control" },
       nudgedBadge(j),
-      j.position > 1 ? control("front-" + j.key, { class: "btn btn-xs btn-outline", title: "Run this next", onclick: () => frontJob(j) }, icon("front"), "Move to front") : h("span", { class: "badge" }, "next"),
-      control("dequeue-" + j.key, { class: "btn btn-xs btn-danger-ghost", onclick: () => dequeueJob(j) }, "Cancel"),
+      j.position > 1 ? control("front-" + j.key, hint("Puts this job first in line, so it is the next to start.", { class: "btn btn-xs btn-outline", onclick: () => frontJob(j) }), icon("front"), "Move to front") : h("span", hint("First in line: it starts as soon as there is room.", { class: "badge" }, true), "next"),
+      control("dequeue-" + j.key, hint("Takes the job out of the queue, after you confirm. It never runs, and its agent is told.", { class: "btn btn-xs btn-danger-ghost", onclick: () => dequeueJob(j) }), "Cancel"),
     ),
   );
 }
@@ -312,11 +347,12 @@ function machineCard(m) {
     { class: "segmented segmented-lg", role: "group", "aria-label": "Mode" },
     MODES.map(([id, label]) => {
       const pending = req?.mode === id;
-      return control("mode-" + m.id + "-" + id, { "aria-pressed": !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, title: pending ? "Asked from " + req.by : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }, label, pending ? h("span", { class: "muted" }, "· pending") : null);
+      const tip = MODE_HINTS[id] + (pending ? " Asked from " + req.by + "; it applies once the " + enforcerName(m) + " picks it up." : "");
+      return control("mode-" + m.id + "-" + id, hint(tip, { "aria-pressed": !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }), label, pending ? h("span", { class: "muted" }, "· pending") : null);
     }),
   );
   const state = h("span", { class: "badge " + (m.mode === "mypc" ? "" : "badge-on") }, modeLabel(m.mode));
-  const enforcerBadge = headless ? h("span", { class: "badge badge-outline", title: "Nobody is logged on to the PC, so the headless enforcer applies the mode" }, "headless") : null;
+  const enforcerBadge = headless ? h("span", hint("Nobody is logged on to the PC, so the headless enforcer, a background task, applies the mode. The tray takes over at logon.", { class: "badge badge-outline" }, true), "headless") : null;
   let note = null;
   if (req) {
     const what = modeLabel(req.mode);
@@ -326,9 +362,9 @@ function machineCard(m) {
   else if (m.mode === "mypc") note = h("p", { class: "mode-note" }, "Boxes are frozen. Pick Shared or Full to let agents run.");
   else note = h("p", { class: "mode-note" }, m.mode === "full" ? "Boxes get their size's Full CPUs." : "Boxes get their size's Shared CPUs, so the PC stays smooth.");
 
-  const meter = (label, used, cap, fmt) => {
+  const meter = (label, used, cap, fmt, tip) => {
     const p = pct(used, cap);
-    return h("div", null, h("div", { class: "meter-label" }, h("span", null, label), h("strong", { class: "num" }, fmt(used) + " / " + fmt(cap))), h("div", { class: "bar" + (p >= 100 ? " full" : p >= 80 ? " hot" : ""), role: "meter", "aria-label": label, "aria-valuenow": Math.round(p), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i", { "data-w": p })));
+    return h("div", null, h("div", { class: "meter-label" }, h("span", hint(tip, {}, true), label), h("strong", { class: "num" }, fmt(used) + " / " + fmt(cap))), h("div", { class: "bar" + (p >= 100 ? " full" : p >= 80 ? " hot" : ""), role: "meter", "aria-label": label, "aria-valuenow": Math.round(p), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i", { "data-w": p })));
   };
   const n = (x) => String(x);
   const r = m.room || {};
@@ -347,14 +383,19 @@ function machineCard(m) {
       h("div", { class: "machine-head" }, h("span", { class: "machine-name" }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name), state, enforcerBadge, switcher),
       note,
     ),
-    h("div", { class: "row" }, h("div", { class: "meters" }, meter("CPUs", m.allocated.cpu, m.caps.cpu, n), meter("Memory", m.allocated.memory, m.caps.memory, bytes), meter("Boxes", m.allocated.instances, m.caps.instances, n), meter("Disk", m.allocated.disk, m.caps.disk, bytes))),
+    h("div", { class: "row" }, h("div", { class: "meters" }, meter("CPUs", m.allocated.cpu, m.caps.cpu, n, "CPUs the boxes are given now, of the most all boxes together may have. The mode sets each box's share."), meter("Memory", m.allocated.memory, m.caps.memory, bytes, "Memory the boxes may use, by their sizes, of the most all boxes together may have. A new box starts only if its size fits."), meter("Boxes", m.allocated.instances, m.caps.instances, n, "Boxes that exist, of the most allowed at once."), meter("Disk", m.allocated.disk, m.caps.disk, bytes, "Disk the boxes are given, by their sizes, of the most all boxes together may have."))),
     h(
       "div",
       { class: "row room" },
-      h("span", null, "Room now:"),
+      h("span", hint("How many more boxes of each size could start now, with what is left under the limits above. A run that doesn't fit waits in the queue.", {}, true), "Room now:"),
       fits.map(([size, k]) => h("span", { class: "badge " + (k > 0 ? "badge-on" : "") }, k + " " + size)),
       h("span", { class: "badge " + (r.gpu > 0 ? "badge-on" : "") }, r.gpu > 0 ? "GPU free" : gpuBox ? "GPU in use" : "no room for GPU"),
-      h("span", { class: "section-aside room-aside" }, h("span", { class: "conn" }, h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? timeEl("ago", m.trayLastSeen, enforcerName(m) + " seen ") : m.trayLastSeen ? timeEl("ago", m.trayLastSeen, "nothing enforcing, " + enforcerName(m) + " last seen ") : "nothing enforcing"), h("span", null, "WSL holds " + bytes(m.wslMemory))),
+      h(
+        "span",
+        { class: "section-aside room-aside" },
+        h("span", hint(alive ? "The " + enforcerName(m) + " on the PC applies the mode and checks in every 30 seconds." : "Nothing has checked in for 90 seconds, so the mode isn't being applied and mode requests wait.", { class: "conn" }, true), h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? timeEl("ago", m.trayLastSeen, enforcerName(m) + " seen ") : m.trayLastSeen ? timeEl("ago", m.trayLastSeen, "nothing enforcing, " + enforcerName(m) + " last seen ") : "nothing enforcing"),
+        h("span", hint("Memory the Linux that runs the boxes (WSL) holds on the PC now, boxes included.", {}, true), "WSL holds " + bytes(m.wslMemory)),
+      ),
     ),
   );
 }
@@ -382,6 +423,22 @@ function runningRow(j) {
   );
 }
 
+// A box's size sets its memory, and its CPUs in each mode (internal/mode/size.go). The figures are
+// the box's own, so the hint holds for any host's sizes.
+function sizeHint(b) {
+  return "Its size: up to " + bytes(b.memLimit) + " of memory, and " + plural(b.cpus, "CPU") + " in this mode." + (b.gpu ? " It has the PC's GPU." : "");
+}
+
+// When the reaper deletes the box (user.expires). A job's start sets it 24h ahead, and once the
+// job ends boxd brings it down to 2h, or 30 minutes for a throwaway (sched.go, endedExpiry).
+function expiry(b) {
+  if (!b.expiresAt) return h("span", hint("Nothing deletes this box on a timer; delete it when it's no longer needed.", {}, true), "no expiry");
+  const t = timeEl("until", b.expiresAt, "expires ");
+  t.removeAttribute("title"); // the hint gives the time
+  const tip = "Deleted " + stamp(b.expiresAt) + ", with anything on it. A job starting sets this a day ahead; once the job ends, it comes down to 2 hours (30 minutes for a throwaway).";
+  return h("span", hint(tip, {}, true), t);
+}
+
 function boxRow(b, full) {
   const job = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"))[0];
   const controls = full
@@ -392,10 +449,11 @@ function boxRow(b, full) {
           "div",
           { class: "menu", role: "group", "aria-label": "Extend " + b.name },
           [1, 4, 24].map((hours) => {
-            return control("ext-" + b.name + "-" + hours, { class: "btn btn-xs btn-outline", title: "Add " + hours + "h to its expiry", disabled: busy.has("ext-" + b.name), onclick: () => extendBox(b, hours) }, "+" + hours + "h");
+            const tip = "Pushes this box's expiry back " + plural(hours, "hour") + ". Use it when an agent still needs the box; a job running on it carries on.";
+            return control("ext-" + b.name + "-" + hours, hint(tip, { class: "btn btn-xs btn-outline", disabled: busy.has("ext-" + b.name), onclick: () => extendBox(b, hours) }), "+" + hours + "h");
           }),
         ),
-        control("del-" + b.name, { class: "btn btn-xs btn-danger-ghost", onclick: () => deleteBox(b) }, "Delete"),
+        control("del-" + b.name, hint("Deletes the box now, after you confirm. A job running on it is lost (it stays listed in Jobs), and anything on the box that wasn't pushed is gone.", { class: "btn btn-xs btn-danger-ghost", onclick: () => deleteBox(b) }), "Delete"),
       )
     : h("div", { class: "row-control" }, boxBadge(b));
   return h(
@@ -404,18 +462,18 @@ function boxRow(b, full) {
     h(
       "div",
       null,
-      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", { class: "badge badge-outline" }, sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", { class: "badge" }, "throwaway") : null),
+      h("p", { class: "row-title" }, b.name, full ? boxBadge(b) : null, h("span", hint(sizeHint(b), { class: "badge badge-outline" }, true), sizeLabel(b.size, b.gpu, " · ")), b.throwaway ? h("span", hint("Made for one run. It is deleted 30 minutes after that run ends, or sooner if another run needs the room.", { class: "badge" }, true), "throwaway") : null),
       h(
         "div",
         { class: "meta" },
         h("span", null, icon("branch"), shortRepo(b.repo)),
-        h("span", { class: "num" }, "mem " + bytes(b.memUsed) + " / " + bytes(b.memLimit)),
-        h("span", { class: "num" }, b.state === "running" ? "CPU " + Math.round(b.cpuPct) + "% of " + plural(b.cpus, "CPU") : plural(b.cpus, "CPU")),
-        b.expiresAt ? timeEl("until", b.expiresAt, "expires ") : h("span", null, "no expiry"),
+        h("span", hint("Memory the box uses now, of the most its size allows.", { class: "num" }, true), "mem " + bytes(b.memUsed) + " / " + bytes(b.memLimit)),
+        h("span", hint(b.state === "running" ? "How busy the box's CPUs are: 100% is all " + plural(b.cpus, "CPU") + " it may use now. The mode sets how many that is." : "The CPUs the box may use; the mode sets how many.", { class: "num" }, true), b.state === "running" ? "CPU " + Math.round(b.cpuPct) + "% of " + plural(b.cpus, "CPU") : plural(b.cpus, "CPU")),
+        expiry(b),
         full ? timeEl("ago", b.createdAt, "made ") : null,
       ),
       job ? h("a", { class: "meta", href: jobLink(job) }, h("span", null, "running: ", job.reason || job.command)) : null,
-      full ? h("div", { class: "bar" }, h("i", { "data-w": pct(b.memUsed, b.memLimit) })) : null,
+      full ? h("div", hint("Memory in use, as a share of what the box's size allows.", { class: "bar" }), h("i", { "data-w": pct(b.memUsed, b.memLimit) })) : null,
     ),
     controls,
   );
@@ -462,7 +520,7 @@ const boxes = {
       h(
         "div",
         { class: "page" },
-        h("div", { class: "page-head" }, h("h2", null, "Boxes"), h("p", null, "Throwaway Linux boxes on the PC. A box goes when it expires; extend one an agent still needs.")),
+        h("div", { class: "page-head" }, h("h2", null, "Boxes"), h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs.")),
         bx.length ? h("div", { class: "group" }, bx.map((b) => boxRow(b, true))) : empty("box", "No boxes", "Agents make them with box run or box new. Nothing is using the PC now."),
       ),
     );
@@ -773,9 +831,9 @@ const jobDetail = {
     }
     if (tailer.gone && tailer.pre.textContent !== (j.tail || "")) tailer.pre.textContent = j.tail || "";
     const live = j.state === "running" || j.state === "paused";
-    const cancel = live ? control("cancel-" + j.key, { class: "btn btn-sm btn-danger-ghost", onclick: () => cancelJob(j) }, "Cancel job") : null;
-    const kv = (k, v) => h("dl", { class: "kv" }, h("dt", null, k), h("dd", null, v || "—"));
-    this.head.replaceChildren(h("div", { class: "group" }, h("div", { class: "row row-grid" }, h("div", null, reasonEl(j, "headline"), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j), cancel))));
+    const cancel = live ? control("cancel-" + j.key, hint("Kills the command, after you confirm. The job ends with exit 130, and its agent hears it was cancelled.", { class: "btn btn-sm btn-danger-ghost", onclick: () => cancelJob(j) }), "Cancel job") : null;
+    const kv = (k, v, tip) => h("dl", { class: "kv" }, h("dt", tip ? hint(tip, {}, true) : null, k), h("dd", null, v || "—"));
+    this.head.replaceChildren(h("div", { class: "group" }, h("div", { class: "row row-grid" }, h("div", null, reasonEl(j, "headline"), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j, true), cancel))));
     this.details.replaceChildren(
       section(
         "Details",
@@ -787,11 +845,11 @@ const jobDetail = {
           kv("Repo", j.repo),
           kv("Branch", j.branch),
           kv("Commit", (j.commit || "").slice(0, 10)),
-          kv("Kind", j.kind),
+          kv("Kind", j.kind, "What sort of run it is, read from the command: go-test, js-test, build and so on, or other."),
           kv("Box", j.box + " · " + sizeLabel(j.size, j.gpu)),
           kv("Started", stamp(j.startedAt)),
           kv(live ? "Running for" : "Took", elapsed(j)),
-          kv("Exit", j.exit == null ? (j.state === "lost" ? "never read" : "—") : String(j.exit)),
+          kv("Exit", j.exit == null ? (j.state === "lost" ? "never read" : "—") : String(j.exit), j.exit == null ? (j.state === "lost" ? RESULT_HINTS.lost : null) : exitHint(j.exit)),
           kv("Host", j.agent?.host),
           kv("Worktree", j.agent?.worktree),
         ),

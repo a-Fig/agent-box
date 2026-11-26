@@ -3,11 +3,11 @@
 // untrusted text and reaches the page only as text nodes, under a Content-Security-Policy of
 // default-src 'self'. Widths and colors are set through the CSSOM, never a style attribute.
 
-import { h, icon, tickTimes, dur, stamp } from "./dom.js";
+import { h, icon, tickTimes, dur, stamp, clock } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
-import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog } from "./views.js";
+import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog, MODE_HINTS } from "./views.js";
 import { history } from "./history.js";
-import { syncTip } from "./tip.js";
+import { syncTip, hint } from "./tip.js";
 
 const root = document.getElementById("root");
 const NARROW = window.matchMedia("(max-width: 767px)");
@@ -99,35 +99,55 @@ function sidebar(r) {
       [...S.machines.values()].map((m) =>
         h(
           "div",
-          { class: "side-machine" },
+          hint(modeLabel(m.mode) + ": " + MODE_HINTS[m.mode] + " Change the mode on Overview.", { class: "side-machine" }, true),
           h("span", { class: "side-machine-name" }, h("span", { class: "dot " + (m.mode === "mypc" ? "dot-off" : "dot-on") }), m.name),
           h("span", { class: "side-machine-line" }, modeLabel(m.mode), m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) + " pending" : ""),
           trayAlive(m) ? (m.enforcer === "headless" ? h("span", { class: "side-machine-line" }, "Headless: nobody logged on") : null) : h("span", { class: "side-machine-line" }, "Nothing enforcing"),
         ),
       ),
     ),
-    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", { class: "conn" }, h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…"), [...S.machines.values()].map((m) => versions(m, S.machines.size > 1))),
+    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", hint(S.conn === "live" ? "Connected: the page updates by itself as things change on the PC." : "The page lost its connection to the PC and is trying again; what it shows may be out of date.", { class: "conn" }, true), h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…"), [...S.machines.values()].map((m) => versions(m, S.machines.size > 1))),
   );
 }
 
-// The commits boxd and the tray were built from (dash.Version), and a quiet note when they
-// differ: twice on 2026-11-25 the PC ran builds hours behind the repo and nothing showed it.
+// The builds boxd and the tray run (dash.Version), and a note when they differ: twice on
+// 2026-11-25 the PC ran builds hours behind the repo and nothing showed it. Both follow stable
+// releases and check for one hourly (docs/releasing.md), so a release on one is on the other
+// within the hour, and the note warns only once that is well past.
+const BEHIND_WARN_MS = 2 * 3600e3; // the hourly check, with room for a slow download
+
 function versions(m, named) {
   const b = m.boxd, t = m.tray;
   if (!b && !t) return null;
   const short = (v) => (v && v.commit ? v.commit.slice(0, 7) + (v.modified ? "+" : "") : "unknown");
-  const tip = (who, v) => who + " " + (v && v.commit ? v.commit + (v.time ? ", committed " + stamp(v.time) : "") + (v.modified ? ", with uncommitted changes" : "") : "unknown");
-  let drift = null;
-  if (b && t && b.commit && t.commit && b.commit !== t.commit) {
-    const d = b.time && t.time ? Date.parse(b.time) - Date.parse(t.time) : 0;
-    drift = d ? (d > 0 ? "boxd " + short(b) : "tray " + short(t)) + " (" + dur(Math.abs(d) / 1000).split(" ")[0] + " newer than " + (d > 0 ? "tray" : "boxd") + ")" : "boxd and tray are from different commits";
-  }
+  const name = (v) => (v?.tag ? v.tag : short(v));
+  const about = (who, v) => who + ": " + (v && v.commit ? (v.tag ? v.tag + ", " : "") + v.commit.slice(0, 10) + (v.time ? ", committed " + stamp(v.time) : "") + (v.modified ? ", with uncommitted changes" : "") : "unknown");
+  const lines = ["The builds of boxd (the server behind this page) and of the tray, which applies the mode on the PC.", about("boxd", b), about("tray", t)];
+  const note = drift(b, t);
+  if (note) lines.push(note.why);
   return h(
     "div",
-    { class: "versions", title: tip("boxd", b) + "\n" + tip("tray", t) },
-    h("span", null, (named ? m.name + ": " : "") + "boxd " + short(b) + " · tray " + short(t)),
-    drift ? h("span", { class: "versions-drift" }, drift) : null,
+    hint(lines.join("\n"), { class: "versions" }, true),
+    h("span", null, (named ? m.name + ": " : "") + "boxd " + name(b) + " · tray " + name(t)),
+    note ? h("span", { class: note.warn ? "versions-drift" : "versions-note" }, note.text) : null,
   );
+}
+
+// What is true when boxd and the tray run different builds: which one updates to which release,
+// and when, or why neither will by itself. null when they are the same build.
+function drift(b, t) {
+  if (!b || !t || !b.commit || !t.commit || b.commit === t.commit) return null;
+  const tb = b.time ? Date.parse(b.time) : 0, tt = t.time ? Date.parse(t.time) : 0;
+  if (!tb || !tt || tb === tt) return { text: "boxd and tray are different builds", why: "They were built from different commits." };
+  const [newer, older, behind, ahead] = tb > tt ? [b, t, "tray", "boxd"] : [t, b, "boxd", "tray"];
+  // Each updates itself only from a release, and only to a stable one (no "-nightly…" suffix).
+  if (!older.tag) return { text: behind + " is a dev build, behind " + ahead, why: "A dev build doesn't update itself: install a release, or build both from the same commit." };
+  if (!newer.tag || newer.tag.includes("-")) return { text: ahead + " runs " + (newer.tag || "a dev build") + ", ahead of " + behind, why: "The hourly update installs only stable releases, so " + behind + " stays on " + older.tag + "." };
+  // How long they have differed: since the later of boxd's start and the tray's last new build.
+  const since = Math.max(b.since ? Date.parse(b.since) : 0, t.since ? Date.parse(t.since) : 0);
+  const waited = since ? clock.now() - since : 0;
+  if (waited > BEHIND_WARN_MS) return { warn: true, text: behind + " still on " + older.tag + "; " + ahead + " has had " + newer.tag + " for " + dur(waited / 1000).split(" ")[0], why: behind + " checks for a release hourly, so it should have updated to " + newer.tag + " by now. Its log on the PC says why it hasn't." };
+  return { text: behind + " updates to " + newer.tag + " at its hourly check", why: behind + " checks for a new release hourly and installs it by itself." };
 }
 
 function setDrawer(open) {

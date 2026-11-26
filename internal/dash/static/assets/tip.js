@@ -1,26 +1,31 @@
-// Tooltips for chart marks. A mark carries its text in data-tip ("\n" between lines) and is shown
-// in one tooltip of the page's own, on hover, keyboard focus and tap. The browser's <title> isn't
-// used: box app's window (a webview) didn't show it, and touch never does (#157). Screen readers
-// get the same text from the mark's aria-label, so the tooltip itself is aria-hidden.
+// Tooltips for chart marks and hints. A mark or a hint carries its text in data-tip ("\n" between
+// lines) and is shown in one tooltip of the page's own, on hover, keyboard focus and tap. The
+// browser's <title> isn't used: box app's window (a webview) didn't show it, and touch never does
+// (#157). Screen readers get the same text from the mark's aria-label or the hint's
+// aria-description, so the tooltip itself is aria-hidden.
 //
-// The tooltip lives on <body>, outside the views, so a redraw that keeps the mark keeps it open;
-// syncTip closes it when its mark is gone, and Escape closes it too.
+// The tooltip lives on <body>, outside the views. A redraw replaces the elements under it (the
+// stream redraws Overview and Boxes every few seconds), so syncTip hands it to the replacement: the
+// focused mark, or the one under the pointer that showed it. Escape closes it.
 //
-// From the keyboard each chart is one tab stop (rove), and the arrow keys move between its marks:
-// a day's charts hold over a hundred marks.
+// A hint is a control or a word on the page that explains itself (hint). Hints keep the page's
+// own tab order. From the keyboard each chart is one tab stop (rove, which marks it data-rove), and
+// the arrow keys move between its marks: a day's charts hold over a hundred marks.
 
-export { syncTip, rove };
+export { syncTip, rove, hint, hideTip };
 
 let el = null; // the tooltip, made on first use
 let at = null; // the mark it is showing
+let point = null; // where the pointer that showed it was, {x, y}; null when focus showed it
 
-function show(mark) {
+function show(mark, p = null) {
   if (!el) {
     el = Object.assign(document.createElement("div"), { className: "tip", hidden: true });
     el.setAttribute("aria-hidden", "true");
     document.body.append(el);
   }
   at = mark;
+  point = p;
   el.textContent = mark.dataset.tip;
   el.hidden = false;
   place();
@@ -29,8 +34,10 @@ function show(mark) {
 function hide() {
   if (!at) return;
   at = null;
+  point = null;
   el.hidden = true;
 }
+const hideTip = hide;
 
 // Above the mark and centred on it, kept inside the window; under it when there is no room above.
 // Measured at 0,0 first: a box left near the right edge would measure narrow.
@@ -44,25 +51,44 @@ function place() {
   el.style.top = Math.round(y) + "px";
 }
 
-// After each redraw: a mark that was replaced takes its tooltip with it.
+// After each redraw: a replaced mark hands its tooltip to the mark now under the pointer that
+// showed it, or, if focus showed it, to the focused mark, with its text read again, so a figure
+// that moved shows its new value. With neither, it closes.
 function syncTip() {
-  if (at && !at.isConnected) hide();
+  if (!at || at.isConnected) return;
+  const next = point ? document.elementFromPoint(point.x, point.y)?.closest?.("[data-tip]") : document.activeElement?.matches?.("[data-tip]") && document.activeElement;
+  if (next) show(next, point);
+  else hide();
 }
 
 // One tab stop for a chart's marks: the first.
 function rove(chart) {
+  chart.setAttribute("data-rove", "");
   chart.querySelectorAll("[data-tip]").forEach((m, i) => m.setAttribute("tabindex", i ? "-1" : "0"));
   return chart;
 }
 
+// A hint, added to an element's props: the tooltip's text, which screen readers get as the
+// element's description (its name stays its own). A word that does nothing else (term) becomes a
+// tab stop, so the keyboard can reach it, and is dotted underneath, so the eye can.
+function hint(text, props = {}, term = false) {
+  const out = { ...props, "data-tip": text, "aria-description": text.replace(/\n/g, " ") };
+  if (term) {
+    out.tabindex = 0;
+    out.class = ((props.class || "") + " hint").trim();
+  }
+  return out;
+}
+
 const markOf = (e) => e.target.closest?.("[data-tip]");
+const chartOf = (m) => m.closest("[data-rove]");
 const keyed = () => document.activeElement?.matches?.("[data-tip]:focus-visible") && document.activeElement;
 const tap = (e) => e.pointerType === "touch" || e.pointerType === "pen";
 
 document.addEventListener("pointerover", (e) => {
   if (tap(e)) return; // a tap is handled on pointerdown
   const m = markOf(e);
-  if (m) show(m);
+  if (m) show(m, { x: e.clientX, y: e.clientY });
 });
 document.addEventListener("pointerout", (e) => {
   if (tap(e) || !at || markOf(e) !== at || at.contains(e.relatedTarget)) return;
@@ -75,17 +101,19 @@ document.addEventListener("pointerout", (e) => {
 document.addEventListener("pointerdown", (e) => {
   if (!tap(e)) return;
   const m = markOf(e);
-  if (m) show(m);
+  if (m) show(m, { x: e.clientX, y: e.clientY });
   else hide();
 });
-// The focused mark, however it was focused, is its chart's one tab stop.
+// The focused mark, however it was focused, is its chart's one tab stop. Its tooltip shows unless
+// the pointer is showing one and the focus isn't the keyboard's: a redraw puts the focus back on
+// the control clicked last, which mustn't take the tooltip from the hint being hovered.
 document.addEventListener("focusin", (e) => {
   const m = markOf(e);
   if (!m) return;
-  (m.closest("svg, .hbars") || m.parentElement).querySelectorAll("[data-tip]").forEach((o) => o.setAttribute("tabindex", o === m ? "0" : "-1"));
-  show(m);
+  chartOf(m)?.querySelectorAll("[data-tip]").forEach((o) => o.setAttribute("tabindex", o === m ? "0" : "-1"));
+  if (at !== m && (!point || m.matches(":focus-visible"))) show(m);
 });
-document.addEventListener("focusout", (e) => markOf(e) === at && hide());
+document.addEventListener("focusout", (e) => markOf(e) === at && !point && hide());
 
 // Left and right along a row of marks, Home and End to its ends. Up and down go to the mark in
 // the row above or below that covers this one's time when a chart has rows (<g class="row">), and along the marks
@@ -114,7 +142,8 @@ const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") return hide();
   const m = markOf(e);
-  if (!m || !KEYS.includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  // Only inside a chart: a hint on a button or a radio leaves its keys alone.
+  if (!m || !chartOf(m) || !KEYS.includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   e.preventDefault();
   const next = nextMark(m, e.key);
   if (next !== m) next.focus(); // focusin makes it the tab stop

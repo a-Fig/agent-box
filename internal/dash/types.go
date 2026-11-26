@@ -87,6 +87,10 @@ type Version struct {
 	Time     *time.Time `json:"time"`          // the commit's time; null if the build didn't record it
 	Modified bool       `json:"modified"`      // built with uncommitted changes
 	Tag      string     `json:"tag,omitempty"` // the release, like v0.3.0; "" for a build that isn't one
+	// Since is when boxd first saw this build run: its own start for its own build, and for the
+	// tray's, when the tray's key took this value (boxd's start, if it held it already). The page
+	// reads how long boxd and the tray have differed from it. Null in a build's own --version.
+	Since *time.Time `json:"since,omitempty"`
 }
 
 // String is the short commit, with "+" for a modified build, or "unknown".

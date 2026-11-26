@@ -6,8 +6,8 @@
 
 import { h, s, icon, dur, bytes, stamp, clock } from "./dom.js";
 import { api, changed } from "./store.js";
-import { empty, section, modeLabel } from "./views.js";
-import { rove } from "./tip.js";
+import { empty, section, modeLabel, MODE_HINTS, RESULT_HINTS } from "./views.js";
+import { rove, hint } from "./tip.js";
 
 export { history };
 
@@ -94,9 +94,19 @@ function columns(buckets, range, get, keys, color, fmt = String, height = 150) {
   return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group" }, kids));
 }
 
-function legend(keys, color, name = (k) => k) {
-  return h("div", { class: "legend" }, keys.map((k, i) => h("span", null, h("i", { "data-bg": color(k, i) }), name(k))));
+// A legend entry with a hint (about) explains its word, for someone who hasn't read the docs.
+function legend(keys, color, name = (k) => k, about = () => null) {
+  return h("div", { class: "legend" }, keys.map((k, i) => h("span", about(k) ? hint(about(k), {}, true) : null, h("i", { "data-bg": color(k, i) }), name(k))));
 }
+
+const SIZE_HINTS = {
+  small: "Hours small boxes existed: the smallest size, for light runs.",
+  medium: "Hours medium boxes existed: the default size.",
+  large: "Hours large boxes existed: for big test suites and builds.",
+  gpu: "Hours the GPU box existed: one at a time, with the PC's GPU.",
+};
+const REFUSED_HINT = "Runs box turned away: it exited 75 and nothing started. Each bar's tooltip says why: My PC, the limits full, or the GPU busy.";
+const QUEUED_HINT = "Runs that waited in the queue for room, counted when they joined it. They start by themselves once their size fits.";
 
 // Memory in use: a 2px line over a faint area. Use mostly sits far under the cap, so the scale
 // is set by use (the larger of its peak x 1.25 and half the cap), with a gridline and label at
@@ -232,7 +242,7 @@ const history = {
       ].map(([id, l]) =>
         h(
           "button",
-          {
+          hint(id === "day" ? "The last 24 hours, an hour per bar." : "The last 7 days, a day per bar, midnight to midnight UTC.", {
             role: "radio",
             "aria-checked": H.range === id ? "true" : "false",
             onclick: () => {
@@ -240,7 +250,7 @@ const history = {
               load(id);
               changed();
             },
-          },
+          }),
           l,
         ),
       ),
@@ -293,17 +303,17 @@ const history = {
         [
           [jobsN, "jobs"],
           [passRate, "passed, of those not cancelled"],
-          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours"],
-          [refused, "runs turned away"],
-          [queuedN, startedN ? "runs queued; median wait " + dur(wait) : "runs queued"],
-        ].map(([v, l]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", null, l))),
+          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours", "Hours boxes existed, added up over all boxes: two boxes for an hour are 2 box-hours."],
+          [refused, "runs turned away", REFUSED_HINT],
+          [queuedN, startedN ? "runs queued; median wait " + dur(wait) : "runs queued", QUEUED_HINT],
+        ].map(([v, l, tip]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", tip ? hint(tip, {}, true) : null, l))),
       ),
       h(
         "div",
         { class: "charts" },
-        chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", null, h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
-        chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])], true),
-        chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
+        chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel, (k) => MODE_HINTS[k]), h("div", { class: "legend" }, h("span", hint(REFUSED_HINT, {}, true), h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", hint(QUEUED_HINT, {}, true), h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
+        chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
+        chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)), undefined, (k) => SIZE_HINTS[k])]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),
         chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), (k) => slot(KINDS.indexOf(k)))),
         chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)")),
