@@ -376,28 +376,28 @@ func (h *History) Job(key string) (dash.Job, bool) {
 }
 
 // EndedOn names the jobs ("<box>.<id>", as box names their files) recorded as
-// ended on the box created at created, so a scan can skip their details.
-func (h *History) EndedOn(box string, created time.Time) map[string]bool {
+// ended on the box in, so a scan can skip their details.
+func (h *History) EndedOn(in Instance) map[string]bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string]bool{}
 	for _, j := range h.jobs {
-		if j.Box == box && (j.State == dash.JobDone || j.State == dash.JobLost) && holds(created, j.StartedAt) {
-			out[box+"."+j.ID] = true
+		if j.Box == in.Name && (j.State == dash.JobDone || j.State == dash.JobLost) && ranOnInstance(*j, in) {
+			out[in.Name+"."+j.ID] = true
 		}
 	}
 	return out
 }
 
 // LastEnded is the job that started last of those recorded on the box
-// created at created, if it has ended: the one whose 24h the box holds. A
+// on the box in, if it has ended: the one whose 24h the box holds. A
 // queued job's name is when it was queued, so the newest name may not be it.
-func (h *History) LastEnded(box string, created time.Time) (dash.Job, bool) {
+func (h *History) LastEnded(in Instance) (dash.Job, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out dash.Job
 	for _, j := range h.jobs {
-		if j.Box == box && holds(created, j.StartedAt) && j.StartedAt.After(out.StartedAt) {
+		if j.Box == in.Name && ranOnInstance(*j, in) && j.StartedAt.After(out.StartedAt) {
 			out = *j
 		}
 	}

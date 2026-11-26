@@ -102,7 +102,7 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		if in.Config[jobrun.ThrowawayKey] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
 			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || mode.Held(in.Config, now).After(now) ||
-			w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			w.Hist == nil || len(w.Hist.EndedOn(in)) == 0 {
 			continue
 		}
 		out = append(out, in)
@@ -495,7 +495,8 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 // PID file exists: before the check, the check sees it; after it, the write
 // fails on its ETag and is decided again, or comes after ours and wins.
 func (w *Watcher) reapEnded(j *dash.Job) {
-	box, started, own := j.Box, j.StartedAt, j.Box+"."+j.ID
+	box, own := j.Box, j.Box+"."+j.ID
+	job := *j
 	if w.boxBusy(box, own) {
 		return
 	}
@@ -503,7 +504,7 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-			until, ok := endedExpiry(in, started, w.Now().UTC())
+			until, ok := endedExpiry(in, job, w.Now().UTC())
 			if !ok || in.Status != "Running" {
 				return time.Time{}, false // a frozen box can't run the check: leave it
 			}
@@ -565,7 +566,7 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 		if !ended {
 			continue
 		}
-		last, ok := w.Hist.LastEnded(in.Name, in.CreatedAt)
+		last, ok := w.Hist.LastEnded(in)
 		if !ok {
 			continue
 		}
@@ -573,7 +574,7 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 		if err != nil || cur.Before(last.StartedAt.Add(jobTTL-jobExpirySlack)) {
 			continue // not the job's 24h: shortened already, or extended from the page since
 		}
-		if _, ok := endedExpiry(in, last.StartedAt, now); ok {
+		if _, ok := endedExpiry(in, last, now); ok {
 			w.reapEnded(&last)
 		}
 	}
@@ -607,9 +608,10 @@ const jobExpirySlack = 10 * time.Minute
 // endedExpiry is the expiry a box gets once the job that started at started
 // has ended, and whether to write it: only to shorten an expiry no later
 // than that job's own (a later job's 24h, or one set by hand, is left alone),
-// on the job's box, and never past its hold (mode.Held).
-func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
-	if !holds(in.CreatedAt, started) {
+// on the job's box (ranOnInstance), and never past its hold (mode.Held).
+func endedExpiry(in Instance, j dash.Job, now time.Time) (time.Time, bool) {
+	started := j.StartedAt
+	if !ranOnInstance(j, in) {
 		return time.Time{}, false
 	}
 	cur, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
