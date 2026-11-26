@@ -42,15 +42,16 @@ func (it *queued) sizeOf() mode.Size {
 }
 
 // waitsFor says what a job waits for now, or "" when it can start. A job
-// that can start only once kept throwaways are deleted gets their names in
-// it.evict; the starter deletes them first.
+// that can start only once kept throwaways or idle repo boxes are deleted
+// gets them in it.evict, the fewest that make room in the order spareBoxes
+// lists them; the starter deletes them first.
 func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 	it.evict = nil
 	why := w.roomFor(it, byName, w.machine.Room)
 	if why != dash.RefusedFull && why != dash.RefusedGPUBusy {
 		return why
 	}
-	spare := w.spareThrowaways(w.lastIns, w.Now().UTC())
+	spare := w.spareBoxes(w.lastIns, w.Now().UTC())
 	for k := 1; k <= len(spare); k++ {
 		gone := spare[:k]
 		rest := slices.DeleteFunc(slices.Clone(w.lastIns), func(in Instance) bool {
@@ -58,9 +59,7 @@ func (w *Watcher) waitsFor(it *queued, byName map[string]Instance) string {
 		})
 		_, _, room := allot(w.lastProj.Config, withoutDisk(w.lastProj, gone), rest)
 		if w.roomFor(it, byName, room) == "" {
-			for _, g := range gone {
-				it.evict = append(it.evict, g.Name)
-			}
+			it.evict = slices.Clone(gone)
 			return ""
 		}
 	}
@@ -113,6 +112,39 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 		return ta.Compare(tb)
 	})
 	return out
+}
+
+// idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
+// job, the longest idle first, for a queued job short of room (#187), as box's
+// launch takes them. A repo box is a cache: deleting it costs the repo's next
+// run a fresh checkout and a cold build cache. Idle is what spareThrowaways
+// checks: running, no job running or being started there (boxBusy), one
+// ended in boxd's history, and an expiry still the idle one set when its last
+// job ended (idleTTL), not a later job's 24h. Never a held one (mode.Held):
+// a person's extend, or box new --ttl. With w.mu held.
+func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
+	var out []Instance
+	for _, in := range ins {
+		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+		if in.Config[jobrun.ThrowawayKey] == "true" || in.Status != "Running" || w.boxBusy(in.Name, "") || err != nil ||
+			exp.After(now.Add(idleTTL+time.Minute)) || mode.Held(in.Config, now).After(now) ||
+			w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			continue
+		}
+		out = append(out, in)
+	}
+	slices.SortFunc(out, func(a, b Instance) int { // the expiry is the last end plus idleTTL
+		ta, _ := time.Parse(time.RFC3339, a.Config[jobrun.ExpiresKey])
+		tb, _ := time.Parse(time.RFC3339, b.Config[jobrun.ExpiresKey])
+		return ta.Compare(tb)
+	})
+	return out
+}
+
+// spareBoxes is what a queued job short of room may delete, in the order it
+// takes them: kept throwaways, then idle repo boxes. With w.mu held.
+func (w *Watcher) spareBoxes(ins []Instance, now time.Time) []Instance {
+	return append(w.spareThrowaways(ins, now), w.idleRepoBoxes(ins, now)...)
 }
 
 // roomFor says what a job waits for with the given room, or "" when it can start.
@@ -345,16 +377,26 @@ func (w *Watcher) dropQueued(it *queued, now time.Time, why string) {
 }
 
 // startQueued starts a job and settles the queue after.
-func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []string) {
+func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Instance) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
 	defer cancel()
 	var err error
-	for _, box := range evict {
+	for _, in := range evict {
+		box, what := in.Name, "kept throwaway"
+		if in.Config[jobrun.ThrowawayKey] != "true" {
+			// box run reuses a repo box, and may have started a job there
+			// since the poll that found it idle.
+			what = "idle box"
+			if out, xerr := w.Incus.Exec(ctx, box, jobrun.RunningScript(workRoot)); xerr != nil || strings.TrimSpace(string(out)) != "" {
+				err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
+				break
+			}
+		}
 		if err = w.delete(ctx, box); err != nil {
-			err = fmt.Errorf("%w: deleting kept %s for room: %v", errNoRoom, box, err)
+			err = fmt.Errorf("%w: deleting %s %s for room: %v", errNoRoom, what, box, err)
 			break
 		}
-		w.logf("boxd: queue: deleted kept throwaway %s for %s's room", box, it.Job)
+		w.logf("boxd: queue: deleted %s %s for %s's room", what, box, it.Job)
 		w.record(record{Type: recControl, Control: &controlRec{Action: actionEvict, Target: box, By: it.Job}})
 	}
 	started := w.Now().UTC()

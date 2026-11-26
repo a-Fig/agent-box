@@ -548,9 +548,43 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 	return out
 }
 
+// idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
+// job, the longest idle first (#187). A repo box is a cache: deleting it costs
+// the repo's next run a fresh checkout and a cold build cache, so a launch
+// short of room takes idle ones after the kept throwaways. Idle is what
+// keptThrowaways checks (keptScript: no job running there, and one ended),
+// on a running box whose expiry is still the idle one set when its last job
+// ended (idleTTL), so not one whose next job has set its 24h. Never a held
+// one (mode.Held): a person's extend, or box new --ttl.
+func (a *App) idleRepoBoxes(ctx context.Context, insts []instance) []instance {
+	var out []instance
+	for _, in := range insts {
+		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
+		if in.Config[throwawayKey] == "true" || in.Status != "Running" || err != nil ||
+			exp.After(a.Now().Add(idleTTL+time.Minute)) || mode.Held(in.Config, a.Now()).After(a.Now()) {
+			continue
+		}
+		look, cancel := a.probeCtx(ctx)
+		res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
+		cancel()
+		if err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept" {
+			out = append(out, in)
+		}
+	}
+	// The expiry is the last job's end plus idleTTL: the earliest is idle longest.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Config[expiresKey] < out[j].Config[expiresKey] })
+	return out
+}
+
+// spareBoxes is what a launch short of room may delete, in the order it
+// deletes them: kept throwaways, then idle repo boxes.
+func (a *App) spareBoxes(ctx context.Context, insts []instance) []instance {
+	return append(a.keptThrowaways(ctx, insts), a.idleRepoBoxes(ctx, insts)...)
+}
+
 // launch creates box name. Refused for the project's caps, it deletes
-// reclaimable boxes and tries once more, then deletes kept throwaways one at
-// a time, trying again after each.
+// reclaimable boxes and tries once more, then deletes kept throwaways and
+// then idle repo boxes (spareBoxes) one at a time, trying again after each.
 // extra are more launch flags, like box new's reason.
 func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra ...string) error {
 	err := a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
@@ -558,25 +592,30 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 		err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	}
 	// Each pass looks again, since other launches may be taking the same room
-	// (#87): it deletes the first kept throwaway only if deleting them all
-	// would fit this box, so none is deleted for a launch that fails anyway.
+	// (#87): it deletes the first spare box only if deleting them all would
+	// fit this box, so none is deleted for a launch that fails anyway.
 	for isNoRoom(err) {
 		insts, lerr := a.list(ctx)
 		if lerr != nil {
 			break
 		}
-		kept := a.keptThrowaways(ctx, insts)
-		if len(kept) == 0 {
+		spare := a.spareBoxes(ctx, insts)
+		if len(spare) == 0 {
 			break
 		}
-		if !a.fitsWithout(ctx, insts, kept, sz) {
-			fmt.Fprintf(a.Err, "box: deleting the %d kept throwaways wouldn't make room for a %s box; leaving them\n", len(kept), sz.Name)
+		if !a.fitsWithout(ctx, insts, spare, sz) {
+			fmt.Fprintf(a.Err, "box: deleting the %d kept throwaways and idle boxes wouldn't make room for a %s box; leaving them\n", len(spare), sz.Name)
 			break
 		}
-		fmt.Fprintf(a.Err, "box: deleting %s, kept after its job, for room\n", kept[0].Name)
-		if rerr := a.Rm(context.WithoutCancel(ctx), kept[0].Name); rerr != nil && !isGone(rerr) {
-			a.warn(fmt.Sprintf("box: warning: removing %s: %v", kept[0].Name, rerr))
+		gone := spare[0]
+		if rerr := a.Rm(context.WithoutCancel(ctx), gone.Name); rerr != nil && !isGone(rerr) {
+			a.warn(fmt.Sprintf("box: warning: removing %s: %v", gone.Name, rerr))
 			break // it would be listed again
+		}
+		if gone.Config[throwawayKey] == "true" {
+			fmt.Fprintf(a.Err, "box: deleted %s, kept after its job, to make room\n", gone.Name)
+		} else {
+			fmt.Fprintf(a.Err, "box: deleted idle box %s to make room\n", gone.Name)
 		}
 		err = a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
 	}

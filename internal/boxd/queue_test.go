@@ -413,6 +413,73 @@ func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short string) {
 	}
 }
 
+// idleRepoRig has two repo boxes whose jobs ended: murmur idle, and widget
+// with another job still running. Both have the idle expiry (#187).
+func idleRepoRig(t *testing.T, cfg map[string]string) *queueRig {
+	r := newQueueRig(t, cfg)
+	r.f.set(func() {
+		for _, name := range []string{"murmur", "widget"} {
+			r.f.ins = append(r.f.ins, inst(name, "Running", "small", t0))
+			r.f.jobs[name] = []fakeJob{{name: name + ".20261124-180000-cccc", state: "running", log: "ok\n", meta: metaJSON}}
+		}
+		r.f.jobs["widget"] = append(r.f.jobs["widget"], fakeJob{name: "widget.20261124-180000-dddd", state: "running", log: "ok\n", meta: metaJSON})
+	})
+	r.poll()
+	r.f.set(func() {
+		for _, name := range []string{"murmur", "widget"} {
+			r.f.jobs[name][0].state, r.f.jobs[name][0].exit = "done", "0"
+		}
+		for i := range r.f.ins {
+			r.f.ins[i].Config["user.expires"] = r.c.now().Add(time.Hour).Format(time.RFC3339)
+		}
+	})
+	r.c.add(3 * time.Second)
+	r.poll()
+	return r
+}
+
+// A queued job short of room takes an idle repo box, as it takes a kept
+// throwaway: never one held, or one with a job running (#187).
+func TestQueueDeletesIdleRepoBoxForRoom(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() { r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339) })
+	r.c.add(3 * time.Second)
+	r.poll()
+	code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B")
+	if code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("made room from a held box, or one with a job running: %v", r.f.cli)
+	}
+	r.c.add(10 * time.Minute)
+	r.poll()
+	if len(r.f.cli) < 2 || r.f.cli[0] != "delete murmur --force" || !strings.HasPrefix(r.f.cli[1], "launch agent-base job-") {
+		t.Fatalf("cli: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 0 {
+		t.Fatalf("still queued: %+v", q)
+	}
+}
+
+// Idle repo boxes that together still wouldn't make room are all left (#187).
+func TestQueueLeavesIdleRepoBoxesThatCantMakeRoom(t *testing.T) {
+	// 8GiB of 10GiB held: deleting murmur frees 4GiB, short of a large box's 8GiB.
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "10GiB", "limits.instances": "10"})
+	req := small("job", "quiet-otter")
+	req.Size = "large"
+	if code, rep, _ := r.enqueue(req, "B"); code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("deleted boxes that couldn't make room: %v", r.f.cli)
+	}
+}
+
 // A start cut short by a boxd restart doesn't run the job twice: boxd looks
 // in the box first, and starts it only if its files aren't there.
 func TestQueueStartCutShortIsNotRepeated(t *testing.T) {

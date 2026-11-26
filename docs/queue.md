@@ -84,7 +84,12 @@ laptop and agent reaches.
   end nobody read (#53) gets the same 30 minutes, and its room can be taken like any kept one: its
   exit code and tail are in boxd's history, which `box job` gives once the box is gone (#90). A queued job that needs the room of kept throwaways (its own, or `box run`'s) gets
   it: boxd deletes them first, soonest to expire first, as `box`'s claimGPU deletes an idle GPU
-  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each. Each deletion is a
+  throwaway. Otherwise back-to-back queued jobs would wait 30 minutes each. After them come repo
+  boxes idle since their last job (one ended in boxd's history, none running or being started, the
+  idle expiry, no hold), the longest idle first, as `box`'s launch takes them (#187): a repo box is
+  a cache, and losing it costs that repo's next run a fresh checkout and a cold build cache. boxd
+  takes the fewest spare boxes that make room, or none, and checks a repo box has no job running
+  just before deleting it, since `box run` may have reused it since the poll. Each deletion is a
   history control `evict` (target the box, by the queued job), and `GET /api/queue/{job}` gives an
   ended job whose box went that way `evicted`: the queued job's name. `box pull` and `box job` then
   say the box was deleted for that job's room, instead of Incus's "Instance not found" (#143).
