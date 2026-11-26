@@ -5,20 +5,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Project Fano — On-demand Linux boxes on your own hardware</title>
-<meta name="description" content="Coding agents offload heavy tests and builds to a spare Linux server or Windows PC inside disposable Incus containers. You choose how much of the machine they get.">
+<title>Project Fano — Linux boxes for your agents, on your own computer</title>
+<meta name="description" content="Keep heavy tests and builds off your laptop. Send them to a spare Linux server or your gaming PC, and take the PC back whenever you want it.">
 <link rel="canonical" href="https://fano.afig.dev/">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="Project Fano, for coding agents">
 <meta name="theme-color" content="#225BFF">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Project Fano">
 <meta property="og:url" content="https://fano.afig.dev/">
-<meta property="og:title" content="Project Fano — On-demand Linux boxes on your own hardware">
-<meta property="og:description" content="Coding agents offload heavy tests and builds to a spare Linux server or Windows PC inside disposable Incus containers. You choose how much of the machine they get.">
+<meta property="og:title" content="Project Fano — Linux boxes for your agents, on your own computer">
+<meta property="og:description" content="Keep heavy tests and builds off your laptop. Send them to a spare Linux server or your gaming PC, and take the PC back whenever you want it.">
 <meta property="og:image" content="https://fano.afig.dev/og.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The Project Fano box logo on cobalt blue beside the words: Project Fano — On-demand Linux boxes on your own hardware.">
+<meta property="og:image:alt" content="The Project Fano box logo on cobalt blue beside the words: Project Fano — Linux boxes for your agents, on your own computer.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
@@ -32,7 +32,7 @@
   "@type": "SoftwareApplication",
   "name": "Project Fano",
   "alternateName": "agent-box",
-  "description": "On-demand, disposable Linux containers on your own Linux server or Windows PC for coding agents.",
+  "description": "Throwaway Linux boxes for coding agents, running on a spare Linux server or Windows PC you already own.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
   "url": "https://fano.afig.dev/",
@@ -146,7 +146,7 @@
     gap: 28px clamp(28px, 5vw, 64px);
   }
   h1 {
-    font-size: clamp(32px, 4.8vw, 56px);
+    font-size: clamp(30px, 4.4vw, 52px);
     font-weight: 700;
     letter-spacing: -.035em;
     line-height: 1.07;
@@ -313,11 +313,11 @@
 
     <div class="hero">
       <div>
-        <h1><span>On-demand Linux boxes</span><em>on your own hardware.</em></h1>
-        <p class="lead">Coding agents offload heavy tests and builds to a spare Linux server or Windows PC. You choose how much of the machine they get.</p>
+        <h1><span>Linux boxes for your agents,</span><em>on your own computer.</em></h1>
+        <p class="lead">Keep heavy tests and builds off your laptop. Send them to a spare Linux server or your gaming PC, and take the PC back whenever you want it.</p>
         <div class="actions">
           <a class="button" href="https://github.com/a-Fig/agent-box">View on GitHub</a>
-          <span class="status">Early work in progress</span>
+          <span class="status">Still early</span>
         </div>
       </div>
 
@@ -335,19 +335,19 @@
     <div class="facts">
       <section class="fact">
         <h2>What it does</h2>
-        <p>Runs disposable Linux containers with Incus. Heavy test suites, <code>-race</code>, and builds run there instead of starving your laptop.</p>
+        <p>Project Fano spins up throwaway Linux boxes on your other machine, using Incus. Big test suites and builds happen there instead of bogging down your laptop.</p>
       </section>
       <section class="fact">
         <h2>How it works</h2>
-        <p>The <code>box</code> CLI and MCP server snapshot your working tree, run the command in a container, and return the result. On Windows, a tray menu picks <strong>My PC</strong>, <strong>Shared</strong>, or <strong>Full</strong>.</p>
+        <p>Agents use the <code>box</code> CLI or MCP tool to copy your working tree to a box, run a command, and get the output back. On Windows, a tray icon lets you switch between <strong>My PC</strong>, <strong>Shared</strong>, and <strong>Full</strong>.</p>
       </section>
       <section class="fact">
         <h2>Why Fano</h2>
-        <p>Named for Robert Fano (1917–2016), who founded MIT's Project MAC in 1963 and pioneered time-sharing: turning one computer into a shared utility.</p>
+        <p>Named after Robert Fano, who started MIT's Project MAC in 1963 and helped invent time-sharing: the idea that one computer can be shared like a utility.</p>
       </section>
       <section class="fact">
-        <h2>Status</h2>
-        <p>Built for daily use on one setup first and not ready for outside users yet. Source and docs live at <a href="https://github.com/a-Fig/agent-box">github.com/a-Fig/agent-box</a>.</p>
+        <h2>Where it's at</h2>
+        <p>Right now it's built around one person's daily setup and isn't ready for outside use yet. The code and notes are public at <a href="https://github.com/a-Fig/agent-box">github.com/a-Fig/agent-box</a>.</p>
       </section>
     </div>
   </div>
