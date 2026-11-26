@@ -350,7 +350,7 @@ body {
           <div class="note" data-note="queue" aria-hidden="true">
             <span class="kicker">03 · Fair-share queue</span>
             <h2>Queues safely when the host is busy</h2>
-            <p>With <code>boxd</code> reachable, busy runs buffer in up to <code>2 GiB</code> of queued bundles in all (fair-share FIFO, <code>24 h</code> TTL): T3 push jobs get one <code>box watch</code> nudge after <code>20 min</code>, while terminal <code>box run</code> waits inline. A second <code>--gpu</code> job waits on the GPU while CPU runs start if room remains; GPU runs during <code>My PC</code> exit 75.</p>
+            <p>With <code>boxd</code> reachable, terminal <code>box run</code> waits inline in the queue while MCP <code>box_run</code> queues only with an active T3 push context (local <code>box watch</code> nudges at <code>20 min</code>; up to <code>2 GiB</code> in all, fair-share FIFO, <code>24 h</code> TTL). A second <code>--gpu</code> job waits on the GPU while CPU runs start if room remains; GPU runs during <code>My PC</code> exit 75.</p>
           </div>
           <div class="note" data-note="reclaim" aria-hidden="true">
             <span class="kicker">04 · Shared PC mode</span>
@@ -402,7 +402,7 @@ body {
       <section class="ch" data-id="queue">
         <div class="ch-fallback">
           <h2>03 · Crash-safe fair-share queue</h2>
-          <p>With <code>boxd</code> reachable, busy runs wait in fair-share FIFO order (up to <code>2 GiB</code> in all): T3 push jobs get a local <code>box watch</code> nudge at <code>20 min</code>, while terminal <code>box run</code> waits inline. CPU runs start while GPU is busy if capacity remains; GPU runs during <code>My PC</code> exit 75.</p>
+          <p>With <code>boxd</code> reachable, terminal <code>box run</code> waits inline in the queue and MCP <code>box_run</code> queues only with an active T3 push context (which gets a local <code>box watch</code> nudge at <code>20 min</code>; up to <code>2 GiB</code> in all, fair-share FIFO). CPU runs start while GPU is busy if capacity remains; GPU runs during <code>My PC</code> exit 75.</p>
         </div>
       </section>
       <section class="ch" data-id="reclaim">

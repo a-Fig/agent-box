@@ -26,6 +26,7 @@ How to call it: once this machine has joined a host, `box mcp` exposes five tool
 ## Optional
 
 - [README](https://github.com/a-Fig/agent-box): overview, measured benchmarks, and CLI reference
-- [Design doc](https://github.com/a-Fig/agent-box/blob/main/docs/DESIGN.md): architecture, isolation, sizes, GPU boxes, failure digests, and push delivery
+- [How agent-box runs](https://agent-box.afig.dev/how/): step-by-step walkthrough of bundles, `/cache`, queueing, RAM reclaim, digests, and pulls
+- [Hosts & GPUs](https://agent-box.afig.dev/hosts/): dedicated Linux hosts, Windows PC modes, GPU passthrough, and queue behavior
 - [Provisioning guide](https://github.com/a-Fig/agent-box/blob/main/provision/README.md): Linux server and Windows PC setup scripts and undo steps
 - [Queue design](https://github.com/a-Fig/agent-box/blob/main/docs/queue.md): how `boxd` schedules waiting runs
