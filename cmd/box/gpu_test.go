@@ -443,3 +443,23 @@ func TestGPUHostDetection(t *testing.T) {
 		t.Errorf("box_run = %s", got)
 	}
 }
+
+// A stopped GPU throwaway a person extended (mode.HoldKey) isn't reclaimed, and
+// status doesn't count it as replaceable, until the hold passes.
+func TestHeldStoppedGPUThrowawayIsNotReclaimed(t *testing.T) {
+	for _, tc := range []struct {
+		hold      string
+		reclaimed bool
+	}{{"2026-11-23T14:00:00Z", false}, {"2026-11-23T11:00:00Z", true}, {"soon", true}} {
+		cfg := gpuConfig(throwawayKey, "true", mode.StoppedKey, "mypc", mode.HoldKey, tc.hold)
+		f := &fakePC{t: t, mode: "shared", project: map[string]string{"limits.instances": "2"},
+			insts: []instance{{Name: "gpu-1234", Status: "Stopped", Config: cfg}}}
+		a, out := testApp(f)
+		if s := a.Status(context.Background(), ""); (s.Replaceable == 1) != tc.reclaimed {
+			t.Errorf("hold %q: replaceable = %d\n%s", tc.hold, s.Replaceable, out)
+		}
+		if got := a.reclaim(context.Background()); got != tc.reclaimed || (f.names() == "") != tc.reclaimed {
+			t.Errorf("hold %q: reclaim = %v, boxes %q", tc.hold, got, f.names())
+		}
+	}
+}

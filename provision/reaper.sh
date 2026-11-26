@@ -6,15 +6,26 @@
 set -eu
 PROJECT=${AGENTS_PROJECT:-agents}
 now=$(date -u +%s)
+# Incus's csv wraps a field holding a comma or quote in double quotes; the values here are plain
+# RFC3339 UTC, so strip them. Anything that isn't exactly that form is refused, as the Go side
+# does (mode.Held), so a malformed hold never counts as a future time.
+unq() { printf '%s' "$1" | sed 's/^"//; s/"$//'; }
+PAT='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'
+epoch() { printf '%s' "$1" | grep -Eq "$PAT" && date -u -d "$1" +%s 2>/dev/null; }
 incus list --project "$PROJECT" -f csv -c n,user.expires,user.box.hold-until </dev/null |
 while IFS=, read -r name expires hold; do
+  expires=$(unq "$expires"); hold=$(unq "$hold")
   [ -n "$expires" ] || continue                        # no expiry: leave it
-  t=$(date -u -d "$expires" +%s 2>/dev/null) || { echo "skip $name: bad user.expires '$expires'"; continue; }
-  if [ -n "$hold" ] && h=$(date -u -d "$hold" +%s 2>/dev/null) && [ "$h" -gt "$t" ]; then
-    t=$h                                               # held: the later of the two
+  t=$(epoch "$expires") || { echo "skip $name: bad user.expires '$expires'"; continue; }
+  if [ -n "$hold" ]; then
+    if h=$(epoch "$hold"); then
+      [ "$h" -gt "$t" ] && t=$h                        # held: the later of the two
+    else
+      echo "ignoring $name: bad user.box.hold-until '$hold'"
+    fi
   fi
   if [ "$t" -lt "$now" ]; then
-    echo "deleting $name (expired $expires${hold:+, held until $hold})"
+    echo "deleting $name (expired $expires${hold:+, hold $hold})"
     incus delete --force --project "$PROJECT" "$name" </dev/null || echo "delete $name failed; next run retries"
   fi
 done

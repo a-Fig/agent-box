@@ -480,11 +480,12 @@ var projectLimitRefusal = jobrun.LimitRefusal
 // reclaimable says whether in is a throwaway GPU box the tray stopped in My
 // PC. It is kept for GPUStoppedTTL so box job can say why its job
 // died, but it still holds a GPU box's memory and disk against the project's
-// caps, so any launch that would not fit deletes it first.
+// caps, so any launch that would not fit deletes it first, unless a person
+// extended it (mode.Held at now).
 // Only the tray's mark counts: Incus creates a box stopped before starting
 // it, so an unmarked stopped box may be one a run is launching.
-func reclaimable(in instance) bool {
-	return in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true" && in.Config[mode.StoppedKey] != ""
+func reclaimable(in instance, now time.Time) bool {
+	return !mode.Held(in.Config, now).After(now) && in.Status == "Stopped" && mode.IsGPU(in.Config) && in.Config[throwawayKey] == "true" && in.Config[mode.StoppedKey] != ""
 }
 
 // reclaim deletes every reclaimable box and says whether there was one.
@@ -495,7 +496,7 @@ func (a *App) reclaim(ctx context.Context) bool {
 	}
 	any := false
 	for _, in := range insts {
-		if reclaimable(in) {
+		if reclaimable(in, a.Now()) {
 			a.removeQuietly(ctx, in.Name)
 			any = true
 		}

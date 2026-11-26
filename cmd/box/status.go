@@ -77,7 +77,7 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 	for _, in := range a.keptThrowaways(ctx, insts) {
 		kept[in.Name] = true
 	}
-	evictable := func(in instance) bool { return reclaimable(in) || kept[in.Name] } // the next launch deletes it first
+	evictable := func(in instance) bool { return reclaimable(in, a.Now()) || kept[in.Name] } // the next launch deletes it first
 	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
 		free := n - len(insts)
 		for _, in := range insts {

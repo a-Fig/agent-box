@@ -27,7 +27,9 @@ const HoldKey = "user.box.hold-until"
 // Held is the later of t and the hold in an instance's config. A box is held
 // at now when Held(cfg, now).After(now).
 func Held(cfg map[string]string, t time.Time) time.Time {
-	if h, err := time.Parse(time.RFC3339, cfg[HoldKey]); err == nil && h.After(t) {
+	// UTC only, as the shell reaper reads it: a malformed hold is ignored.
+	v := cfg[HoldKey]
+	if h, err := time.Parse(time.RFC3339, v); err == nil && strings.HasSuffix(v, "Z") && h.After(t) {
 		return h
 	}
 	return t
@@ -397,7 +399,7 @@ func (m *Manager) stopGPU(ctx context.Context, now time.Time, in Instance, state
 	shorten := func() {
 		soon := now.Add(GPUStoppedTTL)
 		if exp, err := time.Parse(time.RFC3339, in.Config[ExpiresKey]); err != nil || exp.After(soon) {
-			if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, soon.UTC().Format(time.RFC3339)); err != nil {
+			if err := m.Incus.SetInstanceConfig(ctx, in.Name, ExpiresKey, Held(in.Config, soon).UTC().Format(time.RFC3339)); err != nil {
 				errs = append(errs, err)
 			}
 		}

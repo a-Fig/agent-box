@@ -111,3 +111,29 @@ func TestStoppedGPUExpiryRetriedInShared(t *testing.T) {
 		t.Errorf("second tick: %s", calls)
 	}
 }
+
+// A person's extend outlives the tray's stop: the short expiry is written as
+// Held of itself, so it never lands before the hold.
+func TestGPUStopRespectsHold(t *testing.T) {
+	f := gpuFake(later)
+	f.config["g"][HoldKey] = "2026-01-01T14:00:00Z"
+	m := New(f, MyPC)
+	tick(m, 0)
+	equal(t, f.take(), []string{
+		"project user.agent-box.mode=mypc",
+		"set g user.box.stopped=mypc", "stop g", "set g user.expires=2026-01-01T14:00:00Z",
+		"pause a",
+	})
+}
+
+func TestHeldIgnoresMalformedHold(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	for _, hold := range []string{"", "soon", "2026-01-01T14:00:00+02:00", "2026-01-01 14:00:00Z", "\"2026-01-01T14:00:00Z\""} {
+		if got := Held(map[string]string{HoldKey: hold}, t0); !got.Equal(t0) {
+			t.Errorf("Held(%q) = %v, want it ignored", hold, got)
+		}
+	}
+	if got := Held(map[string]string{HoldKey: "2026-01-01T14:00:00Z"}, t0); !got.Equal(t0.Add(2 * time.Hour)) {
+		t.Errorf("Held = %v", got)
+	}
+}
