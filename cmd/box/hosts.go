@@ -17,11 +17,11 @@ type fleetHost struct {
 }
 
 // configuredHosts reads agent-box/hosts.json in the user's config directory.
-// An absent file or empty list leaves the caller on the single-host defaults.
+// An absent config directory, file, or host list leaves single-host defaults.
 func (a *App) configuredHosts() ([]fleetHost, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return nil, fmt.Errorf("find host config directory: %w", err)
+		return nil, nil
 	}
 	path := filepath.Join(dir, "agent-box", "hosts.json")
 	data, err := os.ReadFile(path)

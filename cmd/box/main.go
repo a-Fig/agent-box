@@ -23,7 +23,8 @@ func cancelText(job string, cancelled bool, code int) string {
 }
 
 const usage = `usage:
-  box status                                is offloading worth it now? (PC, mode, room, this repo's box)
+  box status                                is offloading worth it now? (hosts, room, this repo's box)
+  box hosts                                 list hosts and their current capacity
   box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m]
           [--no-queue] -- <cmd...>          sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
@@ -237,13 +238,24 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		fmt.Fprintln(a.Err, "box: "+p.pageHead())
 		io.WriteString(a.Out, p.Text)
 		return 0
-	case "status":
+	case "status", "hosts":
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		dir, _ := os.Getwd()
-		s := a.Status(ctx, dir)
+		listOnly := args[0] == "hosts"
+		if listOnly {
+			dir = ""
+		}
+		s, err := a.fleetStatus(ctx, dir, listOnly)
+		if err != nil {
+			return fail(err)
+		}
+		if listOnly {
+			writeFleet(a.Out, s.Hosts)
+			return 0
+		}
 		writeStatus(a.Out, s)
 		if !s.Available {
 			return exitPaused
