@@ -436,6 +436,12 @@ type RefusalBody struct {
 	Agent  string `json:"agent"`
 }
 
+// ClaimThrowawayBody identifies the matching repo and size for a client-side claim.
+type ClaimThrowawayBody struct {
+	RepoKey string `json:"repoKey"`
+	Size    string `json:"size"`
+}
+
 // JobEndedBody is POST /api/jobs/ended, sent by box as a best effort (2s timeout) once it has
 // read a run's exit and before it deletes a throwaway box, so boxd records the job as ended
 // rather than lost when its box vanishes between polls. boxd takes it only for a job it knows is

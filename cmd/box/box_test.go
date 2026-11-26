@@ -157,8 +157,7 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		if args[1] == "get" {
 			return Result{Stdout: inst.Config[args[3]] + "\n"}, nil
 		}
-		k, v, ok := strings.Cut(args[3], "=")
-		if args[1] != "set" || !ok {
+		if args[1] != "set" {
 			f.t.Fatalf("unexpected incus config arguments: %q", args)
 		}
 		if f.etagFails > 0 {
@@ -168,7 +167,13 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 		if inst.Config == nil {
 			inst.Config = make(map[string]string)
 		}
-		inst.Config[k] = v
+		for _, arg := range args[3:] {
+			k, v, ok := strings.Cut(arg, "=")
+			if !ok {
+				f.t.Fatalf("unexpected incus config argument: %q", arg)
+			}
+			inst.Config[k] = v
+		}
 	case "delete":
 		name := strings.TrimPrefix(args[1], "pc:")
 		for i := range f.insts {

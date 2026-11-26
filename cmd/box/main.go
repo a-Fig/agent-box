@@ -59,6 +59,7 @@ medium). A reused box of another size isn't resized: the run gets a throwaway.
 --gpu is --size gpu: the PC's GPU, one GPU box at a time; on a host without
 one (box status: gpu: none) it exits 75. box run --gpu uses a throwaway. The
 tray stops a GPU box in My PC.
+CPU throwaways reuse an idle box for the same repo and size when available.
 If the Incus image lookup ends with EOF, box retries the launch once.
 
 A run that can't start now (no room, the GPU taken, My PC) waits in the PC's

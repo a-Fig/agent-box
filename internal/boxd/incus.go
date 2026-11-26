@@ -29,12 +29,10 @@ type Incus interface {
 	// CLI runs `incus <args...>` in the project, with stdin (often ""), for
 	// what starting a queued job takes: launch, file push, config set, exec.
 	CLI(ctx context.Context, stdin string, args ...string) ([]byte, error)
-	// SetExpiryIf reads the instance and, if decide says so, sets its
-	// user.expires to the time decide returns, in a write Incus refuses if
-	// anything changed the instance since that read. After a refusal it
-	// reads and decides again. It reports whether it wrote; an instance
-	// that is gone is no error.
-	SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error)
+	// SetConfigIf merges the chosen config keys while the instance's ETag
+	// matches the read. It reads and decides again on a conflict. A nil map
+	// or a missing instance skips the write.
+	SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error)
 }
 
 // Instance is the part of GET /1.0/instances?recursion=2 boxd reads.
@@ -164,11 +162,7 @@ func (s *Socket) Exec(ctx context.Context, name, script string, args ...string) 
 // was read.
 var errStale = errors.New("ETag doesn't match")
 
-// SetExpiryIf is a GET of the instance, for its config and ETag, then a
-// PATCH of user.expires with If-Match: a write that comes between, such as a
-// job's start setting its 24h, makes the PATCH fail with 412, and the next
-// try sees it. PATCH merges config keys, so nothing else is touched.
-func (s *Socket) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+func (s *Socket) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
 	path := "/1.0/instances/" + url.PathEscape(name) + "?project=" + url.QueryEscape(s.Proj)
 	var wrote bool
 	err := jobrun.RetryETag(ctx, func() error {
@@ -195,17 +189,21 @@ func (s *Socket) SetExpiryIf(ctx context.Context, name string, decide func(Insta
 		case derr != nil:
 			return fmt.Errorf("incus GET %s: %w", name, derr)
 		}
-		until, ok := decide(env.Metadata)
-		if !ok {
+		config := decide(env.Metadata)
+		if len(config) == 0 {
 			return nil
 		}
-		body, _ := json.Marshal(map[string]any{"config": map[string]string{jobrun.ExpiresKey: until.UTC().Format(time.RFC3339)}})
+		etag := resp.Header.Get("ETag")
+		if etag == "" {
+			return fmt.Errorf("incus GET %s: missing ETag", name)
+		}
+		body, _ := json.Marshal(map[string]any{"config": config})
 		patch, err := http.NewRequestWithContext(ctx, "PATCH", "http://incus"+path, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
 		patch.Header.Set("Content-Type", "application/json")
-		patch.Header.Set("If-Match", resp.Header.Get("ETag"))
+		patch.Header.Set("If-Match", etag)
 		presp, err := s.client.Do(patch)
 		if err != nil {
 			return err

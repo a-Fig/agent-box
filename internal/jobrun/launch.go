@@ -34,9 +34,18 @@ const EndedKeep = 30 * time.Minute
 
 // Instance keys a box is launched with (cmd/box reads them too).
 const (
-	ExpiresKey   = "user.expires"
-	ThrowawayKey = "user.box.throwaway"
+	ExpiresKey        = "user.expires"
+	ThrowawayKey      = "user.box.throwaway"
+	ThrowawayRepoKey  = "user.box.repo-key"
+	ThrowawayClaimKey = "user.box.claim-until"
+	ThrowawayClaimTTL = 10 * time.Minute
 )
+
+// ThrowawayClaimed reports whether a client is setting up a run in the box.
+func ThrowawayClaimed(cfg map[string]string, now time.Time) bool {
+	until, _ := time.Parse(time.RFC3339, cfg[ThrowawayClaimKey])
+	return until.After(now)
+}
 
 // LaunchFlags are the -c and -d flags of `incus launch` for a box of size sz
 // that expires at expires, with extra flags after the size's. The size's memory and root disk are set here,

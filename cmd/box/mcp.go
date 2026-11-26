@@ -71,7 +71,7 @@ var tools = []tool{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
-		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box, kept up to 30 minutes after the run for box_pull, then deleted; a queued job or another launch that needs the room deletes it sooner. Use it for parallel runs on one repo, which otherwise take turns."},
+		"new":     map[string]any{"type": "boolean", "description": "Use a throwaway box for parallel runs. An idle CPU throwaway for the same repo and size may be reused. Pull artifacts promptly with box_pull; later runs can reuse that checkout."},
 		"size":    sizeArg,
 		"gpu":     gpuArg,
 		"timeout": str(`Kill the command in the box after this long, like "30m"; it then exits 124. Default: no limit.`),

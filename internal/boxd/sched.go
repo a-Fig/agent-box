@@ -122,7 +122,34 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 func keptThrowaway(in Instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 	return in.Config[jobrun.ThrowawayKey] == "true" && in.Status != "Frozen" && err == nil &&
-		!exp.After(now.Add(jobrun.EndedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now)
+		!exp.After(now.Add(jobrun.EndedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
+		!jobrun.ThrowawayClaimed(in.Config, now)
+}
+
+// claimThrowaway reserves an idle CPU throwaway for client-side job setup.
+// The same conditional write that takes it out of the pool protects its
+// expiry. A client that disappears leaves a claim that expires on its own.
+func (w *Watcher) claimThrowaway(ctx context.Context, box, repoKey, size string) (bool, error) {
+	return w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		now := w.Now().UTC()
+		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+		if in.Status != "Running" || in.Config[jobrun.ThrowawayRepoKey] != repoKey ||
+			mode.SizeOf(in.Config).Name != size || !keptThrowaway(in, now) || !expires.After(now) {
+			return nil
+		}
+		out, err := w.Incus.Exec(ctx, box, jobrun.KeptScript(workRoot))
+		if err != nil || strings.TrimSpace(string(out)) != "kept" {
+			return nil
+		}
+		until := now.Add(jobrun.ThrowawayClaimTTL)
+		if expires.Before(until) {
+			expires = until
+		}
+		return map[string]string{
+			jobrun.ExpiresKey:        expires.Format(time.RFC3339),
+			jobrun.ThrowawayClaimKey: until.Format(time.RFC3339),
+		}
+	})
 }
 
 // idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
@@ -549,11 +576,11 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", tmp, box+remote+".meta"); err != nil {
 		return fmt.Errorf("push the .meta: %w", err)
 	}
-	// The job's 24h, or the box's hold if later. SetExpiryIf retries the ETag
+	// The job's 24h, or the box's hold if later. SetConfigIf retries the ETag
 	// race with the tray, which sets a new box's CPU limits within a tick of
 	// its launch, just now.
-	if _, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-		return mode.Held(in.Config, now.Add(jobTTL)), true
+	if _, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		return map[string]string{jobrun.ExpiresKey: mode.Held(in.Config, now.Add(jobTTL)).UTC().Format(time.RFC3339)}
 	}); err != nil {
 		return fmt.Errorf("set the expiry: %w", err)
 	}
@@ -581,7 +608,7 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 // (#90). A repo box gets idleTTL.
 // With w.mu held.
 //
-// Each try of the write (SetExpiryIf) reads the box, then checks, as
+// Each try of the write (SetConfigIf) reads the box, then checks, as
 // markIdle does, that no other job runs or is being started there, then
 // writes with the box's ETag. A job that starts there sets its 24h after its
 // PID file exists: before the check, the check sees it; after it, the write
@@ -595,27 +622,28 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		_, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-			until, ok := endedExpiry(in, job, w.Now().UTC())
-			if !ok || in.Status != "Running" {
-				return time.Time{}, false // a frozen box can't run the check: leave it
+		_, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+			now := w.Now().UTC()
+			until, ok := endedExpiry(in, job, now)
+			if !ok || in.Status != "Running" || jobrun.ThrowawayClaimed(in.Config, now) {
+				return nil
 			}
 			w.mu.Lock()
 			busy := w.boxBusy(box, own)
 			w.mu.Unlock()
 			if busy {
-				return time.Time{}, false
+				return nil
 			}
 			out, err := w.Incus.Exec(ctx, box, jobrun.RunningScript(workRoot))
 			if err != nil {
-				return time.Time{}, false
+				return nil
 			}
 			for _, name := range strings.Fields(string(out)) {
 				if name != own {
-					return time.Time{}, false // another job runs there
+					return nil // another job runs there
 				}
 			}
-			return until, true
+			return map[string]string{jobrun.ExpiresKey: until.Format(time.RFC3339)}
 		})
 		if err != nil {
 			w.logf("boxd: after %s's job: %v", box, err)

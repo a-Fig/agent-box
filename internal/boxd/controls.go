@@ -2,6 +2,7 @@ package boxd
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -27,6 +28,32 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/jobs/{key}/cancel", control(http.HandlerFunc(s.cancelJob)))
 	mux.Handle("POST /api/boxes/{name}/delete", control(http.HandlerFunc(s.deleteBox)))
 	mux.Handle("POST /api/boxes/{name}/extend", control(http.HandlerFunc(s.extendBox)))
+	mux.Handle("POST /api/boxes/{name}/claim", control(http.HandlerFunc(s.claimThrowaway)))
+}
+
+func (s *Server) claimThrowaway(w http.ResponseWriter, r *http.Request) {
+	var req dash.ClaimThrowawayBody
+	if !decode(w, r, &req) {
+		return
+	}
+	box := r.PathValue("name")
+	key, badKey := hex.DecodeString(req.RepoKey)
+	sz, sized := mode.LookupSize(req.Size)
+	if !validBoxName.MatchString(box) || badKey != nil || len(key) != 32 || !sized || sz.GPU {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "claim needs a box name, repository key and CPU size")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
+	defer cancel()
+	claimed, err := s.W.claimThrowaway(ctx, box, req.RepoKey, sz.Name)
+	switch {
+	case err != nil:
+		writeError(w, http.StatusBadGateway, dash.CodeIncus, err.Error())
+	case !claimed:
+		w.WriteHeader(http.StatusConflict)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // device names the asking device for the history and the mode request: its
