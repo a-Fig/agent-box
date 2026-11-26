@@ -1105,7 +1105,7 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 // dnsWaitBound is how long a fresh throwaway may wait for DNS, and dnsPoll
 // how often it tries again (#152).
 const (
-	dnsWaitBound = 30 * time.Second
+	dnsWaitBound = 10 * time.Second
 	dnsPoll      = 500 * time.Millisecond
 )
 
