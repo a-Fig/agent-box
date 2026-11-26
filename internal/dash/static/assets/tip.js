@@ -87,8 +87,8 @@ document.addEventListener("focusin", (e) => {
 });
 document.addEventListener("focusout", (e) => markOf(e) === at && hide());
 
-// Left and right along a row of marks, Home and End to its ends. Up and down go to the nearest
-// mark in the row above or below when a chart has rows (<g class="row">), and along the marks
+// Left and right along a row of marks, Home and End to its ends. Up and down go to the mark in
+// the row above or below that covers this one's time when a chart has rows (<g class="row">), and along the marks
 // when it hasn't (the bar lists run down the page).
 const centre = (m) => { const r = m.getBoundingClientRect(); return r.left + r.width / 2; };
 function nextMark(m, key) {
@@ -102,8 +102,11 @@ function nextMark(m, key) {
     const rows = [...m.parentElement.parentElement.querySelectorAll(":scope > g.row")].filter((g) => along(g).length);
     const row = rows[rows.indexOf(m.parentElement) + d];
     if (!row) return m;
+    // The mark whose span holds this one's centre (gap 0), else the nearest edge: mode segments
+    // vary in width, so the nearest centre can be a segment that doesn't cover this time.
     const x = centre(m);
-    return along(row).reduce((a, b) => (Math.abs(centre(b) - x) < Math.abs(centre(a) - x) ? b : a));
+    const gap = (b) => { const r = b.getBoundingClientRect(); return Math.max(r.left - x, 0, x - r.right); };
+    return along(row).reduce((a, b) => (gap(b) < gap(a) ? b : a));
   }
   return marks[Math.min(marks.length - 1, Math.max(0, i + d))];
 }
