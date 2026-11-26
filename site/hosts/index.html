@@ -57,8 +57,8 @@
       <section class="fact">
         <div class="label"><h2>Queue when busy</h2></div>
         <div class="body">
-          <p>When a host is in <code>My PC</code>, full on memory/CPUs, or already running a GPU job, CPU runs wait automatically unless you pass <code>--no-queue</code> in CLI (or <code>queue: false</code> / <code>push: false</code> in <code>box_run</code>). GPU runs requested while the host is in <code>My PC</code> mode are refused immediately with exit 75 instead of queueing.</p>
-          <p><code>boxd</code> holds up to 2 GiB of queued snapshots in all in a crash-safe disk queue, schedules fair-share FIFO by agent session, nudges agents after 20 minutes if the host stays busy, and expires unstarted entries after 24 hours. Open <code>box ui</code> to reorder or cancel queued runs.</p>
+          <p>Queueing requires a reachable <code>boxd</code>. When the host is in <code>My PC</code> mode or full on memory/CPUs, queued runs wait (CPU runs still launch while an exclusive GPU job is running if CPU and RAM headroom remain, whereas a second GPU job waits in the queue). In MCP <code>box_run</code>, queueing requires an active T3 push context (otherwise busy runs return exit 75; terminal <code>box run</code> waits inline). Pass <code>--no-queue</code> in CLI (or <code>queue: false</code> / <code>push: false</code> in <code>box_run</code>) to skip the queue, and GPU runs requested during <code>My PC</code> always fail at once with exit 75.</p>
+          <p><code>boxd</code> holds up to 2 GiB of queued snapshots in all in a crash-safe disk queue and schedules fair-share FIFO by agent session. When push wakeups are active, the local <code>box watch</code> process nudges the agent once after 20 minutes if the job stays queued; <code>boxd</code> expires unstarted entries after 24 hours. Open <code>box ui</code> to reorder or cancel queued runs.</p>
         </div>
       </section>
       <section class="fact">

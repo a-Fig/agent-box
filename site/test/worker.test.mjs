@@ -138,6 +138,9 @@ test('mp4 requests support closed, suffix, and open-ended byte ranges, and 404 a
     ASSETS: {
       fetch: async req => {
         if (new URL(req.url).pathname === '/how-wide.mp4') {
+          if (req.method === 'HEAD') {
+            return new Response(null, { status: 200, headers: { 'Content-Type': 'video/mp4', 'Content-Length': '10' } });
+          }
           return new Response(bytes, { status: 200, headers: { 'Content-Type': 'video/mp4' } });
         }
         return new Response(req.method === 'HEAD' ? null : 'missing', { status: 404, headers: { 'Content-Type': 'text/plain' } });
@@ -148,6 +151,11 @@ test('mp4 requests support closed, suffix, and open-ended byte ranges, and 404 a
   const full = await worker.fetch(new Request('https://agent-box.afig.dev/how-wide.mp4'), env, makeCtx());
   assert.equal(full.status, 200);
   assert.equal(full.headers.get('Accept-Ranges'), 'bytes');
+
+  const headWithRange = await worker.fetch(new Request('https://agent-box.afig.dev/how-wide.mp4', { method: 'HEAD', headers: { Range: 'bytes=2-5' } }), env, makeCtx());
+  assert.equal(headWithRange.status, 200);
+  assert.equal(headWithRange.headers.get('Accept-Ranges'), 'bytes');
+  assert.equal(await headWithRange.text(), '');
 
   const closed = await worker.fetch(new Request('https://agent-box.afig.dev/how-wide.mp4', { headers: { Range: 'bytes=2-5' } }), env, makeCtx());
   assert.equal(closed.status, 206);

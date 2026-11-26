@@ -19,8 +19,8 @@ checks gain little from offloading.
   Requires `reason` (10 to 300 characters) explaining why the run needs a box; the host's owner sees
   it. Returns inline if the job finishes within 30 seconds; otherwise returns `state: running` with
   a job ID (`push: true` pushes the result into your T3 Code thread when done; pass `push: false`
-  in subagents and call `box_job` instead). With `push`, runs that can't start now queue cleanly
-  (`state: queued`). Use `new: true` for parallel runs on the same repo.
+  in subagents and call `box_job` instead). With `push: true`, an active T3 push context, and a reachable `boxd`, runs that can't start now queue cleanly
+  (`state: queued`); without both, busy runs return exit 75 (`state: refused`). Use `new: true` for parallel runs on the same repo.
 - `box_job`: wait up to 10 minutes for a job's full output (`id`), page logs without waiting
   (`offset` / `limit`), or list recent jobs (omit `id`).
 - `box_cancel`: kill a running job's process session (exit 130) or remove a queued job and its

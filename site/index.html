@@ -87,7 +87,19 @@ code {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
+[hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.copy-fallback {
+  width: min(520px, 100%);
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--butter);
+  background: var(--ink);
+  color: var(--cream);
+  font: 500 12.5px/1.4 var(--mono);
+}
+.copy-fallback:focus { outline: 2px solid var(--blue); outline-offset: 2px; }
 
 /* ---------- Hero stage over fluted Cobalt glass ---------- */
 .hero {
@@ -1096,16 +1108,16 @@ h2 {
 
       <div class="see-win">
         <div class="see-chrome"><i></i><i></i><i></i><span id="seeAddr">https://pc/ui · Gaming PC · Full</span></div>
-        <div class="see-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+        <div class="see-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
           <img src="/ui-overview.webp" alt="box ui Overview displaying Gaming PC Full mode, CPU 10/24, Memory 10.0 GiB/12.0 GiB, Boxes 3/6, Disk 108/150 GiB, and two live vitest and go test -race jobs" width="1280" height="800">
         </div>
-        <div class="see-panel" id="panel-mode" role="tabpanel" aria-labelledby="tab-mode" hidden>
+        <div class="see-panel" id="panel-mode" role="tabpanel" aria-labelledby="tab-mode" tabindex="0" hidden>
           <video class="ui-vid" data-src="/ui-mode.mp4" data-last="/ui-mode-last.webp" poster="/ui-mode-first.webp" muted playsinline preload="none" width="1280" height="800" aria-label="Switching host mode to My PC freezes active containers and pauses queued jobs"></video>
         </div>
-        <div class="see-panel" id="panel-job" role="tabpanel" aria-labelledby="tab-job" hidden>
+        <div class="see-panel" id="panel-job" role="tabpanel" aria-labelledby="tab-job" tabindex="0" hidden>
           <video class="ui-vid" data-src="/ui-job.mp4" data-last="/ui-job-last.webp" poster="/ui-job-first.webp" muted playsinline preload="none" width="1280" height="800" aria-label="Following a live container build log inside box ui"></video>
         </div>
-        <div class="see-panel" id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+        <div class="see-panel" id="panel-history" role="tabpanel" aria-labelledby="tab-history" tabindex="0" hidden>
           <video class="ui-vid" data-src="/ui-history.mp4" data-last="/ui-history-last.webp" poster="/ui-history-first.webp" muted playsinline preload="none" width="1280" height="800" aria-label="7-day History view showing 191 jobs, 82% pass rate, mode timeline, and queued vs refused runs"></video>
         </div>
       </div>
@@ -1338,11 +1350,12 @@ h2 {
 
   // ---------- 1. Subtle premultiplied-alpha WebGL caustic glint over Cobalt ----------
   const canvas = document.getElementById('heroGl');
-  let glRaf = 0;
+  const heroEl = document.querySelector('.hero');
+  let glRaf = 0, glVisible = true, glLost = false, paintGL = null;
   function initGL() {
     if (!canvas) return null;
     const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
-    if (!gl) return null;
+    if (!gl || gl.isContextLost()) return null;
     const vs = 'attribute vec2 p;varying vec2 v;void main(){v=p*.5+.5;gl_Position=vec4(p,0.,1.);}';
     const fs = 'precision mediump float;varying vec2 v;uniform float t;void main(){'
       + 'float w1=sin(v.x*4.2+t*.45+sin(v.y*2.6-t*.22));'
@@ -1353,9 +1366,10 @@ h2 {
       + 'vec3 col=mix(cream,butter,smoothstep(.15,.85,v.x));'
       + 'gl_FragColor=vec4(col*a,a);}';
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const vSh = sh(gl.VERTEX_SHADER, vs), fSh = sh(gl.FRAGMENT_SHADER, fs);
     const prog = gl.createProgram();
-    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
-    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.attachShader(prog, vSh);
+    gl.attachShader(prog, fSh);
     gl.linkProgram(prog);
     gl.useProgram(prog);
     const buf = gl.createBuffer();
@@ -1374,23 +1388,57 @@ h2 {
     };
     resize();
     addEventListener('resize', resize, { passive: true });
-    return now => {
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.uniform1f(uT, now * 0.001);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return {
+      paint(now) {
+        if (glLost || gl.isContextLost()) return;
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(uT, now * 0.001);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      },
+      dispose() {
+        removeEventListener('resize', resize);
+        if (!gl.isContextLost()) {
+          gl.deleteBuffer(buf);
+          gl.deleteShader(vSh);
+          gl.deleteShader(fSh);
+          gl.deleteProgram(prog);
+        }
+      },
     };
   }
-  const paintGL = initGL();
-  const stopGL = () => {
+  const stopGL = (clear = true) => {
     if (glRaf) { cancelAnimationFrame(glRaf); glRaf = 0; }
-    if (paintGL) paintGL(0);
+    if (clear && paintGL) paintGL.paint(0);
   };
   const startGL = () => {
-    if (!paintGL || reduced.matches || glRaf) return;
-    const loop = now => { paintGL(now); glRaf = requestAnimationFrame(loop); };
+    if (!paintGL || glLost || !glVisible || document.hidden || reduced.matches || glRaf) return;
+    const loop = now => { paintGL.paint(now); glRaf = requestAnimationFrame(loop); };
     glRaf = requestAnimationFrame(loop);
   };
+  paintGL = initGL();
+  if (canvas) {
+    canvas.addEventListener('webglcontextlost', e => {
+      e.preventDefault();
+      glLost = true;
+      stopGL(false);
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      glLost = false;
+      paintGL?.dispose();
+      paintGL = initGL();
+      startGL();
+    });
+  }
+  if (heroEl && 'IntersectionObserver' in window) {
+    new IntersectionObserver(entries => {
+      glVisible = Boolean(entries[0]?.isIntersecting);
+      if (glVisible) startGL(); else stopGL(false);
+    }, { threshold: 0.01 }).observe(heroEl);
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopGL(false); else startGL();
+  });
   startGL();
 
   // ---------- 2. Pointer-tracking cube mascot eyes ----------
@@ -1484,8 +1532,26 @@ h2 {
     document.getElementById('benchNote').textContent = note;
   }));
 
-  // ---------- 4. Copy feedback + screen-reader live announcement ----------
+  // ---------- 4. Copy feedback + screen-reader live announcement + selectable fallback ----------
   const copyLive = document.getElementById('copyLive');
+  const showCopyFallback = (btn, text) => {
+    const anchor = btn.closest('.hero-acts, .setup-acts, .close-acts, .cmd-bar') || btn.parentElement;
+    if (!anchor) return;
+    let field = anchor.nextElementSibling?.classList.contains('copy-fallback') ? anchor.nextElementSibling : null;
+    if (!field) {
+      field = document.createElement('input');
+      field.type = 'text';
+      field.readOnly = true;
+      field.className = 'copy-fallback';
+      field.setAttribute('aria-label', 'Selectable text to copy manually');
+      field.addEventListener('click', () => field.select());
+      anchor.insertAdjacentElement('afterend', field);
+    }
+    field.value = text;
+    field.hidden = false;
+    field.focus();
+    field.select();
+  };
   const writeCopy = async (btn, orig, text, okMsg) => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error('no clipboard');
@@ -1494,8 +1560,9 @@ h2 {
       btn.classList.add('copied');
       if (copyLive) copyLive.textContent = okMsg;
     } catch {
-      btn.textContent = 'Copy unavailable';
-      if (copyLive) copyLive.textContent = 'Clipboard permission blocked; copy text manually.';
+      btn.textContent = 'Copy manually below';
+      showCopyFallback(btn, text);
+      if (copyLive) copyLive.textContent = 'Clipboard permission blocked; prompt selected below for manual copy.';
     }
     setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
   };

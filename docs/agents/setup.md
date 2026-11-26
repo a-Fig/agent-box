@@ -29,17 +29,17 @@ What `provision/setup-host.sh` installs and configures (as root):
 - A restricted Incus project `agents`, its `default` profile, a shared 30 GiB `/cache` volume, and
   the `agent-base` Ubuntu 24.04 image (Go, Node LTS, uv, JDK 17, gh, git, build-essential,
   Chromium libraries, lazy Android SDK hook).
-- With `--tailscale`: joins Tailscale as `agent-box`, installs `boxd` (`agent-box-boxd.service`) for
-  the queue and dashboard over `tailscale serve` on `:443`, and sets up automatic hourly updates
-  (`agent-box-update.timer`, disabled via `AGENT_BOX_NO_UPDATE=1` in `/etc/agent-box/update.env`).
+- With `--tailscale`: joins Tailscale as `agent-box`, sets up weekly Let's Encrypt TLS certificates for `:8443`, and — when a Linux `boxd` binary is staged beside `setup-host.sh` (or already installed) — installs `boxd` (`agent-box-boxd.service`), `tailscale serve` on `:443`, and automatic hourly updates (`agent-box-update.timer`, disabled via `AGENT_BOX_NO_UPDATE=1` in `/etc/agent-box/update.env`). Without a `boxd` binary staged, the queue and `box ui` dashboard are skipped and updates stay inactive; after setup, push `boxd` from a client with `provision/deploy-boxd.sh <user@host>` (or stage `provision/boxd` before running `--tailscale`). See `provision/README.md`.
 
 Run from a clone of `https://github.com/a-Fig/agent-box`:
 
     sudo agent-box/provision/setup-host.sh --build-base
 
-Or with Tailscale for the dashboard and queue (`TS_AUTHKEY` is optional if already logged in):
+Or with Tailscale TLS (and `boxd` when staged beside `setup-host.sh`, `TS_AUTHKEY` is optional if already logged in):
 
     TS_AUTHKEY=tskey-auth-... sudo --preserve-env=TS_AUTHKEY agent-box/provision/setup-host.sh --tailscale --build-base
+
+To add the queue and `box ui` dashboard after a fresh Linux clone, deploy `boxd` over SSH (`provision/deploy-boxd.sh <user@host>`), or run `setup-host.sh --tailscale` with a Linux `boxd` binary staged beside it.
 
 Setup takes about 10 minutes (mostly building `agent-base`) and ends by printing the single-use
 `incus remote add` command for clients. Give that exact line to your user.

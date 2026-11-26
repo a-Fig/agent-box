@@ -98,6 +98,7 @@ async function video(request, env) {
   if (!res.ok) return res;
   const headers = new Headers(res.headers);
   headers.set('Accept-Ranges', 'bytes');
+  if (request.method !== 'GET') return new Response(res.body, { status: res.status, headers });
   const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('Range') || '');
   if (!m || (!m[1] && !m[2])) return new Response(res.body, { status: res.status, headers });
 
