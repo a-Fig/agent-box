@@ -244,6 +244,48 @@ preferred node is not available, Ray may run the task somewhere else": locality 
 never a reason to wait long. Custom resources (a named count on a node) are another form of
 labels.
 
+## Sandboxes for agents
+
+**Cloudflare Sandboxes** (Sandbox SDK, on Cloudflare Containers) give an agent a Linux container
+that belongs to one task, driven from a TypeScript API for "executing commands, managing files, and
+exposing services". Each instance is "a microVM with its own kernel and network"
+([overview](https://developers.cloudflare.com/sandbox/)). Generally available since 2026-04-13, on
+the Workers Paid plan ([changelog](https://developers.cloudflare.com/changelog/post/2026-04-13-containers-sandbox-ga/)).
+Pricing figures are not on those pages.
+
+- *Preview URLs* (#190). A web server running in a sandbox opens at a URL, "so agents can run
+  long-lived services and verify in-flight changes". That is the feature #190 takes; its limits
+  (private, own origin, short-lived) are ours to add, since the pages read here don't describe
+  them.
+- *The API as a checklist* (#191). What the SDK offers is what its authors think agents expect:
+  run commands and stream output, move files in and out, keep processes running, persistent code
+  interpreters, interactive terminals, filesystem watching, and backup and restore of a workspace
+  ([changelog](https://developers.cloudflare.com/changelog/post/2026-04-13-containers-sandbox-ga/)).
+  Compare it with `box_run`, `box_job` and `box_pull`, and file a gap only where an agent hit it.
+- *Credentials stay outside* (#192). For self-run agents (Claude Code, Codex, OpenCode, Pi) the
+  Worker "adds the API token to each request, so the sandbox never receives it"
+  ([coding agents](https://developers.cloudflare.com/sandbox/coding-agents/)). The rule for a
+  cloud host: its keys live with the client, not in a box.
+- *A paid sandbox as a host* (#192). When the owner's machines are full or paused, a rented
+  sandbox is one more host with an explicit priority (#171) and a spending limit. It takes a host
+  adapter for a non-Incus backend; the router treats it like any other host.
+- Don't copy: the Worker-fronted design, where HTTP reaches an instance only through a Worker the
+  customer writes. Our boxes are driven by `box` and the dashboard, and need no per-task code.
+
+**Cloudflare Workers** run code in V8 isolates: "Instead of creating a virtual machine for each
+function, an isolate is created within an existing environment"
+([how Workers works](https://developers.cloudflare.com/workers/reference/how-workers-works/)).
+Cloudflare's own 2018 post (updated 2026-07-15, numbers as first written) claims isolates start in
+5 ms and use about 3 MB against 35 MB for a basic Node Lambda
+([Cloud Computing without Containers](https://blog.cloudflare.com/cloud-computing-without-containers/)).
+
+- Nothing to take for placement or limits: isolates fit thousands of short request handlers per
+  machine, a job shape agent-box doesn't have.
+- Don't copy: the isolate model. The same post says "An Isolate-based system can't run arbitrary
+  compiled code"; code must be JavaScript, TypeScript or something that compiles to WebAssembly.
+  Test suites, `go build` and `-race` need a shell, a toolchain and a full Linux, so a box stays a
+  container. Cloudflare's own Sandboxes for coding agents are containers, not isolates.
+
 ## Lessons for #159
 
 1. **Pick in two steps** (Borg, Kubernetes, Nomad): filter hosts that can run the job now, then
