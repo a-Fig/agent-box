@@ -145,11 +145,15 @@ function timeline(d, range) {
   const left = 52;
   const x = (t) => left + ((Math.min(Math.max(t, t0), t0 + span) - t0) / span) * (W - left);
   const kids = [s("text", { x: left - 6, y: 19, "text-anchor": "end" }, "mode")];
+  // Each row's marks in a group of their own, so the arrow keys move along a row and up and down
+  // between rows (tip.js).
+  const segs = [], refusedHits = [], queuedHits = [];
   for (const seg of d.segments || []) {
     const a = x(Date.parse(seg.start)), b = x(Date.parse(seg.end));
     if (b - a < 0.5) continue;
-    kids.push(s("rect", tip(modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")", { class: "mark", x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] })));
+    segs.push(s("rect", tip(modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")", { class: "mark", x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] })));
   }
+  kids.push(s("g", { class: "row" }, segs));
   const max = Math.max(1, ...buckets.map((b) => sum(b.refusals.byWhy)));
   const step = (W - left) / buckets.length;
   kids.push(s("text", { x: left - 6, y: 52, "text-anchor": "end" }, "refused"), s("line", { class: "axis", x1: left, x2: W, y1: 62, y2: 62 }));
@@ -158,8 +162,9 @@ function timeline(d, range) {
     const bx = left + step * i + step * 0.2;
     if (n) kids.push(s("rect", { x: bx, y: 62 - (n / max) * 26, width: Math.max(2, step * 0.6), height: (n / max) * 26, rx: 2, fill: "var(--s8)" }));
     const why = Object.entries(b.refusals.byWhy || {}).map(([k, v]) => v + " " + (WHY[k] || k));
-    kids.push(s("rect", tip(label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"), { class: "hit", x: left + step * i, y: 32, width: step, height: 30 })));
+    refusedHits.push(s("rect", tip(label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"), { class: "hit", x: left + step * i, y: 32, width: step, height: 30 })));
   });
+  kids.push(s("g", { class: "row" }, refusedHits));
   // Runs queued, counted when they were queued; a bucket's tooltip also gives the waits of the
   // queued runs that started in it.
   const qmax = Math.max(1, ...buckets.map((b) => b.queued?.jobs || 0));
@@ -171,8 +176,9 @@ function timeline(d, range) {
     if (n) kids.push(s("rect", { x: bx, y: 100 - (n / qmax) * 26, width: Math.max(2, step * 0.6), height: (n / qmax) * 26, rx: 2, fill: "var(--s7)" }));
     const lines = [label(b, range) + ": " + (n ? n + " queued" : "none queued")];
     if (q.started) lines.push(q.started + " started after a median wait of " + dur(q.medianWaitSeconds));
-    kids.push(s("rect", tip(lines.join("\n"), { class: "hit", x: left + step * i, y: 70, width: step, height: 30 })));
+    queuedHits.push(s("rect", tip(lines.join("\n"), { class: "hit", x: left + step * i, y: 70, width: step, height: 30 })));
   });
+  kids.push(s("g", { class: "row" }, queuedHits));
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => i % every === 0 && kids.push(s("text", { x: left + step * i + step / 2, y: 116, "text-anchor": "middle" }, label(b, range))));
   return rove(s("svg", { viewBox: `0 0 ${W} 120`, role: "group", "aria-label": "Mode timeline, refused runs and queued runs" }, kids));

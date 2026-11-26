@@ -78,25 +78,56 @@ document.addEventListener("pointerdown", (e) => {
   if (m) show(m);
   else hide();
 });
+// The focused mark, however it was focused, is its chart's one tab stop.
 document.addEventListener("focusin", (e) => {
   const m = markOf(e);
-  if (m) show(m);
+  if (!m) return;
+  (m.closest("svg, .hbars") || m.parentElement).querySelectorAll("[data-tip]").forEach((o) => o.setAttribute("tabindex", o === m ? "0" : "-1"));
+  show(m);
 });
 document.addEventListener("focusout", (e) => markOf(e) === at && hide());
-const STEP = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
+
+// Left and right along a row of marks, Home and End to its ends. Up and down go to the nearest
+// mark in the row above or below when a chart has rows (<g class="row">), and along the marks
+// when it hasn't (the bar lists run down the page).
+const centre = (m) => { const r = m.getBoundingClientRect(); return r.left + r.width / 2; };
+function nextMark(m, key) {
+  const along = (p) => [...p.querySelectorAll(":scope > [data-tip]")];
+  const marks = along(m.parentElement);
+  const i = marks.indexOf(m);
+  if (key === "Home") return marks[0];
+  if (key === "End") return marks[marks.length - 1];
+  const d = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;
+  if ((key === "ArrowUp" || key === "ArrowDown") && m.parentElement.matches("g.row")) {
+    const rows = [...m.parentElement.parentElement.querySelectorAll(":scope > g.row")].filter((g) => along(g).length);
+    const row = rows[rows.indexOf(m.parentElement) + d];
+    if (!row) return m;
+    const x = centre(m);
+    return along(row).reduce((a, b) => (Math.abs(centre(b) - x) < Math.abs(centre(a) - x) ? b : a));
+  }
+  return marks[Math.min(marks.length - 1, Math.max(0, i + d))];
+}
+const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") return hide();
   const m = markOf(e);
-  if (!m || !(e.key in STEP || e.key === "Home" || e.key === "End")) return;
-  const marks = [...m.parentElement.querySelectorAll(":scope > [data-tip]")];
-  const i = marks.indexOf(m);
-  const next = marks[e.key === "Home" ? 0 : e.key === "End" ? marks.length - 1 : Math.min(marks.length - 1, Math.max(0, i + (STEP[e.key] || 0)))];
+  if (!m || !KEYS.includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   e.preventDefault();
-  if (next === m) return;
-  m.setAttribute("tabindex", "-1");
-  next.setAttribute("tabindex", "0");
-  next.focus();
+  const next = nextMark(m, e.key);
+  if (next !== m) next.focus(); // focusin makes it the tab stop
 });
-// A scroll moves the mark: a focused one's tooltip follows it, a hovered one's closes.
-window.addEventListener("scroll", () => at && (at === document.activeElement ? place() : hide()), { capture: true, passive: true });
+
+// A scroll moves the mark: a focused one's tooltip follows it, a hovered one's closes, and the
+// tooltip goes back to a mark focused from the keyboard, if there is one.
+window.addEventListener(
+  "scroll",
+  () => {
+    if (!at) return;
+    if (at === document.activeElement) return place();
+    const k = keyed();
+    if (k) show(k);
+    else hide();
+  },
+  { capture: true, passive: true },
+);
 window.addEventListener("resize", hide);
