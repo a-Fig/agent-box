@@ -157,6 +157,9 @@ func (w *Watcher) Poll(ctx context.Context) {
 	w.applyJobs(now, ins, scans, "")
 	w.sweepEnded(now, ins, scans)
 	for _, in := range ins {
+		if in.Status == "Frozen" {
+			w.promoteClaim(in)
+		}
 		boxes[in.Name] = w.box(now, in)
 	}
 	w.applyBoxes(now, ins, boxes)
@@ -354,10 +357,8 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			if j.Repo != "" {
 				w.repoOf[box] = j.Repo
 			}
-			if s.State == "running" && in.Config[jobrun.ThrowawayOwnerKey] == s.Job &&
-				in.Config[jobrun.ThrowawayClaimKey] != "" && !w.promoting[box] {
-				w.promoting[box] = true
-				go w.promotePoolJob(box, s.Job)
+			if s.State == "running" && in.Config[jobrun.ThrowawayOwnerKey] == s.Job {
+				w.promoteClaim(in)
 			}
 			before := *j
 			if s.Tail != "" {
@@ -408,8 +409,18 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 	}
 }
 
-// A client can drop its connection just as the start script runs. The
-// scanner promotes a claimed owner it finds running in that case.
+// With w.mu held. A frozen box can have started just before My PC paused it.
+func (w *Watcher) promoteClaim(in Instance) {
+	job := in.Config[jobrun.ThrowawayOwnerKey]
+	if in.Config[jobrun.ThrowawayClaimKey] == "" || w.promoting[in.Name] || !poolJobMatches(in.Name, job) {
+		return
+	}
+	w.promoting[in.Name] = true
+	go w.promotePoolJob(in.Name, job)
+}
+
+// Retry from a later poll if the client lost its connection at startup or
+// the current Incus lookup failed.
 func (w *Watcher) promotePoolJob(box, job string) {
 	defer func() {
 		w.mu.Lock()

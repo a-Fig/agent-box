@@ -31,6 +31,7 @@ type fakeIncus struct {
 	execs  int
 	cli    []string
 	cliErr func(args []string) error
+	files  map[string]string
 	cancel string // the last cancel script
 	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
@@ -233,6 +234,13 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 		return nil, f.cliErr(args)
 	}
 	switch args[0] {
+	case "file":
+		if args[1] == "pull" {
+			if data, ok := f.files[args[2]]; ok {
+				return []byte(data), nil
+			}
+			return nil, &ExitError{Code: 1, Stderr: "file does not exist"}
+		}
 	case "launch":
 		size := "medium"
 		for i, a := range args {

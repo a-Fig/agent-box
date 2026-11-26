@@ -205,7 +205,10 @@ func (w *Watcher) setPoolExpiry(ctx context.Context, box, job string, ended bool
 }
 
 func (w *Watcher) poolExpiryConfig(ctx context.Context, in Instance, job string, ended bool) map[string]string {
-	if in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job || in.Status != "Running" {
+	if in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job {
+		return nil
+	}
+	if in.Status != "Running" && (in.Status != "Frozen" || ended) {
 		return nil
 	}
 	now := w.Now().UTC()
@@ -220,10 +223,20 @@ func (w *Watcher) poolExpiryConfig(ctx context.Context, in Instance, job string,
 	} else if !lease {
 		return nil
 	}
-	out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot))
-	running := strings.Fields(string(out))
-	if err != nil || (ended && len(running) != 0) || (!ended && !slices.Contains(running, job)) {
-		return nil
+	if in.Status == "Frozen" {
+		// StartScript writes the job's .repo before spawning its wrapper.
+		// That file is readable while exec is blocked by the freeze.
+		p := in.Name + workRoot + "/.box/" + job + ".repo"
+		out, err := w.Incus.CLI(ctx, "", "file", "pull", p, "-")
+		if err != nil || !validBoxName.MatchString(strings.TrimSpace(string(out))) {
+			return nil
+		}
+	} else {
+		out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot))
+		running := strings.Fields(string(out))
+		if err != nil || (ended && len(running) != 0) || (!ended && !slices.Contains(running, job)) {
+			return nil
+		}
 	}
 	return map[string]string{
 		jobrun.ExpiresKey:        mode.Held(in.Config, now.Add(ttl)).Format(time.RFC3339),

@@ -138,3 +138,40 @@ func TestThrowawayPoolIsDisabledByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestPollPromotesAClaimThatFrozeAtStartup(t *testing.T) {
+	r := newQueueRig(t, nil)
+	in := inst("widget-1234", "Frozen", "small", t0)
+	owner := in.Name + ".20261124-180000-1111"
+	claim := t0.Add(jobrun.ThrowawayClaimTTL).Format(time.RFC3339)
+	in.Config[jobrun.ThrowawayKey] = "true"
+	in.Config[jobrun.ThrowawayRepoKey] = strings.Repeat("a", 64)
+	in.Config[jobrun.ThrowawayOwnerKey] = owner
+	in.Config[jobrun.ThrowawayClaimKey] = claim
+	in.Config[jobrun.ExpiresKey] = claim
+	r.f.ins = []Instance{in}
+	poll := func() Instance {
+		t.Helper()
+		r.w.Poll(context.Background())
+		for i := 0; i < 100; i++ {
+			r.w.mu.Lock()
+			pending := r.w.promoting[in.Name]
+			r.w.mu.Unlock()
+			if !pending {
+				got, _ := r.f.instance(in.Name)
+				return got
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("pool promotion never returned")
+		return Instance{}
+	}
+	if got := poll(); got.Config[jobrun.ExpiresKey] != claim {
+		t.Fatalf("unstarted claim expiry changed: %v", got.Config)
+	}
+	r.f.set(func() { r.f.files = map[string]string{in.Name + "/work/.box/" + owner + ".repo": "widget\n"} })
+	if got := poll(); got.Config[jobrun.ExpiresKey] != t0.Add(jobTTL).Format(time.RFC3339) ||
+		got.Config[jobrun.ThrowawayClaimKey] != "" {
+		t.Fatalf("frozen job kept its claim instead of its running expiry: %v", got.Config)
+	}
+}

@@ -98,7 +98,7 @@ func (s *Server) poolExpiry(w http.ResponseWriter, r *http.Request) {
 
 func poolJobMatches(box, job string) bool {
 	name, _, started := jobStart(job)
-	return validBoxName.MatchString(box) && name == box && !started.IsZero()
+	return validBoxName.MatchString(box) && validJob.MatchString(job) && name == box && !started.IsZero()
 }
 
 func poolReply(w http.ResponseWriter, changed bool, err error) {

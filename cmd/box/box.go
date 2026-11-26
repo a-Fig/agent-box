@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -630,12 +631,13 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 	// Each pass looks again, since other launches may be taking the same room
 	// (#87): it deletes the first spare box only if deleting them all would
 	// fit this box, so none is deleted for a launch that fails anyway.
+	rejected := map[string]bool{}
 	for isNoRoom(err) {
 		insts, lerr := a.list(ctx)
 		if lerr != nil {
 			break
 		}
-		spare := a.spareBoxes(ctx, insts)
+		spare := slices.DeleteFunc(a.spareBoxes(ctx, insts), func(in instance) bool { return rejected[in.Name] })
 		if len(spare) == 0 {
 			break
 		}
@@ -646,10 +648,9 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 		gone := spare[0]
 		// A claim or hold may have landed since the selection or the last try.
 		var rerr error
-		if gone.Config[jobrun.ThrowawayRepoKey] != "" {
-			if !a.evictPooled(ctx, gone) {
-				break // the server could not reserve this box for eviction
-			}
+		pooled := gone.Config[jobrun.ThrowawayRepoKey] != ""
+		if pooled {
+			rerr = a.evictPooled(ctx, gone)
 		} else {
 			rerr = jobrun.RetryETag(context.WithoutCancel(ctx), func() error {
 				if !a.stillIdle(ctx, gone) {
@@ -660,6 +661,9 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 			})
 		}
 		if errors.Is(rerr, errNotIdle) {
+			if pooled {
+				rejected[gone.Name] = true
+			}
 			continue // the next pass looks again, without it
 		}
 		if rerr != nil && !isGone(rerr) {

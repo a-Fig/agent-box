@@ -72,13 +72,23 @@ func (a *App) poolPost(ctx context.Context, box, action string, req any) (int, e
 	return status, err
 }
 
-func (a *App) evictPooled(ctx context.Context, in instance) bool {
+func (a *App) evictPooled(ctx context.Context, in instance) error {
 	uid := in.Config["volatile.uuid"]
 	if uid == "" {
 		uid = in.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	status, err := a.poolPost(ctx, in.Name, "evict-idle", struct{ UID string }{uid})
-	return err == nil && status == http.StatusNoContent
+	if err != nil {
+		return err
+	}
+	switch status {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusConflict:
+		return errNotIdle
+	default:
+		return fmt.Errorf("boxd eviction returned HTTP %d", status)
+	}
 }
 
 func (a *App) poolExpiry(ctx context.Context, box, job string, ended bool) {

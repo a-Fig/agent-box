@@ -128,3 +128,42 @@ func TestMarkIdleUsesOwnerCheckedExpiryForPooledBox(t *testing.T) {
 		t.Fatalf("older job changed expiry after boxd refused it: %v", f.insts[0].Config)
 	}
 }
+
+func TestLaunchTriesAnotherPooledBoxAfterEvictionConflict(t *testing.T) {
+	const first, second = "widget-0001", "widget-0002"
+	f := &fakePC{t: t, remotes: testRemotes, refuse: memoryRefusal,
+		kept:    map[string]bool{first: true, second: true},
+		project: map[string]string{"limits.instances": "2"},
+	}
+	a, out := testApp(f)
+	sz := mustSize(t, "small")
+	for i, name := range []string{first, second} {
+		f.insts = append(f.insts, instance{Name: name, Status: "Running", Config: map[string]string{
+			jobrun.ThrowawayKey:     "true",
+			jobrun.ThrowawayRepoKey: "pool",
+			jobrun.ExpiresKey:       a.Now().Add(time.Duration(20+i) * time.Minute).Format(time.RFC3339),
+			mode.SizeKey:            sz.Name,
+		}})
+	}
+	var tried []string
+	a.HTTP = func(r *http.Request) (*http.Response, error) {
+		tried = append(tried, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/boxes/" + first + "/evict-idle":
+			return &http.Response{StatusCode: http.StatusConflict, Body: http.NoBody}, nil
+		case "/api/boxes/" + second + "/evict-idle":
+			f.insts = f.insts[:1]
+			f.refuse = ""
+			return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.Path)
+			return nil, nil
+		}
+	}
+	if err := a.launch(context.Background(), "new-1", time.Hour, true, sz); err != nil {
+		t.Fatalf("launch: %v\n%s", err, out)
+	}
+	if len(tried) != 2 || !strings.Contains(f.names(), first) || strings.Contains(f.names(), second) {
+		t.Fatalf("evictions = %v, boxes = %s", tried, f.names())
+	}
+}
