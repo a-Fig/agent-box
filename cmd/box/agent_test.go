@@ -294,8 +294,14 @@ func TestPullFromStoppedBox(t *testing.T) {
 	if _, err := a.Pull(context.Background(), job, "result.txt", t.TempDir()); err != nil {
 		t.Fatalf("Pull: %v\n%s", err, out)
 	}
-	if got := f.pulls[len(f.pulls)-1]; got != "pc:my-repo-725d/work/my-repo/result.txt" {
-		t.Errorf("pulled %v", f.pulls)
+	pulledResult := false
+	for _, p := range f.pulls {
+		if p == "pc:my-repo-725d/work/my-repo/result.txt" {
+			pulledResult = true
+		}
+	}
+	if !pulledResult {
+		t.Errorf("pulled %v, want pc:my-repo-725d/work/my-repo/result.txt", f.pulls)
 	}
 	// A box name alone has no .repo to read: incus's error stands.
 	if _, err := a.Pull(context.Background(), "my-repo-725d", "result.txt", t.TempDir()); err == nil || !strings.Contains(err.Error(), "not running") {
@@ -315,6 +321,12 @@ func TestPullFromStoppedBox(t *testing.T) {
 		if _, err := a.Pull(context.Background(), job, remote, t.TempDir()); err == nil || !strings.Contains(err.Error(), "was replaced by job "+other) {
 			t.Errorf("Pull(stopped, %q) = %v, want replaced error", remote, err)
 		}
+	}
+	// An absolute path in a DIFFERENT /work/<other> directory on the same stopped
+	// box is not checked against job's .repo ownership.
+	f.files["pc:my-repo-725d/work/.box/other-repo.checkout"] = other + "\n"
+	if _, err := a.Pull(context.Background(), job, "/work/other-repo/result.txt", t.TempDir()); err != nil {
+		t.Errorf("Pull(stopped, /work/other-repo/result.txt) = %v, want success for non-job checkout", err)
 	}
 }
 
@@ -393,6 +405,73 @@ func TestPullDetectsReplacedCheckout(t *testing.T) {
 	if err != nil || res.Code != 0 || strings.TrimSpace(res.Stdout) != workRoot+"/my-repo" {
 		t.Fatalf("box-name checkout script = %+v, %v", res, err)
 	}
+
+	// An absolute path under a DIFFERENT /work/<other> directory is not owned by
+	// job1 (whose .repo is my-repo), so checkoutOwnerScript allows it even when
+	// another job owns other-repo.
+	write(t, filepath.Join(boxDir, "other-repo.checkout"), job2+"\n")
+	res, err = (execRunner{}).Run(ctx, Cmd{Name: bash, Args: []string{"-c", checkoutOwnerScript(job1, "other-repo")}})
+	if err != nil || res.Code != 0 || strings.TrimSpace(res.Stdout) != "" {
+		t.Fatalf("other-repo owner script = %+v, %v", res, err)
+	}
+}
+
+func TestPullRefusesWhenOwnerChangesDuringTransfer(t *testing.T) {
+	job1 := "my-repo.20261123-120000-0001"
+	job2 := "my-repo.20261123-120500-0002"
+
+	t.Run("relative path", func(t *testing.T) {
+		bash := gitBash(t)
+		old := workRoot
+		workRoot = filepath.ToSlash(t.TempDir())
+		defer func() { workRoot = old }()
+
+		boxDir := filepath.Join(workRoot, ".box")
+		if err := os.MkdirAll(boxDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(workRoot, "my-repo"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(boxDir, job1+".log"), "ok\n")
+		write(t, filepath.Join(boxDir, job1+".repo"), "my-repo\n")
+		write(t, filepath.Join(boxDir, job1+".exit"), "0\n")
+		write(t, filepath.Join(boxDir, "my-repo.checkout"), job1+"\n")
+
+		f := &fakePC{t: t, bash: bash}
+		f.pull = func(_, staging string) {
+			write(t, filepath.Join(staging, "result.txt"), "mixed-from-job2\n")
+			// Another job takes over /work/my-repo while incus file pull runs.
+			write(t, filepath.Join(boxDir, "my-repo.checkout"), job2+"\n")
+		}
+		a, _ := testApp(f)
+		local := t.TempDir()
+		if _, err := a.Pull(context.Background(), job1, "result.txt", local); err == nil ||
+			!strings.Contains(err.Error(), "was replaced by job "+job2) {
+			t.Fatalf("Pull across owner change = %v, want replaced error", err)
+		}
+		if entries, err := os.ReadDir(local); err != nil || len(entries) != 0 {
+			t.Errorf("local dir after aborted pull = %v, %v; want nothing published and staging removed", entries, err)
+		}
+	})
+
+	t.Run("absolute path in checkout", func(t *testing.T) {
+		f := &fakePC{t: t, script: "my-repo\n"}
+		f.pull = func(_, staging string) {
+			write(t, filepath.Join(staging, "result.txt"), "mixed-from-job2\n")
+			f.scriptRC = 4
+			f.scriptErr = "job " + job1 + "'s checkout /work/my-repo was replaced by job " + job2
+		}
+		a, _ := testApp(f)
+		local := t.TempDir()
+		if _, err := a.Pull(context.Background(), job1, "/work/my-repo/result.txt", local); err == nil ||
+			!strings.Contains(err.Error(), "was replaced by job "+job2) {
+			t.Fatalf("absolute Pull across owner change = %v, want replaced error", err)
+		}
+		if entries, err := os.ReadDir(local); err != nil || len(entries) != 0 {
+			t.Errorf("local after aborted absolute pull = %v, %v; want nothing published", entries, err)
+		}
+	})
 }
 
 func TestPullAbsolutePathChecksCheckoutOnlyInsideWorkRepo(t *testing.T) {
@@ -410,7 +489,15 @@ func TestPullAbsolutePathChecksCheckoutOnlyInsideWorkRepo(t *testing.T) {
 		t.Fatalf("pulled despite replaced checkout: %v", f.pulls)
 	}
 
+	// Absolute path in a different /work/<other> checkout: checkoutOwnerScript
+	// returns empty stdout (not job's .repo), so Pull proceeds without post-recheck.
+	f.scriptRC, f.scriptErr, f.script = 0, "", ""
+	if _, err := a.Pull(context.Background(), job, "/work/other-repo/out.txt", t.TempDir()); err != nil {
+		t.Errorf("Pull(/work/other-repo/out.txt) = %v, want success", err)
+	}
+
 	// Absolute paths outside /work/<repo> (/tmp and /work/.box) skip the checkout check.
+	f.scriptRC, f.scriptErr = 4, "should not be called"
 	for _, p := range []string{"/tmp/out.txt", "/work/.box/" + job + ".log"} {
 		if _, err := a.Pull(context.Background(), job, p, t.TempDir()); err != nil {
 			t.Errorf("Pull(%q) = %v, want success outside /work/<repo>", p, err)

@@ -313,10 +313,17 @@ fi
 	return s + fmt.Sprintf("echo %s/\"$r\"\n", workRoot)
 }
 
-// checkoutOwnerScript checks that job still owns /work/<repo> before an
-// absolute-path pull reads from it (#197).
+// checkoutOwnerScript checks whether job's .repo matches repo and, if so,
+// verifies that job still owns /work/<repo> (#197). It prints repo when job's
+// checkout is repo and intact, prints nothing when repo is a different
+// directory, exits 3 if job doesn't exist, and exits 4 if another job owns it.
 func checkoutOwnerScript(job, repo string) string {
-	return "# checkout\n" + fmt.Sprintf("test -f %[1]s/.box/%[2]s.log || { echo 'no job %[2]s' >&2; exit 3; }\nr=%[3]s\n", workRoot, job, jobrun.Shq(repo)) + checkoutOwnerCheck(job)
+	return "# checkout\n" + fmt.Sprintf(`test -f %[1]s/.box/%[2]s.log || { echo 'no job %[2]s' >&2; exit 3; }
+r=$(cat %[1]s/.box/%[2]s.repo 2>/dev/null)
+if [ -z "$r" ] || [ "$r" != %[3]s ]; then
+  exit 0
+fi
+`, workRoot, job, jobrun.Shq(repo)) + checkoutOwnerCheck(job) + "echo \"$r\"\n"
 }
 
 // isWindowsPath says whether p looks like a Windows path (C:/..., C:\..., or
@@ -339,6 +346,32 @@ func (a *App) checkStoppedOwner(ctx context.Context, box, job, repo string) erro
 		return fmt.Errorf("job %s's checkout %s/%s was replaced by job %s; pull right after a job, or run with --new (new: true)", job, workRoot, repo, cur)
 	}
 	return nil
+}
+
+// checkCheckoutOwner verifies that job still owns /work/<repo> if repo is job's
+// checkout. owned is true when repo matches job's checkout (so callers recheck
+// it after transferring files into staging).
+func (a *App) checkCheckoutOwner(ctx context.Context, box, job, repo string) (owned bool, err error) {
+	out, stopped, err := a.execCheckoutScript(ctx, box, checkoutOwnerScript(job, repo))
+	if err != nil && stopped {
+		jobRepo, rerr := a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+job+".repo", "-")
+		if rerr != nil {
+			return false, rerr
+		}
+		if strings.TrimSpace(jobRepo) != repo {
+			return false, nil
+		}
+		return true, a.checkStoppedOwner(ctx, box, job, repo)
+	}
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
+
+func inCheckout(cleaned, base string) bool {
+	base = path.Clean(base)
+	return cleaned == base || strings.HasPrefix(cleaned, base+"/")
 }
 
 func (a *App) execCheckoutScript(ctx context.Context, box, script string) (stdout string, stopped bool, err error) {
@@ -406,6 +439,7 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 		}
 		return err
 	}
+	var checkedRepo string
 	if !path.IsAbs(remote) {
 		base, stopped, err := a.execCheckoutScript(ctx, box, checkoutScript(job))
 		if err != nil && job != "" && stopped {
@@ -425,21 +459,22 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 			return "", gone(err)
 		}
 		remote = path.Join(base, remote)
+		if job != "" && inCheckout(path.Clean(remote), base) {
+			if repo := path.Base(path.Clean(base)); validBox.MatchString(repo) {
+				checkedRepo = repo
+			}
+		}
 	} else if job != "" {
 		cleaned := path.Clean(remote)
 		if rest, ok := strings.CutPrefix(cleaned, workRoot+"/"); ok {
 			repo, _, _ := strings.Cut(rest, "/")
 			if validBox.MatchString(repo) {
-				_, stopped, err := a.execCheckoutScript(ctx, box, checkoutOwnerScript(job, repo))
-				if err != nil && stopped {
-					if _, rerr := a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+job+".repo", "-"); rerr != nil {
-						err = rerr
-					} else {
-						err = a.checkStoppedOwner(ctx, box, job, repo)
-					}
-				}
+				owned, err := a.checkCheckoutOwner(ctx, box, job, repo)
 				if err != nil {
 					return "", gone(err)
+				}
+				if owned {
+					checkedRepo = repo
 				}
 			}
 		}
@@ -478,6 +513,14 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 			}
 		}
 		return "", fmt.Errorf("pull %s from %s: %w", remote, box, err)
+	}
+	// Recheck checkout ownership after transferring into staging and before
+	// publishing to dest: another job could have replaced /work/<repo> while
+	// incus file pull was reading it (#197).
+	if checkedRepo != "" {
+		if _, err := a.checkCheckoutOwner(ctx, box, job, checkedRepo); err != nil {
+			return "", gone(err)
+		}
 	}
 	entries, err := os.ReadDir(staging)
 	if err != nil {
