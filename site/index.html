@@ -1,0 +1,376 @@
+<!doctype html>
+<!-- Project Fano: on-demand Linux boxes for coding agents on your own hardware.
+     Source: https://github.com/a-Fig/agent-box  Agent index: https://fano.afig.dev/llms.txt -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Fano — On-demand Linux boxes on your own hardware</title>
+<meta name="description" content="Coding agents offload heavy tests and builds to a spare Linux server or Windows PC inside disposable Incus containers. You choose how much of the machine they get.">
+<link rel="canonical" href="https://fano.afig.dev/">
+<link rel="alternate" type="text/markdown" href="/llms.txt" title="Project Fano, for coding agents">
+<meta name="theme-color" content="#225BFF">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Project Fano">
+<meta property="og:url" content="https://fano.afig.dev/">
+<meta property="og:title" content="Project Fano — On-demand Linux boxes on your own hardware">
+<meta property="og:description" content="Coding agents offload heavy tests and builds to a spare Linux server or Windows PC inside disposable Incus containers. You choose how much of the machine they get.">
+<meta property="og:image" content="https://fano.afig.dev/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Project Fano box logo on cobalt blue beside the words: Project Fano — On-demand Linux boxes on your own hardware.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Project Fano",
+  "alternateName": "agent-box",
+  "description": "On-demand, disposable Linux containers on your own Linux server or Windows PC for coding agents.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "url": "https://fano.afig.dev/",
+  "image": "https://fano.afig.dev/og.jpg",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "codeRepository": "https://github.com/a-Fig/agent-box",
+  "author": { "@type": "Organization", "name": "a-Fig", "url": "https://github.com/a-Fig" }
+}
+</script>
+<style>
+  /* Four colors and their mixes (see site/BRAND.md): cobalt ground, warm cream sheet,
+     butter as the single accent, deep navy ink for text. */
+  :root {
+    --blue: #225BFF;
+    --cream: #FFFBEA;
+    --butter: #FDEE8C;
+    --ink: #0E1B45;
+    --ink-soft: #3A4670;
+    --badge-bg: #DCE6FF;
+    --badge-ink: #1640BF;
+    --line: #DDD7B8;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+    --sheet: clamp(28px, 3.2vw, 44px);
+    --gutter: clamp(20px, 4.5vw, 48px);
+    --ease: cubic-bezier(.22, .8, .24, 1);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { background: var(--blue); }
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--blue);
+    color: var(--cream);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+
+  /* ---------- Top: cobalt ground with subtle grid rules and grain ---------- */
+  .top {
+    position: relative;
+    isolation: isolate;
+    overflow: clip;
+    padding: clamp(22px, 3.5vh, 36px) var(--gutter) clamp(52px, 8vh, 88px);
+  }
+  .top::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(52% 85% at 88% 18%, rgba(253, 238, 140, .20), transparent 72%),
+      radial-gradient(38% 60% at 8% 100%, rgba(14, 27, 69, .24), transparent 75%),
+      repeating-linear-gradient(90deg, rgba(255, 251, 234, .05) 0 1px, transparent 1px 32px),
+      var(--blue);
+  }
+  .top::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--grain);
+    background-size: 180px 180px;
+    mix-blend-mode: overlay;
+    opacity: .11;
+  }
+  .in { max-width: 920px; margin: 0 auto; }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    color: var(--cream);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -.025em;
+    text-decoration: none;
+  }
+  .brand svg { display: block; flex: none; }
+  .nav-gh {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .32);
+    color: var(--cream);
+    font-size: 14.5px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+  }
+  .nav-gh:hover { background: var(--cream); color: var(--ink); box-shadow: inset 0 0 0 1px var(--cream); }
+  .brand:focus-visible, .nav-gh:focus-visible { outline: 2px solid var(--cream); outline-offset: 3px; border-radius: 999px; }
+
+  .hero {
+    margin-top: clamp(44px, 8vh, 80px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 28px clamp(28px, 5vw, 64px);
+  }
+  h1 {
+    font-size: clamp(32px, 4.8vw, 56px);
+    font-weight: 700;
+    letter-spacing: -.035em;
+    line-height: 1.07;
+    color: var(--cream);
+    text-wrap: balance;
+  }
+  h1 span { display: block; }
+  h1 em { display: block; font-style: normal; color: var(--butter); }
+  .lead {
+    margin-top: 20px;
+    max-width: 48ch;
+    font-size: clamp(17px, 1.5vw, 19.5px);
+    line-height: 1.55;
+    color: color-mix(in srgb, var(--cream) 90%, var(--blue));
+    text-wrap: pretty;
+  }
+  .actions {
+    margin-top: 30px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 20px;
+  }
+  .button {
+    display: inline-block;
+    padding: 13px 24px;
+    border-radius: 999px;
+    background: var(--butter);
+    color: var(--ink);
+    font-size: 15.5px;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    text-decoration: none;
+    box-shadow: 0 1px 2px rgba(14, 27, 69, .14), 0 8px 20px -10px rgba(14, 27, 69, .45);
+    transition: background-color .15s ease, transform .15s var(--ease);
+  }
+  .button:hover { background: var(--cream); transform: translateY(-1px); }
+  .button:focus-visible { outline: 2px solid var(--cream); outline-offset: 3px; }
+  .status {
+    font: 500 13.5px/1.4 var(--mono);
+    color: color-mix(in srgb, var(--cream) 88%, var(--blue));
+  }
+  .mascot {
+    width: clamp(112px, 16vw, 168px);
+    height: auto;
+    display: block;
+    filter: drop-shadow(0 18px 28px rgba(14, 27, 69, .30));
+  }
+
+  /* ---------- Sheet: cream, rounded top, heavy rule + hairline rows ---------- */
+  .sheet {
+    flex: 1;
+    background: var(--cream);
+    color: var(--ink);
+    border-radius: var(--sheet) var(--sheet) 0 0;
+    padding: clamp(36px, 6.5vh, 64px) var(--gutter) clamp(36px, 6vh, 56px);
+  }
+  .facts { border-top: 2px solid var(--ink); }
+  .fact {
+    display: grid;
+    grid-template-columns: minmax(0, 12.5em) minmax(0, 1fr);
+    column-gap: 28px;
+    padding: 24px 0 26px;
+    border-bottom: 1px solid var(--line);
+  }
+  .fact h2 {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -.015em;
+    line-height: 1.45;
+  }
+  .fact p {
+    max-width: 60ch;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+  }
+  .fact strong { color: var(--ink); font-weight: 600; }
+  .fact a {
+    color: var(--blue);
+    font-weight: 600;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  .fact a:hover { color: var(--ink); }
+  .fact a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+  code {
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--badge-bg);
+    color: var(--badge-ink);
+    font: 600 .875em/1.5 var(--mono);
+  }
+
+  /* ---------- Footer ---------- */
+  .site-foot {
+    background: var(--cream);
+    padding: 0 var(--gutter);
+  }
+  .site-foot nav {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 20px 0 max(28px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px 24px;
+  }
+  .foot-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--ink);
+    font-size: 14.5px;
+    font-weight: 700;
+    letter-spacing: -.015em;
+    text-decoration: none;
+  }
+  .foot-brand svg { display: block; flex: none; }
+  .site-foot ul {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0;
+    list-style: none;
+  }
+  .site-foot li + li::before { content: "·"; padding: 0 12px; color: var(--ink-soft); opacity: .6; }
+  .site-foot ul a {
+    color: var(--ink-soft);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .site-foot ul a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+  .site-foot a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+
+  @media (max-width: 720px) {
+    .hero { grid-template-columns: 1fr; margin-top: 36px; }
+    .mascot { order: -1; width: 92px; }
+    .fact { grid-template-columns: minmax(0, 1fr); row-gap: 8px; padding: 20px 0 22px; }
+    .fact p { font-size: 15.5px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .button, .nav-gh { transition: none; }
+    .button:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="in">
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="/">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 194" width="30" height="29" aria-hidden="true">
+          <path fill="#FFFBEA" d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/>
+          <path fill="#FFFBEA" fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/>
+          <path fill="#FDEE8C" d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/>
+        </svg>
+        <span>Project Fano</span>
+      </a>
+      <a class="nav-gh" href="https://github.com/a-Fig/agent-box">GitHub</a>
+    </nav>
+
+    <div class="hero">
+      <div>
+        <h1><span>On-demand Linux boxes</span><em>on your own hardware.</em></h1>
+        <p class="lead">Coding agents offload heavy tests and builds to a spare Linux server or Windows PC. You choose how much of the machine they get.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/a-Fig/agent-box">View on GitHub</a>
+          <span class="status">Early work in progress</span>
+        </div>
+      </div>
+
+      <svg class="mascot" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 194" width="168" height="163" aria-hidden="true">
+        <path fill="#FFFBEA" d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/>
+        <path fill="#FFFBEA" fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/>
+        <path fill="#FDEE8C" d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/>
+      </svg>
+    </div>
+  </div>
+</header>
+
+<main class="sheet">
+  <div class="in">
+    <div class="facts">
+      <section class="fact">
+        <h2>What it does</h2>
+        <p>Runs disposable Linux containers with Incus. Heavy test suites, <code>-race</code>, and builds run there instead of starving your laptop.</p>
+      </section>
+      <section class="fact">
+        <h2>How it works</h2>
+        <p>The <code>box</code> CLI and MCP server snapshot your working tree, run the command in a container, and return the result. On Windows, a tray menu picks <strong>My PC</strong>, <strong>Shared</strong>, or <strong>Full</strong>.</p>
+      </section>
+      <section class="fact">
+        <h2>Why Fano</h2>
+        <p>Named for Robert Fano (1917–2016), who founded MIT's Project MAC in 1963 and pioneered time-sharing: turning one computer into a shared utility.</p>
+      </section>
+      <section class="fact">
+        <h2>Status</h2>
+        <p>Built for daily use on one setup first and not ready for outside users yet. Source and docs live at <a href="https://github.com/a-Fig/agent-box">github.com/a-Fig/agent-box</a>.</p>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <nav aria-label="Site">
+    <a class="foot-brand" href="/">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">
+        <rect width="64" height="64" rx="15" fill="#225BFF"/>
+        <svg x="8" y="8.4" width="48" height="46.6" viewBox="0 0 200 194">
+          <path fill="#FFFBEA" d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/>
+          <path fill="#FFFBEA" fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/>
+          <path fill="#FDEE8C" d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/>
+        </svg>
+      </svg>
+      <span>Project Fano</span>
+    </a>
+    <ul>
+      <li><a href="https://github.com/a-Fig/agent-box">GitHub</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul>
+  </nav>
+</footer>
+</body>
+</html>
