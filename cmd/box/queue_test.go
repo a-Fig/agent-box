@@ -363,6 +363,31 @@ func TestIdleRepoBoxGivesWayToALaunch(t *testing.T) {
 	}
 }
 
+// An idle repo box found busy or held when it is read again, just before the
+// delete, is left: box run started a job there, or a person extended it,
+// while the launch looked (#187).
+func TestIdleRepoBoxRecheckedBeforeDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(f *fakePC)
+	}{
+		{"job started", func(f *fakePC) { f.kept["murmur"] = false }},
+		{"held", func(f *fakePC) { f.insts[0].Config[mode.HoldKey] = "2026-11-23T15:00:00Z" }},
+		{"expiry set by a job", func(f *fakePC) { f.insts[0].Config[expiresKey] = "2026-11-24T12:00:00Z" }},
+	} {
+		f := &fakePC{t: t, refuse: memoryRefusal, kept: map[string]bool{"murmur": true},
+			insts: []instance{{Name: "murmur", Status: "Running", Config: map[string]string{expiresKey: "2026-11-23T13:30:00Z"}}}}
+		f.afterKept = func(string) { tc.change(f); f.afterKept = nil } // after the first look
+		a, out := testApp(f)
+		if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "small")); !isNoRoom(err) {
+			t.Fatalf("%s: launch: %v\n%s", tc.name, err, out)
+		}
+		if !strings.Contains(f.names(), "murmur") || strings.Contains(f.callList(), "delete") {
+			t.Errorf("%s: boxes %s, calls %s", tc.name, f.names(), f.callList())
+		}
+	}
+}
+
 // Only idle repo boxes are spare, kept throwaways first and then the longest
 // idle: never one held (an extend or box new --ttl), one with a job running
 // (keptScript says so), or one whose expiry a job has set (#187).

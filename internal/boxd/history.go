@@ -389,6 +389,21 @@ func (h *History) EndedOn(box string, created time.Time) map[string]bool {
 	return out
 }
 
+// EndedOnUID says whether a job recorded on the box with this UID has ended.
+// A job recorded without a UID never counts: by name and creation time alone,
+// a predecessor's job could be credited to a same-name box made within the
+// grace (holds), one whose first job is still starting.
+func (h *History) EndedOnUID(box, uid string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, j := range h.jobs {
+		if j.Box == box && j.BoxUID != "" && j.BoxUID == uid && (j.State == dash.JobDone || j.State == dash.JobLost) {
+			return true
+		}
+	}
+	return false
+}
+
 // LastEnded is the job that started last of those recorded on the box
 // created at created, if it has ended: the one whose 24h the box holds. A
 // queued job's name is when it was queued, so the newest name may not be it.

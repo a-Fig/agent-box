@@ -38,6 +38,7 @@ type fakeIncus struct {
 	between    func(cfg map[string]string)
 	running    map[string][]string // jobs the running-jobs script sees that no scan has yet
 	runChecks  int                 // running-jobs scripts run
+	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
 }
 
 type fakeJob struct {
@@ -170,6 +171,9 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		for _, name := range f.running[box] {
 			fmt.Fprintln(&b, name)
+		}
+		if f.afterRun != nil {
+			f.afterRun(box)
 		}
 		return []byte(b.String()), nil
 	}

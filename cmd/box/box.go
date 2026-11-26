@@ -559,21 +559,42 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 func (a *App) idleRepoBoxes(ctx context.Context, insts []instance) []instance {
 	var out []instance
 	for _, in := range insts {
-		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
-		if in.Config[throwawayKey] == "true" || in.Status != "Running" || err != nil ||
-			exp.After(a.Now().Add(idleTTL+time.Minute)) || mode.Held(in.Config, a.Now()).After(a.Now()) {
-			continue
-		}
-		look, cancel := a.probeCtx(ctx)
-		res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
-		cancel()
-		if err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept" {
+		if a.idleRepo(ctx, in) {
 			out = append(out, in)
 		}
 	}
 	// The expiry is the last job's end plus idleTTL: the earliest is idle longest.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Config[expiresKey] < out[j].Config[expiresKey] })
 	return out
+}
+
+// idleRepo says whether in is an idle repo box, as idleRepoBoxes counts it.
+func (a *App) idleRepo(ctx context.Context, in instance) bool {
+	exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
+	if in.Config[throwawayKey] == "true" || in.Status != "Running" || err != nil ||
+		exp.After(a.Now().Add(idleTTL+time.Minute)) || mode.Held(in.Config, a.Now()).After(a.Now()) {
+		return false
+	}
+	look, cancel := a.probeCtx(ctx)
+	defer cancel()
+	res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
+	return err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept"
+}
+
+// stillIdle reads repo box name again and says whether it is still idle: box
+// run may have started a job there, or a person extended it, since
+// idleRepoBoxes looked, and the room check and other launches came between.
+func (a *App) stillIdle(ctx context.Context, name string) bool {
+	insts, err := a.list(ctx)
+	if err != nil {
+		return false
+	}
+	for _, in := range insts {
+		if in.Name == name {
+			return a.idleRepo(ctx, in)
+		}
+	}
+	return false
 }
 
 // spareBoxes is what a launch short of room may delete, in the order it
@@ -585,6 +606,7 @@ func (a *App) spareBoxes(ctx context.Context, insts []instance) []instance {
 // launch creates box name. Refused for the project's caps, it deletes
 // reclaimable boxes and tries once more, then deletes kept throwaways and
 // then idle repo boxes (spareBoxes) one at a time, trying again after each.
+// Each repo box is read again just before its delete (stillIdle).
 // extra are more launch flags, like box new's reason.
 func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra ...string) error {
 	err := a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
@@ -608,6 +630,9 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 			break
 		}
 		gone := spare[0]
+		if gone.Config[throwawayKey] != "true" && !a.stillIdle(ctx, gone.Name) {
+			continue // the next pass looks again, without it
+		}
 		if rerr := a.Rm(context.WithoutCancel(ctx), gone.Name); rerr != nil && !isGone(rerr) {
 			a.warn(fmt.Sprintf("box: warning: removing %s: %v", gone.Name, rerr))
 			break // it would be listed again

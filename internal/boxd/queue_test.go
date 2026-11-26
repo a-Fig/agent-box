@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -461,6 +462,54 @@ func TestQueueDeletesIdleRepoBoxForRoom(t *testing.T) {
 	}
 	if q := r.w.Queued(); len(q) != 0 {
 		t.Fatalf("still queued: %+v", q)
+	}
+}
+
+// An idle repo box is read again just before its delete: one a person
+// extended since the poll that found it idle is left (#187).
+func TestQueueRechecksIdleRepoBoxBeforeDelete(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		r.f.afterRun = func(box string) {
+			if box == "murmur" {
+				r.f.ins[0].Config = maps.Clone(r.f.ins[0].Config)
+				r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
+				r.f.afterRun = nil
+			}
+		}
+	})
+	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("deleted a box extended since the poll: %v", r.f.cli)
+	}
+	if q := r.w.Queued(); len(q) != 1 {
+		t.Fatalf("queued: %+v", q)
+	}
+}
+
+// A same-name box made in place of an idle one isn't idle on its
+// predecessor's ended job: its own first job may still be starting (#187).
+func TestQueueKeepsReplacedRepoBox(t *testing.T) {
+	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+	r.f.set(func() {
+		in := inst("murmur", "Running", "small", r.c.now())
+		in.Config["user.expires"] = r.c.now().Add(time.Hour).Format(time.RFC3339)
+		r.f.ins[0] = in
+		r.f.jobs["murmur"] = nil
+	})
+	r.c.add(3 * time.Second)
+	r.poll()
+	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 || rep.Why != dash.RefusedFull {
+		t.Fatalf("enqueue: %d %+v", code, rep)
+	}
+	r.c.add(3 * time.Second)
+	r.poll()
+	if len(r.f.cli) != 0 {
+		t.Fatalf("deleted the replacement box: %v", r.f.cli)
 	}
 }
 

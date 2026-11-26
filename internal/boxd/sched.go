@@ -119,19 +119,15 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 // launch takes them. A repo box is a cache: deleting it costs the repo's next
 // run a fresh checkout and a cold build cache. Idle is what spareThrowaways
 // checks: running, no job running or being started there (boxBusy), one
-// ended in boxd's history, and an expiry still the idle one set when its last
+// ended in boxd's history on this very box (its UID: EndedOnUID), and an expiry still the idle one set when its last
 // job ended (idleTTL), not a later job's 24h. Never a held one (mode.Held):
 // a person's extend, or box new --ttl. With w.mu held.
 func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
 	var out []Instance
 	for _, in := range ins {
-		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
-		if in.Config[jobrun.ThrowawayKey] == "true" || in.Status != "Running" || w.boxBusy(in.Name, "") || err != nil ||
-			exp.After(now.Add(idleTTL+time.Minute)) || mode.Held(in.Config, now).After(now) ||
-			w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
-			continue
+		if !w.boxBusy(in.Name, "") && idleRepo(in, now) && w.Hist != nil && w.Hist.EndedOnUID(in.Name, boxUID(in)) {
+			out = append(out, in)
 		}
-		out = append(out, in)
 	}
 	slices.SortFunc(out, func(a, b Instance) int { // the expiry is the last end plus idleTTL
 		ta, _ := time.Parse(time.RFC3339, a.Config[jobrun.ExpiresKey])
@@ -139,6 +135,14 @@ func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
 		return ta.Compare(tb)
 	})
 	return out
+}
+
+// idleRepo says whether in's config is an idle repo box's: running, not a
+// throwaway, its expiry still the idle one and not held.
+func idleRepo(in Instance, now time.Time) bool {
+	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	return in.Config[jobrun.ThrowawayKey] != "true" && in.Status == "Running" && err == nil &&
+		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now)
 }
 
 // spareBoxes is what a queued job short of room may delete, in the order it
@@ -376,6 +380,25 @@ func (w *Watcher) dropQueued(it *queued, now time.Time, why string) {
 	w.emit(dash.Event{Name: dash.EventJob, Data: j})
 }
 
+// stillIdle reads repo box in again, just before a delete: no job running
+// there, and the same box (its UID), its expiry still the idle one and not
+// held. A box another delete took first is no longer idle either.
+func (w *Watcher) stillIdle(ctx context.Context, in Instance) bool {
+	if out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot)); err != nil || strings.TrimSpace(string(out)) != "" {
+		return false
+	}
+	ins, err := w.Incus.Instances(ctx)
+	if err != nil {
+		return false
+	}
+	for _, now := range ins {
+		if now.Name == in.Name {
+			return boxUID(now) == boxUID(in) && idleRepo(now, w.Now())
+		}
+	}
+	return false
+}
+
 // startQueued starts a job and settles the queue after.
 func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Instance) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
@@ -384,10 +407,10 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Inst
 	for _, in := range evict {
 		box, what := in.Name, "kept throwaway"
 		if in.Config[jobrun.ThrowawayKey] != "true" {
-			// box run reuses a repo box, and may have started a job there
-			// since the poll that found it idle.
+			// box run reuses a repo box, and may have started a job there,
+			// or a person extended it, since the poll that found it idle.
 			what = "idle box"
-			if out, xerr := w.Incus.Exec(ctx, box, jobrun.RunningScript(workRoot)); xerr != nil || strings.TrimSpace(string(out)) != "" {
+			if !w.stillIdle(ctx, in) {
 				err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
 				break
 			}
