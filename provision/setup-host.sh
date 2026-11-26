@@ -443,6 +443,15 @@ if [ "$BUILD_BASE" -eq 1 ]; then
     until incus exec "$builder" --project "$PROJECT" -- true >/dev/null 2>&1; do sleep 2; done
     incus exec "$builder" --project "$PROJECT" -- cloud-init status --wait --long \
       || die "cloud-init failed in $builder; see: incus exec $builder --project $PROJECT -- cat /var/log/agent-box-provision.log"
+    # A box is thrown away, so nothing in it updates itself or runs idle housekeeping: apt's
+    # timers and unattended-upgrades hold the dpkg lock and change packages mid-job. Masked, not
+    # just disabled, so no package postinst turns them back on. Kept: networkd, resolved, journald,
+    # logind, udevd, dbus, cron. The image is updated by rebuilding it.
+    incus exec "$builder" --project "$PROJECT" -- systemctl mask --now \
+      unattended-upgrades.service apt-daily.timer apt-daily.service \
+      apt-daily-upgrade.timer apt-daily-upgrade.service motd-news.timer ua-timer.timer \
+      dpkg-db-backup.timer e2scrub_all.timer fstrim.timer \
+      systemd-sysupdate.timer systemd-sysupdate-reboot.timer rsyslog.service polkit.service </dev/null
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
       description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"

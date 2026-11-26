@@ -7,6 +7,7 @@ import { h, icon, tickTimes, dur, stamp } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
 import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog } from "./views.js";
 import { history } from "./history.js";
+import { syncTip } from "./tip.js";
 
 const root = document.getElementById("root");
 const NARROW = window.matchMedia("(max-width: 767px)");
@@ -220,6 +221,7 @@ function draw() {
     current = null;
     shell = null;
     root.replaceChildren(S.conn === "down" ? unreachable() : loading());
+    syncTip();
     toastEl();
     return;
   }
@@ -251,6 +253,7 @@ function draw() {
   finish(shell.content);
   finish(shell.el.firstChild);
   restore(kept);
+  syncTip();
   checkDialog();
   toastEl();
 }
