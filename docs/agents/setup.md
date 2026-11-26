@@ -29,7 +29,7 @@ What `provision/setup-host.sh` installs and configures (as root):
 - A restricted Incus project `agents`, its `default` profile, a shared 30 GiB `/cache` volume, and
   the `agent-base` Ubuntu 24.04 image (Go, Node LTS, uv, JDK 17, gh, git, build-essential,
   Chromium libraries, lazy Android SDK hook).
-- With `--tailscale`: joins Tailscale as `agent-box`, sets up weekly Let's Encrypt TLS certificates for `:8443`, enables `agent-box-update.timer` (hourly `update-boxd.sh`, disabled via `AGENT_BOX_NO_UPDATE=1` in `/etc/agent-box/update.env`), and — when a Linux `boxd` binary is staged beside `setup-host.sh` (or already installed) — installs `boxd` (`agent-box-boxd.service`) and `tailscale serve` on `:443`. Without a released `boxd` binary installed, hourly updates skip runs (both missing binaries and dev builds built from source are left alone until `agent-box-update-boxd <tag>` puts them on a release). Stage a Linux `boxd` binary (from a release or `GOOS=linux go build ./cmd/boxd`) as `provision/boxd` before running `--tailscale` to enable `boxd` on a fresh Linux host. See `provision/README.md`.
+- With `--tailscale`: joins Tailscale as `agent-box`, sets up weekly Let's Encrypt TLS certificates for `:8443`, enables `agent-box-update.timer` (hourly `update-boxd.sh`, disabled via `AGENT_BOX_NO_UPDATE=1` in `/etc/agent-box/update.env`), and — when a Linux `boxd` binary is staged beside `setup-host.sh` (or already installed) — installs `boxd` (`agent-box-boxd.service`), creates `/etc/agent-box/boxd.json`, and configures `tailscale serve` on `:443`. A fresh host without `boxd.json` still needs that staged `setup-host.sh --tailscale` run to create `boxd.json` and `tailscale serve` (even though `agent-box-update-boxd <tag>` can later upgrade dev builds onto releases), and hourly updates skip missing binaries and dev builds built from source. Stage a Linux `boxd` binary as `provision/boxd` before running `--tailscale` to enable `boxd` on a fresh Linux host. See `provision/README.md`.
 
 Run from a clone of `https://github.com/a-Fig/agent-box`:
 
@@ -49,8 +49,8 @@ Follow `provision/README.md` in `https://github.com/a-Fig/agent-box`:
 - **Never wipe, repartition, or dual-boot Windows.** Everything runs in a WSL2 distro (`agents`).
 - `provision/install-pc.ps1` (Admin PowerShell) enables WSL and Virtual Machine Platform if needed,
   imports the `agents` Ubuntu distro, configures `.wslconfig` (backing up to `.wslconfig.agent-box.bak`),
-  creates keep-alive, logon tray (`boxtray`), and headless enforcer scheduled tasks, and runs
-  `setup-host.sh --tailscale`.
+  registers the keep-alive scheduled task (and logon `boxtray` plus startup headless enforcer tasks
+  when `-BoxtrayPath` is supplied), and runs `setup-host.sh --tailscale`.
 
 ## 4. Connecting clients and agents
 

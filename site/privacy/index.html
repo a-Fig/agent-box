@@ -47,7 +47,7 @@
         <div class="label"><h2>Network and access</h2></div>
         <div class="body">
           <p>Container operations connect to Incus HTTPS on port <code>8443</code> using your laptop's Incus client certificate, trusted once with a single-use token generated during host setup.</p>
-          <p>The host daemon (<code>boxd</code>) binds only to <code>127.0.0.1:7766</code>. When exposed over HTTPS on your Tailnet via <code>tailscale serve</code>, every request checks the <code>Tailscale-User-Login</code> identity header against your allowlist, and control actions require <code>POST</code>, JSON, and the <code>X-Agent-Box: 1</code> header.</p>
+          <p>The host daemon (<code>boxd</code>) listens on <code>127.0.0.1:7766</code> by default (configurable via <code>boxd.json</code>) and rejects non-loopback requests. When exposed over HTTPS on your Tailnet via <code>tailscale serve</code>, every request checks the <code>Tailscale-User-Login</code> identity header against your allowlist, and control actions require <code>POST</code>, JSON, and the <code>X-Agent-Box: 1</code> header.</p>
         </div>
       </section>
       <section class="fact">

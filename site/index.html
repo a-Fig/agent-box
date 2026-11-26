@@ -1137,7 +1137,7 @@ h2 {
         </div>
         <div class="arch-card">
           <h3>Client-certificate access only</h3>
-          <p>Incus listens on <code>:8443</code> guarded by restricted TLS client certificates trusted once with a single-use token (plus <code>tailscale serve</code> on a tailnet). <code>boxd</code> binds only to <code>127.0.0.1:7766</code>.</p>
+          <p>Incus listens on <code>:8443</code> guarded by restricted TLS client certificates trusted once with a single-use token (plus <code>tailscale serve</code> on a tailnet). <code>boxd</code> listens on <code>127.0.0.1:7766</code> by default and rejects non-loopback requests.</p>
         </div>
         <div class="arch-card">
           <h3>No git branch churn</h3>
