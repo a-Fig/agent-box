@@ -512,12 +512,12 @@ if [ "$BUILD_BASE" -eq 1 ]; then
     pub_out=$(LC_ALL=C incus publish "$builder" --project "$PROJECT" \
       description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries" \
       agent_box.cloud_init=disabled) || die "failed to publish image from '$builder'"
-    new_fp=$(printf '%s\n' "$pub_out" | awk '{ for (i=1; i<=NF; i++) if ($i ~ /^[0-9a-f]{64}$/) fp=$i } END { print fp }')
+    new_fp=$(printf '%s\n' "$pub_out" | awk '{ for (i=1; i<=NF; i++) if (length($i) == 64 && $i ~ /^[0-9a-f]+$/) fp=$i } END { print fp }')
     [[ "$new_fp" =~ ^[0-9a-f]{64}$ ]] || die "could not parse published image fingerprint from: $pub_out"
     if [ "$BASE_EXISTS" -eq 1 ]; then
       incus query -X PATCH -d "{\"target\":\"$new_fp\"}" \
         '/1.0/images/aliases/agent-base?project=default' >/dev/null \
-        || die "failed to switch 'agent-base' alias to $new_fp (previous alias, image, and profile left unchanged)"
+        || die "could not confirm 'agent-base' alias switch to $new_fp; skipped default-profile update"
     else
       incus image alias create agent-base "$new_fp" --project default \
         || die "failed to create 'agent-base' alias for $new_fp"
