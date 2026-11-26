@@ -506,9 +506,9 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
 		Boxd: w.Version, Config: HostConfig(w.HasGPU != nil && w.HasGPU())}
-	// A GPU box needs the device and the project's say-so, as box's own check reads it: only
-	// "block" refuses, and an unset key counts as a GPU host.
-	blocked := cfg[gpuProjectKey] == "block"
+	// A GPU box needs the device and the project's say-so, as box's own check reads it: "block"
+	// refuses, and so does an unset key on a restricted project, where Incus defaults it to block.
+	blocked := cfg[gpuProjectKey] == "block" || (cfg[gpuProjectKey] == "" && cfg["restricted"] == "true")
 	switch {
 	case blocked && !m.Config.GPU:
 		m.Config.GPUWhy = "both"

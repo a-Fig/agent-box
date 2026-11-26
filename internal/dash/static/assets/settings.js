@@ -87,10 +87,10 @@ function buildCell(v, what) {
 function updates(m) {
   const note = drift(m.boxd, m.tray, trayAlive(m));
   return [
-    row("boxd", m.boxd?.tag ? "The server behind this page. It follows stable releases and checks for one every hour." : "The server behind this page. This is a dev build, not a release, so it doesn't update itself.", buildCell(m.boxd, "running since")),
+    row("boxd", m.boxd?.tag ? "The server behind this page. It follows stable releases and checks for a new one hourly, unless updates are turned off (AGENT_BOX_NO_UPDATE)." : "The server behind this page. This is a dev build, not a release, so it doesn't update itself.", buildCell(m.boxd, "running since")),
     row(
       "Tray",
-      !m.tray ? "Nothing reports a tray build for this host, so there is no tray to update." : m.tray.tag ? "Applies the mode on the PC. It updates itself from stable releases the same way." : "Applies the mode on the PC. This is a dev build, not a release, so it doesn't update itself.",
+      !m.tray ? "Nothing reports a tray build for this host, so there is no tray to update." : m.tray.tag ? "Applies the mode on the PC. It follows stable releases the same way, unless updates are turned off (AGENT_BOX_NO_UPDATE)." : "Applies the mode on the PC. This is a dev build, not a release, so it doesn't update itself.",
       m.tray ? buildCell(m.tray, "this build since") : value("not reporting"),
     ),
     note ? row(note.warn ? "Out of step" : "Different builds", note.why, h("span", { class: "badge " + (note.warn ? "badge-warn" : "") }, note.text)) : null,

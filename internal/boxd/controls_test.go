@@ -236,16 +236,18 @@ func TestMachineConfigGPUAndCaps(t *testing.T) {
 	}
 	r.w.HasGPU = func() bool { return true }
 	for _, c := range []struct {
-		key  string
-		gpu  bool
-		why  string
-		have bool
-	}{{"", true, "", true}, {"allow", true, "", true}, {"block", false, "blocked", true}, {"block", false, "both", false}} {
-		r.f.set(func() { r.f.cfg["restricted.devices.unix-char"] = c.key })
+		key        string
+		restricted string
+		gpu        bool
+		why        string
+		have       bool
+	}{{"", "", true, "", true}, {"", "false", true, "", true}, {"", "true", false, "blocked", true}, {"allow", "true", true, "", true},
+		{"managed", "true", true, "", true}, {"block", "true", false, "blocked", true}, {"block", "", false, "both", false}} {
+		r.f.set(func() { r.f.cfg["restricted.devices.unix-char"] = c.key; r.f.cfg["restricted"] = c.restricted })
 		r.w.HasGPU = func() bool { return c.have }
 		r.poll()
 		if m := r.w.Machine(); m.Config.GPU != c.gpu || m.Config.GPUWhy != c.why {
-			t.Errorf("key %q device %v: %+v", c.key, c.have, m.Config)
+			t.Errorf("key %q restricted %q device %v: %+v", c.key, c.restricted, c.have, m.Config)
 		}
 	}
 }

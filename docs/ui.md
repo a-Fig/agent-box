@@ -104,7 +104,7 @@ whole log while the box still exists, and the kept tail after.
 each host's builds of boxd and the tray, its mode and enforcer, the CPUs a box of each size gets in
 Shared and Full, the caps and expiry times, and whether it has a GPU. Nothing there writes to the PC:
 the mode stays on Overview and in the tray, the caps in the host's setup. `Machine.Config` carries
-the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does; a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
+the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
 
 **History**: charts over a day or a week:
 - jobs per day by result;
