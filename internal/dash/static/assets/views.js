@@ -254,12 +254,12 @@ function deleteBodyText(name, { active, recent }) {
   return parts.join(" ") + " Boxes are compute, not storage: anything on it that wasn't pushed is gone.";
 }
 
-function confirmDelete(b, risk) {
+function confirmDelete(b, risk, note) {
   confirmDialog({
     valid: () => sameBox(b),
     goneText: "Box " + b.name + " went away or was replaced, so nothing was deleted.",
     title: "Delete " + b.name + "?",
-    body: deleteBodyText(b.name, risk),
+    body: note || deleteBodyText(b.name, risk),
     action: "Delete box",
     run: () => act("del-" + b.name, () => post("/api/boxes/" + encodeURIComponent(b.name) + "/delete", { createdAt: b.createdAt, confirmed: true }), () => S.boxes.delete(b.machine + "/" + b.name)),
   });
@@ -282,7 +282,7 @@ async function deleteBox(b) {
     await post("/api/boxes/" + encodeURIComponent(b.name) + "/delete", { createdAt: b.createdAt, confirmed: false });
     S.boxes.delete(b.machine + "/" + b.name);
   } catch (e) {
-    if (e.code === "needs-confirmation" && e.warning) confirmDelete(b, { active: e.warning.active || [], recent: e.warning.recent || [] });
+    if (e.code === "needs-confirmation") confirmDelete(b, { active: e.warning?.active || [], recent: e.warning?.recent || [] }, e.warning?.active?.length || e.warning?.recent?.length ? null : e.message);
     else toast(e.message || "That didn't work.", true);
   } finally {
     busy.delete(key);

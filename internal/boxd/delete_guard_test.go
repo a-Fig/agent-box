@@ -89,3 +89,48 @@ func TestDeleteGuardEmptyActiveRecentExpiredStale(t *testing.T) {
 	}
 	_ = box
 }
+
+// When the probe cannot establish the box's state — here the box is
+// replaced while it is scanned, so the scan is dropped — the unconfirmed
+// delete refuses and deletes nothing.
+func TestDeleteGuardRefusesWhenProbeCannotEstablishState(t *testing.T) {
+	created := t0.Add(-time.Hour)
+	r := newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Running", "small", created)} })
+	r.poll()
+	r.f.set(func() {
+		r.f.onScan = func(box string) { r.f.ins[0].CreatedAt = t0 }
+	})
+	if code, b := r.post("/api/boxes/w/delete", deleteBody(created, false)); code != 409 || !strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("probe cannot establish state, unconfirmed: %d %s", code, b)
+	}
+	for _, c := range r.f.cli {
+		if c == "delete w --force" {
+			t.Fatalf("the box was deleted on a failed probe: %v", r.f.cli)
+		}
+	}
+}
+
+// A direct box run can start after boxd's last poll: neither live nor the
+// history knows it yet. An unconfirmed delete must probe the running box
+// fresh, refuse, and delete nothing (#251 review).
+func TestDeleteGuardProbesJobStartedAfterPoll(t *testing.T) {
+	created := t0.Add(-time.Hour)
+	r := newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Running", "small", created)} })
+	r.poll() // boxd sees an empty box
+	r.f.set(func() {
+		r.f.jobs["w"] = []fakeJob{{name: "w.20261124-175900-ab12", state: "running", log: "x", meta: metaJSON}}
+	}) // a job starts; no Watcher poll follows
+	if code, b := r.post("/api/boxes/w/delete", deleteBody(created, false)); code != 409 || !strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("job started after the poll, unconfirmed: %d %s", code, b)
+	}
+	for _, c := range r.f.cli {
+		if c == "delete w --force" {
+			t.Fatalf("the box was deleted without a warning: %v", r.f.cli)
+		}
+	}
+	if _, err := r.w.boxFor("w", created); err != nil {
+		t.Fatalf("box after the refused delete: %v", err)
+	}
+}
