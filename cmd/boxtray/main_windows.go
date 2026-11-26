@@ -108,6 +108,7 @@ func main() {
 			return err
 		},
 		logf: lg.Printf,
+		busy: mgr.Releasing,
 	}
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
@@ -128,6 +129,7 @@ func main() {
 					return
 				}
 				defer mgr.EndRelease()
+				drop.stop() // no drop's wsl.exe call may restart the distro during the terminate
 				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
 				defer cancel()
 				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
