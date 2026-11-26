@@ -32,6 +32,19 @@ const (
 
 var errNoRoom = errors.New("no room")
 
+// HostConfig is Machine.Config: the size table and the expiry constants, and whether this host
+// has a GPU for a GPU box.
+func HostConfig(gpu bool) dash.Config {
+	c := dash.Config{GPU: gpu, IdleExpiry: int(idleTTL / time.Second), JobExpiry: int(jobTTL / time.Second),
+		KeptAfterJob: int(jobrun.EndedKeep / time.Second)}
+	for _, s := range mode.Sizes {
+		mem, _ := mode.ParseBytes(s.Memory)
+		disk, _ := mode.ParseBytes(s.Disk)
+		c.Sizes = append(c.Sizes, dash.SizeSpec{Name: s.Name, SharedCPUs: s.SharedCPUs, FullCPUs: s.FullCPUs, Memory: mem, Disk: disk, GPU: s.GPU})
+	}
+	return c
+}
+
 // sizeOf is a waiting job's size.
 func (it *queued) sizeOf() mode.Size {
 	if sz, ok := mode.LookupSize(it.Size); ok {
@@ -101,7 +114,7 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		if in.Config[jobrun.ThrowawayKey] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
 			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || mode.Held(in.Config, now).After(now) ||
-			w.Hist == nil || len(w.Hist.EndedOn(in.Name, in.CreatedAt)) == 0 {
+			w.Hist == nil || len(w.Hist.EndedOn(in)) == 0 {
 			continue
 		}
 		out = append(out, in)
@@ -119,13 +132,14 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 // launch takes them. A repo box is a cache: deleting it costs the repo's next
 // run a fresh checkout and a cold build cache. Idle is what spareThrowaways
 // checks: running, no job running or being started there (boxBusy), one
-// ended in boxd's history on this very box (its UID: EndedOnUID), and an expiry still the idle one set when its last
-// job ended (idleTTL), not a later job's 24h. Never a held one (mode.Held):
+// ended in boxd's history on this very box (its UID: EndedHere), and an
+// expiry still the idle one set when its last job ended (idleTTL), not a
+// later job's 24h. Never a held one (mode.Held):
 // a person's extend, or box new --ttl. With w.mu held.
 func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
 	var out []Instance
 	for _, in := range ins {
-		if !w.boxBusy(in.Name, "") && idleRepo(in, now) && w.Hist != nil && w.Hist.EndedOnUID(in.Name, boxUID(in)) {
+		if !w.boxBusy(in.Name, "") && idleRepo(in, now) && w.Hist != nil && w.Hist.EndedHere(in) {
 			out = append(out, in)
 		}
 	}
@@ -560,7 +574,8 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 // PID file exists: before the check, the check sees it; after it, the write
 // fails on its ETag and is decided again, or comes after ours and wins.
 func (w *Watcher) reapEnded(j *dash.Job) {
-	box, started, own := j.Box, j.StartedAt, j.Box+"."+j.ID
+	box, own := j.Box, j.Box+"."+j.ID
+	job := *j
 	if w.boxBusy(box, own) {
 		return
 	}
@@ -568,7 +583,7 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-			until, ok := endedExpiry(in, started, w.Now().UTC())
+			until, ok := endedExpiry(in, job, w.Now().UTC())
 			if !ok || in.Status != "Running" {
 				return time.Time{}, false // a frozen box can't run the check: leave it
 			}
@@ -630,7 +645,7 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 		if !ended {
 			continue
 		}
-		last, ok := w.Hist.LastEnded(in.Name, in.CreatedAt)
+		last, ok := w.Hist.LastEnded(in)
 		if !ok {
 			continue
 		}
@@ -638,7 +653,7 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 		if err != nil || cur.Before(last.StartedAt.Add(jobTTL-jobExpirySlack)) {
 			continue // not the job's 24h: shortened already, or extended from the page since
 		}
-		if _, ok := endedExpiry(in, last.StartedAt, now); ok {
+		if _, ok := endedExpiry(in, last, now); ok {
 			w.reapEnded(&last)
 		}
 	}
@@ -672,9 +687,10 @@ const jobExpirySlack = 10 * time.Minute
 // endedExpiry is the expiry a box gets once the job that started at started
 // has ended, and whether to write it: only to shorten an expiry no later
 // than that job's own (a later job's 24h, or one set by hand, is left alone),
-// on the job's box, and never past its hold (mode.Held).
-func endedExpiry(in Instance, started, now time.Time) (time.Time, bool) {
-	if !holds(in.CreatedAt, started) {
+// on the job's box (ranOnInstance), and never past its hold (mode.Held).
+func endedExpiry(in Instance, j dash.Job, now time.Time) (time.Time, bool) {
+	started := j.StartedAt
+	if !ranOnInstance(j, in) {
 		return time.Time{}, false
 	}
 	cur, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])

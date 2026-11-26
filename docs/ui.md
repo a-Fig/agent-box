@@ -19,7 +19,7 @@ One server, one page, three ways in.
 - **The page** is static files embedded in `boxd`: plain HTML, CSS and JS with no framework and no
   build step, like Murmur's `internal/web/static`. It follows Murmur's look (Tyler, 2026-11-23):
   its tokens and components, and its three themes, Dim by default (Tyler's choice) with Light and
-  Dark, switched in the sidebar and remembered in the browser's `localStorage`.
+  Dark, switched on the Settings page and remembered in the browser's `localStorage`.
 - **Ways in:**
   - `box ui` (laptop) opens the page in the browser.
   - `box app` (laptop) opens it in a window of its own, through
@@ -99,6 +99,12 @@ the jobs it ran before, each linked to its page (#184, 2026-11-25).
 
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
+
+**Settings** (2026-11-26, #158): the theme, a control that saves at once in the browser; and, read-only,
+each host's builds of boxd and the tray, its mode and enforcer, the CPUs a box of each size gets in
+Shared and Full, the caps and expiry times, and whether it has a GPU. Nothing there writes to the PC:
+the mode stays on Overview and in the tray, the caps in the host's setup. `Machine.Config` carries
+the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
 
 **History**: charts over a day or a week:
 - jobs per day by result;
@@ -292,7 +298,9 @@ JSON over HTTPS, on the same origin as the page.
   enough for `box run --new` (the ID is stamped before the bundle and launch, and the laptop's clock
   may be off) lets a replacement box made seconds later list its predecessor's jobs, and a tight one
   hides the box's own. Jobs recorded before 2026-11-25 have no `boxUid`; for them alone the old
-  rule stands: a start no earlier than `createdAt` less one minute (`dash.BoxJobSkew`). The page
+  rule stands: a start no earlier than `createdAt` less one minute (`dash.BoxJobSkew`); boxd's
+  watcher, log endpoint and reaper keep their looser ten minutes (`dash.JobBoxGrace`), since they act
+  on running jobs. A scan whose box was replaced after the poll listed it is dropped. The page
   asks boxd with `box`, `machine`, `uid` and `created`, and merges the stream's jobs by the same
   rule. After a reconnect it asks again, since the new snapshot holds only the last 50, and keeps
   showing what it had until boxd answers.

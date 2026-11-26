@@ -39,6 +39,7 @@ type fakeIncus struct {
 	running    map[string][]string // jobs the running-jobs script sees that no scan has yet
 	runChecks  int                 // running-jobs scripts run
 	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
+	onScan     func(box string)    // runs, under the lock, as a scan of box starts
 }
 
 type fakeJob struct {
@@ -138,6 +139,9 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		return nil, &ExitError{Code: 3}
 	}
 	if strings.HasPrefix(script, "# boxd scan") {
+		if f.onScan != nil {
+			f.onScan(box)
+		}
 		var b strings.Builder
 		for _, j := range f.jobs[box] {
 			meta, tail := "-", "-"
