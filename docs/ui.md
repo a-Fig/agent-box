@@ -332,10 +332,12 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   which the active enforcer writes when it starts enforcing. `since` is when boxd first saw that build
   run: its own start, or when the tray's key took its value. The sidebar's foot shows both, with a
   note when they differ: on 2026-11-25 the PC twice ran a boxd hours older than the repo, and nothing
-  showed it. Both update hourly to the latest stable release, so the note says which one updates to
-  what ("tray updates to v0.3.1 at its hourly check"), and it turns to a warning only when the two
-  have differed for over 2 hours. A dev build or a nightly never updates by itself, and the note says
-  that instead (2026-11-25).
+  showed it. Both update hourly to the latest stable release, so the note says which one updates
+  ("tray updates at its hourly check"), and it turns to a warning only when the two have differed
+  for over 2 hours. Which one is behind is decided by release tag, as the updaters decide
+  (`update.After`): a nightly of v0.3.0 is behind v0.3.0 on the same commit. A dev build never
+  updates itself, nothing updates to a nightly, and a stopped tray checks for nothing; the note says
+  so instead (2026-11-25).
   `trayLastSeen` is the active enforcer's heartbeat, and `enforcer` says which one wrote it; `""` is a
   key never written, or one holding a value boxtray doesn't write.
 - **`Box`:** `{name, machine, size, gpu, state, throwaway, repo, createdAt, expiresAt, memUsed,

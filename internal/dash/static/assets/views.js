@@ -31,16 +31,17 @@ const RESULT_HINTS = {
   pass: "The command exited 0.",
   fail: "The command exited with a code other than 0 or 130: usually tests failed or a build broke.",
   cancelled: "Exit 130: the job was cancelled, from this page or by its agent, or the command was interrupted.",
-  lost: "The job stopped before it finished, and no exit code was read: its box was deleted, stopped or went away.",
+  lost: "No exit code was read: its box was deleted, stopped or went away while it ran, or, still queued, it was dropped without starting.",
 };
 
-// What an exit code means here. 124 is box's own when --timeout fired (cmd/box exitTimeout). box
+// What an exit code means here. 124 is box's when --timeout fired (cmd/box exitTimeout), but a
+// command can exit 124 itself, so the hint says both. box
 // also exits 75 when it couldn't run a job now, but such a run is never a job here (History counts
 // it as refused), and a job paused or lost shows as that, so a finished job's 75 is the command's.
 function exitHint(code) {
   if (code === 0) return RESULT_HINTS.pass;
   if (code === 130) return RESULT_HINTS.cancelled;
-  if (code === 124) return "Exit 124: timed out. box killed the command when the run's time limit (--timeout) ran out.";
+  if (code === 124) return "Exit 124: the run hit its time limit (--timeout) and box killed it, or the command itself exited 124.";
   if (code === 75) return "The command itself exited 75.";
   return "The command exited " + code + ": usually tests failed or a build broke.";
 }
@@ -61,15 +62,16 @@ function result(j) {
   return j.exit === 0 ? "pass" : j.exit === 130 ? "cancelled" : "fail";
 }
 
-// A job's badge sits inside the row's link on Overview and Jobs, so it carries its hint for the
-// pointer only: a tab stop inside a link would be a second one for the same row.
+// A job's badge sits inside the row's link on Overview and Jobs, where a tab stop of its own would
+// be a second one for the same row: there it is the link's inner hint (tip.js), shown when the
+// keyboard focuses the link.
 function jobBadge(j, term = false) {
-  const tip = (text, props) => hint(text, props, term);
+  const tip = (text, props) => hint(text, props, term || "inner");
   switch (j.state) {
     case "running":
       return h("span", tip("The command is running on its box now.", { class: "badge badge-info" }), h("span", { class: "dot dot-on dot-live" }), "running");
     case "paused":
-      return h("span", tip("Its box is paused because the PC is in My PC. It carries on if the mode goes back to Shared or Full within 15 minutes (longer once its memory is moved to swap); after that it is lost.", { class: "badge badge-warn" }), "paused");
+      return h("span", tip("Its box is paused because the PC is in My PC. It carries on if the mode goes back to Shared or Full within 15 minutes (longer once its memory is moved to swap); after that it is lost. It can't be cancelled while its box is paused.", { class: "badge badge-warn" }), "paused");
     case "lost":
       return h("span", tip(RESULT_HINTS.lost, { class: "badge badge-warn" }), "lost");
   }
@@ -261,7 +263,7 @@ function jobName(j) {
 // The nudged badge, shown by the 1s ticker once its time comes (dom.js tickTimes).
 function nudgedBadge(j) {
   const at = new Date(Date.parse(j.queuedAt) + NUDGE_MS).toISOString();
-  return h("span", hint("It has waited 20 minutes, so its agent was told it still waits and that box_cancel takes it off.", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at) }, "q-" + j.key + "-nudged"), "nudged");
+  return h("span", hint("It has waited 20 minutes. An agent box can push to (one whose session it knows) was told the job still waits and that box_cancel takes it off.", { class: "badge badge-warn", "data-show-after": at, hidden: clock.now() < Date.parse(at) }, "q-" + j.key + "-nudged"), "nudged");
 }
 
 function whyText(j) {
@@ -299,7 +301,7 @@ function queueRow(j) {
     h(
       "div",
       { class: "queue-item" },
-      h("span", hint("Its place in the queue. 1 starts first, as soon as a box of its size fits.", { class: "queue-pos num" }, "q-" + j.key + "-pos"), String(j.position)),
+      h("span", hint("Its place in the queue. Among jobs that fit, a free box goes to the session with the fewest jobs running, then to the job nearest the front.", { class: "queue-pos num" }, "q-" + j.key + "-pos"), String(j.position)),
       h(
         "div",
         null,
@@ -319,7 +321,7 @@ function queueRow(j) {
       "div",
       { class: "row-control" },
       nudgedBadge(j),
-      j.position > 1 ? control("front-" + j.key, hint("Puts this job first in line, so it is the next to start.", { class: "btn btn-xs btn-outline", onclick: () => frontJob(j) }), icon("front"), "Move to front") : h("span", hint("First in line: it starts as soon as there is room.", { class: "badge" }, "q-" + j.key + "-next"), "next"),
+      j.position > 1 ? control("front-" + j.key, hint("Puts this job first in line. A free box goes to the session with the fewest jobs running, so a job of another session can still start before it.", { class: "btn btn-xs btn-outline", onclick: () => frontJob(j) }), icon("front"), "Move to front") : h("span", hint("First in line. When there is room it starts, unless a job of a session with fewer jobs running fits too: that one goes first.", { class: "badge" }, "q-" + j.key + "-next"), "next"),
       control("dequeue-" + j.key, hint("Takes the job out of the queue, after you confirm. It never runs, and its agent is told.", { class: "btn btn-xs btn-danger-ghost", onclick: () => dequeueJob(j) }), "Cancel"),
     ),
   );
@@ -394,7 +396,7 @@ function machineCard(m) {
       h(
         "span",
         { class: "section-aside room-aside" },
-        h("span", hint(alive ? "The " + enforcerName(m) + " on the PC applies the mode and checks in every 30 seconds." : "Nothing has checked in for 90 seconds, so the mode isn't being applied and mode requests wait.", { class: "conn" }, true), h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? untitled(timeEl("ago", m.trayLastSeen, enforcerName(m) + " seen ")) : m.trayLastSeen ? untitled(timeEl("ago", m.trayLastSeen, "nothing enforcing, " + enforcerName(m) + " last seen ")) : "nothing enforcing"),
+        h("span", hint(alive ? "The " + enforcerName(m) + " on the PC applies the mode and checks in every 30 seconds." : "Nothing has checked in for 90 seconds, so the mode isn't being applied and mode requests wait.", { class: "conn" }, "enforcer-" + m.name), h("span", { class: "dot " + (alive ? "dot-on" : "dot-bad") }), alive ? untitled(timeEl("ago", m.trayLastSeen, enforcerName(m) + " seen ")) : m.trayLastSeen ? untitled(timeEl("ago", m.trayLastSeen, "nothing enforcing, " + enforcerName(m) + " last seen ")) : "nothing enforcing"),
         h("span", hint("Memory the Linux that runs the boxes (WSL) holds on the PC now, boxes included.", {}, true), "WSL holds " + bytes(m.wslMemory)),
       ),
     ),
@@ -481,7 +483,7 @@ function boxRow(b, full) {
         full ? timeEl("ago", b.createdAt, "made ") : null,
       ),
       job ? h("a", { class: "meta", href: jobLink(job) }, h("span", null, "running: ", job.reason || job.command)) : null,
-      full ? h("div", hint("Memory in use, as a share of what the box's size allows.", { class: "bar" }), h("i", { "data-w": pct(b.memUsed, b.memLimit) })) : null,
+      full ? h("div", hint("Memory in use, as a share of what the box's size allows.", { class: "bar" }, "box-" + b.name + "-membar"), h("i", { "data-w": pct(b.memUsed, b.memLimit) })) : null,
     ),
     controls,
   );
@@ -839,9 +841,11 @@ const jobDetail = {
     }
     if (tailer.gone && tailer.pre.textContent !== (j.tail || "")) tailer.pre.textContent = j.tail || "";
     const live = j.state === "running" || j.state === "paused";
-    const cancel = live ? control("cancel-" + j.key, hint("Kills the command, after you confirm. The job ends with exit 130, and its agent hears it was cancelled.", { class: "btn btn-sm btn-danger-ghost", onclick: () => cancelJob(j) }), "Cancel job") : null;
-    const kv = (k, v, tip) => h("dl", { class: "kv" }, h("dt", tip ? hint(tip, {}, true) : null, k), h("dd", null, v || "—"));
-    this.head.replaceChildren(h("div", { class: "group" }, h("div", { class: "row row-grid" }, h("div", null, reasonEl(j, "headline"), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j, true), cancel))));
+    // A paused job's box is frozen, so boxd refuses the kill (409): the button shows only while
+    // it runs, and the paused badge says why it's gone.
+    const cancel = j.state === "running" ? control("cancel-" + j.key, hint("Kills the command, after you confirm. The job ends with exit 130, and its agent hears it was cancelled.", { class: "btn btn-sm btn-danger-ghost", onclick: () => cancelJob(j) }), "Cancel job") : null;
+    const kv = (k, v, tip) => h("dl", { class: "kv" }, h("dt", tip ? hint(tip, {}, "kv-" + k) : null, k), h("dd", null, v || "—"));
+    this.head.replaceChildren(h("div", { class: "group" }, h("div", { class: "row row-grid" }, h("div", null, reasonEl(j, "headline"), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j, "job-state"), cancel))));
     this.details.replaceChildren(
       section(
         "Details",

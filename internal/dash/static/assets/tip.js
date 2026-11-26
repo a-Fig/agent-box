@@ -9,7 +9,10 @@
 // focused mark, or the one under the pointer that showed it. Escape closes it.
 //
 // A hint is a control or a word on the page that explains itself (hint). Hints keep the page's
-// own tab order. From the keyboard each chart is one tab stop (rove, which marks it data-rove), and
+// own tab order; one inside a link (a job's badge in its row) shows when the keyboard focuses the
+// link, since a tab stop of its own would be a second one for the row. Escape closes a hint until
+// the focus moves on: a redraw that puts the focus back doesn't reopen it. From the keyboard each
+// chart is one tab stop (rove, which marks it data-rove), and
 // the arrow keys move between its marks: a day's charts hold over a hundred marks.
 
 export { syncTip, rove, hint, hideTip };
@@ -17,6 +20,7 @@ export { syncTip, rove, hint, hideTip };
 let el = null; // the tooltip, made on first use
 let at = null; // the mark it is showing
 let point = null; // where the pointer that showed it was, {x, y}; null when focus showed it
+let closed = null; // the data-key of the focused element whose hint Escape closed
 
 function show(mark, p = null) {
   if (!el) {
@@ -72,11 +76,14 @@ function rove(chart) {
 // A hint, added to an element's props: the tooltip's text, which screen readers get as the
 // element's description (its name stays its own). A word that does nothing else (term) becomes a
 // tab stop, so the keyboard can reach it, and is dotted underneath, so the eye can. Its data-key
-// lets a redraw put the focus back on it: term is that key where the same text shows more than
-// once on a page (one per box), or true to key it by its text.
+// lets a redraw put the focus back on it: term is that key, which must stay the same when the
+// text changes (a state, a mode) or shows more than once on a page (one per box), or true to key
+// it by a text that never changes. term "inner" is a hint inside a link: no tab stop, shown when
+// the link is focused.
 function hint(text, props = {}, term = false) {
   const out = { ...props, "data-tip": text, "aria-description": text.replace(/\n/g, " ") };
-  if (term) {
+  if (term === "inner") out["data-inner"] = "";
+  else if (term) {
     out.tabindex = 0;
     out.class = ((props.class || "") + " hint").trim();
     out["data-key"] = "hint:" + (term === true ? text : term);
@@ -86,7 +93,15 @@ function hint(text, props = {}, term = false) {
 
 const markOf = (e) => e.target.closest?.("[data-tip]");
 const chartOf = (m) => m.closest("[data-rove]");
-const keyed = () => document.activeElement?.matches?.("[data-tip]:focus-visible") && document.activeElement;
+// The hint a focused element shows: its own, or the inner one of a link.
+const tipOf = (el) => el?.closest?.("[data-tip]") || (el?.matches?.("a") ? el.querySelector("[data-tip][data-inner]") : null);
+const keyOf = (el) => el?.closest?.("[data-key]")?.dataset.key ?? null;
+// The focused element's hint, when the keyboard focused it and Escape hasn't closed it.
+const keyed = () => {
+  const f = document.activeElement;
+  if (!f?.matches?.(":focus-visible") || (closed && keyOf(f) === closed)) return null;
+  return tipOf(f);
+};
 const tap = (e) => e.pointerType === "touch" || e.pointerType === "pen";
 
 document.addEventListener("pointerover", (e) => {
@@ -111,13 +126,16 @@ document.addEventListener("pointerdown", (e) => {
 // The focused mark, however it was focused, is its chart's one tab stop. Its tooltip shows when
 // the keyboard focused it: a click focuses a button too, and a redraw or a closed dialog puts the
 // focus back on it, and neither should bring its hint back over the page.
+// Focus on another element than the one Escape closed opens hints again.
 document.addEventListener("focusin", (e) => {
-  const m = markOf(e);
+  if (closed && keyOf(e.target) !== closed) closed = null;
+  const m = tipOf(e.target);
   if (!m) return;
   chartOf(m)?.querySelectorAll("[data-tip]").forEach((o) => o.setAttribute("tabindex", o === m ? "0" : "-1"));
-  if (at !== m && m.matches(":focus-visible")) show(m);
+  const k = keyed();
+  if (k && at !== k) show(k);
 });
-document.addEventListener("focusout", (e) => markOf(e) === at && !point && hide());
+document.addEventListener("focusout", (e) => at && tipOf(e.target) === at && !point && hide());
 
 // Left and right along a row of marks, Home and End to its ends. Up and down go to the mark in
 // the row above or below that covers this one's time when a chart has rows (<g class="row">), and along the marks
@@ -144,7 +162,10 @@ function nextMark(m, key) {
 }
 const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") return hide();
+  if (e.key === "Escape") {
+    if (at && !point) closed = keyOf(document.activeElement);
+    return hide();
+  }
   const m = markOf(e);
   // Only inside a chart: a hint on a button or a radio leaves its keys alone.
   if (!m || !chartOf(m) || !KEYS.includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
