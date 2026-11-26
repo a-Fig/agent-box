@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-box privacy</title>
+<meta name="description" content="agent-box runs on your own machines over your own tailnet. It has no accounts and no server of ours, and sends us nothing.">
+<link rel="canonical" href="https://agent-box.afig.dev/privacy/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="agent-box">
+<meta property="og:url" content="https://agent-box.afig.dev/privacy/">
+<meta property="og:title" content="agent-box privacy">
+<meta property="og:description" content="agent-box runs on your own machines over your own tailnet. It has no accounts and no server of ours, and sends us nothing.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pages.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg>agent-box</a>
+    <h1>Privacy</h1>
+    <p class="lead">agent-box runs on your own machines, over your own tailnet. There is nothing of ours in the middle.</p>
+  </div>
+</header>
+
+<main class="sheet">
+  <div class="sheet-in">
+    <div class="facts">
+      <section class="fact">
+        <div class="label"><h2>No server of ours</h2></div>
+        <div class="body">
+          <p>agent-box is software you install and run. The laptop talks to the PC directly over your <a href="https://tailscale.com">Tailscale</a> network, through Incus's own HTTPS API. Nothing routes through us, and we run no service that your boxes or commands touch.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>No accounts, no telemetry</h2></div>
+        <div class="body">
+          <p>There is nothing to sign up for. agent-box collects no analytics and sends us no usage data, no code, no logs and no identifiers. Your worktrees, commands and their output stay between your laptop and your PC.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>Where your data lives</h2></div>
+        <div class="body">
+          <p>A box holds your checked-out worktree and whatever a command writes, on the PC's disk, for as long as the box exists. Boxes are disposable: an idle one expires after two hours by default, and deleting a box erases everything but the shared package caches in <code>/cache</code>.</p>
+          <p><code>box run</code> refuses environment variables whose names look like secrets (<code>TOKEN</code>, <code>SECRET</code>, <code>KEY</code>, <code>PASSWORD</code> and the like), because boxes are shared and the values would be visible inside the box.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>This website</h2></div>
+        <div class="body">
+          <p>This page describes agent-box the software. The website itself is static and sets no cookies. Its host keeps standard server access logs, as any web host does; we don't use them to track visitors.</p>
+        </div>
+      </section>
+    </div>
+    <div class="end">
+      <a class="button" href="https://github.com/a-Fig/agent-box">agent-box on GitHub</a>
+      <a class="quiet" href="/contact/">Questions? Contact</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <nav aria-label="Site">
+    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg></a>
+    <ul>
+      <li><a href="/about/">About</a></li>
+      <li><a href="/privacy/" aria-current="page">Privacy</a></li>
+      <li><a href="/contact/">Contact</a></li>
+      <li><a href="https://github.com/a-Fig/agent-box">GitHub</a></li>
+    </ul>
+  </nav>
+</footer>
+</body>
+</html>

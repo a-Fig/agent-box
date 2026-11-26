@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About agent-box</title>
+<meta name="description" content="agent-box gives coding agents disposable Linux boxes on a Windows gaming PC, without touching Windows. Tyler Darisme makes it, and it is open source.">
+<link rel="canonical" href="https://agent-box.afig.dev/about/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="agent-box">
+<meta property="og:url" content="https://agent-box.afig.dev/about/">
+<meta property="og:title" content="About agent-box">
+<meta property="og:description" content="agent-box gives coding agents disposable Linux boxes on a Windows gaming PC, without touching Windows. Tyler Darisme makes it, and it is open source.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pages.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg>agent-box</a>
+    <h1>About agent-box</h1>
+    <p class="lead">agent-box turns a Windows gaming PC into disposable Linux boxes that coding agents offload heavy work to, without touching Windows.</p>
+  </div>
+</header>
+
+<main class="sheet">
+  <div class="sheet-in">
+    <div class="facts">
+      <section class="fact">
+        <div class="label"><h2>Why it exists</h2></div>
+        <div class="body">
+          <p>Coding agents on a laptop choke on heavy work: a race-detector test run, a full build, a vitest or Android suite. Meanwhile a gaming PC sits idle most of the day with spare cores going to waste.</p>
+          <p>agent-box lets agents hand that work to the PC and get the result back, so the laptop stays responsive and the PC earns its keep, without the agent ever touching Windows or waiting on a game.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>How it works</h2></div>
+        <div class="body">
+          <p><strong>Incus</strong>, running in a WSL2 distro on the PC, provides the boxes, API, auth and web UI. agent-box is the thin glue around it: <code>box</code>, a Go CLI and MCP server agents run on the laptop; <code>boxtray</code>, a Windows tray app that picks how much of the PC agents get; and <code>provision/</code>, the scripts that set the PC up.</p>
+          <p>The PC joins the <a href="https://tailscale.com">tailnet</a> as its own node, so the laptop reaches it from anywhere behind a real certificate. <code>box run</code> snapshots the worktree, ships it to a box, runs the command on up to 4 CPUs, and returns the exit code and log. Boxes are throwaway compute, never storage; only package caches survive.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>Games always win</h2></div>
+        <div class="body">
+          <p>The PC's owner picks one of three modes in the tray: <strong>My PC</strong> (boxes frozen), <strong>Shared</strong> (2 CPUs a box) or <strong>Full power</strong> (4). When a game launches, the tray takes the PC back on its own until the game ends.</p>
+          <p>The mode is enforced by the tray's admin certificate on every tick, not by an honor system. An agent's certificate can't raise its own limits past what the owner allows, so a running game never loses cores to a box.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>What it's built on</h2></div>
+        <div class="body">
+          <p>Incus, WSL2 and Tailscale do the heavy lifting; agent-box writes only the glue, in Go with the standard library first. It runs on the laptop (macOS, Linux or Windows) and the PC (Windows with WSL2). <code>go test ./...</code> runs everything, on Linux and Windows in CI.</p>
+          <p>The rule behind the project: reuse existing tools and open source before writing code, and keep the custom code thin.</p>
+        </div>
+      </section>
+      <section class="fact">
+        <div class="label"><h2>Who makes it</h2></div>
+        <div class="body">
+          <p>Tyler Darisme makes and maintains agent-box, as <a href="https://github.com/a-Fig">a-Fig</a> on GitHub. Others contribute through pull requests.</p>
+          <p>The code is at <a href="https://github.com/a-Fig/agent-box">github.com/a-Fig/agent-box</a>.</p>
+        </div>
+      </section>
+    </div>
+    <div class="end">
+      <a class="button" href="https://github.com/a-Fig/agent-box">Get agent-box on GitHub</a>
+      <a class="quiet" href="https://github.com/a-Fig/agent-box/blob/main/docs/DESIGN.md">Read the design doc</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <nav aria-label="Site">
+    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg></a>
+    <ul>
+      <li><a href="/about/" aria-current="page">About</a></li>
+      <li><a href="/privacy/">Privacy</a></li>
+      <li><a href="/contact/">Contact</a></li>
+      <li><a href="https://github.com/a-Fig/agent-box">GitHub</a></li>
+    </ul>
+  </nav>
+</footer>
+</body>
+</html>

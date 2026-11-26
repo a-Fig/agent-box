@@ -1,0 +1,26 @@
+# agent-box
+
+> agent-box turns a Windows gaming PC on a tailnet into on-demand, disposable Linux boxes that coding agents offload heavy compute to (test suites, `-race` runs, builds), without touching Windows. One click on the PC decides how much of it agents get, and a running game always wins.
+
+Incus, in a WSL2 distro on the PC, provides the boxes, API, auth and web UI. agent-box is the glue around it: `box` (a Go CLI and stdio MCP server for agents on the laptop), `boxtray` (the Windows tray app for modes and gaming yield) and `provision/` (the PC setup scripts). The laptop reaches the PC over Tailscale behind a Let's Encrypt certificate.
+
+How an agent uses it: build `box` with `go build ./cmd/box`. It needs the Windows `incus` client with a remote named `pc` that can reach the `agents` project. `box run -- <cmd>` snapshots the current git worktree (uncommitted and untracked files included, without touching the index), ships it to a box, runs the command there on up to 4 CPUs, and returns the exit code and log. It returns exit 75 when the PC is in My PC mode, the box is paused, or the PC can't be reached, so the caller can run locally instead.
+
+`box mcp` serves the same behavior as MCP tools: `box_status`, `box_new`, `box_run`, `box_job`, `box_jobs`, `box_cancel`, `box_pull`, `box_rm`, `box_ls`. `box join` registers the MCP server with each agent CLI it finds and installs the box skill.
+
+Boxes are disposable compute, never storage. An idle box expires after two hours by default; only package caches in `/cache` survive deletion. `box run --new` uses a throwaway box that deletes itself when its exit code is read.
+
+The PC's owner picks one of three modes in the tray: My PC (boxes paused), Shared (2 CPUs a box) or Full power (4 CPUs a box). The tray enforces the mode every tick with an admin certificate agents don't have, and a launched game pulls the PC back to My PC until the game quits, so a game never loses cores to a box.
+
+## Pages
+
+- [Home](https://agent-box.afig.dev/): what agent-box is, for people
+- [About](https://agent-box.afig.dev/about/): why it exists, how it works, what it's built on
+- [Privacy](https://agent-box.afig.dev/privacy/): no server of ours, no accounts, no telemetry
+- [Contact](https://agent-box.afig.dev/contact/): issues, pull requests, maintainer
+
+## Source
+
+- [README](https://github.com/a-Fig/agent-box#readme): what agent-box is and how to use `box`, for people
+- [Design](https://github.com/a-Fig/agent-box/blob/main/docs/DESIGN.md): how each part works and why
+- [Code](https://github.com/a-Fig/agent-box): the repository

@@ -1,0 +1,319 @@
+<!doctype html>
+<!-- agent-box: on-demand Linux boxes for coding agents, on a Windows gaming PC, without touching
+     Windows. The code is at https://github.com/a-Fig/agent-box. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-box: on-demand Linux boxes for coding agents</title>
+<meta name="description" content="agent-box turns a Windows gaming PC into disposable Linux boxes that coding agents offload heavy work to, without touching Windows. One click decides how much of the PC they get, and games always win.">
+<link rel="canonical" href="https://agent-box.afig.dev/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="agent-box">
+<meta property="og:url" content="https://agent-box.afig.dev/">
+<meta property="og:title" content="agent-box: on-demand Linux boxes for coding agents">
+<meta property="og:description" content="agent-box turns a Windows gaming PC into disposable Linux boxes that coding agents offload heavy work to, without touching Windows. One click decides how much of the PC they get, and games always win.">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://agent-box.afig.dev/#agent-box",
+      "name": "agent-box",
+      "description": "agent-box turns a Windows gaming PC into disposable Linux boxes that coding agents offload heavy work to, without touching Windows. One click decides how much of the PC they get, and games always win.",
+      "url": "https://agent-box.afig.dev/",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows, Linux",
+      "keywords": "coding agents, on-demand compute, Incus, WSL2",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": "https://github.com/a-Fig/agent-box",
+      "softwareHelp": { "@type": "CreativeWork", "url": "https://github.com/a-Fig/agent-box#readme" },
+      "sameAs": ["https://github.com/a-Fig/agent-box"],
+      "author": { "@type": "Person", "name": "Tyler Darisme", "url": "https://github.com/a-Fig" }
+    }
+  ]
+}
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="text/markdown" href="/llms.txt" title="agent-box, for coding agents">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Three colors and one neutral, from Murmur's look (murmur.afig.dev). Blue and cream carry the
+     page; butter is the one loud accent; ink is the text. Everything else is a tint of these four. */
+  :root {
+    --blue: #225BFF;
+    --cream: #FFFBEA;
+    --butter: #FDEE8C;
+    --ink: #0E1B45;
+    --ink-soft: color-mix(in srgb, var(--ink) 78%, var(--cream));
+    --ink-mute: color-mix(in srgb, var(--ink) 62%, var(--cream));
+    --cream-2: color-mix(in srgb, var(--cream) 96%, var(--ink));
+    --cream-3: color-mix(in srgb, var(--cream) 90%, var(--ink));
+    --rule: color-mix(in srgb, var(--ink) 12%, transparent);
+    --blue-tint: color-mix(in srgb, var(--blue) 10%, var(--cream));
+    --blue-deep: color-mix(in srgb, var(--blue) 78%, var(--ink));
+    --line: #DDD7B8;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+    --sheet: clamp(28px, 3.2vw, 44px);
+    --gutter: clamp(20px, 4vw, 48px);
+    --r-sm: 6px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --ease: cubic-bezier(.22, .8, .24, 1);
+    --shadow: 0 1px 2px rgba(14, 27, 69, .10), 0 10px 28px -10px rgba(14, 27, 69, .38);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    --flutes: repeating-linear-gradient(90deg,
+      rgba(255, 255, 255, 0.16) 0px,
+      rgba(255, 255, 255, 0.05) 1px,
+      rgba(255, 255, 255, 0) 5px,
+      rgba(14, 27, 69, 0.05) 9px,
+      rgba(14, 27, 69, 0.22) 11px,
+      rgba(14, 27, 69, 0.3) 12px);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: var(--blue); color: var(--cream); }
+  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: clip; }
+  a { color: inherit; }
+
+  /* ---------- Page 1: the reeded-glass hero ---------- */
+  .hero { position: relative; isolation: isolate; overflow: clip; min-height: max(760px, 100vh); display: flex; flex-direction: column; }
+  .hero::before {
+    content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+    background:
+      var(--flutes),
+      radial-gradient(40% 55% at 82% 22%, rgba(14, 27, 69, .32), rgba(14, 27, 69, 0) 72%),
+      radial-gradient(44% 60% at 14% 108%, rgba(14, 27, 69, .3), rgba(14, 27, 69, 0) 72%),
+      var(--blue);
+    background-blend-mode: soft-light, normal, normal, normal;
+  }
+  .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--grain); background-size: 180px 180px; mix-blend-mode: overlay; opacity: .12; }
+
+  .bar { max-width: 1120px; width: 100%; margin: 0 auto; padding: clamp(18px, 3.5vh, 32px) var(--gutter) 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .wordmark { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--cream); font-weight: 700; font-size: 18px; letter-spacing: -.02em; }
+  .wordmark svg { display: block; }
+  .bar-links { display: flex; align-items: center; gap: 22px; }
+  .bar-links a { color: color-mix(in srgb, var(--cream) 86%, var(--blue)); text-decoration: none; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+  .bar-links a:hover { color: var(--cream); }
+  .bar-links a:focus-visible { outline: 2px solid var(--cream); outline-offset: 4px; border-radius: 4px; }
+  @media (max-width: 560px) { .bar-links .hide-sm { display: none; } }
+
+  .hero-in { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px 24px 72px; }
+  h1 { font-size: clamp(min(38px, 10.5vw), 6vw, 76px); font-weight: 700; letter-spacing: -.035em; line-height: 1.05; color: var(--cream); }
+  h1 span { display: block; }
+  h1 span + span { color: var(--butter); }
+  .tagline { max-width: 640px; margin: 26px auto 0; font-size: clamp(17px, 1.6vw, 20px); line-height: 1.55; text-wrap: balance; color: color-mix(in srgb, var(--cream) 90%, var(--blue)); text-shadow: 0 1px 16px rgba(14, 27, 69, .45); }
+  .cta { margin-top: 36px; display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 15px 26px; border-radius: 999px; font-size: 16px; font-weight: 600; letter-spacing: -.005em; text-decoration: none; transition: background-color .15s ease, transform .15s ease, color .15s ease, box-shadow .15s ease; }
+  .btn-primary { background: var(--butter); color: var(--ink); box-shadow: 0 1px 2px rgba(14, 27, 69, .14), 0 6px 18px -8px rgba(14, 27, 69, .45); }
+  .btn-primary:hover { background: var(--cream); transform: translateY(-1px); }
+  .btn-ghost { color: var(--cream); box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .32); }
+  .btn-ghost:hover { background: rgba(255, 251, 234, .1); }
+  .btn:focus-visible { outline: 2px solid var(--cream); outline-offset: 3px; }
+
+  /* The terminal card: one real command, as an agent would run it. */
+  .term { width: min(560px, 100%); margin: 48px auto 0; text-align: left; border-radius: var(--r-lg); background: var(--ink); color: var(--cream); box-shadow: var(--shadow); overflow: hidden; }
+  .term-top { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid rgba(255, 251, 234, .1); }
+  .term-top b { margin-left: 6px; font: 600 12.5px/1 var(--mono); color: color-mix(in srgb, var(--cream) 62%, var(--ink)); letter-spacing: .02em; }
+  .term-top i { width: 10px; height: 10px; border-radius: 50%; background: color-mix(in srgb, var(--cream) 34%, var(--ink)); }
+  .term pre { margin: 0; padding: 16px 18px 20px; font: 13.5px/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .term .pr { color: var(--butter); }
+  .term .fl { color: color-mix(in srgb, var(--cream) 66%, var(--blue)); }
+  .term .out { color: color-mix(in srgb, var(--cream) 72%, var(--ink)); }
+  .term .ok { color: var(--butter); }
+
+  /* ---------- The cream sheet: everything below the hero ---------- */
+  .sheet { background: var(--cream); color: var(--ink); border-radius: var(--sheet) var(--sheet) 0 0; margin-top: calc(var(--sheet) * -1); position: relative; z-index: 1; }
+  section { padding: clamp(48px, 8vh, 96px) var(--gutter); }
+  .in { max-width: 1040px; margin: 0 auto; }
+  h2 { font-size: clamp(26px, 3vw, 38px); font-weight: 700; letter-spacing: -.028em; line-height: 1.1; color: var(--ink); }
+  .sec-lead { max-width: 64ch; margin-top: 14px; font-size: 17px; line-height: 1.55; color: var(--ink-soft); text-wrap: pretty; }
+
+  /* How it works: three steps across. */
+  .steps { margin-top: 40px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .step { background: var(--cream-2); border: 1px solid var(--rule); border-radius: var(--r-lg); padding: 22px 22px 24px; }
+  .step .n { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 999px; background: var(--blue); color: var(--cream); font-weight: 700; font-size: 15px; }
+  .step h3 { margin-top: 16px; font-size: 18px; font-weight: 700; letter-spacing: -.015em; }
+  .step p { margin-top: 8px; font-size: 15px; line-height: 1.55; color: var(--ink-soft); }
+  .step code { padding: 1px 6px; border-radius: 6px; background: var(--badge-bg); color: var(--badge-ink); font: 600 .86em/1.5 var(--mono); }
+  @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+
+  /* The three parts. */
+  .parts { background: color-mix(in srgb, var(--cream) 97%, var(--ink)); }
+  .part-grid { margin-top: 36px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .part { background: var(--cream); border: 1px solid var(--rule); border-radius: var(--r-lg); padding: 24px; box-shadow: var(--shadow); }
+  .part .k { display: inline-block; padding: 3px 10px; border-radius: var(--r-sm); background: var(--ink); color: var(--cream); font: 700 13px/1.4 var(--mono); }
+  .part h3 { margin-top: 14px; font-size: 18px; font-weight: 700; letter-spacing: -.015em; }
+  .part p { margin-top: 8px; font-size: 15px; line-height: 1.55; color: var(--ink-soft); }
+  @media (max-width: 820px) { .part-grid { grid-template-columns: 1fr; } }
+
+  /* The three modes. */
+  .modes { margin-top: 36px; border-top: 2px solid var(--ink); }
+  .mode { display: grid; grid-template-columns: minmax(0, 11em) minmax(0, 1fr); column-gap: 28px; padding: 22px 0 24px; border-bottom: 1px solid var(--line); }
+  .mode h3 { font-size: 18px; font-weight: 700; letter-spacing: -.015em; }
+  .mode .pill { display: inline-block; margin-top: 7px; padding: 2px 9px; border-radius: 999px; background: var(--blue-tint); color: var(--blue-deep); font: 600 12.5px/1.5 var(--mono); }
+  .mode p { font-size: 16px; line-height: 1.6; color: var(--ink-soft); }
+  @media (max-width: 720px) { .mode { grid-template-columns: 1fr; row-gap: 8px; } .mode .mode-k { margin-bottom: 2px; } }
+
+  .closer { text-align: center; }
+  .closer h2 { text-wrap: balance; }
+  .closer .cta { margin-top: 30px; }
+  .closer .btn-primary { background: var(--blue); color: var(--cream); }
+  .closer .btn-primary:hover { background: var(--ink); color: var(--cream); }
+  .closer .btn-ghost { color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+  .closer .btn-ghost:hover { background: var(--cream-2); }
+  .closer .btn:focus-visible { outline: 2px solid var(--blue); }
+
+  /* Foot. */
+  .site-foot { background: var(--cream); color: var(--ink); padding: 0 var(--gutter); }
+  .site-foot nav { max-width: 1040px; margin: 0 auto; padding: 22px 0 max(30px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; }
+  .site-foot ul { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; padding: 0; list-style: none; }
+  .site-foot li + li::before { content: "·"; padding: 0 12px; color: var(--ink-soft); opacity: .6; }
+  .site-foot a { color: var(--ink-soft); font-size: 14px; font-weight: 500; text-decoration: none; }
+  .site-foot a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+  .site-foot a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+  .foot-mark { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-weight: 700; font-size: 15px; letter-spacing: -.02em; text-decoration: none; }
+  .foot-mark:hover { color: var(--blue); }
+
+  @media (prefers-reduced-motion: reduce) { .btn, .btn-primary:hover { transition: none; transform: none; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="bar">
+    <a class="wordmark" href="/" aria-label="agent-box, home">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="rgba(255,251,234,.08)"/><g fill="none" stroke="#FFFBEA" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg>
+      agent-box
+    </a>
+    <nav class="bar-links" aria-label="Primary">
+      <a class="hide-sm" href="/about/">About</a>
+      <a class="hide-sm" href="/privacy/">Privacy</a>
+      <a href="https://github.com/a-Fig/agent-box">GitHub</a>
+    </nav>
+  </div>
+
+  <div class="hero-in">
+    <h1><span>Spare compute for your agents,</span><span>carved out of a gaming PC.</span></h1>
+    <p class="tagline">agent-box turns a Windows gaming PC on your tailnet into disposable Linux boxes that coding agents offload heavy work to. One click decides how much of the PC they get, and games always win.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/a-Fig/agent-box">Get it on GitHub</a>
+      <a class="btn btn-ghost" href="#how">How it works</a>
+    </div>
+
+    <div class="term" aria-label="Example: running a test suite on a box">
+      <div class="term-top"><i></i><i></i><i></i><b>agent-box</b></div>
+<pre><span class="pr">$</span> box run --new -- go test -race ./...
+<span class="out">→ throwaway box agent-box-9f3c, 4 CPUs / 4GiB</span>
+<span class="out">→ synced worktree, running…</span>
+ok      github.com/a-Fig/agent-box/internal/mode   2.41s
+<span class="ok">PASS</span> <span class="out">— box deleted</span></pre>
+    </div>
+  </div>
+</header>
+
+<div class="sheet">
+  <main>
+    <section id="how">
+      <div class="in">
+        <h2>Heavy work leaves the laptop</h2>
+        <p class="sec-lead">A coding agent in a laptop worktree hands a build or test suite to a box on the PC, gets the result back, and the box goes away. Nothing is installed on the laptop beyond one small binary.</p>
+        <div class="steps">
+          <div class="step">
+            <span class="n">1</span>
+            <h3>Snapshot and send</h3>
+            <p><code>box run</code> snapshots the worktree, uncommitted and untracked files included, without touching your git index, and ships it to a box over the tailnet.</p>
+          </div>
+          <div class="step">
+            <span class="n">2</span>
+            <h3>Run on real cores</h3>
+            <p>The command runs on a Linux box with up to 4 CPUs and 4GiB. A dropped connection loses nothing: reattach with <code>box job</code>.</p>
+          </div>
+          <div class="step">
+            <span class="n">3</span>
+            <h3>Collect and discard</h3>
+            <p>You get the exit code and log back, and can <code>box pull</code> any output. Throwaway boxes delete themselves; reusable ones keep caches warm.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="parts">
+      <div class="in">
+        <h2>Three pieces of glue</h2>
+        <p class="sec-lead">Incus in a WSL2 distro does the boxes, API, auth and web UI. agent-box is the thin layer around it: a CLI for agents, a tray for the PC's owner, and the scripts that set the PC up.</p>
+        <div class="part-grid">
+          <div class="part">
+            <span class="k">box</span>
+            <h3>CLI and MCP for agents</h3>
+            <p>One Go binary that syncs a worktree to a box and runs a command there. Every command is also an MCP tool, so agents call it directly: <code>box_run</code>, <code>box_status</code>, <code>box_pull</code>.</p>
+          </div>
+          <div class="part">
+            <span class="k">boxtray</span>
+            <h3>The PC owner's switch</h3>
+            <p>A Windows tray app. One click picks My PC, Shared or Full power. When a game starts, it takes the PC back on its own, every few seconds, until the game ends.</p>
+          </div>
+          <div class="part">
+            <span class="k">provision</span>
+            <h3>Set the PC up once</h3>
+            <p>Scripts that stand up the WSL2 distro, Incus, the isolated project and the Tailscale node, so the PC serves boxes on the tailnet behind a real certificate.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="modes">
+      <div class="in">
+        <h2>The owner decides, games win</h2>
+        <p class="sec-lead">The tray writes one mode on the PC. The <code>box</code> CLI only reads it; the tray enforces it every tick with an admin cert agents don't have, so an agent can never take cores a game needs.</p>
+        <div class="modes">
+          <div class="mode">
+            <div class="mode-k"><h3>My PC</h3><span class="pill">boxes paused</span></div>
+            <p>The PC is yours. Boxes freeze, and ones still frozen after 15 minutes are stopped to free RAM. Agents fall back to running locally.</p>
+          </div>
+          <div class="mode">
+            <div class="mode-k"><h3>Shared</h3><span class="pill">2 CPUs / box</span></div>
+            <p>Agents get a modest slice while you keep working. Paused boxes resume.</p>
+          </div>
+          <div class="mode">
+            <div class="mode-k"><h3>Full power</h3><span class="pill">4 CPUs / box</span></div>
+            <p>The PC is idle, so agents get the most of it. A launched game instantly pulls it back to My PC until the game quits.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="closer">
+      <div class="in">
+        <h2>Reuse, don't rebuild.</h2>
+        <p class="sec-lead" style="margin-left:auto;margin-right:auto;text-align:center">agent-box is open source, built on Incus, WSL2 and Tailscale, with only the glue written from scratch. Read the design doc to see how each part works and why.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/a-Fig/agent-box">View the code</a>
+          <a class="btn btn-ghost" href="https://github.com/a-Fig/agent-box/blob/main/docs/DESIGN.md">Read the design doc</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <nav aria-label="Site">
+      <a class="foot-mark" href="/" aria-label="agent-box, home">
+        <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#225BFF"/><g fill="none" stroke="#FFFBEA" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M16 6.2 25.3 10.8 16 15.4 6.7 10.8Z"/><path d="M6.7 10.8V21.4L16 26V15.4"/><path d="M25.3 10.8V21.4L16 26"/></g></svg>
+        agent-box
+      </a>
+      <ul>
+        <li><a href="/about/">About</a></li>
+        <li><a href="/privacy/">Privacy</a></li>
+        <li><a href="/contact/">Contact</a></li>
+        <li><a href="https://github.com/a-Fig/agent-box">GitHub</a></li>
+      </ul>
+    </nav>
+  </footer>
+</div>
+
+</body>
+</html>
