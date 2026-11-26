@@ -453,10 +453,16 @@ if [ "$BUILD_BASE" -eq 1 ]; then
       dpkg-db-backup.timer e2scrub_all.timer fstrim.timer \
       systemd-sysupdate.timer systemd-sysupdate-reboot.timer rsyslog.service polkit.service </dev/null
     # Toolchains, profile.d and netplan (/etc/netplan/50-cloud-init.yaml) are baked into the image
-    # now. Disabling cloud-init prevents boxes launched from agent-base from re-running cloud-init
-    # stages (ssh-keygen, apt_configure, runcmd) and stops cloud-init-local from delaying
-    # systemd-networkd on every launch (#194).
-    incus exec "$builder" --project "$PROJECT" -- touch /etc/cloud/cloud-init.disabled </dev/null
+    # now. Scrub the builder's per-instance identity (truncate /etc/machine-id so systemd generates
+    # a fresh one per box and DHCPv4 DUIDs don't collide; remove any SSH host keys) while preserving
+    # netplan, then disable cloud-init so launches skip ssh-keygen, apt_configure and runcmd and
+    # don't delay systemd-networkd (#194).
+    incus exec "$builder" --project "$PROJECT" -- bash -c '
+      rm -f /etc/machine-id /etc/ssh/ssh_host_*
+      : > /etc/machine-id
+      [ -L /var/lib/dbus/machine-id ] || rm -f /var/lib/dbus/machine-id
+      touch /etc/cloud/cloud-init.disabled
+    ' </dev/null
     incus config unset "$builder" cloud-init.user-data --project "$PROJECT"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
