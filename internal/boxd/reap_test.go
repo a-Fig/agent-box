@@ -1,6 +1,8 @@
 package boxd
 
 import (
+	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -90,5 +92,89 @@ func TestReapEndedUnreadJob(t *testing.T) {
 		case tc != "alone" && len(sets) != 0:
 			t.Errorf("%s: cut a running job's expiry: sets %v, expires %s", tc, sets, expires)
 		}
+	}
+}
+
+// A job that ended while boxd's reapEnded didn't get to write (a restart cut
+// it short; here another job looked to be running) leaves its throwaway the
+// job's 24 hours. A boxd started again sweeps it to 30 minutes, once nothing
+// runs there (#156): on the first poll that finds the box running (it was
+// frozen for My PC when boxd started), and only that once.
+func TestSweepEndedAfterRestart(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
+	job := "w-0001.20261124-180000-ab12"
+	own := t0.Add(jobTTL).Format(time.RFC3339)
+	r.f.set(func() {
+		in := inst("w-0001", "Running", "small", t0)
+		in.Config[jobrun.ThrowawayKey] = "true"
+		in.Config["user.expires"] = own
+		r.f.ins = []Instance{in}
+		r.f.jobs["w-0001"] = []fakeJob{{name: job, state: "running", log: "x", meta: metaJSON}}
+	})
+	r.poll()
+	r.c.add(time.Hour)
+	r.f.set(func() {
+		r.f.jobs["w-0001"][0].state, r.f.jobs["w-0001"][0].exit = "done", "0"
+		r.f.running = map[string][]string{"w-0001": {"w-0001.20261124-185000-cd34"}}
+	})
+	expires := func() (string, int, int) {
+		r.f.mu.Lock()
+		defer r.f.mu.Unlock()
+		return r.f.ins[0].Config["user.expires"], r.f.runChecks, len(r.f.expirySets)
+	}
+	// waitChecks waits for the running-jobs check of n reaps in all; a reap
+	// reads the clock before it.
+	waitChecks := func(n int) {
+		t.Helper()
+		for i := 0; i < 200; i++ {
+			if _, c, _ := expires(); c >= n {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("no reap ran its check %d", n)
+	}
+	r.poll()
+	waitChecks(1)
+	time.Sleep(20 * time.Millisecond) // its decline
+	if got, _, _ := expires(); got != own {
+		t.Fatalf("reaped while another job ran: %s", got)
+	}
+
+	r.f.set(func() { r.f.running, r.f.ins[0].Status = nil, "Frozen" })
+	r.c.add(time.Hour)
+	w := r.restart()
+	w.Poll(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if got, c, _ := expires(); got != own || c != 1 {
+		t.Fatalf("swept a frozen box: expires %s, checks %d", got, c)
+	}
+	r.f.set(func() { r.f.ins[0].Status = "Running" })
+	w.Poll(context.Background())
+	waitChecks(2)
+	want := r.c.now().Add(jobrun.EndedKeep).UTC().Format(time.RFC3339)
+	for i := 0; i < 50; i++ {
+		if got, _, _ := expires(); got == want {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got, _, _ := expires(); got != want {
+		t.Fatalf("after restart: expires %s, want %s", got, want)
+	}
+
+	// The job's 24h again (as a late extend could land): later polls leave it.
+	extended := own
+	r.f.set(func() {
+		c := maps.Clone(r.f.ins[0].Config)
+		c["user.expires"] = extended
+		r.f.ins[0].Config = c
+	})
+	_, checks, sets := expires()
+	r.c.add(time.Minute)
+	w.Poll(context.Background())
+	time.Sleep(50 * time.Millisecond)
+	if got, c, n := expires(); got != extended || c != checks || n != sets {
+		t.Errorf("a later poll: expires %s (want %s), checks %d→%d, writes %d→%d", got, extended, checks, c, sets, n)
 	}
 }

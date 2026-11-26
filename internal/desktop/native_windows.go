@@ -31,6 +31,7 @@ const (
 // Someone who sets the variable themselves is left to it. The runtime reads it as the web view is
 // made; what this returns puts it back, so a browser the window opens doesn't inherit it.
 func beforeWindow() (after func()) {
+	setProcessAppID() // the Start menu shortcut's (launcher_windows.go)
 	const env = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
 	if _, set := os.LookupEnv(env); set {
 		return func() {}

@@ -560,10 +560,16 @@ func TestReaperDeletesOnlyExpiredInEveryMode(t *testing.T) {
 		expiry(f, "fresh", t0.Add(time.Hour))
 		expiry(f, "gone", t0.Add(-24*time.Hour))
 		m := New(f, md)
+		var logged []string
+		m.Logf = func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
 		st := tick(m, 0)
 		if st.Err != nil {
 			t.Fatalf("%s: err %v", md, st.Err)
 		}
+		equal(t, logged, []string{
+			"reaped old (expired " + t0.Add(-time.Second).Format(time.RFC3339) + ")",
+			"reaped gone (expired " + t0.Add(-24*time.Hour).Format(time.RFC3339) + ")",
+		})
 		var dels []string
 		for _, c := range f.calls {
 			if strings.HasPrefix(c, "delete ") {
