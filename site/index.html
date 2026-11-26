@@ -3,26 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agent-box — Remote runners for coding agents on hardware you own</title>
+<title>agent-box — Heavy agent builds on hardware you own</title>
 <meta name="description" content="Offload heavy tests, builds, and GPU workloads from coding agents on your laptop to your own Linux server or shared Windows gaming PC inside isolated Incus boxes.">
 <link rel="canonical" href="https://agent-box.afig.dev/">
 <link rel="alternate" type="text/markdown" href="/setup" title="Setup guide for coding agents">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="agent-box">
 <meta property="og:url" content="https://agent-box.afig.dev/">
-<meta property="og:title" content="agent-box — Remote runners for coding agents on hardware you own">
+<meta property="og:title" content="agent-box — Heavy agent builds on hardware you own">
 <meta property="og:description" content="Offload heavy tests, builds, and GPU workloads from coding agents on your laptop to your own Linux server or shared Windows gaming PC inside isolated Incus boxes.">
 <meta property="og:image" content="https://agent-box.afig.dev/og.jpg">
 <meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="735">
-<meta property="og:image:alt" content="The agent-box cube mark behind reeded glass on blue, over the words: Remote runners on hardware you own. Run heavy builds off your laptop.">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="agent-box: Heavy agent builds, off your laptop.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -31,38 +31,36 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
   "url": "https://agent-box.afig.dev/",
-  "author": { "@type": "Person", "name": "Tyler Darisme", "url": "https://github.com/a-Fig" },
+  "author": { "@type": "Person", "name": "a-Fig", "url": "https://github.com/a-Fig" },
   "codeRepository": "https://github.com/a-Fig/agent-box"
 }
 </script>
 <style>
 :root {
-  --blue: #225BFF;
-  --cream: #FFFBEA;
-  --butter: #FDEE8C;
-  --ink: #0E1B45;
-  --ink-soft: #3A4670;
-  --badge-bg: #DCE6FF;
-  --badge-ink: #1640BF;
-  --ink-tint: color-mix(in srgb, var(--ink) 6%, var(--cream));
-  --line: #DDD7B8;
-  --mono: ui-monospace, Menlo, Consolas, monospace;
-  --sheet: clamp(28px, 3.2vw, 44px);
+  --carbon: #111318;
+  --panel: #191D26;
+  --panel-2: #212633;
+  --peri: #8EA2FF;
+  --peri-deep: #4F63E8;
+  --peri-soft: #B5C3FF;
+  --green: #2BD06A;
+  --amber: #F59E0B;
+  --red: #F87171;
+  --stone: #F5F6FA;
+  --surface: #FFFFFF;
+  --ink: #14151A;
+  --ink-soft: #4B5263;
+  --badge-bg: #E5EAFF;
+  --badge-ink: #2C3EC9;
+  --line: #DFE3EE;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   --gutter: clamp(20px, 4vw, 48px);
   --ease: cubic-bezier(.22, .8, .24, 1);
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  --flutes: repeating-linear-gradient(90deg,
-    rgba(255, 255, 255, 0.16) 0px,
-    rgba(255, 255, 255, 0.05) 1px,
-    rgba(255, 255, 255, 0) 5px,
-    rgba(14, 27, 69, 0.05) 9px,
-    rgba(14, 27, 69, 0.22) 11px,
-    rgba(14, 27, 69, 0.3) 12px);
 }
 * { box-sizing: border-box; margin: 0; }
-html { background: var(--blue); scroll-behavior: smooth; }
+html { background: var(--carbon); scroll-behavior: smooth; }
 body {
-  background: var(--blue);
+  background: var(--carbon);
   color: var(--ink);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -78,343 +76,306 @@ code {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
-.nw { white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* ---------- Hero stage ---------- */
-.stage {
+/* ---------- Hero Deck (Graphite Carbon + Isometric Blueprint Grid + Periwinkle Accent) ---------- */
+.hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  min-height: clamp(610px, 90svh, 880px);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  padding: clamp(20px, 3vh, 32px) var(--gutter) clamp(32px, 4.5vh, 46px);
-  color: var(--cream);
+  padding: clamp(18px, 3vh, 28px) var(--gutter) clamp(52px, 8vh, 84px);
+  color: #F4F6FB;
   background:
-    radial-gradient(38% 58% at 88% 24%, rgba(14, 27, 69, .34), rgba(14, 27, 69, 0) 74%),
-    radial-gradient(32% 52% at 10% 96%, rgba(14, 27, 69, .3), rgba(14, 27, 69, 0) 76%),
-    var(--blue);
+    radial-gradient(46% 62% at 82% 16%, rgba(142, 162, 255, .18), transparent 72%),
+    radial-gradient(38% 55% at 14% 88%, rgba(43, 208, 106, .09), transparent 70%),
+    linear-gradient(rgba(142, 162, 255, .055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(142, 162, 255, .055) 1px, transparent 1px),
+    var(--carbon);
+  background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px, 100% 100%;
 }
-.st-gl {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: -2;
-  pointer-events: none;
-  opacity: .72;
-}
-.stage::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: var(--flutes);
-  mix-blend-mode: soft-light;
-}
-.stage::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: var(--grain);
-  background-size: 180px 180px;
-  mix-blend-mode: overlay;
-  opacity: .12;
-}
-
-.st-top {
-  position: relative;
-  z-index: 4;
-  max-width: 1120px;
-  width: 100%;
+.top-nav {
+  max-width: 1140px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
-.st-nav {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 18px;
-}
-.st-nav a {
-  color: var(--cream);
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: -.01em;
-  text-decoration: none;
-  opacity: .9;
-  transition: opacity .15s ease, color .15s ease;
-}
-.st-nav a:hover { color: var(--butter); opacity: 1; }
-.st-nav a:focus-visible { outline: 2px solid var(--cream); outline-offset: 4px; border-radius: 4px; }
-.st-ver {
-  flex: none;
-  white-space: nowrap;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: rgba(14, 27, 69, .28);
-  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .24);
-  font: 600 12.5px/1 var(--mono);
-  color: var(--cream);
-}
-
-.st-hero {
-  position: relative;
-  z-index: 3;
-  max-width: 1120px;
-  width: 100%;
-  margin: auto;
-  padding: clamp(24px, 4vh, 42px) 0 clamp(26px, 4vh, 42px);
-  display: grid;
-  place-items: center;
-  text-align: center;
-}
-
-/* Floating glass harness tiles strictly around the outer perimeter */
-.st-icons {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-}
-.st-ic {
-  position: absolute;
-  width: clamp(48px, 4.6vw, 60px);
-  height: clamp(48px, 4.6vw, 60px);
-  border-radius: 16px;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 251, 234, .92);
-  box-shadow: inset 0 1px 0 #fff, 0 14px 32px rgba(14, 27, 69, .26);
-  opacity: .92;
-  animation: bob var(--dur, 7.5s) ease-in-out infinite alternate;
-  animation-delay: var(--del, 0s);
-}
-.st-ic img { width: 58%; height: 58%; object-fit: contain; display: block; }
-.ic-t3 { left: 1.5%; top: 6%; --dur: 7.2s; --del: -.4s; transform: rotate(-7deg); }
-.ic-cu { left: 3.5%; top: 44%; --dur: 8.6s; --del: -.9s; transform: rotate(4deg); }
-.ic-cl { left: 9%; bottom: 4%; --dur: 8.4s; --del: -2.1s; transform: rotate(6deg); }
-.ic-cx { right: 2%; top: 6%; --dur: 7.8s; --del: -1.4s; transform: rotate(7deg); }
-.ic-oc { right: 3.5%; top: 46%; --dur: 7.4s; --del: -2.7s; transform: rotate(-5deg); }
-.ic-ag { right: 9%; bottom: 4%; --dur: 6.9s; --del: -3.2s; transform: rotate(-6deg); }
-@keyframes bob {
-  from { translate: 0 0; }
-  to { translate: 0 -10px; }
-}
-
-.st-lockup {
-  position: relative;
-  z-index: 2;
+.brand-link {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: clamp(14px, 2vw, 24px);
-}
-.st-logo {
-  flex: none;
-  width: clamp(68px, 8.2vw, 104px);
-  height: auto;
-  display: block;
-  filter: drop-shadow(0 12px 28px rgba(14, 27, 69, .28));
-}
-.st-word {
-  font-size: clamp(50px, 8.8vw, 106px);
+  gap: 11px;
+  color: #FFFFFF;
+  text-decoration: none;
+  font-size: 20px;
   font-weight: 800;
-  letter-spacing: -.045em;
-  line-height: .94;
-  color: var(--butter);
-  text-shadow: 0 12px 34px rgba(14, 27, 69, .22);
+  letter-spacing: -.035em;
 }
+.brand-link svg { width: 32px; height: 32px; display: block; flex: none; }
+.brand-link:hover { color: var(--peri-soft); }
+.brand-link:focus-visible { outline: 2px solid var(--peri); outline-offset: 4px; border-radius: 6px; }
 
-.st-h1 {
-  position: relative;
-  z-index: 2;
-  max-width: 780px;
-  margin-top: clamp(20px, 3vh, 30px);
-  font-size: clamp(24px, 3.3vw, 42px);
-  font-weight: 700;
-  letter-spacing: -.03em;
-  line-height: 1.15;
-  color: var(--cream);
-  text-shadow: 0 2px 18px rgba(14, 27, 69, .38);
-  text-wrap: balance;
-}
-.st-h1 span { color: var(--butter); }
-.st-sub {
-  position: relative;
-  z-index: 2;
-  max-width: 580px;
-  margin-top: 14px;
-  font-size: clamp(16px, 1.45vw, 19px);
-  font-weight: 500;
-  line-height: 1.5;
-  color: rgba(255, 251, 234, .92);
-  text-shadow: 0 1px 14px rgba(14, 27, 69, .38);
-  text-wrap: pretty;
-}
-
-.st-acts {
-  position: relative;
-  z-index: 4;
-  margin-top: clamp(24px, 3.6vh, 36px);
+.nav-links {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 12px 14px;
+  gap: 8px 20px;
 }
-.act-wrap { position: relative; display: inline-block; }
+.nav-links a {
+  color: #B4BDD3;
+  font-size: 14.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color .15s ease;
+}
+.nav-links a:hover { color: var(--peri-soft); }
+.nav-links a:focus-visible { outline: 2px solid var(--peri); outline-offset: 4px; border-radius: 4px; }
 
-.st-cta {
+.hero-grid {
+  max-width: 1140px;
+  margin: clamp(36px, 6.5vh, 72px) auto 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
+  gap: clamp(28px, 4vw, 52px);
+  align-items: center;
+}
+.kicker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(142, 162, 255, .12);
+  box-shadow: inset 0 0 0 1px rgba(142, 162, 255, .28);
+  font: 600 12.5px/1 var(--mono);
+  color: var(--peri-soft);
+}
+.kicker-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: block; }
+h1 {
+  margin-top: 18px;
+  font-size: clamp(38px, 4.9vw, 64px);
+  font-weight: 800;
+  letter-spacing: -.04em;
+  line-height: 1.03;
+  color: #FFFFFF;
+  text-wrap: balance;
+}
+h1 span { color: var(--peri); }
+.hero-sub {
+  margin-top: 18px;
+  max-width: 54ch;
+  font-size: clamp(16.5px, 1.45vw, 19px);
+  line-height: 1.55;
+  color: #A9B2C8;
+  text-wrap: pretty;
+}
+.hero-acts {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.btn-hero {
   appearance: none;
   border: 0;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  height: 50px;
-  padding: 0 24px;
+  height: 48px;
+  padding: 0 22px;
   border-radius: 999px;
-  background: var(--cream);
+  background: var(--peri);
   color: var(--ink);
   font: 700 15.5px/1 Inter, system-ui, sans-serif;
   letter-spacing: -.01em;
-  box-shadow: 0 10px 28px rgba(14, 27, 69, .24);
-  transition: background-color .16s ease, transform .15s ease;
+  transition: background-color .16s ease, transform .14s ease;
 }
-.st-cta:hover { background: var(--butter); }
-.st-cta:active { transform: scale(.98); }
-.st-cta:focus-visible { outline: 3px solid var(--cream); outline-offset: 3px; }
-.st-cta.copied { background: var(--butter); }
+.btn-hero:hover { background: var(--peri-soft); }
+.btn-hero:active { transform: scale(.98); }
+.btn-hero.copied { background: var(--green); color: var(--ink); }
+.btn-hero:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 
-.st-star {
+.btn-ghost {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  height: 50px;
-  padding: 0 22px;
+  gap: 8px;
+  height: 48px;
+  padding: 0 20px;
   border-radius: 999px;
-  background: rgba(14, 27, 69, .28);
-  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .32);
-  color: var(--cream);
-  font: 600 15.5px/1 Inter, system-ui, sans-serif;
+  background: rgba(25, 29, 38, .8);
+  box-shadow: inset 0 0 0 1px rgba(142, 162, 255, .3);
+  color: #F4F6FB;
+  font: 600 15px/1 Inter, system-ui, sans-serif;
   text-decoration: none;
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-  transition: background-color .2s ease, color .2s ease, box-shadow .2s ease;
+  transition: background-color .16s ease, box-shadow .16s ease;
 }
-.st-star svg { width: 17px; height: 17px; fill: currentColor; }
-.st-star:hover { background: var(--butter); box-shadow: inset 0 0 0 1px var(--butter); color: var(--ink); }
-.st-star:focus-visible { outline: 3px solid var(--cream); outline-offset: 3px; }
+.btn-ghost svg { width: 16px; height: 16px; fill: currentColor; }
+.btn-ghost:hover { background: rgba(142, 162, 255, .18); box-shadow: inset 0 0 0 1px var(--peri); }
+.btn-ghost:focus-visible { outline: 3px solid var(--peri); outline-offset: 3px; }
 
-/* Popovers on primary hero buttons */
-.st-tip, .st-star-tip {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 12px);
-  transform: translate(-50%, 6px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .18s var(--ease), transform .18s var(--ease);
+.hero-prompt {
+  margin-top: 14px;
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(25, 29, 38, .85);
+  border: 1px solid rgba(255, 255, 255, .08);
+  font: 500 12.5px/1.4 var(--mono);
+  color: #9AA4BC;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
-.st-tip {
-  width: min(360px, 84vw);
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--ink);
-  color: var(--cream);
-  box-shadow: 0 12px 30px rgba(14, 27, 69, .38), inset 0 0 0 1px rgba(255, 251, 234, .18);
-  font: 500 12.5px/1.45 var(--mono);
-  text-align: left;
-}
-.st-star-tip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 14px 10px;
-  border-radius: 14px;
-  background: var(--ink);
-  color: var(--butter);
-  box-shadow: 0 12px 30px rgba(14, 27, 69, .38), inset 0 0 0 1px rgba(255, 251, 234, .18);
-  font: 700 13px/1 Inter, sans-serif;
-}
-.act-wrap:hover .st-tip,
-.act-wrap:focus-within .st-tip,
-.act-wrap:hover .st-star-tip,
-.act-wrap:focus-within .st-star-tip {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-/* Bottom hero trust strip */
-.st-trust {
-  position: relative;
-  z-index: 3;
-  max-width: 1120px;
-  width: 100%;
-  margin: 0 auto;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 251, 234, .18);
+.hero-harnesses {
+  margin-top: 24px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 10px 26px;
-  font-size: 13.5px;
+  gap: 10px 14px;
+  font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 251, 234, .9);
+  color: #9AA4BC;
 }
-.st-trust span { display: inline-flex; align-items: center; gap: 7px; }
-.st-trust i { width: 6px; height: 6px; border-radius: 50%; background: var(--butter); display: inline-block; }
+.h-chips { display: inline-flex; align-items: center; gap: 8px; }
+.h-chip {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .92);
+  display: grid;
+  place-items: center;
+}
+.h-chip img { width: 18px; height: 18px; object-fit: contain; display: block; }
 
-/* ---------- Overlapping cream sheet ---------- */
-.sheet {
-  position: relative;
-  z-index: 5;
-  background: var(--cream);
-  color: var(--ink);
-  border-radius: var(--sheet) var(--sheet) 0 0;
-  box-shadow: 0 -22px 60px rgba(14, 27, 69, .18);
+/* Signature Interactive Rig Console in Hero */
+.rig-card {
+  border-radius: 20px;
+  background: var(--panel);
+  border: 1px solid rgba(142, 162, 255, .28);
+  box-shadow: 0 26px 64px rgba(0, 0, 0, .48);
+  overflow: hidden;
 }
-.sec { padding: clamp(56px, 8.5vh, 92px) var(--gutter); }
-.sec-in { max-width: 1040px; margin: 0 auto; }
+.rig-head {
+  padding: 14px 18px;
+  background: var(--panel-2);
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rig-id {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font: 700 13.5px/1 var(--mono);
+  color: #F4F6FB;
+}
+.rig-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex: none; }
+.rig-dot.shared { background: var(--peri); }
+.rig-dot.mypc { background: var(--amber); }
+
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: #12151C;
+  border: 1px solid rgba(255, 255, 255, .08);
+  gap: 2px;
+}
+.mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #9AA4BC;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font: 600 12.5px/1 Inter, sans-serif;
+  cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.mode-btn[aria-pressed="true"] { background: var(--peri); color: var(--ink); font-weight: 700; }
+.mode-btn[data-mode="mypc"][aria-pressed="true"] { background: var(--amber); color: var(--ink); }
+.mode-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+
+.rig-body { padding: 18px; display: grid; gap: 14px; }
+.rig-msg { font-size: 13.5px; line-height: 1.45; color: #B4BDD3; }
+.rig-bars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.rig-stat {
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: #141720;
+  border: 1px solid rgba(255, 255, 255, .06);
+}
+.rig-stat-k { font: 600 11px/1 var(--mono); color: #8D97B0; text-transform: uppercase; letter-spacing: .04em; }
+.rig-stat-v { margin-top: 6px; font: 700 14.5px/1 var(--mono); color: #FFFFFF; }
+.rig-track { margin-top: 8px; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.rig-fill { height: 100%; border-radius: 999px; background: var(--green); transition: width .24s var(--ease), background-color .24s ease; }
+
+.bench-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bench-btn {
+  appearance: none;
+  border: 1px solid rgba(142, 162, 255, .24);
+  background: #141720;
+  color: #C7D0E4;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font: 600 12px/1 var(--mono);
+  cursor: pointer;
+}
+.bench-btn[aria-pressed="true"] {
+  background: rgba(142, 162, 255, .18);
+  border-color: var(--peri);
+  color: #fff;
+}
+.bench-btn:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+
+.rig-term {
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: #111318;
+  border: 1px solid rgba(142, 162, 255, .2);
+  font: 500 12.5px/1.5 var(--mono);
+}
+.rig-term-cmd { color: var(--peri-soft); }
+.rig-term-res { margin-top: 4px; color: var(--green); font-weight: 700; }
+.rig-term-note { margin-top: 4px; color: #9AA4BC; font-size: 12px; }
+
+/* ---------- Light Stone & Surface Bands ---------- */
+.band-light { background: var(--stone); color: var(--ink); }
+.band-white { background: var(--surface); color: var(--ink); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.sec { padding: clamp(56px, 8.5vh, 88px) var(--gutter); }
+.sec-in { max-width: 1060px; margin: 0 auto; }
 .sec h2 {
-  font-size: clamp(30px, 4vw, 48px);
-  font-weight: 700;
-  letter-spacing: -.032em;
-  line-height: 1.06;
+  font-size: clamp(30px, 3.8vw, 46px);
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: 1.07;
   text-wrap: balance;
 }
 .sec-sub {
-  margin-top: 14px;
+  margin-top: 12px;
   max-width: 62ch;
-  font-size: clamp(16.5px, 1.45vw, 19px);
+  font-size: clamp(16.5px, 1.4vw, 18.5px);
   line-height: 1.55;
   color: var(--ink-soft);
   text-wrap: pretty;
 }
 
-/* ---------- Supported platforms & agents ---------- */
-.sup-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px 24px;
-}
+/* Works with */
+.sup-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; }
 .os-row { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 .os-btn {
   appearance: none;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   height: 40px;
   padding: 0 14px;
@@ -424,60 +385,45 @@ code {
   gap: 8px;
   font: 600 14px/1 Inter, system-ui, sans-serif;
   cursor: pointer;
-  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
 }
 .os-btn .ico {
-  width: 16px;
-  height: 16px;
-  display: block;
-  background: currentColor;
-  -webkit-mask: var(--m) center / contain no-repeat;
-  mask: var(--m) center / contain no-repeat;
+  width: 16px; height: 16px; display: block; background: currentColor;
+  -webkit-mask: var(--m) center / contain no-repeat; mask: var(--m) center / contain no-repeat;
 }
-.os-btn[aria-pressed="true"] {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--cream);
-}
-.os-btn:hover { border-color: var(--ink); }
-.os-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.os-btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.os-btn:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; }
 
-.agents-row {
-  margin-top: 26px;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-}
+.agents-row { margin-top: 26px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .ag-btn {
   appearance: none;
   border: 1px solid var(--line);
-  background: #F7F4E4;
+  background: var(--surface);
   color: var(--ink);
-  padding: 16px 14px;
-  border-radius: 16px;
+  padding: 15px 14px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   gap: 11px;
   font: 600 15px/1.2 Inter, system-ui, sans-serif;
   text-align: left;
   cursor: pointer;
-  transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 .ag-btn img { width: 26px; height: 26px; object-fit: contain; flex: none; border-radius: 6px; }
 .ag-btn[aria-pressed="true"] {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: var(--cream);
-  box-shadow: 0 10px 24px rgba(34, 91, 255, .24);
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(20, 21, 26, .14);
 }
-.ag-btn:hover { border-color: var(--blue); }
-.ag-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.ag-btn[aria-pressed="true"] span { color: var(--peri-soft); }
+.ag-btn:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; }
 
 .sup-note {
-  margin-top: 20px;
+  margin-top: 18px;
   padding: 18px 20px;
-  border-radius: 16px;
-  background: var(--ink-tint);
+  border-radius: 14px;
+  background: var(--surface);
   border: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
@@ -487,44 +433,26 @@ code {
   font-size: 15.5px;
   line-height: 1.5;
 }
-.sup-note code { background: #fff; }
-.sup-tag {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--badge-bg);
-  color: var(--badge-ink);
-  font: 700 12.5px/1 var(--mono);
-}
+.sup-tag { padding: 5px 11px; border-radius: 999px; background: var(--badge-bg); color: var(--badge-ink); font: 700 12.5px/1 var(--mono); }
 
-/* ---------- How it works video ---------- */
-.how-sec { border-top: 1px solid var(--line); }
+/* How it works video */
 .how-box {
   margin-top: 28px;
-  border-radius: 22px;
+  border-radius: 20px;
   overflow: hidden;
-  background: var(--blue);
-  box-shadow: 0 20px 50px rgba(14, 27, 69, .14);
+  background: var(--carbon);
+  border: 1px solid rgba(142, 162, 255, .28);
+  box-shadow: 0 22px 54px rgba(20, 21, 26, .14);
 }
-.how-box video, .how-box img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-.how-foot {
-  margin-top: 20px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
-}
+.how-box video, .how-box img { display: block; width: 100%; height: auto; }
+.how-foot { margin-top: 18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
 .how-metric { font-size: 16px; color: var(--ink-soft); }
 .how-metric strong { color: var(--ink); font-weight: 700; }
 .how-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .replay-btn {
   appearance: none;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   height: 38px;
   padding: 0 14px;
@@ -533,19 +461,12 @@ code {
   cursor: pointer;
 }
 .replay-btn:hover { border-color: var(--ink); }
-.replay-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.text-link {
-  color: var(--blue);
-  font-size: 15.5px;
-  font-weight: 600;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 4px;
-}
+.replay-btn:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; }
+.text-link { color: var(--peri-deep); font-size: 15.5px; font-weight: 600; text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
 .text-link:hover { color: var(--ink); }
-.text-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 3px; }
+.text-link:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 3px; border-radius: 3px; }
 
-/* ---------- MCP tools list ---------- */
-.tools-sec { border-top: 1px solid var(--line); }
+/* Five MCP tools */
 .tools-list { margin-top: 28px; border-top: 2px solid var(--ink); }
 .tool-row {
   display: grid;
@@ -555,33 +476,16 @@ code {
   border-bottom: 1px solid var(--line);
   align-items: baseline;
 }
-.tool-name {
-  font: 700 16px/1.4 var(--mono);
-  color: var(--badge-ink);
-}
+.tool-name { font: 700 16px/1.4 var(--mono); color: var(--peri-deep); }
 .tool-desc { font-size: 16px; line-height: 1.58; color: var(--ink); max-width: 66ch; }
 .tool-desc span { display: block; margin-top: 4px; font-size: 14.5px; color: var(--ink-soft); }
 
-/* ---------- For humans UI section ---------- */
-.see-sec { border-top: 1px solid var(--line); }
-.see-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px 24px;
-}
-.size-row {
-  margin-top: 22px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
+/* For humans dashboard showcase */
+.size-row { margin-top: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .sz-btn {
   appearance: none;
   border: 1px solid var(--line);
-  background: #F7F4E4;
+  background: var(--stone);
   color: var(--ink);
   height: 36px;
   padding: 0 13px;
@@ -589,28 +493,15 @@ code {
   font: 600 13.5px/1 var(--mono);
   cursor: pointer;
 }
-.sz-btn[aria-pressed="true"] {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--butter);
-}
-.sz-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.sz-spec {
-  margin-left: 4px;
-  font: 500 13.5px/1.4 var(--mono);
-  color: var(--ink-soft);
-}
+.sz-btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--peri-soft); }
+.sz-btn:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; }
+.sz-spec { margin-left: 4px; font: 500 13.5px/1.4 var(--mono); color: var(--ink-soft); }
 
-.see-tabs {
-  margin-top: 24px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+.see-tabs { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
 .see-tab {
   appearance: none;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--stone);
   color: var(--ink);
   height: 40px;
   padding: 0 16px;
@@ -618,99 +509,62 @@ code {
   font: 600 14.5px/1 Inter, sans-serif;
   cursor: pointer;
 }
-.see-tab[aria-selected="true"] {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: var(--cream);
-}
-.see-tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.see-tab[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.see-tab:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; }
 
 .see-win {
   margin-top: 16px;
-  border-radius: 20px;
+  border-radius: 18px;
   overflow: hidden;
   background: #171A23;
-  box-shadow: 0 22px 54px rgba(14, 27, 69, .18);
-  border: 1px solid rgba(14, 27, 69, .16);
+  box-shadow: 0 22px 54px rgba(20, 21, 26, .16);
+  border: 1px solid rgba(20, 21, 26, .16);
 }
 .see-chrome {
-  height: 36px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: #12151D;
-  border-bottom: 1px solid rgba(255, 255, 255, .07);
+  height: 36px; padding: 0 14px; display: flex; align-items: center; gap: 7px;
+  background: #12151D; border-bottom: 1px solid rgba(255, 255, 255, .07);
 }
 .see-chrome i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, .18); display: block; }
 .see-chrome span { margin-left: 8px; font: 500 12px/1 var(--mono); color: #9BA5BE; }
 .see-panel[hidden] { display: none; }
-.see-panel img, .see-panel video {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-.see-cap {
-  margin-top: 14px;
-  font-size: 15px;
-  color: var(--ink-soft);
-}
+.see-panel img, .see-panel video { display: block; width: 100%; height: auto; }
+.see-cap { margin-top: 14px; font-size: 15px; color: var(--ink-soft); }
 
-/* ---------- Dark Ink Security & Architecture Band ---------- */
+/* Dark Carbon Security & Architecture Band */
 .sec-dark {
-  background: var(--ink);
-  color: var(--cream);
+  background: var(--carbon);
+  color: #F4F6FB;
+  background-image:
+    linear-gradient(rgba(142, 162, 255, .04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(142, 162, 255, .04) 1px, transparent 1px);
+  background-size: 36px 36px;
 }
-.sec-dark h2 { color: var(--butter); }
-.sec-dark .sec-sub { color: rgba(255, 251, 234, .82); }
-.arch-grid {
-  margin-top: 34px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px 26px;
-}
+.sec-dark h2 { color: #FFFFFF; }
+.sec-dark .sec-sub { color: #A9B2C8; }
+.arch-grid { margin-top: 32px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 22px; }
 .arch-card {
   padding: 20px;
   border-radius: 16px;
-  background: rgba(255, 251, 234, .05);
-  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .12);
+  background: var(--panel);
+  border: 1px solid rgba(142, 162, 255, .2);
 }
-.arch-card h3 {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--butter);
-  line-height: 1.3;
-}
-.arch-card p {
-  margin-top: 8px;
-  font-size: 14.5px;
-  line-height: 1.55;
-  color: rgba(255, 251, 234, .84);
-}
-.arch-card code {
-  background: rgba(255, 251, 234, .12);
-  color: var(--butter);
-}
+.arch-card h3 { font-size: 17px; font-weight: 700; color: var(--peri); line-height: 1.3; }
+.arch-card p { margin-top: 8px; font-size: 14.5px; line-height: 1.55; color: #B4BDD3; }
+.arch-card code { background: rgba(142, 162, 255, .14); color: var(--peri-soft); }
+
 .arch-diag {
-  margin-top: 34px;
-  padding: clamp(18px, 3vw, 28px);
-  border-radius: 20px;
-  background: #142357;
-  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .14);
+  margin-top: 30px;
+  padding: clamp(18px, 3vw, 26px);
+  border-radius: 18px;
+  background: var(--panel);
+  border: 1px solid rgba(142, 162, 255, .24);
 }
 .arch-diag svg { display: block; width: 100%; height: auto; }
 .arch-diag .diag-tall { display: none; }
 
-/* ---------- Setup section ---------- */
-.setup-sec { border-top: 1px solid var(--line); }
+/* Setup */
 .setup-rows { margin-top: 28px; border-top: 2px solid var(--ink); }
-.setup-row {
-  display: grid;
-  grid-template-columns: minmax(0, 15em) minmax(0, 1fr);
-  column-gap: 28px;
-  padding: 24px 0;
-  border-bottom: 1px solid var(--line);
-}
+.setup-row { display: grid; grid-template-columns: minmax(0, 15em) minmax(0, 1fr); column-gap: 28px; padding: 24px 0; border-bottom: 1px solid var(--line); }
 .setup-row h3 { font-size: 18px; font-weight: 700; line-height: 1.4; }
 .setup-body p { font-size: 16px; line-height: 1.6; max-width: 64ch; }
 .setup-body p + p, .setup-body .cmd-bar + p, .setup-body p + .cmd-bar, .setup-body .setup-acts { margin-top: 12px; }
@@ -724,173 +578,106 @@ code {
   gap: 8px;
   padding: 13px 22px;
   border-radius: 999px;
-  background: var(--blue);
-  color: var(--cream);
+  background: var(--ink);
+  color: #fff;
   font: 600 15.5px/1 Inter, sans-serif;
   transition: background-color .15s ease;
 }
-.btn-primary:hover { background: var(--ink); }
-.btn-primary:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
-
+.btn-primary:hover { background: var(--peri-deep); }
+.btn-primary:focus-visible { outline: 3px solid var(--peri-deep); outline-offset: 3px; }
 .cmd-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 11px 12px 11px 15px;
-  border-radius: 12px;
-  background: var(--ink);
-  color: var(--cream);
-  font: 13.5px/1.5 var(--mono);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 12px 11px 15px; border-radius: 11px;
+  background: var(--carbon); color: #F4F6FB; font: 13.5px/1.5 var(--mono);
 }
 .cmd-bar code { padding: 0; background: none; color: inherit; font: inherit; overflow-wrap: anywhere; }
 .cmd-copy {
-  flex: none;
-  appearance: none;
-  border: 1px solid rgba(255, 251, 234, .24);
-  background: rgba(255, 251, 234, .1);
-  color: var(--cream);
-  height: 30px;
-  padding: 0 11px;
-  border-radius: 8px;
+  flex: none; appearance: none; cursor: pointer; height: 30px; padding: 0 11px; border-radius: 8px;
+  border: 1px solid rgba(142, 162, 255, .32); background: rgba(142, 162, 255, .14); color: var(--peri-soft);
   font: 600 12px/1 Inter, sans-serif;
-  cursor: pointer;
 }
-.cmd-copy:hover { background: var(--butter); color: var(--ink); border-color: var(--butter); }
-.cmd-copy:focus-visible { outline: 2px solid var(--butter); outline-offset: 2px; }
-
+.cmd-copy:hover { background: var(--peri); color: var(--ink); border-color: var(--peri); }
+.cmd-copy:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
 .plat-pills { display: inline-flex; gap: 6px; margin-bottom: 10px; }
 .plat-pill {
-  appearance: none;
-  border: 1px solid var(--line);
-  background: #F7F4E4;
-  color: var(--ink);
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font: 600 13px/1 Inter, sans-serif;
-  cursor: pointer;
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  height: 32px; padding: 0 12px; border-radius: 999px; font: 600 13px/1 Inter, sans-serif; cursor: pointer;
 }
-.plat-pill[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--cream); }
-.plat-pill:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.plat-pill[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.plat-pill:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; }
 
-/* ---------- FAQ accordion ---------- */
-.faq-sec { border-top: 1px solid var(--line); }
-.faq-grid {
-  margin-top: 28px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 28px;
-  align-items: start;
-}
-.faq-item {
-  border-top: 1px solid var(--line);
-  padding: 16px 0 4px;
-}
+/* FAQ */
+.faq-grid { margin-top: 28px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 28px; align-items: start; }
+.faq-item { border-top: 1px solid var(--line); padding: 16px 0 4px; }
 .faq-item summary {
-  list-style: none;
-  cursor: pointer;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  font-size: 16.5px;
-  font-weight: 700;
-  line-height: 1.4;
-  color: var(--ink);
+  list-style: none; cursor: pointer; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  font-size: 16.5px; font-weight: 700; line-height: 1.4; color: var(--ink);
 }
 .faq-item summary::-webkit-details-marker { display: none; }
-.faq-item summary::after {
-  content: "+";
-  flex: none;
-  font: 500 20px/1.1 var(--mono);
-  color: var(--blue);
-}
+.faq-item summary::after { content: "+"; flex: none; font: 600 20px/1.1 var(--mono); color: var(--peri-deep); }
 .faq-item[open] summary::after { content: "−"; }
-.faq-item summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 4px; }
-.faq-item p {
-  margin-top: 10px;
-  padding-bottom: 12px;
-  font-size: 15.5px;
-  line-height: 1.58;
-  color: var(--ink-soft);
-}
+.faq-item summary:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 4px; border-radius: 4px; }
+.faq-item p { margin-top: 10px; padding-bottom: 12px; font-size: 15.5px; line-height: 1.58; color: var(--ink-soft); }
 
-/* ---------- End credits + peeking mascot + shared footer ---------- */
-.end-sec {
-  border-top: 1px solid var(--line);
-  padding-bottom: 0;
-  overflow: hidden;
-}
-.end-wrap {
-  max-width: 1040px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 28px;
-}
-.end-copy { padding-bottom: clamp(36px, 6vh, 64px); }
-.end-copy h2 { font-size: clamp(28px, 3.8vw, 44px); }
-.end-copy p { margin-top: 12px; max-width: 52ch; font-size: 16.5px; line-height: 1.55; color: var(--ink-soft); }
-.end-btns { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }
-.end-logo {
-  display: block;
-  width: clamp(180px, 24vw, 270px);
-  height: auto;
-  margin-bottom: -24px;
-}
+/* Closing + shared footer */
+.close-sec { border-top: 1px solid var(--line); padding: clamp(44px, 7vh, 72px) var(--gutter) clamp(28px, 5vh, 44px); }
+.close-wrap { max-width: 1060px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; }
+.close-copy p { margin-top: 10px; max-width: 52ch; font-size: 16px; line-height: 1.55; color: var(--ink-soft); }
+.close-acts { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }
+.close-mark svg { width: 88px; height: 88px; display: block; }
 
-.site-foot { background: var(--cream); padding: 0 var(--gutter); }
+.site-foot { background: var(--stone); padding: 0 var(--gutter); }
 .site-foot nav {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 20px 0 max(28px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px 24px;
+  max-width: 1060px; margin: 0 auto; padding: 20px 0 max(28px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px;
 }
 .site-foot ul { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; padding: 0; list-style: none; }
 .site-foot li + li::before { content: "·"; padding: 0 12px; color: var(--ink-soft); opacity: .6; }
 .site-foot a { color: var(--ink-soft); font-size: 14px; font-weight: 500; text-decoration: none; }
 .site-foot a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
-.site-foot a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
-.foot-logo { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-size: 19px; font-weight: 800; letter-spacing: -.035em; }
-.foot-logo svg { display: block; fill: currentColor; }
-.foot-logo:hover { color: var(--blue); text-decoration: none; }
+.site-foot a:focus-visible { outline: 2px solid var(--peri-deep); outline-offset: 2px; border-radius: 3px; }
+.foot-logo { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 18px; font-weight: 800; letter-spacing: -.03em; }
+.foot-logo svg { display: block; }
+.foot-logo:hover { color: var(--peri-deep); text-decoration: none; }
 
-@media (max-width: 1020px) {
-  .st-icons { display: none; }
+@media (max-width: 980px) {
+  .hero-grid { grid-template-columns: minmax(0, 1fr); }
   .agents-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .arch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
-  .st-top { flex-wrap: wrap; gap: 10px 14px; }
-  .st-nav { gap: 6px 14px; }
+  .top-nav { flex-wrap: wrap; gap: 10px 14px; }
   .agents-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tool-row, .setup-row { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
-  .arch-grid, .faq-grid, .end-wrap { grid-template-columns: minmax(0, 1fr); }
-  .end-logo { justify-self: center; width: 170px; }
+  .arch-grid, .faq-grid { grid-template-columns: minmax(0, 1fr); }
+  .rig-bars { grid-template-columns: minmax(0, 1fr); }
   .arch-diag .diag-wide { display: none; }
   .arch-diag .diag-tall { display: block; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .st-ic { animation: none; }
-  .st-cta, .st-star, .btn-primary, .st-tip, .st-star-tip { transition: none; }
+  .rig-fill, .btn-hero, .btn-primary, .btn-ghost { transition: none; }
 }
 </style>
 </head>
 <body>
-<header class="stage">
-  <canvas class="st-gl" id="gl" aria-hidden="true"></canvas>
-
-  <div class="st-top">
-    <span class="st-ver">CLI · MCP · Incus</span>
-    <nav class="st-nav" aria-label="Primary">
+<header class="hero">
+  <div class="top-nav">
+    <a class="brand-link" href="/">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="16" fill="#8EA2FF"/>
+        <path d="M32 13L50 22L32 31L14 22Z" fill="#B5C3FF"/>
+        <path d="M32 31L50 22V42L32 51Z" fill="#6D82F5"/>
+        <g fill="none" stroke="#14151A" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M32 13L50 22V42L32 51L14 42V22Z"/>
+          <path d="M14 22L32 31L50 22"/>
+          <path d="M32 31V51"/>
+        </g>
+        <circle cx="49" cy="15" r="5" fill="#2BD06A" stroke="#14151A" stroke-width="2.5"/>
+      </svg>
+      <span>agent-box</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
       <a href="#supported">Works with</a>
       <a href="/how/">How it runs</a>
       <a href="/hosts/">Hosts &amp; GPUs</a>
@@ -899,84 +686,81 @@ code {
     </nav>
   </div>
 
-  <div class="st-hero">
-    <div class="st-icons" aria-hidden="true">
-      <div class="st-ic ic-t3"><img src="/agents/t3.svg" alt="" width="34" height="34"></div>
-      <div class="st-ic ic-cl"><img src="/agents/claude.svg" alt="" width="34" height="34"></div>
-      <div class="st-ic ic-cx"><img src="/agents/codex.svg" alt="" width="34" height="34"></div>
-      <div class="st-ic ic-ag"><img src="/agents/antigravity.svg" alt="" width="34" height="34"></div>
-      <div class="st-ic ic-cu"><img src="/agents/cursor.svg" alt="" width="34" height="34"></div>
-      <div class="st-ic ic-oc"><img src="/agents/opencode.svg" alt="" width="34" height="34"></div>
-    </div>
-
-    <div class="st-lockup">
-      <svg class="st-logo" data-look="200;83,122,5.5" viewBox="0 0 200 194" width="104" height="101" role="img" aria-label="agent-box cube mascot">
-        <defs>
-          <mask id="eyeHero" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="194">
-            <rect width="200" height="194" fill="#fff"/>
-            <g class="st-eye">
-              <ellipse cx="61" cy="122" rx="9.5" ry="15" fill="#000"/>
-              <ellipse cx="105" cy="122" rx="9.5" ry="15" fill="#000"/>
-            </g>
-          </mask>
-        </defs>
-        <path fill="#FFFBEA" d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/>
-        <path fill="#FFFBEA" mask="url(#eyeHero)" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z"/>
-        <path fill="#FDEE8C" d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/>
-      </svg>
-      <span class="st-word">agent-box</span>
-    </div>
-
-    <h1 class="st-h1">Remote runners on <span>hardware you own.</span> Run heavy builds off your laptop.</h1>
-    <p class="st-sub">Send race tests, Android builds, and GPU workloads from coding agents on your laptop to your own Linux host or shared Windows gaming PC inside isolated Incus containers.</p>
-
-    <div class="st-acts">
-      <div class="act-wrap">
-        <button class="st-cta" id="copyHero" type="button" data-copy="Read https://agent-box.afig.dev/setup and help me set up agent-box.">Copy setup prompt</button>
-        <div class="st-tip" role="status">Read https://agent-box.afig.dev/setup and help me set up agent-box.</div>
-      </div>
-      <div class="act-wrap">
-        <a class="st-star" href="https://github.com/a-Fig/agent-box">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2l2.1 4.26 4.7.68-3.4 3.31.8 4.68L8 11.9l-4.2 2.23.8-4.68-3.4-3.31 4.7-.68z"/></svg>
-          Star us on GitHub
+  <div class="hero-grid">
+    <div>
+      <span class="kicker-pill"><i></i>Incus · box CLI · MCP</span>
+      <h1>Heavy agent builds, <span>off your laptop.</span></h1>
+      <p class="hero-sub">Send race suites, Android builds, and GPU jobs from coding agents on your laptop to your own Linux host or shared Windows gaming PC inside isolated Incus containers.</p>
+      <div class="hero-acts">
+        <button class="btn-hero" id="copyHero" type="button" data-copy="Read https://agent-box.afig.dev/setup and help me set up agent-box.">Copy setup prompt</button>
+        <a class="btn-ghost" href="https://github.com/a-Fig/agent-box">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          Star on GitHub
         </a>
-        <div class="st-star-tip" aria-hidden="true">
-          <svg data-look="200;83,122,5.5" viewBox="0 0 200 194" width="54" height="52">
-            <defs>
-              <mask id="eyeStar" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="194">
-                <rect width="200" height="194" fill="#fff"/>
-                <g class="st-eye">
-                  <ellipse cx="61" cy="122" rx="9.5" ry="15" fill="#000"/>
-                  <ellipse cx="105" cy="122" rx="9.5" ry="15" fill="#000"/>
-                </g>
-              </mask>
-            </defs>
-            <path fill="#FFFBEA" d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/>
-            <path fill="#FFFBEA" mask="url(#eyeStar)" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z"/>
-            <path fill="#FDEE8C" d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/>
-          </svg>
-          <span>please</span>
+      </div>
+      <div class="hero-prompt">Read https://agent-box.afig.dev/setup and help me set up agent-box.</div>
+      <div class="hero-harnesses">
+        <div class="h-chips" aria-hidden="true">
+          <span class="h-chip"><img src="/agents/t3.svg" alt="" width="18" height="18"></span>
+          <span class="h-chip"><img src="/agents/claude.svg" alt="" width="18" height="18"></span>
+          <span class="h-chip"><img src="/agents/codex.svg" alt="" width="18" height="18"></span>
+          <span class="h-chip"><img src="/agents/antigravity.svg" alt="" width="18" height="18"></span>
+          <span class="h-chip"><img src="/agents/cursor.svg" alt="" width="18" height="18"></span>
+        </div>
+        <span>Works with T3 Code, Claude Code, Codex, Antigravity &amp; Cursor</span>
+      </div>
+    </div>
+
+    <div class="rig-card" aria-label="Interactive host mode and benchmark preview">
+      <div class="rig-head">
+        <div class="rig-id"><i class="rig-dot" id="rigDot"></i><span id="rigTitle">Gaming PC · Full</span></div>
+        <div class="mode-switch" role="group" aria-label="Host mode">
+          <button class="mode-btn" type="button" data-mode="full" aria-pressed="true">Full</button>
+          <button class="mode-btn" type="button" data-mode="shared" aria-pressed="false">Shared</button>
+          <button class="mode-btn" type="button" data-mode="mypc" aria-pressed="false">My PC</button>
+        </div>
+      </div>
+      <div class="rig-body">
+        <p class="rig-msg" id="rigMsg">Uncapped Windows PC host budget: boxes receive their full CPU limits and GPU access.</p>
+        <div class="rig-bars">
+          <div class="rig-stat">
+            <div class="rig-stat-k">CPUs</div>
+            <div class="rig-stat-v" id="rigCpu">24 max</div>
+            <div class="rig-track"><div class="rig-fill" id="rigCpuBar" style="width:100%"></div></div>
+          </div>
+          <div class="rig-stat">
+            <div class="rig-stat-k">Memory cap</div>
+            <div class="rig-stat-v" id="rigMem">24 GiB</div>
+            <div class="rig-track"><div class="rig-fill" id="rigMemBar" style="width:100%"></div></div>
+          </div>
+          <div class="rig-stat">
+            <div class="rig-stat-k">GPU box</div>
+            <div class="rig-stat-v" id="rigGpu">Ready</div>
+            <div class="rig-track"><div class="rig-fill" id="rigGpuBar" style="width:100%"></div></div>
+          </div>
+        </div>
+        <div class="bench-row" role="group" aria-label="Measured run benchmark">
+          <button class="bench-btn" type="button" data-bench="race" aria-pressed="true">go test -race</button>
+          <button class="bench-btn" type="button" data-bench="android" aria-pressed="false">Android unit</button>
+          <button class="bench-btn" type="button" data-bench="pytorch" aria-pressed="false">PyTorch GPU</button>
+        </div>
+        <div class="rig-term">
+          <div class="rig-term-cmd" id="benchCmd">$ box run --size large --reason "daemon race suite" -- go test -race ./internal/daemon</div>
+          <div class="rig-term-res" id="benchRes">PASS · 913 tests · 420 s on box vs 1,013 s on laptop</div>
+          <div class="rig-term-note" id="benchNote">Shared /cache/go-build and /cache/go-mod stay warm across runs.</div>
         </div>
       </div>
     </div>
   </div>
-
-  <div class="st-trust">
-    <span><i></i>Isolated Incus boxes</span>
-    <span><i></i>Warm shared /cache</span>
-    <span><i></i>GPU passthrough</span>
-    <span><i></i>Shared Windows PC tray</span>
-    <span><i></i>T3 Code push wakeups</span>
-  </div>
 </header>
 
-<main class="sheet">
-  <section class="sec" id="supported">
+<main>
+  <section class="sec band-light" id="supported">
     <div class="sec-in">
       <div class="sup-head">
         <div>
           <h2>Works where your agents run</h2>
-          <p class="sec-sub">Install <code>box</code> on your laptop and connect one Linux or Windows WSL2 host. Your coding agents call MCP tools; you keep quiet fans.</p>
+          <p class="sec-sub">Install <code>box</code> on your laptop and add one Linux server or Windows WSL2 host. Your coding agents call MCP tools; your laptop stays quiet.</p>
         </div>
         <div class="os-row" role="group" aria-label="Laptop operating system">
           <button class="os-btn" type="button" data-os="mac" aria-pressed="true"><span class="ico" style="--m:url(/os/apple.svg)"></span>macOS</button>
@@ -994,22 +778,23 @@ code {
       </div>
 
       <div class="sup-note" id="supNote" aria-live="polite">
-        <span id="supText">In <strong>T3 Code</strong>, background runs end the turn right away and push results straight back to the thread — zero polling loops.</span>
+        <span id="supText">In <strong>T3 Code</strong>, runs longer than 30 s return a job ID so your turn ends right away, and local <code>box watch</code> pushes completion via <code>t3 thread send</code>.</span>
         <span class="sup-tag" id="supBadge">box join · push wakeups</span>
       </div>
     </div>
   </section>
 
-  <section class="sec how-sec" id="how">
+  <section class="sec band-white" id="how">
     <div class="sec-in">
       <h2>How it works</h2>
-      <p class="sec-sub">Your laptop snapshots uncommitted changes into an Incus box on your host, builds against persistent <code>/cache</code> volumes, and returns failure digests or artifacts.</p>
+      <p class="sec-sub">Your laptop stages dirty work into a temporary <code>git bundle</code>, syncs it to your Incus box with warm <code>/cache</code> mounts, and returns short digests or built files.</p>
 
       <div class="how-box">
-        <video id="howVid" autoplay muted playsinline preload="metadata" width="1400" height="802" aria-label="Animation showing box shipping a snapshot to an Incus host with warm /cache and finishing in 420 s vs 1,013 s on laptop">
+        <video id="howVid" autoplay muted playsinline preload="metadata" width="1400" height="802" aria-label="Animation showing box shipping a git bundle to an Incus host with warm /cache and finishing in 420 s vs 1,013 s on laptop">
           <p>Your browser does not support embedded video. <a href="/how/">Read the interactive walkthrough</a>.</p>
         </video>
         <img id="howImg" src="/how-wide-last.webp" alt="Diagram showing box running go test -race in 420 s vs 1,013 s on a laptop" width="1400" height="802" hidden>
+        <noscript><style>#howVid{display:none!important}#howImg{display:block!important}</style></noscript>
       </div>
 
       <div class="how-foot">
@@ -1022,44 +807,40 @@ code {
     </div>
   </section>
 
-  <section class="sec tools-sec" id="uses">
+  <section class="sec band-light" id="uses">
     <div class="sec-in">
       <h2>Five tools for your agents</h2>
-      <p class="sec-sub"><code>box join</code> registers one MCP server across Claude Code, Codex, and Antigravity (or paste into <code>~/.cursor/mcp.json</code>). Every tool uses the same rules as the CLI.</p>
+      <p class="sec-sub"><code>box join</code> installs one stdio MCP server across Claude Code, Codex, and Antigravity (or paste into <code>~/.cursor/mcp.json</code>).</p>
 
       <div class="tools-list">
         <div class="tool-row">
           <div class="tool-name">box_status</div>
-          <div class="tool-desc">Check host mode (<code>Full</code>, <code>Shared</code>, <code>My PC</code>), GPU availability, and free slots before starting a heavy build.<span>Returns headroom per size (<code>small</code>, <code>medium</code>, <code>large</code>, <code>gpu</code>) and queue depth.</span></div>
+          <div class="tool-desc">Check host mode (<code>Full</code>, <code>Shared</code>, <code>My PC</code>), GPU availability, and free room before starting a heavy build.<span>Returns headroom per size (<code>small</code>, <code>medium</code>, <code>large</code>, <code>gpu</code>) and active jobs.</span></div>
         </div>
         <div class="tool-row">
           <div class="tool-name">box_run</div>
-          <div class="tool-desc">Snapshot tracked and untracked files (no throwaway commits) into an isolated container and run any shell command.<span>Parses test runners into short failure digests on error instead of dumping 20,000 log lines.</span></div>
+          <div class="tool-desc">Bundle tracked and untracked files (no commits added) and run any command inside the repo's Incus box.<span>Parses failing <code>go test</code> and <code>vitest</code> specs into a <code>3 KiB</code> digest; after 30 s, background runs wake T3 Code via <code>box watch</code>.</span></div>
         </div>
         <div class="tool-row">
           <div class="tool-name">box_job</div>
-          <div class="tool-desc">Check elapsed time, queue position, or live tail lines for a background run by job ID.<span>Optional on T3 Code, where finished runs push directly to the waiting thread.</span></div>
+          <div class="tool-desc">Wait up to 10 minutes for full job output or page log output without blocking.<span>Optional in T3 Code when <code>push: true</code> handles wakeup automatically.</span></div>
         </div>
         <div class="tool-row">
           <div class="tool-name">box_pull</div>
-          <div class="tool-desc">Copy built APKs, compiled binaries, or generated files from a box back into your local working tree.<span>Works up to 30 minutes after a throwaway <code>--new</code> run ends.</span></div>
+          <div class="tool-desc">Copy built APKs, binaries, or generated artifacts from a container back into your local worktree.<span>Repo boxes stay up 2 hours idle; throwaway <code>--new</code> boxes stay 30 minutes after exit.</span></div>
         </div>
         <div class="tool-row">
           <div class="tool-name">box_cancel</div>
-          <div class="tool-desc">Stop a running container or remove a queued snapshot immediately when requirements change.<span>Frees host CPU, RAM, and GPU lock right away for other sessions.</span></div>
+          <div class="tool-desc">Stop a running container command (exit 130) or drop a queued bundle right away.<span>Frees CPU, RAM, and GPU capacity immediately for other sessions.</span></div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="sec see-sec" id="see">
+  <section class="sec band-white" id="see">
     <div class="sec-in">
-      <div class="see-top">
-        <div>
-          <h2>For humans: <code>box ui</code> &amp; <code>box app</code></h2>
-          <p class="sec-sub">Inspect every running box, flip your gaming PC between modes, monitor live job logs, and audit queue wait times over the week.</p>
-        </div>
-      </div>
+      <h2>For humans: <code>box ui</code> &amp; <code>box app</code></h2>
+      <p class="sec-sub">Watch live box utilization, flip a shared Windows PC between modes, follow streaming container logs, and audit weekly pass/queue history.</p>
 
       <div class="size-row" role="group" aria-label="Box sizes">
         <button class="sz-btn" type="button" data-sz="small" aria-pressed="false">small</button>
@@ -1070,10 +851,10 @@ code {
       </div>
 
       <div class="see-tabs" role="tablist" aria-label="Dashboard screens">
-        <button class="see-tab" role="tab" type="button" id="tab-overview" aria-controls="panel-overview" aria-selected="true">Overview</button>
-        <button class="see-tab" role="tab" type="button" id="tab-mode" aria-controls="panel-mode" aria-selected="false">Modes &amp; queue</button>
-        <button class="see-tab" role="tab" type="button" id="tab-job" aria-controls="panel-job" aria-selected="false">Live job log</button>
-        <button class="see-tab" role="tab" type="button" id="tab-history" aria-controls="panel-history" aria-selected="false">History</button>
+        <button class="see-tab" role="tab" type="button" id="tab-overview" aria-controls="panel-overview" aria-selected="true" tabindex="0">Overview</button>
+        <button class="see-tab" role="tab" type="button" id="tab-mode" aria-controls="panel-mode" aria-selected="false" tabindex="-1">Modes &amp; queue</button>
+        <button class="see-tab" role="tab" type="button" id="tab-job" aria-controls="panel-job" aria-selected="false" tabindex="-1">Live job log</button>
+        <button class="see-tab" role="tab" type="button" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1">History</button>
       </div>
 
       <div class="see-win">
@@ -1098,92 +879,92 @@ code {
   <section class="sec sec-dark" id="security">
     <div class="sec-in">
       <h2>Hardware you own. Tight by default.</h2>
-      <p class="sec-sub">Your repo stays between your laptop and your host — isolated per run, never uploaded to third-party cloud build runners.</p>
+      <p class="sec-sub">Your repo stays between your laptop and your host — isolated per box, never uploaded to third-party cloud build runners.</p>
 
       <div class="arch-grid">
         <div class="arch-card">
           <h3>Unprivileged Incus boxes</h3>
-          <p>Runs under <code>restricted=true</code> as a non-root container user with hard CPU, memory, and disk limits (24 CPUs, 10 containers cap).</p>
+          <p>Runs under <code>restricted=true</code> as a non-root container user with hard CPU, memory, and disk caps (24 CPUs / 10 boxes on Windows PCs; sized from hardware on Linux servers).</p>
         </div>
         <div class="arch-card">
           <h3>Private network only</h3>
-          <p>Control traffic runs over Incus TLS client certs and Tailscale SSH. <code>boxd</code> binds only to <code>127.0.0.1:7766</code> behind <code>tailscale serve</code>.</p>
+          <p>Control traffic runs over Incus HTTPS TLS client certificates (and <code>tailscale serve</code> on a tailnet). <code>boxd</code> binds only to <code>127.0.0.1:7766</code>.</p>
         </div>
         <div class="arch-card">
           <h3>No git branch churn</h3>
-          <p>Snapshots tar dirty tracked and untracked files straight to the box. Nothing pushes temporary commits or alters your branches.</p>
+          <p><code>box</code> stages dirty edits and untracked files in a temporary index and writes a <code>git bundle</code> — never touching branches or <code>HEAD</code>.</p>
         </div>
         <div class="arch-card">
           <h3>Persistent <code>/cache</code></h3>
-          <p>Host caches for Go, Cargo, Gradle, npm, and uv cut Android Robolectric tests from <code>6m 18s</code> cold to <code>1m 05s</code> warm.</p>
+          <p>Shared caches for Go builds and modules, Gradle, npm, and uv cut cold Android Robolectric tests from <code>6m 18s</code> to <code>1m 05s</code> warm.</p>
         </div>
         <div class="arch-card">
           <h3>GPU when requested</h3>
-          <p><code>-s gpu</code> wires <code>/dev/dxg</code> and WSL CUDA libraries: 4096×4096 PyTorch matmul drops from <code>590 ms</code> CPU to <code>10 ms</code> on RTX 3070.</p>
+          <p><code>--gpu</code> (<code>--size gpu</code>) wires <code>/dev/dxg</code> and WSL CUDA libraries: 4096×4096 PyTorch matmul drops from <code>590 ms</code> CPU to <code>10 ms</code> on RTX 3070.</p>
         </div>
         <div class="arch-card">
           <h3>SHA-256 verified installs</h3>
-          <p><code>install.sh</code> and <code>install.ps1</code> check release tarballs against <code>SHA256SUMS</code>. Set <code>AGENT_BOX_NO_UPDATE=1</code> to skip update checks.</p>
+          <p><code>install.sh</code> and <code>install.ps1</code> verify release archives against <code>SHA256SUMS</code>. Set <code>AGENT_BOX_NO_UPDATE=1</code> to skip update checks.</p>
         </div>
       </div>
 
       <div class="arch-diag">
-        <svg class="diag-wide" viewBox="0 0 880 210" role="img" aria-label="Architecture: Laptop sends worktree snapshots over Incus TLS or Tailscale to your Host running Incus boxes, /cache, boxd, and cgroups; third-party cloud runners are crossed out">
-          <rect x="14" y="34" width="210" height="118" rx="14" fill="#0E1B45" stroke="#FFFBEA" stroke-width="2.5"/>
-          <text x="32" y="64" fill="#FDEE8C" font-size="15" font-weight="700" font-family="Inter, sans-serif">Laptop (box + MCP)</text>
-          <text x="32" y="90" fill="#FFFBEA" font-size="12.5" font-family="ui-monospace, Menlo, monospace">box_run · box_pull</text>
-          <text x="32" y="112" fill="#B8C4F0" font-size="12" font-family="Inter, sans-serif">macOS · Linux · Windows</text>
-          <text x="32" y="133" fill="#B8C4F0" font-size="12" font-family="Inter, sans-serif">dirty snapshot, no commits</text>
+        <svg class="diag-wide" viewBox="0 0 880 210" role="img" aria-label="Architecture: Laptop sends git bundles over Incus HTTPS TLS to your Host running Incus boxes, /cache, boxd, and cgroups; third-party cloud runners are crossed out">
+          <rect x="14" y="34" width="210" height="118" rx="14" fill="#141720" stroke="#8EA2FF" stroke-width="2"/>
+          <text x="32" y="64" fill="#8EA2FF" font-size="15" font-weight="700" font-family="Inter, sans-serif">Laptop (box + MCP)</text>
+          <text x="32" y="90" fill="#F4F6FB" font-size="12.5" font-family="JetBrains Mono, ui-monospace, monospace">box_run · box_pull</text>
+          <text x="32" y="112" fill="#9AA4BC" font-size="12" font-family="Inter, sans-serif">macOS · Linux · Windows</text>
+          <text x="32" y="133" fill="#9AA4BC" font-size="12" font-family="Inter, sans-serif">git bundle, no commits</text>
 
-          <line x1="224" y1="93" x2="366" y2="93" stroke="#FDEE8C" stroke-width="3" stroke-dasharray="6 6"/>
-          <rect x="242" y="54" width="110" height="52" rx="10" fill="#225BFF"/>
-          <text x="297" y="77" text-anchor="middle" fill="#FFFBEA" font-size="12" font-weight="700" font-family="Inter, sans-serif">Incus TLS</text>
-          <text x="297" y="95" text-anchor="middle" fill="#FDEE8C" font-size="11" font-family="ui-monospace, Menlo, monospace">Tailscale</text>
+          <line x1="224" y1="93" x2="366" y2="93" stroke="#8EA2FF" stroke-width="3" stroke-dasharray="6 6"/>
+          <rect x="236" y="64" width="122" height="54" rx="10" fill="#8EA2FF"/>
+          <text x="297" y="87" text-anchor="middle" fill="#14151A" font-size="12" font-weight="800" font-family="Inter, sans-serif">Incus HTTPS TLS</text>
+          <text x="297" y="105" text-anchor="middle" fill="#14151A" font-size="11" font-family="JetBrains Mono, ui-monospace, monospace">tailscale serve</text>
 
-          <rect x="366" y="18" width="500" height="150" rx="16" fill="#0E1B45" stroke="#2BD06A" stroke-width="2.5"/>
-          <text x="388" y="48" fill="#FDEE8C" font-size="15.5" font-weight="700" font-family="Inter, sans-serif">Your Host (Linux server or Windows 11 WSL2)</text>
-          <rect x="388" y="64" width="144" height="82" rx="10" fill="#182B6B"/>
-          <text x="402" y="88" fill="#FFFBEA" font-size="13" font-weight="700" font-family="ui-monospace, Menlo, monospace">Incus boxes</text>
-          <text x="402" y="109" fill="#B8C4F0" font-size="11.5" font-family="Inter, sans-serif">restricted=true</text>
-          <text x="402" y="128" fill="#2BD06A" font-size="11.5" font-family="ui-monospace, Menlo, monospace">+ /dev/dxg GPU</text>
+          <rect x="366" y="18" width="500" height="150" rx="16" fill="#141720" stroke="#2BD06A" stroke-width="2"/>
+          <text x="388" y="48" fill="#FFFFFF" font-size="15.5" font-weight="700" font-family="Inter, sans-serif">Your Host (Linux server or Windows 11 WSL2)</text>
+          <rect x="388" y="64" width="144" height="82" rx="10" fill="#212633"/>
+          <text x="402" y="88" fill="#B5C3FF" font-size="13" font-weight="700" font-family="JetBrains Mono, ui-monospace, monospace">Incus boxes</text>
+          <text x="402" y="109" fill="#9AA4BC" font-size="11.5" font-family="Inter, sans-serif">restricted=true</text>
+          <text x="402" y="128" fill="#2BD06A" font-size="11.5" font-family="JetBrains Mono, ui-monospace, monospace">+ /dev/dxg GPU</text>
 
-          <rect x="546" y="64" width="144" height="82" rx="10" fill="#182B6B"/>
-          <text x="560" y="88" fill="#FFFBEA" font-size="13" font-weight="700" font-family="ui-monospace, Menlo, monospace">/cache mounts</text>
-          <text x="560" y="109" fill="#B8C4F0" font-size="11.5" font-family="Inter, sans-serif">Go · Cargo · Gradle</text>
-          <text x="560" y="128" fill="#B8C4F0" font-size="11.5" font-family="Inter, sans-serif">npm · uv · warm</text>
+          <rect x="546" y="64" width="144" height="82" rx="10" fill="#212633"/>
+          <text x="560" y="88" fill="#B5C3FF" font-size="13" font-weight="700" font-family="JetBrains Mono, ui-monospace, monospace">/cache mounts</text>
+          <text x="560" y="109" fill="#9AA4BC" font-size="11.5" font-family="Inter, sans-serif">Go · Gradle · npm</text>
+          <text x="560" y="128" fill="#9AA4BC" font-size="11.5" font-family="Inter, sans-serif">uv · warm</text>
 
-          <rect x="704" y="64" width="144" height="82" rx="10" fill="#182B6B"/>
-          <text x="718" y="88" fill="#FFFBEA" font-size="13" font-weight="700" font-family="ui-monospace, Menlo, monospace">boxd + cgroups</text>
-          <text x="718" y="109" fill="#B8C4F0" font-size="11.5" font-family="Inter, sans-serif">127.0.0.1:7766</text>
-          <text x="718" y="128" fill="#FDEE8C" font-size="11.5" font-family="Inter, sans-serif">FIFO + My PC tray</text>
+          <rect x="704" y="64" width="144" height="82" rx="10" fill="#212633"/>
+          <text x="718" y="88" fill="#B5C3FF" font-size="13" font-weight="700" font-family="JetBrains Mono, ui-monospace, monospace">boxd + boxtray</text>
+          <text x="718" y="109" fill="#9AA4BC" font-size="11.5" font-family="Inter, sans-serif">127.0.0.1:7766</text>
+          <text x="718" y="128" fill="#F59E0B" font-size="11.5" font-family="Inter, sans-serif">FIFO + My PC tray</text>
 
-          <g opacity="0.72">
-            <rect x="14" y="170" width="338" height="30" rx="8" fill="rgba(255,251,234,0.06)"/>
-            <text x="28" y="190" fill="#B8C4F0" font-size="12" font-family="Inter, sans-serif" text-decoration="line-through">Third-party cloud CI servers · per-minute billing</text>
+          <g opacity="0.78">
+            <rect x="14" y="170" width="338" height="30" rx="8" fill="rgba(255,255,255,0.04)"/>
+            <text x="28" y="190" fill="#9AA4BC" font-size="12" font-family="Inter, sans-serif" text-decoration="line-through">Third-party cloud CI servers · per-minute billing</text>
             <text x="366" y="190" fill="#2BD06A" font-size="12" font-weight="700" font-family="Inter, sans-serif">Zero external runner servers · code stays inside your network</text>
           </g>
         </svg>
 
         <svg class="diag-tall" viewBox="0 0 360 340" role="img" aria-label="Architecture from laptop to your host">
-          <rect x="14" y="14" width="332" height="84" rx="12" fill="#0E1B45" stroke="#FFFBEA" stroke-width="2"/>
-          <text x="30" y="42" fill="#FDEE8C" font-size="14" font-weight="700" font-family="Inter, sans-serif">Laptop (box CLI + MCP)</text>
-          <text x="30" y="65" fill="#FFFBEA" font-size="12" font-family="ui-monospace, Menlo, monospace">box_run · box_pull · dirty tree</text>
-          <line x1="180" y1="98" x2="180" y2="146" stroke="#FDEE8C" stroke-width="3" stroke-dasharray="5 5"/>
-          <rect x="92" y="108" width="176" height="28" rx="14" fill="#225BFF"/>
-          <text x="180" y="126" text-anchor="middle" fill="#FFFBEA" font-size="11.5" font-weight="700" font-family="Inter, sans-serif">Incus TLS / Tailscale</text>
-          <rect x="14" y="146" width="332" height="148" rx="14" fill="#0E1B45" stroke="#2BD06A" stroke-width="2"/>
-          <text x="30" y="174" fill="#FDEE8C" font-size="14" font-weight="700" font-family="Inter, sans-serif">Your Host (Linux or WSL2 PC)</text>
-          <text x="30" y="200" fill="#FFFBEA" font-size="12" font-family="ui-monospace, Menlo, monospace">• Incus boxes (restricted=true)</text>
-          <text x="30" y="224" fill="#FFFBEA" font-size="12" font-family="ui-monospace, Menlo, monospace">• /cache persistent volumes</text>
-          <text x="30" y="248" fill="#FFFBEA" font-size="12" font-family="ui-monospace, Menlo, monospace">• boxd :7766 queue + boxtray</text>
-          <text x="30" y="272" fill="#2BD06A" font-size="12" font-family="ui-monospace, Menlo, monospace">• optional /dev/dxg NVIDIA GPU</text>
-          <text x="180" y="322" text-anchor="middle" fill="#B8C4F0" font-size="12" font-family="Inter, sans-serif">Zero third-party cloud runners</text>
+          <rect x="14" y="14" width="332" height="84" rx="12" fill="#141720" stroke="#8EA2FF" stroke-width="2"/>
+          <text x="30" y="42" fill="#8EA2FF" font-size="14" font-weight="700" font-family="Inter, sans-serif">Laptop (box CLI + MCP)</text>
+          <text x="30" y="65" fill="#F4F6FB" font-size="12" font-family="JetBrains Mono, ui-monospace, monospace">box_run · box_pull · git bundle</text>
+          <line x1="180" y1="98" x2="180" y2="146" stroke="#8EA2FF" stroke-width="3" stroke-dasharray="5 5"/>
+          <rect x="82" y="108" width="196" height="28" rx="14" fill="#8EA2FF"/>
+          <text x="180" y="126" text-anchor="middle" fill="#14151A" font-size="11.5" font-weight="800" font-family="Inter, sans-serif">Incus HTTPS TLS</text>
+          <rect x="14" y="146" width="332" height="148" rx="14" fill="#141720" stroke="#2BD06A" stroke-width="2"/>
+          <text x="30" y="174" fill="#FFFFFF" font-size="14" font-weight="700" font-family="Inter, sans-serif">Your Host (Linux or WSL2 PC)</text>
+          <text x="30" y="200" fill="#F4F6FB" font-size="12" font-family="JetBrains Mono, ui-monospace, monospace">• Incus boxes (restricted=true)</text>
+          <text x="30" y="224" fill="#F4F6FB" font-size="12" font-family="JetBrains Mono, ui-monospace, monospace">• /cache (Go, Gradle, npm, uv)</text>
+          <text x="30" y="248" fill="#F4F6FB" font-size="12" font-family="JetBrains Mono, ui-monospace, monospace">• boxd :7766 queue + boxtray</text>
+          <text x="30" y="272" fill="#2BD06A" font-size="12" font-family="JetBrains Mono, ui-monospace, monospace">• optional /dev/dxg NVIDIA GPU</text>
+          <text x="180" y="322" text-anchor="middle" fill="#9AA4BC" font-size="12" font-family="Inter, sans-serif">Zero third-party cloud runners</text>
         </svg>
       </div>
     </div>
   </section>
 
-  <section class="sec setup-sec" id="setup">
+  <section class="sec band-light" id="setup">
     <div class="sec-in">
       <h2>Setup</h2>
       <p class="sec-sub">Provision your host once, install <code>box</code> on your laptop, and connect your coding agents with <code>box join</code>.</p>
@@ -1234,70 +1015,69 @@ code {
     </div>
   </section>
 
-  <section class="sec faq-sec" id="faq">
+  <section class="sec band-white" id="faq">
     <div class="sec-in">
       <h2>Questions</h2>
       <div class="faq-grid">
         <details class="faq-item">
           <summary>Does agent-box create commits or touch my git branches?</summary>
-          <p>No. <code>box run</code> packs your tracked edits and untracked files into a snapshot and unpacks it directly inside the box. Your local branches and history stay untouched.</p>
+          <p>No. <code>box run</code> packs your tracked edits and untracked files using a temporary index and a <code>git bundle</code>, then unpacks it inside the box. Your local branches and <code>HEAD</code> stay untouched.</p>
         </details>
         <details class="faq-item">
           <summary>What happens when I want to game on my Windows host?</summary>
-          <p>Click the <code>boxtray</code> icon in the Windows notification area and pick <code>My PC</code>. Active containers freeze cleanly via cgroups and <code>memory.reclaim</code> returns RAM to Windows, then resumes everything when you switch back.</p>
+          <p>Click the <code>boxtray</code> icon in the Windows notification area and pick <code>My PC</code>. <code>boxtray</code> freezes CPU boxes via cgroups and runs <code>memory.reclaim</code> to hand RAM back to Windows; GPU boxes stop right away, and CPU boxes still paused past 15 minutes (4 hours in swap) stop too. Switch back earlier to thaw CPU work in place.</p>
         </details>
         <details class="faq-item">
           <summary>Do I need a dedicated GPU server?</summary>
-          <p>No. A cheap Ubuntu or Debian server (kernel 6.12+, 6 GiB RAM, 75 GiB disk) works great for test suites and builds. GPU passthrough (<code>-s gpu</code>) is optional on WSL2 NVIDIA hosts.</p>
+          <p>No. An Ubuntu or Debian server (kernel 6.12+, 6 GiB RAM, 75 GiB disk) works great for test suites and builds. GPU passthrough (<code>--gpu</code>) is optional on WSL2 NVIDIA hosts.</p>
         </details>
         <details class="faq-item">
           <summary>Why is it faster than starting a Docker container?</summary>
-          <p><code>/cache</code> volumes hold Go build and module caches, Cargo crates, Gradle caches, npm packages, and uv wheels on the host across runs, cutting cold Android tests from <code>6m 18s</code> to <code>1m 05s</code>.</p>
+          <p><code>/cache</code> volumes hold Go build and module caches, Gradle caches, npm packages, and uv wheels on the host across runs, cutting cold Android tests from <code>6m 18s</code> to <code>1m 05s</code>.</p>
         </details>
         <details class="faq-item">
-          <summary>How big can a snapshot or queue get?</summary>
-          <p><code>boxd</code> persists snapshots up to <code>2 GiB</code> per job in fair-share FIFO order by session and expires unstarted queued jobs after 24 hours. Throwaway boxes stay alive up to 30 minutes for <code>box_pull</code>.</p>
+          <summary>How big can a bundle or queue get?</summary>
+          <p><code>boxd</code> persists bundles up to <code>2 GiB</code> per job in fair-share FIFO order by session and expires unstarted queued jobs after 24 hours. Repo boxes live for 2 hours idle; throwaway <code>--new</code> boxes stay alive up to 30 minutes after exit for <code>box_pull</code>.</p>
         </details>
         <details class="faq-item">
           <summary>Which agent harnesses work without polling?</summary>
-          <p>T3 Code receives a direct push wakeup when a background job completes. Claude Code, Codex, Antigravity, and Cursor work via MCP tools (<code>box_run</code>, <code>box_job</code>, <code>box_pull</code>).</p>
+          <p>T3 Code receives a wakeup pushed by a local <code>box watch</code> process when a background job completes. Claude Code, Codex, Antigravity, and Cursor work via MCP tools (<code>box_run</code>, <code>box_job</code>, <code>box_pull</code>).</p>
         </details>
       </div>
     </div>
   </section>
 
-  <section class="sec end-sec">
-    <div class="end-wrap">
-      <div class="end-copy">
+  <section class="close-sec band-light">
+    <div class="close-wrap">
+      <div>
         <h2>Keep your laptop quiet.</h2>
-        <p>Built by <a class="text-link" href="https://github.com/a-Fig">Tyler Darisme</a> and contributors. Open source on GitHub.</p>
-        <div class="end-btns">
+        <div class="close-copy">
+          <p>Maintained by <a class="text-link" href="https://github.com/a-Fig">a-Fig</a> and contributors. Open source on GitHub.</p>
+        </div>
+        <div class="close-acts">
           <button class="btn-primary" id="copyEnd" type="button" data-copy="Read https://agent-box.afig.dev/setup and help me set up agent-box.">Copy setup prompt</button>
           <a class="text-link" href="https://github.com/a-Fig/agent-box">View on GitHub</a>
         </div>
       </div>
-
-      <svg class="end-logo" data-look="200;83,122,5.5" viewBox="0 0 200 194" width="260" height="252" role="img" aria-label="agent-box mascot">
-        <defs>
-          <mask id="eyeEnd" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="194">
-            <rect width="200" height="194" fill="#fff"/>
-            <g class="st-eye">
-              <ellipse cx="61" cy="122" rx="9.5" ry="15" fill="#000"/>
-              <ellipse cx="105" cy="122" rx="9.5" ry="15" fill="#000"/>
-            </g>
-          </mask>
-        </defs>
-        <path fill="#1640BF" d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/>
-        <path fill="#225BFF" mask="url(#eyeEnd)" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z"/>
-        <path fill="#0E1B45" d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/>
-      </svg>
+      <div class="close-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="16" fill="#8EA2FF"/>
+          <path d="M32 13L50 22L32 31L14 22Z" fill="#B5C3FF"/>
+          <path d="M32 31L50 22V42L32 51Z" fill="#6D82F5"/>
+          <g fill="none" stroke="#14151A" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round">
+            <path d="M32 13L50 22V42L32 51L14 42V22Z"/>
+            <path d="M14 22L32 31L50 22"/>
+            <path d="M32 31V51"/>
+          </g>
+        </svg>
+      </div>
     </div>
   </section>
 </main>
 
 <footer class="site-foot">
   <nav aria-label="Site">
-    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 200 194" width="24" height="23" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg><span>agent-box</span></a>
+    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#8EA2FF"/><g fill="none" stroke="#14151A" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M32 14L49 22.5V41.5L32 50L15 41.5V22.5Z"/><path d="M15 22.5L32 31L49 22.5"/><path d="M32 31V50"/></g></svg><span>agent-box</span></a>
     <ul>
       <li><a href="/about/">About</a></li>
       <li><a href="/how/">How it runs</a></li>
@@ -1309,119 +1089,93 @@ code {
   </nav>
 </footer>
 
+<div class="sr-only" id="copyLive" aria-live="polite"></div>
+
 <script>
 (() => {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
-  // ---------- 1. Subtle WebGL fluted-glass butter glint on hero ----------
-  const glCanvas = document.getElementById('gl');
-  if (glCanvas && !reduced.matches) {
-    const gl = glCanvas.getContext('webgl', { alpha: true, antialias: false, powerPreference: 'low-power' });
-    if (gl) {
-      const vs = gl.createShader(gl.VERTEX_SHADER);
-      gl.shaderSource(vs, 'attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.0,1.0);}');
-      gl.compileShader(vs);
-      const fs = gl.createShader(gl.FRAGMENT_SHADER);
-      gl.shaderSource(fs, `
-        precision mediump float;
-        varying vec2 v;
-        uniform float u_t;
-        uniform vec2 u_m;
-        uniform vec2 u_r;
-        void main() {
-          float reed = floor(v.x * u_r.x / 12.0) * 12.0 / u_r.x;
-          float d1 = exp(-pow((reed - (0.32 + 0.16 * sin(u_t * 0.28))) * 3.4, 2.0));
-          float d2 = exp(-pow((reed - (0.72 + 0.14 * cos(u_t * 0.21))) * 3.8, 2.0));
-          float ptr = exp(-pow((reed - u_m.x) * 4.8, 2.0)) * 0.45;
-          float glow = (d1 + d2 * 0.75 + ptr) * smoothstep(0.0, 0.45, v.y) * smoothstep(1.0, 0.3, v.y);
-          vec3 col = mix(vec3(0.992, 0.933, 0.549), vec3(1.0, 0.984, 0.918), 0.3);
-          float alpha = clamp(glow * 0.18, 0.0, 0.28);
-          gl_FragColor = vec4(col * alpha, alpha);
-        }
-      `);
-      gl.compileShader(fs);
-      const prog = gl.createProgram();
-      gl.attachShader(prog, vs);
-      gl.attachShader(prog, fs);
-      gl.linkProgram(prog);
-      if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-        gl.useProgram(prog);
-        const buf = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-        const loc = gl.getAttribLocation(prog, 'p');
-        gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-        const uT = gl.getUniformLocation(prog, 'u_t');
-        const uM = gl.getUniformLocation(prog, 'u_m');
-        const uR = gl.getUniformLocation(prog, 'u_r');
-        let mx = 0.5, my = 0.5, running = true;
-        const size = () => {
-          const dpr = Math.min(2, devicePixelRatio || 1);
-          glCanvas.width = Math.max(1, Math.round(glCanvas.clientWidth * dpr));
-          glCanvas.height = Math.max(1, Math.round(glCanvas.clientHeight * dpr));
-          gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-        };
-        addEventListener('resize', size, { passive: true });
-        addEventListener('pointermove', e => { mx = e.clientX / Math.max(1, innerWidth); my = e.clientY / Math.max(1, innerHeight); }, { passive: true });
-        document.addEventListener('visibilitychange', () => { running = !document.hidden; if (running) requestAnimationFrame(loop); });
-        size();
-        const t0 = performance.now();
-        const loop = now => {
-          if (!running) return;
-          gl.clearColor(0, 0, 0, 0);
-          gl.clear(gl.COLOR_BUFFER_BIT);
-          gl.uniform1f(uT, (now - t0) * 0.001);
-          gl.uniform2f(uM, mx, my);
-          gl.uniform2f(uR, glCanvas.clientWidth || 1200, glCanvas.clientHeight || 720);
-          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-          requestAnimationFrame(loop);
-        };
-        requestAnimationFrame(loop);
-      }
-    }
-  }
+  // ---------- 1. Hero interactive host mode & benchmark deck ----------
+  const MODES = {
+    full: {
+      dot: 'rig-dot',
+      title: 'Gaming PC · Full',
+      msg: 'Uncapped Windows PC host budget: boxes receive their full CPU limits and GPU access.',
+      cpu: '24 max', cpuW: '100%', cpuC: '#2BD06A',
+      mem: '24 GiB', memW: '100%', memC: '#2BD06A',
+      gpu: 'Ready', gpuW: '100%', gpuC: '#2BD06A',
+    },
+    shared: {
+      dot: 'rig-dot shared',
+      title: 'Gaming PC · Shared',
+      msg: 'Half-CPU caps and 12 GiB memory limit keep background builds out of your desktop headroom.',
+      cpu: '12 max', cpuW: '50%', cpuC: '#8EA2FF',
+      mem: '12 GiB', memW: '50%', memC: '#8EA2FF',
+      gpu: '1 job', gpuW: '65%', gpuC: '#8EA2FF',
+    },
+    mypc: {
+      dot: 'rig-dot mypc',
+      title: 'Gaming PC · My PC',
+      msg: 'boxtray freezes CPU boxes via cgroups (3.1 GB reclaimed in 35 s); GPU boxes stop right away and new jobs queue.',
+      cpu: 'Paused', cpuW: '0%', cpuC: '#F59E0B',
+      mem: '3.1 GB free', memW: '22%', memC: '#F59E0B',
+      gpu: 'Yours', gpuW: '0%', gpuC: '#F59E0B',
+    },
+  };
+  const BENCHES = {
+    race: [
+      '$ box run --size large --reason "daemon race suite" -- go test -race ./internal/daemon',
+      'PASS · 913 tests · 420 s on box vs 1,013 s on laptop',
+      'Shared /cache keeps Go build and module caches warm across runs.',
+    ],
+    android: [
+      '$ box run --new --reason "Android unit suite" -- ./gradlew :vi:testDebugUnitTest --rerun',
+      'PASS · 1m 05s warm /cache vs 6m 18s cold',
+      'Shared /cache keeps Gradle dependencies warm across throwaway boxes.',
+    ],
+    pytorch: [
+      '$ box run --gpu --reason "CUDA matmul check" -- python3 bench_matmul.py',
+      'PASS · 10 ms on an RTX 3070 host vs 590 ms CPU',
+      'Exclusive GPU lock prevents concurrent VRAM contention.',
+    ],
+  };
+  document.querySelectorAll('[data-mode]').forEach(btn => btn.addEventListener('click', () => {
+    const s = MODES[btn.dataset.mode];
+    document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    document.getElementById('rigDot').className = s.dot;
+    document.getElementById('rigTitle').textContent = s.title;
+    document.getElementById('rigMsg').textContent = s.msg;
+    document.getElementById('rigCpu').textContent = s.cpu;
+    document.getElementById('rigCpuBar').style.width = s.cpuW;
+    document.getElementById('rigCpuBar').style.background = s.cpuC;
+    document.getElementById('rigMem').textContent = s.mem;
+    document.getElementById('rigMemBar').style.width = s.memW;
+    document.getElementById('rigMemBar').style.background = s.memC;
+    document.getElementById('rigGpu').textContent = s.gpu;
+    document.getElementById('rigGpuBar').style.width = s.gpuW;
+    document.getElementById('rigGpuBar').style.background = s.gpuC;
+  }));
+  document.querySelectorAll('[data-bench]').forEach(btn => btn.addEventListener('click', () => {
+    const [cmd, res, note] = BENCHES[btn.dataset.bench];
+    document.querySelectorAll('[data-bench]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    document.getElementById('benchCmd').textContent = cmd;
+    document.getElementById('benchRes').textContent = res;
+    document.getElementById('benchNote').textContent = note;
+  }));
 
-  // ---------- 2. Pointer eye-tracking on all mascot SVGs ----------
-  const lookers = [...document.querySelectorAll('[data-look]')].map(svg => {
-    const [vb, rest] = svg.dataset.look.split(';');
-    const [cx, cy, maxR] = rest.split(',').map(Number);
-    const eye = svg.querySelector('.st-eye');
-    return eye ? { svg, vb: +vb, cx, cy, maxR, eye, curX: 0, curY: 0 } : null;
-  }).filter(Boolean);
-  let px = innerWidth * 0.5, py = innerHeight * 0.35, hasPtr = false;
-  if (!reduced.matches && lookers.length) {
-    addEventListener('pointermove', e => { px = e.clientX; py = e.clientY; hasPtr = true; }, { passive: true });
-    const stepEyes = () => {
-      if (hasPtr) {
-        for (const k of lookers) {
-          const r = k.svg.getBoundingClientRect();
-          if (r.width <= 0 || r.bottom < -40 || r.top > innerHeight + 40) continue;
-          const sx = r.left + r.width * (k.cx / k.vb);
-          const sy = r.top + r.height * (k.cy / 194);
-          const dx = px - sx, dy = py - sy, dist = Math.hypot(dx, dy);
-          const f = dist > 1 ? Math.min(k.maxR, dist / 26) / dist : 0;
-          k.curX += (dx * f - k.curX) * 0.22;
-          k.curY += (dy * f - k.curY) * 0.22;
-          k.eye.setAttribute('transform', `translate(${k.curX.toFixed(2)} ${k.curY.toFixed(2)})`);
-        }
-      }
-      requestAnimationFrame(stepEyes);
-    };
-    requestAnimationFrame(stepEyes);
-  }
-
-  // ---------- 3. Copy buttons ----------
-  const copyFeedback = (btn, orig) => {
+  // ---------- 2. Copy feedback + screen-reader live announcement ----------
+  const copyLive = document.getElementById('copyLive');
+  const copyFeedback = (btn, orig, msg) => {
     btn.textContent = 'Copied';
     btn.classList.add('copied');
+    if (copyLive) copyLive.textContent = msg;
     setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
   };
   document.querySelectorAll('[data-copy]').forEach(btn => {
     const orig = btn.textContent;
     btn.addEventListener('click', () => {
       navigator.clipboard?.writeText(btn.dataset.copy).catch(() => {});
-      copyFeedback(btn, orig);
+      copyFeedback(btn, orig, 'Setup prompt copied to clipboard.');
     });
   });
   document.querySelectorAll('[data-copy-target]').forEach(btn => {
@@ -1429,18 +1183,18 @@ code {
     btn.addEventListener('click', () => {
       const target = document.getElementById(btn.dataset.copyTarget);
       if (target) navigator.clipboard?.writeText(target.textContent).catch(() => {});
-      copyFeedback(btn, orig);
+      copyFeedback(btn, orig, 'Command copied to clipboard.');
     });
   });
 
-  // ---------- 4. Works with: OS & Agent switchers ----------
+  // ---------- 3. Works with: OS & Agent switchers ----------
   const OS_COPY = {
-    mac: 'Works over Incus TLS certs or Tailscale SSH on macOS Apple Silicon and Intel.',
-    linux: 'Works natively on Linux laptops over Incus TLS or Tailscale SSH.',
-    win: 'Works natively on Windows laptops and connects smoothly to Linux or Windows WSL2 hosts.',
+    mac: 'Connects over Incus HTTPS TLS certs (and tailscale serve on a tailnet) from Apple Silicon and Intel Macs.',
+    linux: 'Connects natively on Linux laptops over Incus HTTPS TLS (and tailscale serve on a tailnet).',
+    win: 'Connects natively from Windows laptops to Linux or Windows WSL2 hosts.',
   };
   const AG_COPY = {
-    t3: ['In <strong>T3 Code</strong>, background runs end the turn right away and push results straight back to the thread — zero polling loops.', 'box join · push wakeups'],
+    t3: ['In <strong>T3 Code</strong>, runs longer than 30 s return a job ID so your turn ends right away, and local <code>box watch</code> pushes completion via <code>t3 thread send</code>.', 'box join · push wakeups'],
     claude: ['<code>box join</code> installs the MCP tools directly into <strong>Claude Code</strong> across your user config.', 'box join · auto setup'],
     codex: ['<code>box join</code> registers the MCP tools in <strong>Codex</strong> and keeps long test suites out of your laptop CPU.', 'box join · auto setup'],
     ag: ['<code>box join</code> configures <strong>Antigravity</strong> across its ACP / Gemini configuration directories automatically.', 'box join · auto setup'],
@@ -1465,7 +1219,7 @@ code {
     renderSup();
   }));
 
-  // ---------- 5. How-it-works responsive video / reduced-motion fallback ----------
+  // ---------- 4. Responsive video & reduced-motion media sync ----------
   const howVid = document.getElementById('howVid');
   const howImg = document.getElementById('howImg');
   const replayBtn = document.getElementById('replayHow');
@@ -1474,6 +1228,7 @@ code {
     const kind = tallMQ.matches ? 'tall' : 'wide';
     const w = kind === 'tall' ? 784 : 1400, h = kind === 'tall' ? 1600 : 802;
     if (reduced.matches) {
+      howVid.pause();
       howVid.hidden = true;
       howImg.hidden = false;
       howImg.src = `/how-${kind}-last.webp`;
@@ -1501,7 +1256,7 @@ code {
   });
   syncHowMedia();
 
-  // ---------- 6. Box size switcher & Dashboard UI tabs ----------
+  // ---------- 5. Box size switcher & accessible ARIA Dashboard tabs ----------
   const SIZES = {
     small: '1 shared / 2 full CPUs · 2 GiB RAM · 18 GiB disk',
     medium: '2 shared / 4 full CPUs · 4 GiB RAM · 30 GiB disk',
@@ -1516,7 +1271,7 @@ code {
 
   const TAB_META = {
     'tab-overview': ['https://pc/ui · Gaming PC · Full', 'Live overview across CPUs, RAM, disk pool, WSL memory usage, and streaming container logs.'],
-    'tab-mode': ['https://pc/ui · Mode -> My PC', 'Switching to My PC freezes active boxes via cgroups and queues new runs until you switch back.'],
+    'tab-mode': ['https://pc/ui · Mode -> My PC', 'Switching to My PC freezes CPU boxes via cgroups, stops GPU boxes, and queues incoming runs.'],
     'tab-job': ['https://pc/ui/jobs · Following build log', 'Live job view shows container state, command, queue position, and real-time terminal stream.'],
     'tab-history': ['https://pc/ui/history · 7-day timeline', 'History tracks daily pass rates, queued vs turned-away runs, and when My PC mode paused agents.'],
   };
@@ -1525,15 +1280,21 @@ code {
   const tabs = [...document.querySelectorAll('.see-tab')];
   const panels = [...document.querySelectorAll('.see-panel')];
 
-  const activateTab = tab => {
+  const activateTab = (tab, moveFocus = false) => {
     const targetId = tab.getAttribute('aria-controls');
-    tabs.forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+    tabs.forEach(t => {
+      const sel = t === tab;
+      t.setAttribute('aria-selected', String(sel));
+      t.setAttribute('tabindex', sel ? '0' : '-1');
+    });
+    if (moveFocus) tab.focus();
     panels.forEach(p => {
       const on = p.id === targetId;
       p.hidden = !on;
       const vid = p.querySelector('.ui-vid');
       if (vid) {
         if (reduced.matches) {
+          vid.pause();
           let img = p.querySelector('img');
           if (!img) {
             img = document.createElement('img');
@@ -1541,14 +1302,23 @@ code {
             img.alt = vid.getAttribute('aria-label') || '';
             img.width = 1280;
             img.height = 800;
-            vid.replaceWith(img);
+            vid.hidden = true;
+            p.append(img);
+          } else {
+            img.hidden = false;
+            vid.hidden = true;
           }
-        } else if (on) {
-          if (!vid.getAttribute('src')) vid.setAttribute('src', vid.dataset.src);
-          vid.currentTime = 0;
-          vid.play().catch(() => {});
         } else {
-          vid.pause();
+          const img = p.querySelector('img');
+          if (img) img.hidden = true;
+          vid.hidden = false;
+          if (on) {
+            if (!vid.getAttribute('src')) vid.setAttribute('src', vid.dataset.src);
+            vid.currentTime = 0;
+            vid.play().catch(() => {});
+          } else {
+            vid.pause();
+          }
         }
       }
     });
@@ -1556,9 +1326,25 @@ code {
     seeAddr.textContent = addr;
     seeCap.textContent = cap;
   };
-  tabs.forEach(t => t.addEventListener('click', () => activateTab(t)));
+  tabs.forEach((t, i) => {
+    t.addEventListener('click', () => activateTab(t));
+    t.addEventListener('keydown', e => {
+      const next = e.key === 'ArrowRight' ? (i + 1) % tabs.length
+        : e.key === 'ArrowLeft' ? (i - 1 + tabs.length) % tabs.length
+        : e.key === 'Home' ? 0
+        : e.key === 'End' ? tabs.length - 1
+        : -1;
+      if (next >= 0) { e.preventDefault(); activateTab(tabs[next], true); }
+    });
+  });
 
-  // ---------- 7. Setup installer toggle ----------
+  reduced.addEventListener('change', () => {
+    syncHowMedia();
+    const active = tabs.find(t => t.getAttribute('aria-selected') === 'true');
+    if (active) activateTab(active);
+  });
+
+  // ---------- 6. Setup installer toggle ----------
   const INSTALLERS = {
     sh: 'curl -fsSL https://raw.githubusercontent.com/a-Fig/agent-box/main/install.sh | sh',
     ps1: 'irm https://raw.githubusercontent.com/a-Fig/agent-box/main/install.ps1 | iex',

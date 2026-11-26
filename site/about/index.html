@@ -13,21 +13,21 @@
 <meta property="og:description" content="agent-box runs slow, noisy builds and tests on your own Linux box or gaming PC, inside isolated Incus containers, so your laptop stays quiet.">
 <meta property="og:image" content="https://agent-box.afig.dev/og.jpg">
 <meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="735">
-<meta property="og:image:alt" content="The agent-box logo behind reeded glass on blue, over the words: Remote runners on hardware you own. Run heavy builds off your laptop.">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="agent-box: Heavy agent builds, off your laptop.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/pages.css">
 </head>
 <body>
 <header class="top">
   <div class="top-in">
-    <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 200 194" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg>agent-box</a>
+    <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#8EA2FF"/><g fill="none" stroke="#14151A" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M32 14L49 22.5V41.5L32 50L15 41.5V22.5Z"/><path d="M15 22.5L32 31L49 22.5"/><path d="M32 31V50"/></g></svg>agent-box</a>
     <h1>About agent-box</h1>
     <p class="lead">Run heavy builds, race tests, and GPU workloads on your own server or gaming PC, inside isolated Incus containers.</p>
   </div>
@@ -40,27 +40,27 @@
         <div class="label"><h2>Why it exists</h2></div>
         <div class="body">
           <p>Run two coding agents side by side on a laptop and wait for <code>go test -race</code>, Gradle, or a full Vite suite: fans pin at full speed, battery drops, and every edit slows to a crawl.</p>
-          <p>agent-box sends those heavy runs to a fast machine you already own. Each run gets an isolated container with warm caches, and your agent receives the result when it finishes.</p>
+          <p>agent-box moves those heavy runs onto a fast machine you already own. Each run executes inside an isolated Incus container with warm caches, and your agent receives the result when it finishes.</p>
         </div>
       </section>
       <section class="fact">
         <div class="label"><h2>How it works</h2></div>
         <div class="body">
-          <p>Your agent calls <code>box_run</code> from a repo, or you run <code>box run -- ...</code>. <code>box</code> snapshots the working tree — tracked edits and untracked files, without committing — into an Incus container on your host.</p>
-          <p>Shared caches under <code>/cache</code> keep Go modules, Cargo crates, Gradle caches, and Node installs warm between fresh containers. <a href="/how/">The runner walkthrough</a> follows a job from snapshot to push notification.</p>
+          <p>Your agent calls <code>box_run</code> from a repo, or you run <code>box run -- ...</code>. <code>box</code> bundles your working tree — tracked edits and untracked files, without committing — into an Incus box on your host. Each repo reuses its box for up to 2 hours idle, or pass <code>--new</code> for a throwaway box.</p>
+          <p>Shared caches under <code>/cache</code> keep Go builds and modules, Gradle, npm, and uv warm across runs. <a href="/how/">The runner walkthrough</a> follows a job from bundle to completion.</p>
         </div>
       </section>
       <section class="fact">
         <div class="label"><h2>What it works with</h2></div>
         <div class="body">
-          <p>The <code>box</code> client runs on macOS, Linux, and Windows over Incus TLS or Tailscale SSH, and wires MCP tools into Claude Code, Codex, and Antigravity (plus a snippet for Cursor). In T3 Code, background runs wake your thread with a push message when they finish, so no context window goes to polling.</p>
+          <p>The <code>box</code> client runs on macOS, Linux, and Windows over the Incus HTTPS API (and <code>tailscale serve</code> on a tailnet), and wires MCP tools into Claude Code, Codex, and Antigravity (plus a snippet for Cursor). In T3 Code, long background runs wake your thread when they finish via <code>box watch</code>, so zero context goes to polling.</p>
           <p><code>box ui</code> and <code>box app</code> open the live web UI to inspect boxes, switch a shared Windows gaming PC between Full, Shared, and My PC modes, and read logs or history.</p>
         </div>
       </section>
       <section class="fact">
         <div class="label"><h2>Who makes it</h2></div>
         <div class="body">
-          <p>Tyler Darisme makes and maintains agent-box, as <a href="https://github.com/a-Fig">a-Fig</a> on GitHub. Others contribute through pull requests.</p>
+          <p><a href="https://github.com/a-Fig">a-Fig</a> maintains agent-box on GitHub, and contributors submit pull requests.</p>
           <p>The source code is at <a href="https://github.com/a-Fig/agent-box">github.com/a-Fig/agent-box</a>.</p>
         </div>
       </section>
@@ -74,7 +74,7 @@
 
 <footer class="site-foot">
   <nav aria-label="Site">
-    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 200 194" width="24" height="23" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg><span>agent-box</span></a>
+    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#8EA2FF"/><g fill="none" stroke="#14151A" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M32 14L49 22.5V41.5L32 50L15 41.5V22.5Z"/><path d="M15 22.5L32 31L49 22.5"/><path d="M32 31V50"/></g></svg><span>agent-box</span></a>
     <ul>
       <li><a href="/about/" aria-current="page">About</a></li>
       <li><a href="/how/">How it runs</a></li>

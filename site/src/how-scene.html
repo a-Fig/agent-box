@@ -1,341 +1,263 @@
 <!doctype html>
-<!-- The scene how-wide.mp4 and how-tall.mp4 are rendered from, by render-video.mjs. It is not published. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agent-box: how it works</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>agent-box workflow</title>
 <style>
   :root {
-    --blue: #225BFF;
-    --butter: #FDEE8C;
-    --cream: #FFFBEA;
-    --ink: #0E1B45;
-    --ink-soft: #3A4670;
-    --badge-bg: #DCE6FF;
-    --badge-ink: #1640BF;
-    --green: #17A34A;
-    --mono: ui-monospace, Menlo, Consolas, monospace;
+    --bg: #111318;
+    --panel: #191D26;
+    --panel-2: #212633;
+    --border: rgba(142, 162, 255, .24);
+    --peri: #8EA2FF;
+    --peri-soft: #B5C3FF;
+    --green: #2BD06A;
+    --amber: #F59E0B;
+    --ink: #14151A;
+    --text: #F4F6FB;
+    --muted: #9AA4BC;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; margin: 0; }
-  html, body { background: var(--blue); color: var(--cream); }
-  body {
-    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  #how { position: relative; background: var(--blue); color: var(--cream); }
-  .stage { position: relative; height: 100vh; height: 100svh; min-height: 640px; container-type: size; overflow: clip; }
-  .scene {
-    --dw: 1400; --dh: 802;
-    --px: clamp(24px, 5cqw, 96px);
-    --py: clamp(24px, 7.2cqh, 80px);
-    --u: min(calc((100cqw - 2 * var(--px)) / var(--dw)), calc((100cqh - 2 * var(--py)) / var(--dh)));
-    --shade: #1A47CF;
-    --ln: 5;
-    position: absolute;
-    left: 50%; top: 50%;
-    width: calc(var(--u) * var(--dw));
-    height: calc(var(--u) * var(--dh));
-    transform: translate(-50%, -50%);
-  }
-  .abs, .lap, .host, .panel, .clock, .wires, .pill { position: absolute; }
-
-  .wires { inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; }
-  .wires path { fill: none; }
-  .wires .base { stroke: rgba(255, 251, 234, .42); stroke-width: 2.5; stroke-dasharray: 3 8; stroke-linecap: round; }
-  .wires .fl { stroke: var(--butter); stroke-width: var(--ln); stroke-linejoin: round; }
-  .tall-only { display: none; }
-
-  /* Laptop (left) and Host (right) */
-  .lap { z-index: 4; left: 0; top: calc(var(--u) * 300); width: calc(var(--u) * 580); --fs: 31; }
-  .host { z-index: 4; left: calc(var(--u) * 820); top: calc(var(--u) * 300); width: calc(var(--u) * 580); --fs: 26; }
-  .lid {
-    width: calc(var(--u) * 536);
-    height: calc(var(--u) * 336);
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    padding: calc(var(--u) * 14) calc(var(--u) * 14) calc(var(--u) * 10);
-    background: var(--cream);
-    border-radius: calc(var(--u) * 18) calc(var(--u) * 18) 0 0;
-  }
-  .host .lid {
-    border-radius: calc(var(--u) * 18);
-    padding-bottom: calc(var(--u) * 14);
-  }
-  .disp {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--ink);
-    border-radius: calc(var(--u) * 6);
-    overflow: hidden;
-    font-family: var(--mono);
-  }
-  .tbar {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: calc(var(--u) * 9);
-    height: calc(var(--u) * 36);
-    padding: 0 calc(var(--u) * 20);
-    background: #16265C;
-    color: #C3C9DC;
-    font-size: calc(var(--u) * 18);
-  }
-  .tbar i { width: calc(var(--u) * 10); height: calc(var(--u) * 10); border-radius: 50%; background: #2BD06A; flex: none; }
-  .tbar i.idle { background: #5C688F; }
-  .tbar-r { margin-left: auto; font-size: calc(var(--u) * 15); color: var(--butter); font-weight: 600; }
-  .log {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    padding: calc(var(--u) * 12) calc(var(--u) * 14);
-    font-size: calc(var(--u) * var(--fs));
-    line-height: 1.24;
-    color: var(--cream);
-  }
-  .turn { padding: calc(var(--u) * 10) calc(var(--u) * 12); border-radius: calc(var(--u) * 7); }
-  .turn + .turn { margin-top: calc(var(--u) * 8); }
-  .in { background: var(--butter); color: var(--ink); }
-  .from { display: block; margin-bottom: calc(var(--u) * 3); font-size: calc(var(--u) * 17); color: var(--ink-soft); font-weight: 600; }
-  .sub-note { margin-top: calc(var(--u) * 6); font-size: calc(var(--u) * 19); color: #A9B6E6; }
-  .host-lines { display: grid; gap: calc(var(--u) * 6); padding: calc(var(--u) * 6) calc(var(--u) * 4); font-size: calc(var(--u) * 21); line-height: 1.3; }
-  .host-lines .ok { color: #6EE7B7; }
-  .host-lines .dim { color: #9FB0E3; }
-  .host-lines .pass { color: var(--butter); font-weight: 700; }
-  .off { visibility: hidden; }
-  .caret { position: absolute; left: 0; top: 0; width: .54em; height: 1.1em; background: var(--cream); display: none; }
-  .deck { display: block; width: 100%; height: calc(var(--u) * 118); }
-  .stand { display: block; width: calc(var(--u) * 220); height: calc(var(--u) * 118); margin: 0 auto; }
-  .seat {
-    margin-top: calc(var(--u) * 12);
-    text-align: center;
-    font-size: calc(var(--u) * 28);
-    line-height: calc(var(--u) * 36);
-    font-weight: 600;
-    letter-spacing: -.02em;
-  }
-
-  /* Top-center panel: Host Incus + /cache */
-  .panel {
-    z-index: 2;
-    left: calc(var(--u) * 500);
-    top: 0;
-    width: calc(var(--u) * 400);
-    height: calc(var(--u) * 252);
-    --lab: 20; --pad: 16; --lane: 80; --ly: 58;
-    background: #F7F4E4;
-    color: var(--ink);
-    border-radius: calc(var(--u) * 14);
-    overflow: hidden;
-    box-shadow: 0 calc(var(--u) * 8) 0 var(--shade);
-  }
-  .gh {
-    height: calc(var(--u) * 44);
-    padding: 0 calc(var(--u) * var(--pad));
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: var(--ink);
-    color: var(--cream);
-    font-size: calc(var(--u) * 21);
-    font-weight: 600;
-    letter-spacing: -.01em;
-  }
-  .gh span:last-child { font: 600 calc(var(--u) * 15)/1 var(--mono); color: var(--butter); }
-  .hd {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    padding: calc(var(--u) * 10) calc(var(--u) * var(--pad)) calc(var(--u) * 4);
-    font-size: calc(var(--u) * var(--lab));
-    line-height: 1.2;
-    color: var(--ink-soft);
-  }
-  .hd b { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
-  .hd-r { color: var(--ink); font: 700 calc(var(--u) * var(--lab))/1.2 var(--mono); }
-  .hd-r b { color: var(--badge-ink); font-family: Inter, system-ui, sans-serif; }
-  .graph { display: block; width: calc(100% - var(--u) * var(--pad) * 2); margin: 0 auto; }
-  .graph path { fill: none; stroke: #A5A9B4; stroke-width: 2.5; }
-  .graph circle { fill: #A5A9B4; }
-  .lane {
-    position: absolute;
-    left: 0; right: 0; bottom: 0;
-    height: calc(var(--u) * var(--lane));
-    background: var(--butter);
-  }
-  .lane::before { content: ""; position: absolute; left: 0; right: 0; top: calc(var(--u) * var(--ly)); height: calc(var(--u) * var(--ln)); margin-top: calc(var(--u) * var(--ln) / -2); background: var(--blue); }
-  .cd {
-    position: absolute;
-    top: calc(var(--u) * var(--ly));
-    width: calc(var(--u) * var(--dot));
-    height: calc(var(--u) * var(--dot));
-    margin: calc(var(--u) * var(--dot) / -2) 0 0 calc(var(--u) * var(--dot) / -2);
-    border-radius: 50%;
-    background: var(--blue);
-    --dot: 22;
-  }
-  #cd1 { left: calc(var(--u) * 145); }
-  #cd2 { left: calc(var(--u) * 295); }
-
-  /* Nodes on wires */
-  .node {
-    position: absolute;
-    z-index: 2;
-    left: calc(var(--u) * var(--nx));
-    top: calc(var(--u) * var(--ny));
-    width: calc(var(--u) * var(--nw));
-    height: calc(var(--u) * var(--nh));
-    --nx: 276; --ny: 160; --nw: 100; --nh: 88; --ly: 70;
-    background: var(--ink);
-    color: var(--cream);
-    border-radius: calc(var(--u) * 10);
-    box-shadow: 0 calc(var(--u) * 6) 0 var(--shade);
-  }
-  .node-a { --nx: 1024; }
-  .node::after { content: ""; position: absolute; left: 0; right: 0; top: calc(var(--u) * var(--ly)); height: calc(var(--u) * var(--ln)); margin-top: calc(var(--u) * var(--ln) / -2); background: var(--butter); }
-  .nm {
-    display: block;
-    padding: calc(var(--u) * 8) 0 0 calc(var(--u) * 25);
-    font-size: calc(var(--u) * 17);
-    line-height: 1.15;
-    font-weight: 600;
-    letter-spacing: -.01em;
-  }
-  .on { position: absolute; top: calc(var(--u) * 13); left: calc(var(--u) * 10); width: calc(var(--u) * 9); height: calc(var(--u) * 9); border-radius: 50%; background: #2BD06A; }
-  .st { position: absolute; top: calc(var(--u) * 34); font: 700 calc(var(--u) * 18)/1.2 var(--mono); color: var(--cream); }
-  .node-b .st { left: calc(100% + var(--u) * 8); }
-  .node-a .st { right: calc(100% + var(--u) * 8); }
-
-  /* Moving payload pill */
-  .pill {
-    z-index: 6;
-    left: 0; top: 0;
+  section {
+    height: 100%;
     display: grid;
     place-items: center;
+    padding: var(--py, 32px) var(--px, 44px);
+    background:
+      radial-gradient(48% 60% at 80% 18%, rgba(142, 162, 255, .14), transparent 72%),
+      radial-gradient(44% 55% at 18% 85%, rgba(43, 208, 106, .08), transparent 70%),
+      linear-gradient(rgba(142, 162, 255, .05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(142, 162, 255, .05) 1px, transparent 1px),
+      var(--bg);
+    background-size: 100% 100%, 100% 100%, 34px 34px, 34px 34px, 100% 100%;
+  }
+  .scene {
+    --dw: 1400; --dh: 802; --ln: 5;
+    --u: min(calc((100vw - 2 * var(--px, 44px)) / var(--dw)), calc((100vh - 2 * var(--py, 32px)) / var(--dh)));
+    position: relative;
+    width: calc(var(--u) * var(--dw));
+    height: calc(var(--u) * var(--dh));
+  }
+  .scene > * { position: absolute; }
+  .wires { inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 1; }
+  .wires path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .wires .base { stroke: rgba(142, 162, 255, .34); stroke-width: 2.5; stroke-dasharray: 4 7; }
+  .wires .fl { stroke: var(--peri); stroke-width: 5; opacity: 0; }
+  .tall-only { display: none; }
+
+  .lap { left: 0; top: calc(var(--u) * 282); width: calc(var(--u) * 520); --fs: 20; }
+  .host { right: 0; top: calc(var(--u) * 282); width: calc(var(--u) * 520); --fs: 19; }
+
+  .frame {
+    margin: 0 auto;
+    width: calc(var(--u) * 500);
+    height: calc(var(--u) * 324);
+    border-radius: calc(var(--u) * 18);
+    background: var(--panel);
+    border: calc(var(--u) * 2) solid var(--border);
+    box-shadow: 0 calc(var(--u) * 18) calc(var(--u) * 44) rgba(0, 0, 0, .42);
     overflow: hidden;
-    width: calc(var(--u) * var(--pw, 112));
-    height: calc(var(--u) * var(--ph, 40));
-    border-radius: calc(var(--u) * 27);
-    background: var(--butter);
-    color: var(--ink);
-    font-size: calc(var(--u) * 21);
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .tbar {
+    height: calc(var(--u) * 42);
+    padding: 0 calc(var(--u) * 18);
+    display: flex;
+    align-items: center;
+    gap: calc(var(--u) * 10);
+    background: var(--panel-2);
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    font: 600 calc(var(--u) * 17)/1 var(--mono);
+    color: var(--peri-soft);
+  }
+  .dot { width: calc(var(--u) * 10); height: calc(var(--u) * 10); border-radius: 50%; background: var(--green); flex: none; }
+  .dot.idle { background: #64708D; }
+  .dot.pause { background: var(--amber); }
+  .tbar-r { margin-left: auto; font-size: calc(var(--u) * 15); color: var(--muted); }
+  .tbar-r.ok { color: var(--green); font-weight: 700; }
+
+  .body { padding: calc(var(--u) * 16) calc(var(--u) * 18); display: flex; flex-direction: column; gap: calc(var(--u) * 12); }
+  .card {
+    padding: calc(var(--u) * 14) calc(var(--u) * 16);
+    border-radius: calc(var(--u) * 12);
+    background: #141720;
+    border: 1px solid rgba(255, 255, 255, .07);
+    font: 600 calc(var(--u) * var(--fs))/1.42 var(--mono);
+    color: var(--text);
+  }
+  .sub-note { margin-top: calc(var(--u) * 7); font-size: calc(var(--u) * 15); font-weight: 500; color: var(--muted); opacity: 0; }
+  .res {
+    margin-top: auto;
+    padding: calc(var(--u) * 14) calc(var(--u) * 16);
+    border-radius: calc(var(--u) * 12);
+    background: rgba(43, 208, 106, .14);
+    border: 1px solid rgba(43, 208, 106, .45);
+    color: var(--text);
+    opacity: 0;
+  }
+  .res-head { font: 700 calc(var(--u) * 14)/1 var(--mono); color: var(--green); margin-bottom: calc(var(--u) * 6); }
+  .res-body { font: 700 calc(var(--u) * 19)/1.25 var(--mono); }
+
+  .lines { display: grid; gap: calc(var(--u) * 7); font: 500 calc(var(--u) * 17.5)/1.4 var(--mono); }
+  .dim { color: var(--muted); }
+  .ok { color: var(--green); }
+  .pass { color: var(--peri); font-weight: 700; }
+  .hl { opacity: 0; }
+
+  .seat {
+    margin-top: calc(var(--u) * 16);
+    text-align: center;
+    font-size: calc(var(--u) * 24);
     font-weight: 700;
     letter-spacing: -.02em;
-    white-space: nowrap;
+    color: var(--text);
+  }
+
+  /* Top center Host Rack + /cache */
+  .rack {
+    z-index: 2;
+    left: calc(var(--u) * 485);
+    top: 0;
+    width: calc(var(--u) * 430);
+    height: calc(var(--u) * 230);
+    border-radius: calc(var(--u) * 16);
+    background: var(--panel);
+    border: calc(var(--u) * 2) solid var(--peri);
+    box-shadow: 0 calc(var(--u) * 16) calc(var(--u) * 38) rgba(0, 0, 0, .4);
+    overflow: hidden;
+  }
+  .rack-h {
+    height: calc(var(--u) * 42);
+    padding: 0 calc(var(--u) * 16);
+    background: var(--peri);
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: calc(var(--u) * 18);
+    font-weight: 800;
+    letter-spacing: -.02em;
+  }
+  .rack-h span:last-child { font: 700 calc(var(--u) * 14)/1 var(--mono); }
+  .rack-mid {
+    padding: calc(var(--u) * 12) calc(var(--u) * 16);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: calc(var(--u) * 8);
+  }
+  .slot {
+    padding: calc(var(--u) * 10);
+    border-radius: calc(var(--u) * 9);
+    background: #141720;
+    border: 1px solid rgba(142, 162, 255, .18);
+    font: 600 calc(var(--u) * 13)/1.35 var(--mono);
+    color: var(--muted);
+  }
+  .slot b { display: block; color: var(--text); font-size: calc(var(--u) * 14); margin-bottom: calc(var(--u) * 2); }
+  .slot.on { border-color: var(--green); }
+  .slot.on b { color: var(--green); }
+  .cache-bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: calc(var(--u) * 64);
+    padding: 0 calc(var(--u) * 16);
+    background: #141720;
+    border-top: 1px solid rgba(142, 162, 255, .25);
+    display: flex; align-items: center; justify-content: space-between;
+    font: 700 calc(var(--u) * 16)/1 var(--mono);
+    color: var(--peri-soft);
+  }
+  .cache-bar b { color: var(--green); }
+
+  .clock { z-index: 2; left: calc(var(--u) * 560); top: calc(var(--u) * 372); width: calc(var(--u) * 280); text-align: center; }
+  .clock-n { font-size: calc(var(--u) * 108); font-weight: 800; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+  .clock.done .clock-n { color: var(--green); }
+  .clock-n small { font-size: .4em; color: var(--peri); margin-left: .06em; }
+  .clock-l { margin-top: calc(var(--u) * 10); font-size: calc(var(--u) * 20); font-weight: 600; color: var(--muted); }
+
+  .pill {
+    z-index: 6; left: 0; top: 0;
+    padding: calc(var(--u) * 6) calc(var(--u) * 14);
+    border-radius: 999px;
+    background: var(--peri);
+    color: var(--ink);
+    font: 800 calc(var(--u) * 17)/1 var(--mono);
     opacity: 0;
-    will-change: transform;
     pointer-events: none;
   }
-  .pill span { grid-area: 1 / 1; white-space: nowrap; }
-  #pillT { color: transparent; -webkit-background-clip: text; background-clip: text; }
 
-  .clock { z-index: 2; left: calc(var(--u) * 570); top: calc(var(--u) * 392); width: calc(var(--u) * 260); text-align: center; color: var(--cream); }
-  .clock.done { color: var(--butter); }
-  .clock-n {
-    font-size: calc(var(--u) * 114);
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: -.05em;
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum";
-  }
-  .clock-n small { font-size: .42em; font-weight: 600; letter-spacing: -.02em; margin-left: .06em; }
-  .clock-l { margin-top: calc(var(--u) * 8); font-size: calc(var(--u) * 20); color: var(--cream); font-weight: 500; }
+  .off { opacity: 0; }
+  .caret { display: inline-block; width: calc(var(--u) * 2.5); height: calc(var(--u) * 22); background: var(--peri); vertical-align: middle; }
 
   @media (max-aspect-ratio: 1/1), (max-width: 999px) {
-    .scene { --dw: 358; --dh: 753; --px: 16px; --py: 20px; --ln: 3.5; }
+    section { --px: 14px; --py: 18px; }
+    .scene { --dw: 358; --dh: 753; }
     .wide-only { display: none; }
     .tall-only { display: block; }
-    .wires .base { stroke-width: 2; stroke-dasharray: 2 6; }
-    .lap { left: 0; top: 0; width: calc(var(--u) * 358); --fs: 18; }
-    .host { left: 0; top: calc(var(--u) * 490); width: calc(var(--u) * 358); --fs: 16; }
-    .lid { width: calc(var(--u) * 330); height: calc(var(--u) * 190); padding: calc(var(--u) * 8) calc(var(--u) * 8) calc(var(--u) * 5); border-radius: calc(var(--u) * 12) calc(var(--u) * 12) 0 0; }
-    .host .lid { border-radius: calc(var(--u) * 12); padding-bottom: calc(var(--u) * 8); }
-    .node { --nx: -8; --ny: 401; --nw: 70; --nh: 60; --ly: 50; border-radius: calc(var(--u) * 7); box-shadow: 0 calc(var(--u) * 4) 0 var(--shade); }
-    .node-a { --nx: 296; }
-    .node-b::after { left: 50%; }
-    .node-a::after { right: 50%; }
-    .nm { padding: calc(var(--u) * 4) 0 0 calc(var(--u) * 13); font-size: calc(var(--u) * 13); line-height: 1.08; }
-    .on { top: calc(var(--u) * 8); left: calc(var(--u) * 4); width: calc(var(--u) * 6); height: calc(var(--u) * 6); }
-    .st { top: calc(var(--u) * -19); font-size: calc(var(--u) * 13); }
-    .node-b .st { left: calc(var(--u) * 41); }
-    .node-a .st { left: auto; right: 0; }
-    .disp { border-radius: calc(var(--u) * 4); }
-    .tbar { height: calc(var(--u) * 22); padding: 0 calc(var(--u) * 12); font-size: calc(var(--u) * 13); gap: calc(var(--u) * 6); }
-    .tbar i { width: calc(var(--u) * 7); height: calc(var(--u) * 7); }
+    .lap { left: 0; top: 0; width: calc(var(--u) * 358); --fs: 13.5; }
+    .host { left: 0; top: calc(var(--u) * 474); width: calc(var(--u) * 358); --fs: 13; }
+    .frame { width: calc(var(--u) * 342); height: calc(var(--u) * 202); border-radius: calc(var(--u) * 14); }
+    .tbar { height: calc(var(--u) * 30); font-size: calc(var(--u) * 12); padding: 0 calc(var(--u) * 12); }
     .tbar-r { font-size: calc(var(--u) * 11); }
-    .log { padding: calc(var(--u) * 6) calc(var(--u) * 8); }
-    .turn { padding: calc(var(--u) * 6) calc(var(--u) * 8); border-radius: calc(var(--u) * 5); }
-    .turn + .turn { margin-top: calc(var(--u) * 4); }
-    .from { margin-bottom: calc(var(--u) * 2); font-size: calc(var(--u) * 12); }
-    .sub-note { margin-top: calc(var(--u) * 3); font-size: calc(var(--u) * 12); }
-    .host-lines { font-size: calc(var(--u) * 13); gap: calc(var(--u) * 3); }
-    .deck { height: calc(var(--u) * 48); }
-    .stand { width: calc(var(--u) * 120); height: calc(var(--u) * 48); }
-    .seat { margin-top: calc(var(--u) * 3); font-size: calc(var(--u) * 17); line-height: calc(var(--u) * 22); }
-    .panel {
-      left: calc(var(--u) * 76); top: calc(var(--u) * 326);
-      width: calc(var(--u) * 206); height: calc(var(--u) * 138);
-      --lab: 13; --pad: 8; --lane: 46; --ly: 33;
-      border-radius: calc(var(--u) * 10);
-      box-shadow: 0 calc(var(--u) * 5) 0 var(--shade);
-    }
-    .gh { height: calc(var(--u) * 26); font-size: calc(var(--u) * 13); }
-    .gh span:last-child { font-size: calc(var(--u) * 10); }
-    .hd { padding-top: calc(var(--u) * 3); padding-bottom: 0; }
-    .cd { --dot: 14; }
-    #cd1 { left: calc(var(--u) * 63); }
-    #cd2 { left: calc(var(--u) * 143); }
-    .pill { font-size: calc(var(--u) * 13); border-radius: calc(var(--u) * 15); }
-    .clock { left: calc(var(--u) * 76); top: calc(var(--u) * 270); width: calc(var(--u) * 206); display: flex; align-items: baseline; gap: calc(var(--u) * 8); text-align: left; }
-    .clock-n { font-size: calc(var(--u) * 40); }
-    .clock-l { font-size: calc(var(--u) * 12); margin-top: 0; white-space: nowrap; }
+    .body { padding: calc(var(--u) * 10) calc(var(--u) * 12); gap: calc(var(--u) * 8); }
+    .card { padding: calc(var(--u) * 8) calc(var(--u) * 10); }
+    .sub-note { font-size: calc(var(--u) * 11); }
+    .res { padding: calc(var(--u) * 8) calc(var(--u) * 10); }
+    .res-head { font-size: calc(var(--u) * 11); margin-bottom: calc(var(--u) * 3); }
+    .res-body { font-size: calc(var(--u) * 14); }
+    .lines { font-size: calc(var(--u) * 12.5); gap: calc(var(--u) * 4); }
+    .seat { font-size: calc(var(--u) * 16); margin-top: calc(var(--u) * 8); }
+    .rack { left: calc(var(--u) * 18); top: calc(var(--u) * 296); width: calc(var(--u) * 322); height: calc(var(--u) * 150); border-radius: calc(var(--u) * 12); }
+    .rack-h { height: calc(var(--u) * 28); font-size: calc(var(--u) * 12); padding: 0 calc(var(--u) * 10); }
+    .rack-h span:last-child { font-size: calc(var(--u) * 10); }
+    .rack-mid { padding: calc(var(--u) * 8) calc(var(--u) * 10); gap: calc(var(--u) * 6); }
+    .slot { padding: calc(var(--u) * 6); font-size: calc(var(--u) * 10); }
+    .slot b { font-size: calc(var(--u) * 10.5); }
+    .cache-bar { height: calc(var(--u) * 42); font-size: calc(var(--u) * 11.5); padding: 0 calc(var(--u) * 10); }
+    .clock { left: calc(var(--u) * 18); top: calc(var(--u) * 240); width: calc(var(--u) * 322); display: flex; align-items: baseline; justify-content: center; gap: calc(var(--u) * 10); }
+    .clock-n { font-size: calc(var(--u) * 42); }
+    .clock-l { font-size: calc(var(--u) * 13); margin-top: 0; }
+    .pill { font-size: calc(var(--u) * 12); padding: calc(var(--u) * 4) calc(var(--u) * 10); }
   }
 </style>
 </head>
 <body>
-<section id="how">
-  <div class="stage"><div class="scene" id="scene">
+<section>
+  <div class="scene" id="scene">
     <svg class="wires wide-only" viewBox="0 0 1400 802" aria-hidden="true">
-      <path class="base" d="M326 230H645"/><path class="base" d="M645 230H1074"/>
-      <path class="base" d="M240 310V246Q240 230 256 230H326"/>
-      <path class="base" d="M1074 230H1144Q1160 230 1160 246V310"/>
-      <path class="fl" id="f1w" pathLength="1" d="M326 230H645"/>
-      <path class="fl" id="f2w" pathLength="1" d="M645 230H1074"/>
-      <path class="fl" id="f3w" pathLength="1" d="M1074 230H795"/>
-      <path class="fl" id="f4w" pathLength="1" d="M795 230H326"/>
-      <path class="fl" id="sBw" pathLength="1" d="M240 310V246Q240 230 256 230H326"/>
-      <path class="fl" id="sAw" pathLength="1" d="M1074 230H1144Q1160 230 1160 246V310"/>
+      <path class="base" d="M260 282V195Q260 175 280 175H485"/>
+      <path class="base" d="M915 175H1120Q1140 175 1140 195V282"/>
+      <path class="fl" id="ow1" pathLength="1" d="M260 282V195Q260 175 280 175H485"/>
+      <path class="fl" id="ow2" pathLength="1" d="M915 175H1120Q1140 175 1140 195V282"/>
+      <path class="fl" id="ob1" pathLength="1" d="M1140 282V195Q1140 175 1120 175H280Q260 175 260 195V282"/>
     </svg>
     <svg class="wires tall-only" viewBox="0 0 358 753" aria-hidden="true">
-      <path class="base" d="M27 451H139"/><path class="base" d="M139 451H331"/>
-      <path class="base" d="M27 225V451"/><path class="base" d="M331 451V505"/>
-      <path class="fl" id="f1t" pathLength="1" d="M27 451H139"/>
-      <path class="fl" id="f2t" pathLength="1" d="M139 451H331"/>
-      <path class="fl" id="f3t" pathLength="1" d="M331 451H219"/>
-      <path class="fl" id="f4t" pathLength="1" d="M219 451H27"/>
-      <path class="fl" id="sBt" pathLength="1" d="M27 225V451"/>
-      <path class="fl" id="sAt" pathLength="1" d="M331 451V505"/>
+      <path class="base" d="M40 202V296"/>
+      <path class="base" d="M318 446V474"/>
+      <path class="fl" id="ot1" pathLength="1" d="M40 202V296"/>
+      <path class="fl" id="ot2" pathLength="1" d="M318 446V474"/>
+      <path class="fl" id="ob2" pathLength="1" d="M40 474V202"/>
     </svg>
 
-    <div class="panel">
-      <div class="gh"><span>Incus host</span><span>Full · 24 CPUs</span></div>
-      <div class="hd"><span>branches</span><b>+0 commits</b></div>
-      <svg class="graph" viewBox="0 0 368 70" aria-hidden="true"><path d="M8 11H340M40 11C66 11 58 59 84 59H320M140 11C166 11 158 35 184 35H345"/><circle cx="40" cy="11" r="6"/><circle cx="140" cy="11" r="6"/><circle cx="250" cy="11" r="6"/><circle cx="340" cy="11" r="6"/><circle cx="205" cy="35" r="6"/><circle cx="280" cy="35" r="6"/><circle cx="345" cy="35" r="6"/><circle cx="120" cy="59" r="6"/><circle cx="225" cy="59" r="6"/><circle cx="320" cy="59" r="6"/></svg>
-      <div class="lane">
-        <div class="hd hd-r"><span>/cache warm</span><b id="cnt">ready</b></div>
-        <i class="cd" id="cd1"></i><i class="cd" id="cd2"></i>
+    <div class="rack">
+      <div class="rack-h"><span>Incus host</span><span>Full · 24 CPUs</span></div>
+      <div class="rack-mid">
+        <div class="slot" id="sl1"><b>box-lantern</b>repo · 8 CPU</div>
+        <div class="slot"><b>box-tide</b>idle · 2 CPU</div>
+        <div class="slot"><b>--gpu</b>ready · RTX</div>
       </div>
+      <div class="cache-bar"><span>/cache (go · gradle · npm · uv)</span><b id="cnt">warm</b></div>
     </div>
-
-    <div class="node node-b"><span class="nm">box<br>CLI</span><i class="on"></i><span class="st" id="stB"></span></div>
-    <div class="node node-a"><span class="nm">boxd<br>host</span><i class="on"></i><span class="st" id="stA"></span></div>
 
     <div class="clock" id="clock">
       <div class="clock-n"><span id="clk">0</span><small>s</small></div>
@@ -343,228 +265,104 @@
     </div>
 
     <div class="lap">
-      <div class="lid"><div class="disp">
-        <div class="tbar"><i id="dotB"></i><span>quiet-otter</span><span class="tbar-r" id="lstat">running</span></div>
-        <div class="log">
-          <div class="turn" id="bq-wrap">
-            <p id="bq">$ box run -- go test -race ./internal/daemon</p>
-            <p class="sub-note" id="laptop-free">push: true · turn ended, laptop stays free</p>
-          </div>
-          <div class="turn in" id="ba"><span class="from">box · exit 0 · 420 s</span><p>PASS: 913 tests passed</p></div>
-          <i class="caret" id="caretB"></i>
+      <div class="frame">
+        <div class="tbar"><i class="dot" id="dotB"></i><span>quiet-otter</span><span class="tbar-r" id="lstat">running</span></div>
+        <div class="body">
+          <div class="card"><span id="bq">box run --reason "race suite" -- go test -race ./internal/daemon</span><i class="caret" id="caret"></i><div class="sub-note" id="lsub">git bundle staged · HEAD and branches untouched</div></div>
+          <div class="res" id="res"><div class="res-head">box · exit 0 · 420 s</div><div class="res-body">PASS: 913 tests passed</div></div>
         </div>
-      </div></div>
-      <svg class="deck" viewBox="0 0 580 118" preserveAspectRatio="none" aria-hidden="true"><use href="#deckArt"/></svg>
+      </div>
       <div class="seat">Your laptop</div>
     </div>
 
     <div class="host">
-      <div class="lid"><div class="disp">
-        <div class="tbar"><i id="dotA" class="idle"></i><span>box · lantern (large)</span><span class="tbar-r" id="rstat">idle</span></div>
-        <div class="log">
-          <div class="host-lines" id="hl">
-            <div class="dim" id="hl1">$ git checkout snapshot</div>
-            <div class="dim" id="hl2">$ go test -race ./internal/daemon</div>
-            <div class="ok" id="hl3">ok  internal/daemon  913 passed</div>
-            <div class="pass" id="hl4">PASS · exit 0 · 420 s</div>
+      <div class="frame">
+        <div class="tbar"><i class="dot idle" id="dotA"></i><span>box-lantern (large)</span><span class="tbar-r" id="rstat">idle</span></div>
+        <div class="body">
+          <div class="lines">
+            <div class="dim hl" id="hl1">$ git unbundle dirty-tree</div>
+            <div class="dim hl" id="hl2">$ go test -race ./internal/daemon</div>
+            <div class="ok hl" id="hl3">ok  internal/daemon  913 passed</div>
+            <div class="pass hl" id="hl4">PASS · exit 0 · 420 s (warm /cache)</div>
           </div>
         </div>
-      </div></div>
-      <svg class="stand" viewBox="0 0 220 118" preserveAspectRatio="none" aria-hidden="true">
-        <rect x="86" y="0" width="48" height="44" fill="#D5D1B8"/>
-        <rect x="40" y="44" width="140" height="12" rx="6" fill="#FFFBEA"/>
-        <rect x="30" y="64" width="160" height="42" rx="10" fill="#16265C" stroke="#FFFBEA" stroke-width="3"/>
-        <circle cx="52" cy="85" r="5" fill="#2BD06A"/>
-        <rect x="70" y="81" width="96" height="8" rx="4" fill="#225BFF"/>
-      </svg>
-      <div class="seat">Your PC (or Linux server)</div>
+      </div>
+      <div class="seat">Your PC or Linux host</div>
     </div>
 
-    <div class="pill" id="pill" aria-hidden="true"><span id="pillM">bundle</span><span id="pillT">snapshot</span></div>
-
-    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><g id="deckArt"><rect x="22" y="0" width="536" height="5" fill="#C9C5AC"/><path d="M22 0H558L580 106H0Z" fill="#F7F4E4"/><rect x="22" y="0" width="536" height="3" fill="#C9C5AC"/><path d="M63.4 7.0L91.3 7.0L89.8 16.5L61.7 16.5ZM96.1 7.0L124.0 7.0L122.8 16.5L94.7 16.5ZM128.8 7.0L156.7 7.0L155.7 16.5L127.6 16.5ZM161.5 7.0L189.4 7.0L188.7 16.5L160.6 16.5ZM194.3 7.0L222.1 7.0L221.6 16.5L193.6 16.5ZM227.0 7.0L254.9 7.0L254.6 16.5L226.5 16.5ZM259.7 7.0L287.6 7.0L287.6 16.5L259.5 16.5ZM292.4 7.0L320.3 7.0L320.5 16.5L292.4 16.5ZM325.1 7.0L353.0 7.0L353.5 16.5L325.4 16.5ZM357.9 7.0L385.7 7.0L386.4 16.5L358.4 16.5ZM390.6 7.0L418.5 7.0L419.4 16.5L391.3 16.5ZM423.3 7.0L451.2 7.0L452.4 16.5L424.3 16.5ZM456.0 7.0L483.9 7.0L485.3 16.5L457.2 16.5ZM488.7 7.0L516.6 7.0L518.3 16.5L490.2 16.5ZM61.3 18.7L99.6 18.7L98.1 29.3L59.5 29.3ZM104.5 18.7L130.4 18.7L129.1 29.3L103.0 29.3ZM135.3 18.7L161.2 18.7L160.2 29.3L134.0 29.3ZM166.1 18.7L192.0 18.7L191.2 29.3L165.1 29.3ZM196.9 18.7L222.8 18.7L222.3 29.3L196.2 29.3ZM227.7 18.7L253.7 18.7L253.4 29.3L227.2 29.3ZM258.6 18.7L284.5 18.7L284.4 29.3L258.3 29.3ZM289.4 18.7L315.3 18.7L315.5 29.3L289.4 29.3ZM320.2 18.7L346.1 18.7L346.6 29.3L320.4 29.3ZM351.0 18.7L376.9 18.7L377.6 29.3L351.5 29.3ZM381.8 18.7L407.7 18.7L408.7 29.3L382.5 29.3ZM412.6 18.7L438.5 18.7L439.7 29.3L413.6 29.3ZM443.4 18.7L469.4 18.7L470.8 29.3L444.7 29.3ZM474.2 18.7L518.7 18.7L520.5 29.3L475.7 29.3ZM59.1 31.5L107.1 31.5L105.4 43.2L57.1 43.2ZM112.0 31.5L138.2 31.5L136.8 43.2L110.4 43.2ZM143.1 31.5L169.3 31.5L168.2 43.2L141.8 43.2ZM174.2 31.5L200.4 31.5L199.6 43.2L173.2 43.2ZM205.4 31.5L231.5 31.5L231.0 43.2L204.6 43.2ZM236.5 31.5L262.6 31.5L262.4 43.2L236.0 43.2ZM267.6 31.5L293.8 31.5L293.8 43.2L267.4 43.2ZM298.7 31.5L324.9 31.5L325.2 43.2L298.8 43.2ZM329.8 31.5L356.0 31.5L356.6 43.2L330.2 43.2ZM360.9 31.5L387.1 31.5L388.0 43.2L361.5 43.2ZM392.0 31.5L418.2 31.5L419.3 43.2L392.9 43.2ZM423.2 31.5L449.3 31.5L450.7 43.2L424.3 43.2ZM454.3 31.5L520.9 31.5L522.9 43.2L455.7 43.2ZM56.7 45.4L120.9 45.4L119.2 58.2L54.5 58.2ZM125.9 45.4L152.3 45.4L151.0 58.2L124.3 58.2ZM157.3 45.4L183.7 45.4L182.7 58.2L156.0 58.2ZM188.7 45.4L215.2 45.4L214.5 58.2L187.8 58.2ZM220.2 45.4L246.6 45.4L246.2 58.2L219.5 58.2ZM251.6 45.4L278.1 45.4L278.0 58.2L251.3 58.2ZM283.1 45.4L309.5 45.4L309.7 58.2L283.0 58.2ZM314.5 45.4L341.0 45.4L341.4 58.2L314.7 58.2ZM345.9 45.4L372.4 45.4L373.2 58.2L346.5 58.2ZM377.4 45.4L403.8 45.4L404.9 58.2L378.2 58.2ZM408.8 45.4L435.3 45.4L436.7 58.2L410.0 58.2ZM440.3 45.4L523.3 45.4L525.5 58.2L441.7 58.2ZM54.1 60.4L83.1 60.4L81.0 74.3L51.6 74.3ZM88.1 60.4L117.1 60.4L115.4 74.3L86.1 74.3ZM122.2 60.4L158.0 60.4L156.7 74.3L120.5 74.3ZM163.1 60.4L348.8 60.4L349.4 74.3L161.8 74.3ZM353.8 60.4L389.7 60.4L390.7 74.3L354.5 74.3ZM394.7 60.4L423.7 60.4L425.1 74.3L395.8 74.3ZM428.8 60.4L457.8 60.4L459.5 74.3L430.2 74.3ZM462.9 60.4L491.9 60.4L493.9 74.3L464.6 74.3ZM496.9 60.4L525.9 60.4L528.4 74.3L499.0 74.3Z" fill="#0E1B45"/><path d="M216.0 79.5L364.0 79.5L365.2 103.0L214.8 103.0Z" fill="#E4E0CA"/><path d="M0 106H580V110Q580 118 572 118H8Q0 118 0 110Z" fill="#D5D1B8"/><path d="M254 106H326V109Q326 112 323 112H257Q254 112 254 109Z" fill="#BDB99F"/></g></defs></svg>
-  </div></div>
+    <div class="pill" id="pill">bundle</div>
+  </div>
 </section>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const scene = $('scene');
   const stacked = matchMedia('(max-aspect-ratio: 1/1), (max-width: 999px)');
   const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
-  const outCubic = f => 1 - (1 - f) ** 3;
-  const smooth = f => f * f * (3 - 2 * f);
+  const ss = f => { const x = clamp(f); return x * x * (3 - 2 * x); };
+  const el = $('bq'), raw = el.textContent;
+  el.textContent = '';
+  const chars = [...raw].map(c => { const s = document.createElement('span'); s.textContent = c; el.append(s); return s; });
 
-  const split = id => {
-    const el = $(id), text = el.textContent;
-    el.textContent = '';
-    const chars = [...text].map(c => { const s = document.createElement('span'); s.textContent = c; el.append(s); return s; });
-    return { el, chars, shown: chars.length };
-  };
-  const bq = split('bq');
-  const type = (m, n) => {
-    for (let i = Math.min(n, m.shown); i < Math.max(n, m.shown); i++) m.chars[i].classList.toggle('off', i >= n);
-    m.shown = n;
-  };
-
-  const flights = [
-    { n: 1, from: 1.4, to: 2.0, ease: outCubic, leaving: false, label: 'bundle' },
-    { n: 2, from: 2.2, to: 3.1, ease: smooth, leaving: true, label: 'bundle' },
-    { n: 3, from: 12.6, to: 13.4, ease: outCubic, leaving: false, label: 'exit 0' },
-    { n: 4, from: 13.6, to: 14.5, ease: smooth, leaving: true, label: 'exit 0' },
-  ];
-  const SENDS = [
-    { from: 1.0, strip: 1.25, flight: 0, screen: 'bq', x: 'bx', s: 'bs' },
-  ];
-  const DELIVERIES = [
-    { strip: 14.5, go: 14.7, at: 15.0, flight: 3, screen: 'ba', x: 'bx', s: 'bs' },
-  ];
-  const SHAPE = {
-    w: { env: [96, 44], full: [118, 40], dot: 22, dist: [145, 255, 105, 295], edge: [500, 900], bx: 240, ax: 1160, bs: 326, as: 1074, dw: 1400, nodes: [[276, 160, 376, 248], [1024, 160, 1124, 248]] },
-    t: { env: [64, 30], full: [76, 24], dot: 14, dist: [63, 143, 63, 143], edge: [76, 282], bx: 60, ax: 290, bs: 27, as: 331, dw: 358, nodes: [[-8, 401, 62, 461], [296, 401, 366, 461]] },
-  };
-  let paths = [], stems = {}, shape = SHAPE.w, screens = {};
-  function choosePaths() {
-    const k = stacked.matches ? 't' : 'w';
-    shape = SHAPE[k];
-    paths = flights.map(f => $('f' + f.n + k));
-    paths.forEach(p => { p.len = p.getTotalLength(); });
-    stems = { bx: $('sB' + k), ax: $('sA' + k) };
-    stems.bx.len = stems.bx.getTotalLength();
-    stems.ax.len = stems.ax.getTotalLength();
-    const box = scene.getBoundingClientRect(), unit = box.width / shape.dw;
-    screens = {
-      bq: ( ($('bq').getBoundingClientRect().top + $('bq').getBoundingClientRect().height / 2) - box.top ) / unit,
-      ba: ( ($('ba').getBoundingClientRect().top + $('ba').getBoundingClientRect().height / 2) - box.top ) / unit,
-    };
-  }
-
-  const END = 15.6;
-  const SCRUB = [[0, 0], [.08, 1], [.14, 1.4], [.21, 2.0], [.29, 3.2], [.74, 12.6], [.81, 13.6], [.89, 14.5], [.94, 15.0], [1, END]];
+  const SCRUB = [[0, 0], [.12, 1.4], [.28, 3.2], [.76, 12.6], [.9, 14.8], [1, 15.6]];
   function tAt(p) {
-    if (p <= SCRUB[0][0]) return 0;
+    if (p <= 0) return 0;
     for (let i = 1; i < SCRUB.length; i++) {
       const [p0, t0] = SCRUB[i - 1], [p1, t1] = SCRUB[i];
       if (p <= p1) return t0 + (t1 - t0) * (p - p0) / (p1 - p0);
     }
-    return END;
+    return 15.6;
   }
 
-  function placeCaret(c, char, after) {
-    if (!char) { c.style.display = 'none'; return; }
-    const box = c.parentElement.getBoundingClientRect(), r = char.getBoundingClientRect();
-    c.style.display = 'block';
-    c.style.transform = `translate(${(after ? r.right : r.left) - box.left}px, ${r.top - box.top}px)`;
-  }
-  function land(el, t, at) {
-    const x = clamp((t - at) / .35);
-    el.style.opacity = t >= at ? 1 : 0;
-    el.style.transform = t >= at && x < 1 ? `scale(${.95 + .05 * x + .025 * Math.sin(x * Math.PI)})` : '';
-  }
-
-  let last = -1;
   function paint(t) {
-    if (t === last) return;
-    last = t;
-    const secs = t < 3.2 ? 0 : Math.min(420, Math.round(420 * smooth(clamp((t - 3.2) / 9.4))));
+    const nq = Math.round(clamp(t / 1.1) * chars.length);
+    chars.forEach((s, i) => s.classList.toggle('off', i >= nq));
+    $('caret').style.opacity = t > 0 && nq < chars.length ? '1' : '0';
+    $('lsub').style.opacity = t >= 1.2 ? '1' : '0';
+
+    const running = t >= 3.0 && t < 12.6;
+    $('sl1').classList.toggle('on', t >= 2.8);
+    $('dotA').className = 'dot ' + (running ? '' : 'idle');
+    $('rstat').textContent = t >= 12.6 ? 'exit 0' : running ? '8 CPUs active' : 'idle';
+    $('rstat').className = 'tbar-r ' + (t >= 12.6 ? 'ok' : '');
+
+    $('dotB').className = 'dot ' + (t >= 14.8 ? '' : t >= 2.6 ? 'idle' : '');
+    $('lstat').textContent = t >= 14.8 ? 'done' : t >= 2.6 ? 'waiting' : 'running';
+    $('lstat').className = 'tbar-r ' + (t >= 14.8 ? 'ok' : '');
+
+    $('hl1').style.opacity = t >= 2.9 ? '1' : '0';
+    $('hl2').style.opacity = t >= 3.6 ? '1' : '0';
+    $('hl3').style.opacity = t >= 8.4 ? '1' : '0';
+    $('hl4').style.opacity = t >= 12.4 ? '1' : '0';
+    $('res').style.opacity = t >= 14.8 ? '1' : '0';
+
+    const secs = t < 3.2 ? 0 : Math.min(420, Math.round(420 * ss((t - 3.2) / 9.4)));
     $('clk').textContent = String(secs);
-    $('clock').classList.toggle('done', t >= 15);
-    $('clockL').style.visibility = t >= 15 ? 'visible' : 'hidden';
+    $('clock').classList.toggle('done', t >= 14.8);
+    $('clockL').style.visibility = t >= 14.8 ? 'visible' : 'hidden';
 
-    $('cnt').textContent = t >= 13.4 ? 'done' : t >= 2.0 ? '1 box' : 'ready';
-    $('cd1').style.opacity = t >= 2.0 ? 1 : 0;
-    $('cd2').style.opacity = t >= 13.4 ? 1 : 0;
-
-    $('dotB').classList.toggle('idle', t >= 2.2 && t < 15.0);
-    $('lstat').textContent = t >= 15.0 ? 'done' : t >= 2.2 ? 'turn ended' : 'running';
-    $('laptop-free').style.opacity = t >= 2.2 ? 1 : 0;
-
-    const hostRunning = t >= 3.2 && t < 12.6;
-    $('dotA').classList.toggle('idle', !hostRunning);
-    $('rstat').textContent = t >= 12.6 ? 'exit 0' : hostRunning ? '400% CPU' : 'idle';
-
-    $('hl1').style.opacity = t >= 3.1 ? 1 : 0;
-    $('hl2').style.opacity = t >= 3.8 ? 1 : 0;
-    $('hl3').style.opacity = t >= 8.2 ? 1 : 0;
-    $('hl4').style.opacity = t >= 12.4 ? 1 : 0;
-
-    const during = (a, b) => t >= a && t < b;
-    $('stB').textContent = during(1.3, 2.1) ? 'push' : during(13.6, 14.7) ? 'deliver' : '';
-    $('stA').textContent = during(2.2, 3.2) ? 'sync' : during(12.6, 13.6) ? 'done' : '';
-
-    const stem = (el, e) => { el.setAttribute('stroke-dasharray', `${e} 1`); el.style.opacity = e > 0 ? 1 : 0; };
-    const kind = stacked.matches ? 't' : 'w';
-    stem($('sB' + kind), smooth(clamp((t - 1) / .25)));
-    stem($('sA' + kind), smooth(clamp((t - 3.0) / .4)));
-
-    const nq = Math.round(clamp((t - .02) / .95) * bq.chars.length);
-    type(bq, nq);
-    placeCaret($('caretB'), t > .02 && nq < bq.chars.length ? (nq ? bq.chars[nq - 1] : bq.chars[0]) : null, nq > 0);
-    land($('ba'), t, 15.0);
+    const w = stacked.matches ? 't' : 'w';
+    const f1 = $(w === 'w' ? 'ow1' : 'ot1'), f2 = $(w === 'w' ? 'ow2' : 'ot2'), fb = $(w === 'w' ? 'ob1' : 'ob2');
+    const p1 = ss((t - 1.2) / 1.0), p2 = ss((t - 2.2) / 0.8), pb = ss((t - 12.6) / 2.1);
+    f1.setAttribute('stroke-dasharray', `${p1.toFixed(3)} 1`); f1.style.opacity = p1 > 0 ? '1' : '0';
+    f2.setAttribute('stroke-dasharray', `${p2.toFixed(3)} 1`); f2.style.opacity = p2 > 0 ? '1' : '0';
+    fb.setAttribute('stroke-dasharray', `${pb.toFixed(3)} 1`); fb.style.opacity = pb > 0 && t < 15.2 ? '1' : '0';
 
     const pill = $('pill');
-    let at = null, m = 0, msg = 0, size = 1, copy = false, onRoute = false, lbl = 'bundle';
-    const lerp = (a, b, f) => ({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
-    const hop = (side, y, f) => {
-      const stemEl = stems[side], along = g => stemEl.getPointAtLength((side === 'bx' ? g : 1 - g) * stemEl.len);
-      return f < .35 ? lerp({ x: shape[side], y }, along(0), f / .35) : along((f - .35) / .65);
-    };
-    flights.forEach((fl, i) => {
-      const p = paths[i];
-      const f = clamp((t - fl.from) / (fl.to - fl.from));
-      const e = fl.ease(f);
-      p.setAttribute('stroke-dasharray', `${e} 1`);
-      p.style.opacity = e > 0 ? 1 : 0;
-      if (f > 0 && f < 1) {
-        at = p.getPointAtLength(e * p.len);
-        onRoute = true;
-        copy = fl.leaving;
-        lbl = fl.label;
-        if (!copy) m = clamp(1 - (1 - e) * p.len / (shape.dist[i] + shape.full[0] / 2));
-      }
-    });
-    SENDS.forEach(s => {
-      const route = paths[s.flight].getPointAtLength(0), strip = { x: shape[s.s], y: route.y }, screen = { x: shape[s.x], y: screens[s.screen] };
-      if (during(s.from, s.strip)) { const f = (t - s.from) / (s.strip - s.from); at = hop(s.x, screen.y, smooth(f)); msg = 1; size = clamp(f / .3); lbl = 'bundle'; }
-      if (during(s.strip, flights[s.flight].from)) { const f = (t - s.strip) / (flights[s.flight].from - s.strip); at = lerp(strip, route, smooth(f)); msg = 1 - f; lbl = 'bundle'; }
-    });
-    DELIVERIES.forEach(d => {
-      const p = paths[d.flight], route = p.getPointAtLength(p.len), strip = { x: shape[d.s], y: route.y }, screen = { x: shape[d.x], y: screens[d.screen] };
-      if (during(d.strip, d.go)) { const f = (t - d.strip) / (d.go - d.strip); at = lerp(route, strip, smooth(f)); msg = 1; size = f; lbl = 'exit 0'; }
-      if (during(d.go, d.at)) { at = hop(d.x, screen.y, 1 - smooth((t - d.go) / (d.at - d.go))); msg = 1; lbl = 'exit 0'; }
-    });
-    pill.style.opacity = at ? 1 : 0;
-    if (at) {
-      $('pillM').textContent = lbl;
-      $('pillT').textContent = lbl;
-      const mm = copy ? 1 : smooth(m), inFlight = msg || !onRoute ? 1 : 1 - mm;
-      const k = msg || (!onRoute) ? size : inFlight;
-      const big = i => shape.full[i] + (shape.env[i] - shape.full[i]) * msg;
-      const wide = shape.dot + (big(0) - shape.dot) * k, high = shape.dot + (big(1) - shape.dot) * k;
-      pill.style.setProperty('--pw', wide.toFixed(1));
-      pill.style.setProperty('--ph', high.toFixed(1));
-      pill.style.borderRadius = `calc(var(--u) * ${msg ? 7 + (shape.full[1] / 2 - 7) * (1 - msg) : 27})`;
-      const leftSide = at.x < (shape.edge[0] + shape.edge[1]) / 2;
-      const splitX = (x, w) => clamp(((leftSide ? shape.edge[0] : shape.edge[1]) - (x - w / 2)) / w) * 100;
-      const two = (out, inn, s) => `linear-gradient(90deg, ${leftSide ? out : inn} ${s}%, ${leftSide ? inn : out} ${s}%)`;
-      const white = msg * k, mix = (a, b) => Math.round(a + (255 - a) * white);
-      pill.style.background = onRoute ? two('#FDEE8C', '#225BFF', splitX(at.x, wide)) : `rgb(${mix(253)}, ${mix(238)}, ${mix(140)})`;
-      const overNode = shape.nodes.some(([x0, y0, x1, y1]) => at.x + wide / 2 > x0 && at.x - wide / 2 < x1 && at.y + high / 2 > y0 && at.y - high / 2 < y1);
-      pill.style.boxShadow = onRoute && !overNode ? 'none' : `0 0 0 calc(var(--u) * 2) var(--ink)`;
-      const label = $('pillT'), tw = label.offsetWidth * shape.dw / scene.offsetWidth;
-      label.style.backgroundImage = onRoute ? two('#0E1B45', '#FFFBEA', splitX(at.x, tw)) : 'linear-gradient(#0E1B45, #0E1B45)';
-      label.style.opacity = onRoute ? clamp(1 - m * 1.8) : msg < .5 ? .2 + .8 * (1 - 2 * msg) : 0;
-      $('pillM').style.opacity = onRoute || msg < .5 ? 0 : .2 + .8 * (2 * msg - 1);
-      pill.style.transform = `translate(calc(var(--u) * ${at.x.toFixed(1)}), calc(var(--u) * ${at.y.toFixed(1)})) translate(-50%, -50%)`;
+    let pt = null;
+    if (p1 > 0 && p1 < 1) { pill.textContent = 'bundle'; pill.style.background = '#8EA2FF'; pt = f1.getPointAtLength(p1 * f1.getTotalLength()); }
+    else if (p2 > 0 && p2 < 1) { pill.textContent = 'sync'; pill.style.background = '#8EA2FF'; pt = f2.getPointAtLength(p2 * f2.getTotalLength()); }
+    else if (pb > 0 && pb < 1) { pill.textContent = 'exit 0'; pill.style.background = '#2BD06A'; pt = fb.getPointAtLength(pb * fb.getTotalLength()); }
+    pill.style.opacity = pt ? '1' : '0';
+    if (pt) {
+      const dw = stacked.matches ? 358 : 1400;
+      pill.style.transform = `translate(calc(var(--u) * ${pt.x.toFixed(1)}), calc(var(--u) * ${pt.y.toFixed(1)})) translate(-50%, -50%)`;
     }
   }
 
   window.__paint = paint;
   window.__tAt = tAt;
-  window.__setup = () => { choosePaths(); last = -1; paint(END); };
-  addEventListener('resize', () => { choosePaths(); last = -1; paint(END); });
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { choosePaths(); last = -1; paint(END); });
-  choosePaths();
-  paint(END);
+  window.__setup = () => paint(15.6);
+  paint(15.6);
 })();
 </script>
 </body>

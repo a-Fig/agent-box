@@ -13,21 +13,21 @@
 <meta property="og:description" content="Run agent-box on a dedicated Linux host, or share a Windows gaming PC with Full, Shared, and My PC modes plus NVIDIA GPU passthrough.">
 <meta property="og:image" content="https://agent-box.afig.dev/og.jpg">
 <meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="735">
-<meta property="og:image:alt" content="The agent-box logo behind reeded glass on blue, over the words: Remote runners on hardware you own. Run heavy builds off your laptop.">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="agent-box: Heavy agent builds, off your laptop.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/pages.css">
 </head>
 <body>
 <header class="top">
   <div class="top-in">
-    <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 200 194" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg>agent-box</a>
+    <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#8EA2FF"/><g fill="none" stroke="#14151A" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M32 14L49 22.5V41.5L32 50L15 41.5V22.5Z"/><path d="M15 22.5L32 31L49 22.5"/><path d="M32 31V50"/></g></svg>agent-box</a>
     <h1>Hosts &amp; GPUs</h1>
     <p class="lead">Use a dedicated Linux box around the clock, or share your Windows gaming PC without losing frames or RAM.</p>
   </div>
@@ -41,30 +41,30 @@
         <div class="body">
           <p>On Windows 11 with WSL2, <code>boxtray</code> puts a mode switch in the notification area and syncs with <code>boxd</code> inside WSL.</p>
           <ul>
-            <li><strong>Full</strong> — Uncapped: all configured host CPUs (up to 24), 24 GiB RAM, and GPU access.</li>
-            <li><strong>Shared</strong> — Background builds live within half the host budget (12 GiB total) so the desktop stays responsive.</li>
-            <li><strong>My PC</strong> — Running containers freeze immediately via cgroups, queued runs pause without failing, and cgroup <code>memory.reclaim</code> hands memory back to Windows (about 3.2 s to reclaim and 35 s to settle). Switch back to Shared or Full and paused runs resume in place.</li>
+            <li><strong>Full</strong> — Uncapped: all configured host CPUs (up to 24), 24 GiB RAM, and GPU access on a Windows PC host.</li>
+            <li><strong>Shared</strong> — Background builds live within half the host budget (12 GiB total on a PC host) so the desktop stays responsive.</li>
+            <li><strong>My PC</strong> — <code>boxtray</code> freezes running CPU boxes immediately via cgroups and runs <code>memory.reclaim</code> to hand RAM back to Windows (measured: 3.2 s to swap cold pages and 3.1 GB returned in 35 s). GPU boxes stop immediately, and boxes still paused past 15 minutes (4 hours once swapped) are stopped and their jobs lost. Switch back earlier to thaw CPU boxes in place.</li>
           </ul>
         </div>
       </section>
       <section class="fact">
         <div class="label"><h2>GPU passthrough</h2></div>
         <div class="body">
-          <p>Request a GPU box with <code>-s gpu</code> in CLI or <code>size: "gpu"</code> in <code>box_run</code> (4 shared / 6 full CPUs, 8 GiB RAM, 40 GiB disk). On WSL2 hosts, <code>box</code> maps <code>/dev/dxg</code> and <code>/usr/lib/wsl</code> into the container so CUDA and PyTorch use your NVIDIA GPU.</p>
-          <p>Measured on a shared RTX 3070 host: a 4096×4096 PyTorch matrix multiply finishes in <code>10 ms</code> on the GPU box vs <code>590 ms</code> on CPU. Only one GPU job runs at a time, so workloads never contend over VRAM.</p>
+          <p>Request a GPU box with <code>--gpu</code> or <code>--size gpu</code> in CLI (or <code>gpu: true</code> / <code>size: "gpu"</code> in <code>box_run</code>; 4 shared / 6 full CPUs, 8 GiB RAM, 40 GiB disk). On WSL2 hosts, <code>box</code> maps <code>/dev/dxg</code> and <code>/usr/lib/wsl</code> into the container so CUDA and PyTorch use your NVIDIA GPU.</p>
+          <p>Measured on an RTX 3070 WSL2 host: a 4096×4096 PyTorch matrix multiply finishes in <code>10 ms</code> on the GPU box vs <code>590 ms</code> on CPU. Only one GPU job runs at a time, so workloads never contend over VRAM.</p>
         </div>
       </section>
       <section class="fact">
         <div class="label"><h2>Queue when busy</h2></div>
         <div class="body">
-          <p>When a host is in <code>My PC</code>, full on memory/CPUs, or already running a GPU job, you can pass <code>queue: true</code> (or set <code>--queue</code>).</p>
-          <p><code>boxd</code> stores snapshots in a crash-safe disk queue up to 2 GiB per bundle, schedules fair-share FIFO by agent session, nudges agents after 20 minutes if the host stays busy, and expires unstarted entries after 24 hours. Open <code>box ui</code> to reorder or cancel queued runs.</p>
+          <p>When a host is in <code>My PC</code>, full on memory/CPUs, or already running a GPU job, runs queue automatically unless you pass <code>--no-queue</code> (or <code>push: false</code> in <code>box_run</code>).</p>
+          <p><code>boxd</code> stores bundles in a crash-safe disk queue up to 2 GiB per bundle, schedules fair-share FIFO by agent session, nudges agents after 20 minutes if the host stays busy, and expires unstarted entries after 24 hours. Open <code>box ui</code> to reorder or cancel queued runs.</p>
         </div>
       </section>
       <section class="fact">
         <div class="label"><h2>Dedicated Linux server</h2></div>
         <div class="body">
-          <p>A cloud VM or home Linux server runs the same provisioning script without Windows modes or tray switches. Minimums: Ubuntu or Debian, Linux kernel 6.12+, at least 6 GiB RAM (16 GiB+ recommended), and 75 GiB free disk for the container pool and <code>/cache</code>.</p>
+          <p>A cloud VM or home Linux server runs the same provisioning script without Windows modes or tray switches, sizing CPU, memory (3/4 of RAM), and container caps automatically from the hardware. Minimums: Ubuntu or Debian, Linux kernel 6.12+, at least 6 GiB RAM, and 75 GiB free disk for the container pool and <code>/cache</code>.</p>
           <div class="cmd"><code>sudo bash provision/setup-host.sh --build-base</code></div>
           <p>The <a href="https://github.com/a-Fig/agent-box/blob/main/provision/README.md">provisioning guide</a> covers both Ubuntu/Debian servers and the two-step Windows PC installer, plus exact uninstall commands.</p>
         </div>
@@ -79,7 +79,7 @@
 
 <footer class="site-foot">
   <nav aria-label="Site">
-    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 200 194" width="24" height="23" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg><span>agent-box</span></a>
+    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#8EA2FF"/><g fill="none" stroke="#14151A" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M32 14L49 22.5V41.5L32 50L15 41.5V22.5Z"/><path d="M15 22.5L32 31L49 22.5"/><path d="M32 31V50"/></g></svg><span>agent-box</span></a>
     <ul>
       <li><a href="/about/">About</a></li>
       <li><a href="/how/">How it runs</a></li>

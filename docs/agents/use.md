@@ -32,10 +32,10 @@ checks gain little from offloading.
 ## Sizes, modes, and rules
 
 - **Sizes (`size`):** `small` (1/2 CPUs, 2 GiB, 18 GiB), `medium` (default: 2/4 CPUs, 4 GiB, 30 GiB),
-  `large` (4/8 CPUs, 8 GiB, 40 GiB), and `gpu` (`gpu: true`, 4/6 CPUs, 8 GiB, 40 GiB + RTX 3070 on
+  `large` (4/8 CPUs, 8 GiB, 40 GiB), and `gpu` (`gpu: true`, 4/6 CPUs, 8 GiB, 40 GiB + the host's NVIDIA GPU on
   WSL2 hosts, one at a time).
-- **Modes:** `Full` (full CPUs, 24 GiB cap), `Shared` (half CPUs, 12 GiB cap), `My PC` (boxes paused
-  for up to 15 min, or 4 hours once reclaimed to swap; GPU boxes are stopped).
+- **Modes (shared Windows PCs):** `Full` (full CPUs, 24 GiB cap), `Shared` (half CPUs, 12 GiB cap), `My PC` (boxes paused
+  for up to 15 min, or 4 hours once reclaimed to swap; GPU boxes are stopped). Dedicated Linux hosts size CPU/memory caps from the host machine instead.
 - **Exit 75 (`state: refused`):** nothing started (host paused, busy without queue, or unreachable).
   Retry later, pick a smaller `size`, or run locally if needed. A `done` job with exit 75 is the
   command's own exit code.

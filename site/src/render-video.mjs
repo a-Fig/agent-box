@@ -7,16 +7,15 @@ import { pathToFileURL } from 'node:url';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_CORE_PATH).href : 'playwright-core');
 
-const [source, outDir, only] = process.argv.slice(2);
+const [source = 'site/src/how-scene.html', outDir = 'site', only] = process.argv.slice(2);
 const FPS = 30, RUN = 12, HOLD = 2.5;
 const FORMATS = {
   wide: { viewport: { width: 1600, height: 980 }, scale: 1, crf: 22 },
   tall: { viewport: { width: 392, height: 800 }, scale: 2, crf: 23 },
 };
-const chrome = path.join(process.env.LOCALAPPDATA, 'ms-playwright', 'chromium-1248', 'chrome-win64', 'chrome.exe');
 fs.mkdirSync(outDir, { recursive: true });
 
-const br = await chromium.launch({ executablePath: chrome });
+const br = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : undefined);
 try {
   for (const [name, f] of Object.entries(FORMATS)) {
     if (only && only !== name) continue;
