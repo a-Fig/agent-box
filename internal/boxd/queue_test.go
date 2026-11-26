@@ -439,6 +439,54 @@ func idleRepoRig(t *testing.T, cfg map[string]string) *queueRig {
 	return r
 }
 
+func TestQueueKeepsReplacedThrowaway(t *testing.T) {
+	for _, when := range []string{"during scan", "before delete retry"} {
+		t.Run(when, func(t *testing.T) {
+			r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.instances": "2"})
+			r.f.set(func() {
+				r.f.ins[0].Config["user.box.throwaway"] = "true"
+				r.f.ins[0].Config["user.expires"] = r.c.now().Add(20 * time.Minute).Format(time.RFC3339)
+				replace := func() {
+					in := r.f.ins[0]
+					in.Config = maps.Clone(in.Config)
+					in.Config["volatile.uuid"] = "replacement"
+					r.f.ins[0] = in
+					r.f.jobs[in.Name] = nil
+				}
+				if when == "during scan" {
+					r.f.onScan = func(box string) {
+						if box == "murmur" {
+							replace()
+							r.f.onScan = nil
+						}
+					}
+				} else {
+					r.f.cliErr = func(args []string) error {
+						if args[0] != "delete" {
+							return nil
+						}
+						replace()
+						r.f.cliErr = nil
+						return errors.New(`Instance is busy running a "update" operation`)
+					}
+				}
+			})
+			if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+				t.Fatalf("enqueue: %d %+v", code, rep)
+			}
+			r.c.add(3 * time.Second)
+			r.poll()
+			replacement, ok := r.f.instance("murmur")
+			if !ok || replacement.Config["volatile.uuid"] != "replacement" {
+				t.Fatalf("replacement instance = %+v, exists = %v", replacement, ok)
+			}
+			if q := r.w.Queued(); len(q) != 1 {
+				t.Fatalf("queued: %+v", q)
+			}
+		})
+	}
+}
+
 // A queued job short of room takes an idle repo box, as it takes a kept
 // throwaway: never one held, or one with a job running (#187).
 func TestQueueDeletesIdleRepoBoxForRoom(t *testing.T) {

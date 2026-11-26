@@ -105,19 +105,11 @@ func withoutDisk(proj Project, gone []Instance) Project {
 // these: no job has ended there, and its launch expiry is 2h unless box run
 // was given a shorter --ttl. Nor is one a person extended (mode.Held).
 func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
-	busy := map[string]bool{}
-	for _, j := range w.live {
-		busy[j.Box] = true
-	}
 	var out []Instance
 	for _, in := range ins {
-		exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
-		if in.Config[jobrun.ThrowawayKey] != "true" || busy[in.Name] || in.Status == "Frozen" || err != nil ||
-			exp.After(now.Add(jobrun.EndedKeep+time.Minute)) || mode.Held(in.Config, now).After(now) ||
-			w.Hist == nil || len(w.Hist.EndedOn(in)) == 0 {
-			continue
+		if !w.boxBusy(in.Name, "") && keptThrowaway(in, now) && w.Hist != nil && w.Hist.EndedHere(in) {
+			out = append(out, in)
 		}
-		out = append(out, in)
 	}
 	slices.SortFunc(out, func(a, b Instance) int {
 		ta, _ := time.Parse(time.RFC3339, a.Config[jobrun.ExpiresKey])
@@ -125,6 +117,12 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 		return ta.Compare(tb)
 	})
 	return out
+}
+
+func keptThrowaway(in Instance, now time.Time) bool {
+	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	return in.Config[jobrun.ThrowawayKey] == "true" && in.Status != "Frozen" && err == nil &&
+		!exp.After(now.Add(jobrun.EndedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now)
 }
 
 // idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
@@ -394,23 +392,30 @@ func (w *Watcher) dropQueued(it *queued, now time.Time, why string) {
 	w.emit(dash.Event{Name: dash.EventJob, Data: j})
 }
 
-// errNotIdle is a repo box that took a job or a hold before its delete.
+// errNotIdle means the selected box is no longer safe to evict.
 var errNotIdle = errors.New("no longer idle")
 
-// stillIdle reads repo box in again, just before a delete: no job running
-// there, and the same box (its UID), its expiry still the idle one and not
-// held. A box another delete took first is no longer idle either.
+// stillIdle checks for running jobs, then reads the box again to verify its
+// UID, status, expiry and hold before each delete attempt.
 func (w *Watcher) stillIdle(ctx context.Context, in Instance) bool {
-	if out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot)); err != nil || strings.TrimSpace(string(out)) != "" {
-		return false
+	if in.Status == "Running" {
+		if out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot)); err != nil || strings.TrimSpace(string(out)) != "" {
+			return false
+		}
 	}
 	ins, err := w.Incus.Instances(ctx)
 	if err != nil {
 		return false
 	}
-	for _, now := range ins {
-		if now.Name == in.Name {
-			return boxUID(now) == boxUID(in) && idleRepo(now, w.Now())
+	for _, current := range ins {
+		if current.Name == in.Name {
+			if boxUID(current) != boxUID(in) || current.Status != in.Status {
+				return false
+			}
+			if in.Config[jobrun.ThrowawayKey] == "true" {
+				return keptThrowaway(current, w.Now())
+			}
+			return idleRepo(current, w.Now())
 		}
 	}
 	return false
@@ -424,24 +429,18 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Inst
 	for _, in := range evict {
 		box, what := in.Name, "kept throwaway"
 		if in.Config[jobrun.ThrowawayKey] != "true" {
-			// box run reuses a repo box, and may have started a job there,
-			// or a person extended it, since the poll that found it idle. It
-			// is read again before each try: a refused delete may have met
-			// an extend's write.
 			what = "idle box"
-			err = jobrun.RetryETag(ctx, func() error {
-				if !w.stillIdle(ctx, in) {
-					return errNotIdle
-				}
-				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
-				return err
-			})
-			if errors.Is(err, errNotIdle) {
-				err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
-				break
+		}
+		err = jobrun.RetryETag(ctx, func() error {
+			if !w.stillIdle(ctx, in) {
+				return errNotIdle
 			}
-		} else {
-			err = w.delete(ctx, box)
+			_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
+			return err
+		})
+		if errors.Is(err, errNotIdle) {
+			err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
+			break
 		}
 		if err != nil {
 			err = fmt.Errorf("%w: deleting %s %s for room: %v", errNoRoom, what, box, err)
