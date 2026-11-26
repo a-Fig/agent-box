@@ -231,3 +231,63 @@ func TestReleaseStoresAPickNoTickStored(t *testing.T) {
 		t.Fatalf("stored %+v, want my-pc from the click", v)
 	}
 }
+
+// A pick made while the release writes the previous one is written too, so
+// the project ends with the latest pick (#204).
+func TestReleaseStoresAPickMadeDuringItsWrite(t *testing.T) {
+	f := newFake()
+	m, _ := handshakeMgr(f, Full)
+	tick(m, 0)
+	m.SetChosenAt(MyPC, t0.Add(time.Second))
+	f.onSet = func(k, _ string) {
+		if k == ProjectChosenKey {
+			f.onSet = nil
+			m.SetChosenAt(Shared, t0.Add(2*time.Second))
+		}
+	}
+	if !m.BeginRelease(context.Background()) {
+		t.Fatal("BeginRelease")
+	}
+	defer m.EndRelease()
+	if v := storedChoice(t, f); v.Mode != Shared || !v.At.Equal(t0.Add(2*time.Second)) {
+		t.Fatalf("stored %+v, want shared, picked during the write", v)
+	}
+}
+
+func TestStorePendingStoresTheLatestPick(t *testing.T) {
+	f := newFake()
+	m, _ := handshakeMgr(f, Full)
+	tick(m, 0)
+	if stored, err := m.StorePending(context.Background()); stored || err != nil {
+		t.Fatalf("nothing pending: got %v, %v", stored, err)
+	}
+	if _, ok := f.project[ProjectChosenKey]; ok {
+		t.Fatal("wrote with nothing pending")
+	}
+	m.SetChosenAt(MyPC, t0.Add(time.Second))
+	f.onSet = func(k, _ string) {
+		if k == ProjectChosenKey {
+			f.onSet = nil
+			m.SetChosenAt(Shared, t0.Add(2*time.Second))
+		}
+	}
+	if stored, err := m.StorePending(context.Background()); !stored || err != nil {
+		t.Fatalf("got %v, %v", stored, err)
+	}
+	if v := storedChoice(t, f); v.Mode != Shared {
+		t.Fatalf("stored %+v, want shared", v)
+	}
+}
+
+// StorePending waits for the tick lock, but no longer than ctx allows.
+func TestStorePendingGivesUpAtTheDeadline(t *testing.T) {
+	m, _ := handshakeMgr(newFake(), Full)
+	m.SetChosenAt(MyPC, t0)
+	m.tickMu.Lock()
+	defer m.tickMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := m.StorePending(ctx); err == nil {
+		t.Fatal("want an error once the deadline passes")
+	}
+}

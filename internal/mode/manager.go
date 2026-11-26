@@ -464,8 +464,9 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 // and waits for their wsl.exe calls to end, and keeps any new tick or start
 // from calling out until EndRelease.
 //
-// With Handshake set it then stores a pick that no tick has stored yet (a
-// click the cancelled tick never wrote), bounded by ctx: once the distro is
+// With Handshake set it then stores the latest pick that no tick has stored
+// yet (a click the cancelled tick never wrote, or one made during that
+// write), bounded by ctx: once the distro is
 // down, an enforcer that takes over (the headless one, after Quit) reads the
 // pick from the project, and would otherwise apply an older one (#204).
 func (m *Manager) BeginRelease(ctx context.Context) bool {
@@ -480,7 +481,7 @@ func (m *Manager) BeginRelease(ctx context.Context) bool {
 	m.tickMu.Lock()
 	m.rc.forgetAll()
 	if m.Handshake {
-		if err := m.publishChosen(ctx); err != nil {
+		if err := m.storeChosen(ctx); err != nil {
 			m.logf("release memory: %v", err)
 		}
 	}

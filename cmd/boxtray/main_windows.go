@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"runtime"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -102,6 +103,7 @@ func main() {
 		}
 	}
 
+	var releases sync.WaitGroup // Release memory runs in flight
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
 			mgr.SetChosen(m)
@@ -113,25 +115,15 @@ func main() {
 			poke()
 		},
 		release: func() {
+			// Counted before it starts, so a Quit right after it waits for it.
+			releases.Add(1)
 			go func() {
-				// One release at a time; while it runs, no tick, reclaim or
-				// swap call starts a wsl.exe that would bring the distro back.
-				// It also stores a pick not yet in the project (wslIncus
-				// bounds that write), so after Quit the headless enforcer
-				// applies it, not an older one.
-				if !mgr.BeginRelease(context.Background()) {
-					lg.Printf("release memory: already running")
-					return
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
-				defer cancel()
-				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
-					lg.Printf("release memory: wsl --terminate: %v", err)
-				}
-				// Ended before the poke, so the tick it wakes starts the
-				// distro again, without the boxes' memory (#204).
-				mgr.EndRelease()
-				poke()
+				defer releases.Done()
+				releaseMemory(mgr, func() error {
+					ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
+					defer cancel()
+					return hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run()
+				}, poke, lg.Printf)
 			}()
 		},
 	})
@@ -167,6 +159,11 @@ func main() {
 	}
 	t.loop()
 	lg.Printf("exit: message loop ended")
+	// Stop ticking, then let a release in flight finish and store the last
+	// pick, so the headless enforcer that takes over applies it (#204).
+	cancel()
+	beforeQuit(&releases, mgr, quitTimeout, lg.Printf)
+	lg.Printf("exit")
 }
 
 // supervise reruns f if it panics, so a bug in one tick can't leave the tray

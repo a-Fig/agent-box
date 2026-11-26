@@ -157,6 +157,56 @@ func (m *Manager) publishChosen(ctx context.Context) error {
 	return nil
 }
 
+// storeChosen calls publishChosen until the project holds the latest pick: a
+// pick made while a write was in flight is written next. ctx bounds it all.
+func (m *Manager) storeChosen(ctx context.Context) error {
+	for {
+		if err := m.publishChosen(ctx); err != nil {
+			return err
+		}
+		m.mu.Lock()
+		dirty := m.chosenDirty
+		m.mu.Unlock()
+		if !dirty {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("store the chosen mode: %w", err)
+		}
+	}
+}
+
+// StorePending is for an enforcer that is about to exit (the tray's Quit). It
+// cancels a tick in flight, waits for it to end, then stores the latest pick
+// not yet in the project, so the enforcer that takes over applies it rather
+// than an older one (#204). ctx bounds it all. It reports whether a pick was
+// waiting; with none, it returns at once.
+func (m *Manager) StorePending(ctx context.Context) (bool, error) {
+	if !m.Handshake {
+		return false, nil
+	}
+	m.cancelMu.Lock()
+	if m.tickCancel != nil {
+		m.tickCancel()
+	}
+	m.cancelMu.Unlock()
+	for !m.tickMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return false, fmt.Errorf("wait for the tick in flight: %w", ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer m.tickMu.Unlock()
+	m.mu.Lock()
+	dirty := m.chosenDirty
+	m.mu.Unlock()
+	if !dirty {
+		return false, nil
+	}
+	return true, m.storeChosen(ctx)
+}
+
 // clearRequest empties the request key, but only if it still holds raw: a
 // second request that arrived while this one was handled is left for the next tick.
 func (m *Manager) clearRequest(ctx context.Context, raw string) error {

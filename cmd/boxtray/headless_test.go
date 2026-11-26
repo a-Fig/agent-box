@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -148,4 +149,61 @@ func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// My PC, then Release memory, then Quit at once: Quit waits for the release
+// goroutine (which has not even begun) and the project ends with my-pc (#204).
+func TestQuitRightAfterReleaseStoresThePick(t *testing.T) {
+	inc := &recIncus{}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	mgr.SetChosen(mode.MyPC)
+	var releases sync.WaitGroup
+	start := make(chan struct{})
+	terminated := false
+	releases.Add(1)
+	go func() {
+		defer releases.Done()
+		<-start // the goroutine is slow to begin
+		releaseMemory(mgr, func() error { terminated = true; return nil }, func() {}, t.Logf)
+	}()
+	go func() { time.Sleep(50 * time.Millisecond); close(start) }()
+	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	if !terminated {
+		t.Fatal("Quit returned before the release terminated the distro")
+	}
+	if inc.count(mode.ProjectChosenKey+`={"mode":"`+string(mode.MyPC)+`"`) != 1 {
+		t.Fatalf("writes %q, want my-pc stored once", inc.snapshot())
+	}
+}
+
+// A pick made while the release runs, after its write, is stored by Quit.
+func TestQuitStoresAPickMadeDuringTheRelease(t *testing.T) {
+	inc := &recIncus{}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	mgr.SetChosen(mode.MyPC)
+	var releases sync.WaitGroup
+	releases.Add(1)
+	go func() {
+		defer releases.Done()
+		releaseMemory(mgr, func() error { mgr.SetChosen(mode.Shared); return nil }, func() {}, t.Logf)
+	}()
+	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	got := inc.snapshot()
+	if len(got) == 0 || !strings.HasPrefix(got[len(got)-1], mode.ProjectChosenKey+`={"mode":"shared"`) {
+		t.Fatalf("writes %q, want shared last", got)
+	}
+}
+
+func TestQuitWithNothingPendingExitsAtOnce(t *testing.T) {
+	inc := &noIncus{}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	var releases sync.WaitGroup
+	start := time.Now()
+	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	if d := time.Since(start); d > time.Second || inc.calls != 0 {
+		t.Fatalf("took %s with %d Incus calls, want at once with none", d, inc.calls)
+	}
 }
