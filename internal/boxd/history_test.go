@@ -57,6 +57,15 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 	if p := h.Finished(Filter{Box: "a", Since: t0.Add(-100 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
 		t.Fatalf("box since filter: %+v", p)
 	}
+	// A box made at 12:03 doesn't list the 12:00 job of the box it replaced: Since is the
+	// box's creation less dash.BoxJobSkew, and the boundary itself is in.
+	created := t0.Add(-90*time.Minute + 3*time.Minute)
+	if p := h.Finished(Filter{Box: "a", Since: created.Add(-dash.BoxJobSkew)}); len(p.Jobs) != 0 {
+		t.Fatalf("replacement box listed an older box's job: %+v", p)
+	}
+	if p := h.Finished(Filter{Box: "a", Since: t0.Add(-90 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
+		t.Fatalf("since is inclusive: %+v", p)
+	}
 	if p := h.Finished(Filter{Box: "b"}); len(p.Jobs) != 0 {
 		t.Fatalf("box filter: %+v", p)
 	}

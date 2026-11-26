@@ -286,6 +286,11 @@ JSON over HTTPS, on the same origin as the page.
   start before it launches the box, so a throwaway's `createdAt` is a few seconds after its job's
   `startedAt`. A box of the name made later is a reuse of the name, not the job's: its log is gone,
   and the page shows the kept `tail`.
+- **A box's jobs** are the ones that started at or after its `createdAt` less one minute
+  (`dash.BoxJobSkew`), the same inequality from the box's side but tighter: a log link wrongly
+  refused costs a click, while a replacement box listing the job of the box it replaced shows
+  someone else's work. The page asks boxd for them with `since`, and merges the stream's jobs by
+  the same rule; after a reconnect it asks again, since the new snapshot holds only the last 50.
 - **A box control names its box** by name and `createdAt`, for the same reason: delete and extend
   send `{createdAt}` (the box the page saw), `boxd` compares it with the box's own under the same
   lock as the change, and answers 409 `code: "gone"` when the name now belongs to another box. The
@@ -309,7 +314,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 |---|---|
 | `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
-| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&since=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` a box name and `since` an RFC3339 time the job started at or after (the Boxes page asks for a box's jobs with its name and `createdAt` less `JobBoxGrace`), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
+| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&since=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` a box name and `since` an RFC3339 time the job started at or after (the Boxes page asks for a box's jobs with its name and `createdAt` less `BoxJobSkew`, one minute), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |

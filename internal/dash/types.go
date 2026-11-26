@@ -210,6 +210,12 @@ const TailBytes = 2 << 10
 // startedAt + JobBoxGrace; a box of that name made later is a reuse of the name.
 const JobBoxGrace = 10 * time.Minute
 
+// BoxJobSkew is how much before its box's creation a job may have started and still be listed as
+// the box's. It is the same inequality as JobBoxGrace read from the box's side, but tighter: a
+// wrongly refused log link costs a click, while a replacement box that lists the job of the box it
+// replaced shows someone else's work. A throwaway's job starts seconds before its box.
+const BoxJobSkew = time.Minute
+
 // JobKey makes a job's key from its box, ID and start.
 func JobKey(box, id string, started time.Time) string {
 	return box + "/" + id + "/" + started.UTC().Format(time.RFC3339)

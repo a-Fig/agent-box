@@ -105,12 +105,15 @@ function elapsed(j) {
 // (dash.JobBoxGrace: box run --new starts the job's clock before it launches the box). Names get
 // reused, and a later box of that name holds none of this job's log.
 const JOB_BOX_GRACE_MS = 10 * 60 * 1000;
+// A box's jobs use the tighter dash.BoxJobSkew: a log link that is wrongly refused costs a click,
+// but a replacement box that lists its predecessor's jobs shows someone else's work.
+const BOX_JOB_SKEW_MS = 60 * 1000;
 function jobBox(j) {
   const b = boxOf(j.machine, j.box);
   return b && ranOn(j, b) ? b : null;
 }
-function ranOn(j, b) {
-  return j.box === b.name && j.machine === b.machine && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + JOB_BOX_GRACE_MS;
+function ranOn(j, b, grace = JOB_BOX_GRACE_MS) {
+  return j.box === b.name && j.machine === b.machine && Date.parse(b.createdAt) <= Date.parse(j.startedAt) + grace;
 }
 
 function sizeLabel(size, gpu, sep = " ") {
@@ -453,6 +456,9 @@ function expiry(b) {
 function boxRow(b, full) {
   const job = jobsOf((j) => j.box === b.name && j.machine === b.machine && (j.state === "running" || j.state === "paused"))[0];
   const open = full && opened.has(boxKey(b));
+  // A reconnect replaces the jobs the stream held, so what the history gave may have missed some.
+  const seen = open && boxJobs.get(boxKey(b));
+  if (seen && seen.state !== "loading" && seen.gen !== S.gen) loadBoxJobs(b);
   const controls = full
     ? h(
         "div",
@@ -509,7 +515,7 @@ function toggleBox(b) {
   const k = boxKey(b);
   if (opened.delete(k)) return changed();
   opened.add(k);
-  if (boxJobs.get(k)?.state !== "ok") loadBoxJobs(b);
+  if (boxJobs.get(k)?.state !== "ok" || boxJobs.get(k).gen !== S.gen) loadBoxJobs(b);
   changed();
 }
 
@@ -523,9 +529,10 @@ function rowClick(e, b) {
 
 function loadBoxJobs(b) {
   const k = boxKey(b);
-  const mine = { state: "loading", jobs: [], more: false };
+  const prev = boxJobs.get(k);
+  const mine = { state: "loading", jobs: prev?.jobs || [], more: prev?.more || false, gen: S.gen };
   boxJobs.set(k, mine);
-  const since = new Date(Date.parse(b.createdAt) - JOB_BOX_GRACE_MS).toISOString();
+  const since = new Date(Date.parse(b.createdAt) - BOX_JOB_SKEW_MS).toISOString();
   const p = new URLSearchParams({ box: b.name, machine: b.machine, since, limit: String(BOX_JOBS) });
   api("/api/jobs?" + p)
     .then((page) => {
@@ -563,8 +570,12 @@ function exitText(j) {
 function boxDone(b) {
   const by = new Map();
   for (const j of boxJobs.get(boxKey(b))?.jobs || []) by.set(j.key, j);
-  for (const j of S.jobs.values()) if ((j.state === "done" || j.state === "lost") && ranOn(j, b)) by.set(j.key, j);
-  return [...by.values()].sort((a, c) => Date.parse(c.startedAt) - Date.parse(a.startedAt)).slice(0, BOX_JOBS);
+  for (const j of S.jobs.values()) if ((j.state === "done" || j.state === "lost") && ranOn(j, b, BOX_JOB_SKEW_MS)) by.set(j.key, j);
+  return [...by.values()].sort((a, c) => Date.parse(c.startedAt) - Date.parse(a.startedAt));
+}
+
+function endedMs(j) {
+  return Date.parse(j.endedAt || j.startedAt);
 }
 
 function boxJobRow(j) {
@@ -579,8 +590,10 @@ function boxJobRow(j) {
 
 function boxDetail(b, job) {
   const load = boxJobs.get(boxKey(b));
-  const done = boxDone(b);
-  const last = done[0];
+  const all = boxDone(b);
+  const done = all.slice(0, BOX_JOBS);
+  // Jobs overlap, so the one that ended last, not the one that started last, says since when the box is idle.
+  const last = all.reduce((m, j) => (!m || endedMs(j) > endedMs(m) ? j : m), null);
   let now;
   if (job) now = runningRow(job);
   else {
@@ -589,11 +602,13 @@ function boxDetail(b, job) {
       ? [", last job ", h("a", { href: jobLink(last), "data-key": "blast-" + last.key }, last.id), " " + exitText(last) + "."]
       : load?.state === "loading"
         ? "."
-        : ", when it was made. It hasn't run a job yet.";
+        : load?.state === "error"
+          ? ", when it was made. Its job history couldn't load, so it may have run jobs."
+          : ", when it was made. It hasn't run a job yet.";
     now = h("p", { class: "box-idle" }, h("span", { class: "dot dot-off" }), h("span", null, "Idle since ", h("span", { title: stamp(since) }, hhmm(since)), tail));
   }
   let before = null;
-  if (done.length) before = [done.map(boxJobRow), load?.more ? h("p", { class: "row-empty" }, "Its last " + BOX_JOBS + " jobs; Jobs has the rest.") : null];
+  if (done.length) before = [done.map(boxJobRow), load?.more || all.length > BOX_JOBS ? h("p", { class: "row-empty" }, "Its last " + BOX_JOBS + " jobs; Jobs has the rest.") : null];
   else if (load?.state === "loading") before = h("p", { class: "row-empty" }, "Loading its jobs…");
   else if (load?.state !== "error") before = h("p", { class: "row-empty" }, "No finished jobs on this box yet.");
   const err =
