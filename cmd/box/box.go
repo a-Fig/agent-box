@@ -337,9 +337,19 @@ func (a *App) hasGPU(ctx context.Context) bool {
 	case "block":
 		return false
 	case "":
-		return a.projectKey(ctx, "restricted") != "true"
+		return !incusTrue(a.projectKey(ctx, "restricted"))
 	}
 	return true
+}
+
+// incusTrue reads an Incus boolean as Incus does (shared/util/boolean.go): true, 1, yes or on,
+// in any case.
+func incusTrue(v string) bool {
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // isTempFail says whether err means "not now": no room, the GPU is taken, or

@@ -241,7 +241,7 @@ func TestMachineConfigGPUAndCaps(t *testing.T) {
 		gpu        bool
 		why        string
 		have       bool
-	}{{"", "", true, "", true}, {"", "false", true, "", true}, {"", "true", false, "blocked", true}, {"allow", "true", true, "", true},
+	}{{"", "", true, "", true}, {"", "false", true, "", true}, {"", "true", false, "blocked", true}, {"", "Yes", false, "blocked", true}, {"", "0", true, "", true}, {"allow", "true", true, "", true},
 		{"managed", "true", true, "", true}, {"block", "true", false, "blocked", true}, {"block", "", false, "both", false}} {
 		r.f.set(func() { r.f.cfg["restricted.devices.unix-char"] = c.key; r.f.cfg["restricted"] = c.restricted })
 		r.w.HasGPU = func() bool { return c.have }

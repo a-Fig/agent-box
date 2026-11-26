@@ -502,13 +502,23 @@ func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]das
 // setup-host.sh sets it to allow on WSL and to block elsewhere.
 const gpuProjectKey = "restricted.devices.unix-char"
 
+// incusTrue reads an Incus boolean as Incus does (shared/util/boolean.go): true, 1, yes or on,
+// in any case.
+func incusTrue(v string) bool {
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxes map[string]dash.Box) {
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
 		Boxd: w.Version, Config: HostConfig(w.HasGPU != nil && w.HasGPU())}
 	// A GPU box needs the device and the project's say-so, as box's own check reads it: "block"
 	// refuses, and so does an unset key on a restricted project, where Incus defaults it to block.
-	blocked := cfg[gpuProjectKey] == "block" || (cfg[gpuProjectKey] == "" && cfg["restricted"] == "true")
+	blocked := cfg[gpuProjectKey] == "block" || (cfg[gpuProjectKey] == "" && incusTrue(cfg["restricted"]))
 	switch {
 	case blocked && !m.Config.GPU:
 		m.Config.GPUWhy = "both"
