@@ -440,6 +440,20 @@ func TestRunReportsBoxFrozenAtStart(t *testing.T) {
 	}
 }
 
+func TestRunNewFrozenAtStartRemovesThrowaway(t *testing.T) {
+	// The explicit refusal means no job started, so the throwaway the run
+	// just launched goes with it instead of holding a slot unused.
+	f := &fakePC{t: t, freezeStart: true}
+	a, out := testApp(f)
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true})
+	if err != nil || r.State != statePaused || r.Code != exitPaused || r.Job != "" {
+		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
+	}
+	if len(f.insts) != 0 {
+		t.Errorf("throwaway left behind: %s", f.names())
+	}
+}
+
 func TestRunKeepsJobWhenFrozenStartFailureIsAmbiguous(t *testing.T) {
 	// The connection dropped, so the start script may already have run:
 	// the job ID stays, for a job that may resume when the box thaws.

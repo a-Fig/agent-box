@@ -1032,6 +1032,10 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 					if paused == "" {
 						paused = box + " is paused"
 					}
+					// No job started, so a throwaway has nothing to keep
+					// it for: let the launch defer remove it, rather than
+					// leaving it holding a slot and its 24h job expiry.
+					started = false
 					return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
 				}
 				// Any other failure may have happened after the script
