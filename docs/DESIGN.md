@@ -1,5 +1,10 @@
 # agent-box design (v2: Incus-native)
 
+This page records how agent-box works today and why it is built that way.
+For a task-first route through all the docs, see the [documentation map](README.md).
+For the product direction, see [VISION.md](VISION.md); for setup steps, start with the root
+[README](../README.md#quick-start-a-linux-server) and [provision/README.md](../provision/README.md).
+
 On-demand compute for coding agents on Tyler's Windows gaming PC (`desktop-l0rvq1v`: Ryzen 5 3600 6c/12t, 32 GB, RTX 3070).
 **Never wipe, repartition or dual-boot the PC.** Everything runs on top of Windows.
 **Reuse, don't rebuild:** Incus provides the API, auth, dashboard and box lifecycle. We write only glue.
