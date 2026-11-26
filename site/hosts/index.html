@@ -41,7 +41,7 @@
         <div class="body">
           <p>On Windows 11 with WSL2, <code>boxtray</code> puts a mode switch in the notification area and syncs with <code>boxd</code> inside WSL.</p>
           <ul>
-            <li><strong>Full</strong> — Uncapped: all configured host CPUs (up to 24), 24 GiB RAM, and GPU access on a Windows PC host.</li>
+            <li><strong>Full</strong> — Full host budget: boxes receive their full configured CPUs (up to 24), 24 GiB RAM, and GPU access (GPU boxes run in Shared too).</li>
             <li><strong>Shared</strong> — Background builds live within half the host budget (12 GiB total on a PC host) so the desktop stays responsive.</li>
             <li><strong>My PC</strong> — <code>boxtray</code> freezes running CPU boxes immediately via cgroups and runs <code>memory.reclaim</code> to hand RAM back to Windows (measured: 3.2 s to swap cold pages and 3.1 GB returned in 35 s). GPU boxes stop immediately, and boxes still paused past 15 minutes (4 hours once swapped) are stopped and their jobs lost. Switch back earlier to thaw CPU boxes in place.</li>
           </ul>
