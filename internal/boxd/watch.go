@@ -201,15 +201,15 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 	wg.Wait()
 	// A scan finds a box by name. If the box was replaced by one of the same name after ins was
 	// listed, its scan may have read the new box and must not be stamped with the old one's UID:
-	// such a box counts as not scanned this time. A box that is gone, or a list that fails, keeps
-	// its scans: they read the box that was listed, and its results may be the last there are.
+	// such a box counts as not scanned this time. A successful list that confirms a box is gone
+	// keeps its last scan. If the list fails, none of the scans can be verified.
 	if len(out) == 0 {
 		return out
 	}
 	now, err := w.Incus.Instances(ctx)
 	if err != nil {
-		w.logf("boxd: incus: %v", err)
-		return out
+		w.logf("boxd: verifying scans: %v", err)
+		return nil
 	}
 	uid := map[string]string{}
 	for _, in := range now {

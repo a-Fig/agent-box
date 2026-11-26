@@ -9,46 +9,75 @@ import (
 	"testing"
 )
 
-// provision/reaper.sh reads user.expires and the hold the way Held does: only
-// RFC3339 UTC counts, Incus's csv quotes are stripped, and a malformed hold
-// is ignored, never taken for a future time. Run against a fake incus.
 func TestReaperShellParsing(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("reaper.sh runs in the Linux distro")
 	}
-	dir := t.TempDir()
-	list := filepath.Join(dir, "list.csv")
-	log := filepath.Join(dir, "deleted")
-	fake := "#!/bin/sh\nif [ \"$1\" = list ]; then cat '" + list + "'; else echo \"$@\" >> '" + log + "'; fi\n"
-	if err := os.WriteFile(filepath.Join(dir, "incus"), []byte(fake), 0o755); err != nil {
-		t.Fatal(err)
+	// A malformed config value is still part of one instance's record.
+	const records = `[
+		{"name":"plain","config":{"user.expires":"2020-01-01T00:00:00Z"}},
+		{"name":"held","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2999-01-01T00:00:00Z"}},
+		{"name":"fraction","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2999-01-01T00:00:00.5Z"}},
+		{"name":"junk","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"tomorrow"}},
+		{"name":"offset","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2999-01-01T00:00:00+02:00"}},
+		{"name":"badexp","config":{"user.expires":"whenever","user.box.hold-until":"2999-01-01T00:00:00Z"}},
+		{"name":"noexp","config":{}},
+		{"name":"pasthold","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2021-01-01T00:00:00Z"}},
+		{"name":"future","config":{"user.expires":"2999-01-01T00:00:00Z","user.box.hold-until":"2020-01-01T00:00:00Z"}},
+		{"name":"multiline","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"bad\nheld,2020-01-01T00:00:00Z,\n"}},
+		{"name":"badtype","config":{"user.expires":1}}
+	]`
+	for _, tc := range []struct {
+		name, list, status string
+		fail, dryRun       bool
+		deleted            string
+	}{
+		{name: "expiry and hold decisions", list: records, deleted: "plain\njunk\noffset\npasthold\nmultiline\n"},
+		{name: "dry run", list: records, dryRun: true},
+		{name: "list failure with valid output", list: records, status: "1", fail: true},
+		{name: "truncated JSON", list: records[:len(records)-1], fail: true},
+		{name: "invalid record after expired one", list: `[{"name":"plain","config":{"user.expires":"2020-01-01T00:00:00Z"}},null]`, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			list := filepath.Join(dir, "list.json")
+			log := filepath.Join(dir, "deleted")
+			if err := os.WriteFile(list, []byte(tc.list), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			const fake = `#!/bin/sh
+case "$*" in
+    "list --project test -f json") cat "$REAPER_LIST"; exit "${REAPER_STATUS:-0}" ;;
+    "delete --force --project test -- "*) printf '%s\n' "$6" >> "$REAPER_DELETES" ;;
+    *) exit 2 ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(dir, "incus"), []byte(fake), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("AGENTS_PROJECT", "test")
+			t.Setenv("REAPER_LIST", list)
+			t.Setenv("REAPER_DELETES", log)
+			t.Setenv("REAPER_STATUS", tc.status)
+			cmd := exec.Command("sh", "../../provision/reaper.sh")
+			if tc.dryRun {
+				cmd.Args = append(cmd.Args, "--dry-run")
+			}
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != tc.fail {
+				t.Fatalf("reaper.sh: %v\n%s", err, out)
+			}
+			if tc.dryRun && (!strings.Contains(string(out), "would delete plain") || strings.Contains(string(out), "would delete held")) {
+				t.Fatalf("unexpected dry run:\n%s", out)
+			}
+			b, err := os.ReadFile(log)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if got := string(b); got != tc.deleted {
+				t.Fatalf("deleted %q, want %q\n%s", got, tc.deleted, out)
+			}
+		})
 	}
-	// All expiries are long past; only a valid, future, UTC hold keeps a box.
-	rows := []string{
-		"plain,2020-01-01T00:00:00Z,",
-		"held,2020-01-01T00:00:00Z,2999-01-01T00:00:00Z",
-		"quoted,2020-01-01T00:00:00Z,\"2999-01-01T00:00:00Z\"",
-		"fraction,2020-01-01T00:00:00Z,2999-01-01T00:00:00.5Z",
-		"junk,2020-01-01T00:00:00Z,tomorrow",
-		"offset,2020-01-01T00:00:00Z,2999-01-01T00:00:00+02:00",
-		"spaced,2020-01-01T00:00:00Z,2999-01-01 00:00:00Z",
-		"relative,2020-01-01T00:00:00Z,next year",
-		"badexp,whenever,2999-01-01T00:00:00Z",
-		"noexp,,",
-		"pasthold,2020-01-01T00:00:00Z,2021-01-01T00:00:00Z",
-	}
-	if err := os.WriteFile(list, []byte(strings.Join(rows, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("sh", "../../provision/reaper.sh")
-	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("reaper.sh: %v\n%s", err, out)
-	}
-	b, _ := os.ReadFile(log)
-	var got []string
-	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		got = append(got, l[strings.LastIndex(l, " ")+1:])
-	}
-	equal(t, got, []string{"plain", "junk", "offset", "spaced", "relative", "pasthold"})
 }
