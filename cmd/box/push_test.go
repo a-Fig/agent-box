@@ -298,14 +298,17 @@ func TestExitCode75IsSaidToBeTheCommands(t *testing.T) {
 // result is (#182).
 func TestPassIsPushedAsOneLine(t *testing.T) {
 	r := jobRecord{Job: "my-repo.20261123-120000-0001", Reason: "Why.", Command: "go test ./...", Worktree: "w"}
-	end := jobEnd{Took: 372, DigestRead: true, Tail: "ok  p  0.1s\n", Digest: "PASS: 2325 tests passed, 28 skipped (go test)\nPASS: 4 tests passed (vitest)\n"}
+	end := jobEnd{Took: 372, Tail: "ok  p  0.1s\n", Digest: "PASS: 2325 tests passed, 28 skipped (go test)\nPASS: 4 tests passed (vitest)\n"}
 	want := "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.): PASS: 2325 tests passed, 28 skipped (go test); PASS: 4 tests passed (vitest). From box, not your user. Full result: box_job id my-repo.20261123-120000-0001. Artifacts: box_pull, before this repo's next run."
 	if got := endedMessage(r, end); got != want {
 		t.Errorf("message =\n%s\nwant\n%s", got, want)
 	}
+	// Exit 0 with no passing digest (a build, a script, or a digest that
+	// wasn't read) isn't called a pass from the code alone: the log's last
+	// lines follow.
 	end.Digest = ""
-	if got := endedMessage(r, end); strings.Contains(got, "\n") || strings.Contains(got, "ok  p") || !strings.HasPrefix(got, "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.). From box") {
-		t.Errorf("pass without a digest = %q", got)
+	if got := endedMessage(r, end); !strings.HasPrefix(got, "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.). From box") || !strings.Contains(got, "\nok  p  0.1s\nFull result:") {
+		t.Errorf("exit 0 without a digest = %q", got)
 	}
 	// Exit 0 with failed tests (go test ... || true) still shows the failures.
 	end.Digest = "FAIL: 1 of 2 tests failed (go test)\np\n  TestQ  q_test.go:8: no\n"
@@ -339,28 +342,13 @@ func TestFailureDigestKeepsTheLogsLastLines(t *testing.T) {
 	}
 }
 
-// An exit 0 whose digest wasn't read (boxd's copy of a queued job's end)
-// isn't called a pass: the tail shows what the run printed.
+// An exit 0 whose digest wasn't read (boxd's copy of a queued job's end, a
+// reducer that died) isn't called a pass: the tail shows what the run printed.
 func TestExitZeroWithoutReadDigestKeepsTheTail(t *testing.T) {
 	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
 	got := endedMessage(r, jobEnd{Tail: "--- FAIL: TestQ\nFAIL p\n"})
 	if !strings.Contains(got, "\n--- FAIL: TestQ\nFAIL p\nFull result:") {
 		t.Errorf("message = %q", got)
-	}
-}
-
-// The follow's digest line, empty for a run with no test report, is what
-// says the digest was read.
-func TestEmptyDigestLineMeansRead(t *testing.T) {
-	var out strings.Builder
-	ef := &exitFilter{w: &out}
-	ef.Write([]byte("hello\n" + exitMarker + "0\n"))
-	if ef.digestRead() {
-		t.Fatal("digest read before its line came")
-	}
-	ef.Write([]byte(digestMarker + "\n"))
-	if !ef.digestRead() || ef.digest() != "" || out.String() != "hello\n" {
-		t.Errorf("digestRead %v, digest %q, out %q", ef.digestRead(), ef.digest(), out.String())
 	}
 }
 

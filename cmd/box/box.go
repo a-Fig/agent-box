@@ -1192,8 +1192,8 @@ while :; do
   fi
   if [ $fin = 1 ]; then
     printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
-    d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0; exit "${PIPESTATUS[0]}") &&
-      printf '%%s%%s\n' %[5]s "$d" >&2
+    d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0)
+    [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     exit 0
   fi
   if ! alive "$pid" %[2]s; then
@@ -1248,9 +1248,6 @@ type exitFilter struct {
 	code   string
 	seen   bool
 	report string // digestMarker's base64, when there was one
-	// digestSeen: the digest line came, empty for a run with no test report,
-	// so the digest was read; without it, an exit 0 isn't known to be a pass.
-	digestSeen bool
 	// notRunning: incus said the box isn't running, a line held back
 	// because a stopped GPU box has a better explanation (#118).
 	notRunning bool
@@ -1272,7 +1269,7 @@ func (e *exitFilter) Write(p []byte) (int, error) {
 		if rest, ok := bytes.CutPrefix(line, []byte(exitMarker)); ok {
 			e.code, e.seen = strings.TrimSpace(string(rest)), true
 		} else if rest, ok := bytes.CutPrefix(line, []byte(digestMarker)); ok {
-			e.report, e.digestSeen = strings.TrimSpace(string(rest)), true
+			e.report = strings.TrimSpace(string(rest))
 		} else if string(line) == notRunning+"\n" {
 			e.notRunning = true // attach says why, or prints it
 		} else if _, err := e.w.Write(line); err != nil {
@@ -1304,13 +1301,6 @@ func (e *exitFilter) digest() string {
 		return ""
 	}
 	return digest.Parse(string(b))
-}
-
-// digestRead says whether the follow printed its digest line.
-func (e *exitFilter) digestRead() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.digestSeen
 }
 
 func (e *exitFilter) exit() (string, bool) {
@@ -1419,7 +1409,7 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 		a.markIdle(ctx, box)
 		a.reportEnded(ctx, job, code, ended, tail.String())
 		dg = ef.digest()
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg, DigestRead: ef.digestRead()})
+		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
 		return stateDone, code, dg, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

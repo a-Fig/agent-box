@@ -192,11 +192,6 @@ type jobEnd struct {
 	Took    int64  `json:"tookSeconds"`
 	Tail    string `json:"tail,omitempty"`
 	Digest  string `json:"digest,omitempty"` // a test run's failure digest
-	// DigestRead: the follow read the digest (empty for a run with no test
-	// report). Only then is an exit 0 without failed tests pushed as a pass:
-	// an end from boxd, a record from before it, or a follow cut off before
-	// its digest line shows its tail instead.
-	DigestRead bool `json:"digestRead,omitempty"`
 }
 
 // thread is the T3 thread of this session, or "".
@@ -606,21 +601,23 @@ func endedMessage(r jobRecord, e jobEnd) string {
 	}
 	digest := strings.TrimRight(mask.Mask(e.Digest), "\n")
 	failed := testsFailed(digest)
-	if e.Code == 0 && !failed && e.DigestRead {
-		if digest != "" {
-			head += ": " + strings.Join(strings.Split(digest, "\n"), "; ")
-		}
-		return head + ". " + fromBox + " " + where
+	// One line only when the digest itself says the tests passed: an exit 0
+	// alone doesn't (go test ./... || true), and a digest can be missing for
+	// many reasons (boxd's copy of the end, a follow cut off, a reducer that
+	// died), none of which may pass for clean.
+	if e.Code == 0 && !failed && testsPassed(digest) {
+		return head + ": " + strings.Join(strings.Split(digest, "\n"), "; ") + ". " + fromBox + " " + where
 	}
 	msg := head + ". " + fromBox + "\n"
 	if digest != "" {
 		msg += digest + "\n"
 	}
-	// After a failure digest only the log's last few lines follow: they carry
-	// what came after the tests, like a cancel from the dashboard or a later
-	// step's error.
+	// After a failure digest, and after an exit 0 with no passing digest
+	// (a build, a script, or tests whose digest wasn't read), only the log's
+	// last few lines follow: they carry what came last, like a cancel from
+	// the dashboard, a later step's error or a test summary.
 	n := endedLines
-	if failed {
+	if failed || e.Code == 0 {
 		n = endedLinesAfterDigest
 	}
 	if tail := lastLines(mask.Mask(e.Tail), n); tail != "" {
@@ -640,6 +637,19 @@ func shortReason(reason string) string {
 		s = strings.TrimRight(string(r[:reasonChars-1]), " ") + "…"
 	}
 	return s
+}
+
+// testsPassed says whether a digest reports passing tests and no failures.
+func testsPassed(digest string) bool {
+	if testsFailed(digest) {
+		return false
+	}
+	for _, l := range strings.Split(digest, "\n") {
+		if strings.HasPrefix(l, "PASS:") {
+			return true
+		}
+	}
+	return false
 }
 
 // testsFailed says whether a digest reports failed tests or packages.
@@ -815,11 +825,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
-			end := jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest}
-			if rec, ok := a.recordedEnd(job); ok { // attach's record says whether it read the digest
-				end.DigestRead = rec.DigestRead
-			}
-			return end, true
+			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest}, true
 		case err == nil && res.State == statePaused && rec.GPU:
 			return lost() // a GPU box is stopped in My PC, not frozen
 		case err == nil && res.State == statePaused:
