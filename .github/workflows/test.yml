@@ -65,6 +65,10 @@ jobs:
                       tf.flush()
                       subprocess.run([shell, '-n', tf.name], check=True)
                       subprocess.run(['shellcheck', '-S', 'warning', '-s', shell, tf.name], check=True)
+          dp = yaml.safe_load(open('provision/default-profile.yaml'))
+          assert not (dp.get('config') or {}).get('cloud-init.user-data'), 'default-profile.yaml must not run cloud-init on every box launch (#194)'
+          ab = yaml.safe_load(open('provision/agent-base.yaml'))
+          assert (ab.get('config') or {}).get('cloud-init.user-data'), 'agent-base.yaml must carry the image build cloud-init (#194)'
           PY
 
   # gofmt runs on Linux only: a Windows checkout of LF files can confuse it.

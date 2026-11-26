@@ -84,7 +84,7 @@ if [ "$kmajor" -lt 6 ] || { [ "$kmajor" -eq 6 ] && [ "${kminor:-0}" -lt 12 ]; };
   fi
   die "kernel is $kernel; Incus 7.x needs Linux 6.12 or newer. Ubuntu 24.04: apt install linux-generic-hwe-24.04, then reboot. Debian 12: a kernel from bookworm-backports. Debian 13 ships 6.12."
 fi
-for f in incus-preseed.yaml default-profile.yaml reaper.sh https-cert.sh update-boxd.sh systemd; do
+for f in incus-preseed.yaml default-profile.yaml agent-base.yaml reaper.sh https-cert.sh update-boxd.sh systemd; do
   [ -r "$HERE/$f" ] || die "missing $HERE/$f"
 done
 
@@ -355,7 +355,7 @@ note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
 
 step "Default profile of the '$PROJECT' project"
 incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
-note "applied default-profile.yaml (medium-size defaults: limits.cpu=2, limits.memory=4GiB, 30GiB root; nesting, /cache, cloud-init)"
+note "applied default-profile.yaml (medium-size defaults: limits.cpu=2, limits.memory=4GiB, 30GiB root; nesting, /cache)"
 
 # ---------------------------------------------------------------- Tailscale
 step "Tailscale"
@@ -438,7 +438,7 @@ if [ "$BUILD_BASE" -eq 1 ]; then
     rmdir "/var/lib/incus/storage-pools/default/containers/${PROJECT}_${builder}" 2>/dev/null || true
     warm_image images:ubuntu/24.04/cloud agent-base-build-warm \
       || note "warning: couldn't warm base Ubuntu image; continuing"
-    incus launch images:ubuntu/24.04/cloud "$builder" --project "$PROJECT"
+    incus launch images:ubuntu/24.04/cloud "$builder" --project "$PROJECT" < "$HERE/agent-base.yaml"
     note "waiting for cloud-init (installs Go, Node, JDK, ...); this takes a few minutes"
     until incus exec "$builder" --project "$PROJECT" -- true >/dev/null 2>&1; do sleep 2; done
     incus exec "$builder" --project "$PROJECT" -- cloud-init status --wait --long \
@@ -452,6 +452,12 @@ if [ "$BUILD_BASE" -eq 1 ]; then
       apt-daily-upgrade.timer apt-daily-upgrade.service motd-news.timer ua-timer.timer \
       dpkg-db-backup.timer e2scrub_all.timer fstrim.timer \
       systemd-sysupdate.timer systemd-sysupdate-reboot.timer rsyslog.service polkit.service </dev/null
+    # Toolchains, profile.d and netplan (/etc/netplan/50-cloud-init.yaml) are baked into the image
+    # now. Disabling cloud-init prevents boxes launched from agent-base from re-running cloud-init
+    # stages (ssh-keygen, apt_configure, runcmd) and stops cloud-init-local from delaying
+    # systemd-networkd on every launch (#194).
+    incus exec "$builder" --project "$PROJECT" -- touch /etc/cloud/cloud-init.disabled </dev/null
+    incus config unset "$builder" cloud-init.user-data --project "$PROJECT"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
       description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
