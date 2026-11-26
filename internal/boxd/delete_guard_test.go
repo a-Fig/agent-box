@@ -92,7 +92,7 @@ func TestDeleteGuardEmptyActiveRecentExpiredStale(t *testing.T) {
 
 // When the probe cannot establish the box's state — here the box is
 // replaced while it is scanned, so the scan is dropped — the unconfirmed
-// delete refuses and deletes nothing.
+// delete answers a retryable error (not the warning), and deletes nothing.
 func TestDeleteGuardRefusesWhenProbeCannotEstablishState(t *testing.T) {
 	created := t0.Add(-time.Hour)
 	r := newQueueRig(t, nil)
@@ -101,12 +101,33 @@ func TestDeleteGuardRefusesWhenProbeCannotEstablishState(t *testing.T) {
 	r.f.set(func() {
 		r.f.onScan = func(box string) { r.f.ins[0].CreatedAt = t0 }
 	})
-	if code, b := r.post("/api/boxes/w/delete", deleteBody(created, false)); code != 409 || !strings.Contains(string(b), dash.CodeNeedsConfirm) {
+	code, b := r.post("/api/boxes/w/delete", deleteBody(created, false))
+	if code != 502 || !strings.Contains(string(b), dash.CodeIncus) || strings.Contains(string(b), dash.CodeNeedsConfirm) {
 		t.Fatalf("probe cannot establish state, unconfirmed: %d %s", code, b)
 	}
 	for _, c := range r.f.cli {
 		if c == "delete w --force" {
 			t.Fatalf("the box was deleted on a failed probe: %v", r.f.cli)
+		}
+	}
+}
+
+// A job that froze before boxd's last poll is not in live or the history
+// either. The Frozen box is probed too: its job warns, nothing is deleted.
+func TestDeleteGuardProbesFrozenBox(t *testing.T) {
+	created := t0.Add(-time.Hour)
+	r := newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Frozen", "small", created)} })
+	r.poll() // boxd sees a frozen, empty box
+	r.f.set(func() {
+		r.f.jobs["w"] = []fakeJob{{name: "w.20261124-175900-ab12", state: "running", log: "x", meta: metaJSON}}
+	}) // it froze mid-job; no Watcher poll follows
+	if code, b := r.post("/api/boxes/w/delete", deleteBody(created, false)); code != 409 || !strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("frozen job, unconfirmed: %d %s", code, b)
+	}
+	for _, c := range r.f.cli {
+		if c == "delete w --force" {
+			t.Fatalf("the frozen box was deleted without a warning: %v", r.f.cli)
 		}
 	}
 }
@@ -132,5 +153,17 @@ func TestDeleteGuardProbesJobStartedAfterPoll(t *testing.T) {
 	}
 	if _, err := r.w.boxFor("w", created); err != nil {
 		t.Fatalf("box after the refused delete: %v", err)
+	}
+	// The probe is read-only: it must not record the job in live or the
+	// history, or a poll whose scan predates the job could settle it lost.
+	key := dash.JobKey("w", "20261124-175900-ab12", time.Date(2026, 11, 24, 17, 59, 0, 0, time.UTC))
+	if _, ok := r.w.Hist.Job(key); ok {
+		t.Fatal("the probe recorded the job in the history")
+	}
+	r.w.mu.Lock()
+	_, live := r.w.live[key]
+	r.w.mu.Unlock()
+	if live {
+		t.Fatal("the probe recorded the job as live")
 	}
 }
