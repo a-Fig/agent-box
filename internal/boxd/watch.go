@@ -193,6 +193,26 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 		}(in.Name)
 	}
 	wg.Wait()
+	// A scan finds a box by name. If the box was replaced by one of the same name after ins was
+	// listed, its scan read the new box and must not be stamped with the old one's UID: such a box
+	// counts as not scanned this time.
+	if len(out) == 0 {
+		return out
+	}
+	now, err := w.Incus.Instances(ctx)
+	if err != nil {
+		w.logf("boxd: incus: %v", err)
+		return map[string][]scanned{}
+	}
+	uid := map[string]string{}
+	for _, in := range now {
+		uid[in.Name] = boxUID(in)
+	}
+	for _, in := range ins {
+		if _, ok := out[in.Name]; ok && uid[in.Name] != boxUID(in) {
+			delete(out, in.Name)
+		}
+	}
 	return out
 }
 
@@ -204,11 +224,21 @@ func holds(created, started time.Time) bool {
 	return !created.After(started.Add(dash.JobBoxGrace))
 }
 
-// ranOnInstance says whether j ran on the box in is: dash.Job.RanOn, by the box's UID, with its
-// time rule for jobs recorded before they had one. The reaper reads Incus instances, not
-// dash.Boxes, so the box is made the way the dashboard's is (boxUID).
+// ranOnInstance says whether j ran on the box in is (ranOn). The reaper reads Incus instances,
+// not dash.Boxes, so the box is made the way the dashboard's is (boxUID).
 func ranOnInstance(j dash.Job, in Instance) bool {
-	return j.RanOn(dash.Box{Name: in.Name, Machine: j.Machine, UID: boxUID(in), CreatedAt: in.CreatedAt.UTC()})
+	return ranOn(j, dash.Box{Name: in.Name, Machine: j.Machine, UID: boxUID(in), CreatedAt: in.CreatedAt.UTC()})
+}
+
+// ranOn is dash.Job.RanOn for boxd's own paths: the watcher, the log endpoint and the reaper. A job
+// recorded without a BoxUID falls back to holds, the rule boxd used before jobs had one, and not
+// to the dashboard's tighter dash.BoxJobSkew: these paths act on running jobs, and the tighter
+// rule would mark a live one lost whose box was made minutes after it was named.
+func ranOn(j dash.Job, b dash.Box) bool {
+	if j.BoxUID == "" {
+		return j.Box == b.Name && j.Machine == b.Machine && holds(b.CreatedAt, j.StartedAt)
+	}
+	return j.RanOn(b)
 }
 
 // EndJob applies box's report of how a job ended (POST /api/jobs/ended). It

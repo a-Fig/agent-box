@@ -292,7 +292,9 @@ JSON over HTTPS, on the same origin as the page.
   enough for `box run --new` (the ID is stamped before the bundle and launch, and the laptop's clock
   may be off) lets a replacement box made seconds later list its predecessor's jobs, and a tight one
   hides the box's own. Jobs recorded before 2026-11-25 have no `boxUid`; for them alone the old
-  rule stands: a start no earlier than `createdAt` less one minute (`dash.BoxJobSkew`). The page
+  rule stands: a start no earlier than `createdAt` less one minute (`dash.BoxJobSkew`); boxd's
+  watcher, log endpoint and reaper keep their looser ten minutes (`dash.JobBoxGrace`), since they act
+  on running jobs. A scan whose box was replaced after the poll listed it is dropped. The page
   asks boxd with `box`, `machine`, `uid` and `created`, and merges the stream's jobs by the same
   rule. After a reconnect it asks again, since the new snapshot holds only the last 50, and keeps
   showing what it had until boxd answers.
