@@ -129,18 +129,32 @@ func keptThrowaway(in Instance, now time.Time) bool {
 // claimThrowaway reserves an idle CPU throwaway for client-side job setup.
 // The same conditional write that takes it out of the pool protects its
 // expiry. A client that disappears leaves a claim that expires on its own.
-func (w *Watcher) claimThrowaway(ctx context.Context, box, repoKey, size string) (bool, error) {
+func (w *Watcher) claimThrowaway(ctx context.Context, box, repoKey, size, job string) (bool, error) {
+	claimedBefore := w.Now().Add(controlTimeout)
+	return w.reservePooled(ctx, box, job, func(in Instance) bool {
+		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+		return in.Status == "Running" && in.Config[jobrun.ThrowawayRepoKey] == repoKey &&
+			mode.SizeOf(in.Config).Name == size && expires.After(claimedBefore)
+	})
+}
+
+// A run and an eviction compete for the same Incus reservation. The empty
+// owner on an eviction fences expiry writes from the previous job.
+func (w *Watcher) reservePooled(ctx context.Context, box, job string, matches func(Instance) bool) (bool, error) {
 	return w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
 		now := w.Now().UTC()
+		if in.Config[jobrun.ThrowawayRepoKey] == "" || !keptThrowaway(in, now) || !matches(in) {
+			return nil
+		}
+		if in.Status == "Running" {
+			out, err := w.Incus.Exec(ctx, box, jobrun.KeptScript(workRoot))
+			if err != nil || strings.TrimSpace(string(out)) != "kept" {
+				return nil
+			}
+		} else if w.Hist == nil || !w.Hist.EndedHere(in) {
+			return nil
+		}
 		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
-		if in.Status != "Running" || in.Config[jobrun.ThrowawayRepoKey] != repoKey ||
-			mode.SizeOf(in.Config).Name != size || !keptThrowaway(in, now) || !expires.After(now) {
-			return nil
-		}
-		out, err := w.Incus.Exec(ctx, box, jobrun.KeptScript(workRoot))
-		if err != nil || strings.TrimSpace(string(out)) != "kept" {
-			return nil
-		}
 		until := now.Add(jobrun.ThrowawayClaimTTL)
 		if expires.Before(until) {
 			expires = until
@@ -148,8 +162,73 @@ func (w *Watcher) claimThrowaway(ctx context.Context, box, repoKey, size string)
 		return map[string]string{
 			jobrun.ExpiresKey:        expires.Format(time.RFC3339),
 			jobrun.ThrowawayClaimKey: until.Format(time.RFC3339),
+			jobrun.ThrowawayOwnerKey: job,
 		}
 	})
+}
+
+func (w *Watcher) evictPooled(ctx context.Context, box, uid string) (bool, error) {
+	reserved, err := w.reservePooled(ctx, box, "", func(in Instance) bool { return boxUID(in) == uid })
+	if err != nil || !reserved {
+		return false, err
+	}
+	err = jobrun.RetryETag(ctx, func() error {
+		ins, err := w.Incus.Instances(ctx)
+		if err != nil {
+			return err
+		}
+		for _, in := range ins {
+			if in.Name == box {
+				now := w.Now()
+				if boxUID(in) != uid || in.Status == "Frozen" || mode.Held(in.Config, now).After(now) ||
+					in.Config[jobrun.ThrowawayOwnerKey] != "" || !jobrun.ThrowawayClaimed(in.Config, now) {
+					return errNotIdle
+				}
+				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errNotIdle) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// setPoolExpiry changes only the owner's deadline. A fast job may finish
+// before the client confirms its start, so promotion also needs a live job.
+func (w *Watcher) setPoolExpiry(ctx context.Context, box, job string, ended bool) (bool, error) {
+	return w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		return w.poolExpiryConfig(ctx, in, job, ended)
+	})
+}
+
+func (w *Watcher) poolExpiryConfig(ctx context.Context, in Instance, job string, ended bool) map[string]string {
+	if in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job || in.Status != "Running" {
+		return nil
+	}
+	now := w.Now().UTC()
+	cur, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	lease := in.Config[jobrun.ThrowawayClaimKey] != ""
+	ttl := jobTTL
+	if ended {
+		ttl = jobrun.EndedKeep
+		if err == nil && !lease && !cur.After(now.Add(ttl)) {
+			return nil
+		}
+	} else if !lease {
+		return nil
+	}
+	out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot))
+	running := strings.Fields(string(out))
+	if err != nil || (ended && len(running) != 0) || (!ended && !slices.Contains(running, job)) {
+		return nil
+	}
+	return map[string]string{
+		jobrun.ExpiresKey:        mode.Held(in.Config, now.Add(ttl)).Format(time.RFC3339),
+		jobrun.ThrowawayClaimKey: "",
+	}
 }
 
 // idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
@@ -458,13 +537,21 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Inst
 		if in.Config[jobrun.ThrowawayKey] != "true" {
 			what = "idle box"
 		}
-		err = jobrun.RetryETag(ctx, func() error {
-			if !w.stillIdle(ctx, in) {
-				return errNotIdle
+		if in.Config[jobrun.ThrowawayRepoKey] != "" {
+			var evicted bool
+			evicted, err = w.evictPooled(ctx, box, boxUID(in))
+			if err == nil && !evicted {
+				err = errNotIdle
 			}
-			_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
-			return err
-		})
+		} else {
+			err = jobrun.RetryETag(ctx, func() error {
+				if !w.stillIdle(ctx, in) {
+					return errNotIdle
+				}
+				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
+				return err
+			})
+		}
 		if errors.Is(err, errNotIdle) {
 			err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
 			break
@@ -624,6 +711,12 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 		defer cancel()
 		_, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
 			now := w.Now().UTC()
+			if in.Config[jobrun.ThrowawayRepoKey] != "" {
+				if ranOnInstance(job, in) {
+					return w.poolExpiryConfig(ctx, in, own, true)
+				}
+				return nil
+			}
 			until, ok := endedExpiry(in, job, now)
 			if !ok || in.Status != "Running" || jobrun.ThrowawayClaimed(in.Config, now) {
 				return nil

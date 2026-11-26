@@ -18,7 +18,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
 6. `go test`/vitest results lead with failures (file:line); `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
 7. `box_pull` fetches reports and builds before a later run replaces them. Parallel runs: `new: true`.
 
-Box can reuse idle CPU throwaways. `/cache` survives.
+CPU throwaways can be reused. `fresh: true` launches clean.
 An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).

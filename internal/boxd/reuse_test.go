@@ -24,7 +24,7 @@ func TestClaimThrowawayChecksAndReservesIdleBox(t *testing.T) {
 			in.Config[jobrun.ExpiresKey] = t0.Add(5 * time.Minute).Format(time.RFC3339)
 			r.f.ins = []Instance{in}
 			r.f.jobs[in.Name] = []fakeJob{{name: in.Name + ".old", state: "done", exit: "0"}}
-			req := dash.ClaimThrowawayBody{RepoKey: key, Size: "small"}
+			req := dash.ClaimThrowawayBody{RepoKey: key, Size: "small", Job: in.Name + ".20261124-180000-1111"}
 			switch scenario {
 			case "wrong repo":
 				req.RepoKey = strings.Repeat("b", 64)
@@ -66,7 +66,8 @@ func TestClaimThrowawayChecksAndReservesIdleBox(t *testing.T) {
 			}
 			claimed, _ := r.f.instance(in.Name)
 			until := t0.Add(jobrun.ThrowawayClaimTTL).Format(time.RFC3339)
-			if claimed.Config[jobrun.ExpiresKey] != until || claimed.Config[jobrun.ThrowawayClaimKey] != until {
+			if claimed.Config[jobrun.ExpiresKey] != until || claimed.Config[jobrun.ThrowawayClaimKey] != until ||
+				claimed.Config[jobrun.ThrowawayOwnerKey] != req.Job {
 				t.Fatalf("claim config = %v, want claim and expiry through %s", claimed.Config, until)
 			}
 			if got := claim(); got != http.StatusConflict {
@@ -74,6 +75,45 @@ func TestClaimThrowawayChecksAndReservesIdleBox(t *testing.T) {
 			}
 			if r.w.stillIdle(context.Background(), in) {
 				t.Fatal("eviction accepted a box claimed after the poll")
+			}
+		})
+	}
+}
+
+func TestPooledEvictionAndOldCleanupLoseToClaim(t *testing.T) {
+	for _, action := range []string{"eviction", "cleanup"} {
+		t.Run(action, func(t *testing.T) {
+			r := newQueueRig(t, nil)
+			in := inst("widget-1234", "Running", "small", t0)
+			old, next := in.Name+".20261124-180000-1111", in.Name+".20261124-180000-2222"
+			in.Config[jobrun.ThrowawayKey] = "true"
+			in.Config[jobrun.ThrowawayRepoKey] = strings.Repeat("a", 64)
+			in.Config[jobrun.ThrowawayOwnerKey] = old
+			deadline := t0.Add(jobrun.EndedKeep).Format(time.RFC3339)
+			if action == "cleanup" {
+				deadline = t0.Add(jobTTL).Format(time.RFC3339)
+			}
+			in.Config[jobrun.ExpiresKey] = deadline
+			r.f.ins = []Instance{in}
+			r.f.jobs[in.Name] = []fakeJob{{name: old, state: "done", exit: "0"}}
+			r.f.between = func(cfg map[string]string) {
+				cfg[jobrun.ThrowawayClaimKey] = t0.Add(jobrun.ThrowawayClaimTTL).Format(time.RFC3339)
+				cfg[jobrun.ThrowawayOwnerKey] = next
+			}
+			ctx := context.Background()
+			var changed bool
+			var err error
+			if action == "eviction" {
+				changed, err = r.w.evictPooled(ctx, in.Name, boxUID(in))
+			} else {
+				changed, err = r.w.setPoolExpiry(ctx, in.Name, old, true)
+			}
+			if changed || err != nil || len(r.f.cli) != 0 {
+				t.Fatalf("stale %s changed=%v err=%v cli=%v", action, changed, err, r.f.cli)
+			}
+			current, _ := r.f.instance(in.Name)
+			if current.Config[jobrun.ThrowawayOwnerKey] != next || current.Config[jobrun.ExpiresKey] != deadline {
+				t.Fatalf("stale %s changed the owner's config: %v", action, current.Config)
 			}
 		})
 	}

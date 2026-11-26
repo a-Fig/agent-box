@@ -440,6 +440,13 @@ type RefusalBody struct {
 type ClaimThrowawayBody struct {
 	RepoKey string `json:"repoKey"`
 	Size    string `json:"size"`
+	Job     string `json:"job"`
+}
+
+// PoolExpiryBody asks boxd to set the deadline for the current pool owner.
+type PoolExpiryBody struct {
+	Job   string `json:"job"`
+	Ended bool   `json:"ended"`
 }
 
 // JobEndedBody is POST /api/jobs/ended, sent by box as a best effort (2s timeout) once it has

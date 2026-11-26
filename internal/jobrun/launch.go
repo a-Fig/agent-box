@@ -37,6 +37,7 @@ const (
 	ExpiresKey        = "user.expires"
 	ThrowawayKey      = "user.box.throwaway"
 	ThrowawayRepoKey  = "user.box.repo-key"
+	ThrowawayOwnerKey = "user.box.pool-job"
 	ThrowawayClaimKey = "user.box.claim-until"
 	ThrowawayClaimTTL = 10 * time.Minute
 )

@@ -352,6 +352,10 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			if j.Repo != "" {
 				w.repoOf[box] = j.Repo
 			}
+			if !ok && s.State == "running" && in.Config[jobrun.ThrowawayOwnerKey] == s.Job &&
+				in.Config[jobrun.ThrowawayClaimKey] != "" {
+				go w.promotePoolJob(box, s.Job)
+			}
 			before := *j
 			if s.Tail != "" {
 				j.Tail = s.Tail
@@ -398,6 +402,16 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 			}
 		}
 		w.settle(key, j, before)
+	}
+}
+
+// A client can drop its connection just as the start script runs. The
+// scanner promotes a claimed owner it finds running in that case.
+func (w *Watcher) promotePoolJob(box, job string) {
+	ctx, cancel := context.WithTimeout(context.Background(), controlTimeout)
+	defer cancel()
+	if _, err := w.setPoolExpiry(ctx, box, job, false); err != nil {
+		w.logf("boxd: promoting the claim for %s: %v", job, err)
 	}
 }
 
