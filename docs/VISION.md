@@ -46,7 +46,7 @@ give it, on the owner's terms.
 | Mac | Incus doesn't run on macOS; it would need a Linux VM (Lima, Colima) | Not supported |
 | VPS or cloud VM (AWS, Hetzner, ...) | The Linux server path; costs money while up, so it should start on demand and stop when idle | Linux path works; no start/stop or cost awareness |
 | Machines other people lend | The owner's terms, and isolation from the borrower | In use privately; not designed for |
-| Serverless (Cloudflare Workers) | A Worker runs JS/WASM in an isolate with no Linux shell, so it can't run `go test`. Cloudflare's Containers and Sandbox products are the closer fit (not verified in depth) | Not looked at |
+| Serverless (Cloudflare) | A Worker runs JS/WASM in an isolate with no Linux shell, so it can't run `go test`. Cloudflare Sandbox, a Linux container, is the closer fit | A rented sandbox as a host is #192 ([prior-art.md](prior-art.md)) |
 
 ## What the bridge has to get right
 
@@ -68,7 +68,7 @@ its effort, and where a newcomer would have to start from nothing.
 6. **Starting warm.** Caches and toolchains already there. Today: the shared `/cache` volume and the
    `agent-base` image.
 7. **Choosing where.** With more than one machine, picking the one that's free, fits and is cheapest.
-   Today: one host (issue #8 is multi-host).
+   Today: one host. Several hosts is the fleet (#159, #161-#171; [prior-art.md](prior-art.md)).
 8. **Setup is part of the product.** Every kind of compute in the table above should be a short,
    tested recipe, from "I have this machine" to "my agents use it", in about ten minutes.
 
@@ -107,7 +107,8 @@ Recorded as of 2026-11-26; each could change.
 
 ## Nearby projects
 
-Found 2026-11-26, from their own pages; none tried.
+Found 2026-11-26, from their own pages; none tried. [prior-art.md](prior-art.md) covers the
+systems the fleet takes ideas from (Bazel remote execution, Buildbarn, Cloudflare Sandbox, ...).
 
 - **Crabbox** (openclaw): leases remote machines, syncs the repo, runs commands and streams output back,
   for expensive tests and for AI agents. The closest match found.
