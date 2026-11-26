@@ -504,9 +504,24 @@ if [ "$BUILD_BASE" -eq 1 ]; then
     ' </dev/null
     incus config unset "$builder" cloud-init.user-data --project "$PROJECT"
     incus stop "$builder" --project "$PROJECT"
-    incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
+    # Publish without --alias/--reuse so Incus does not delete the previous `agent-base` image
+    # before the alias is updated (Incus 7.6 publish --reuse deletes the old image first).
+    # Then atomically retarget the existing alias via PATCH /1.0/images/aliases/agent-base (or
+    # create it on a fresh host), keeping the previous fingerprint in the store and leaving the
+    # deferred default-profile update untouched if the alias switch fails.
+    pub_out=$(LC_ALL=C incus publish "$builder" --project "$PROJECT" \
       description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries" \
-      agent_box.cloud_init=disabled
+      agent_box.cloud_init=disabled) || die "failed to publish image from '$builder'"
+    new_fp=$(printf '%s\n' "$pub_out" | awk '{ for (i=1; i<=NF; i++) if ($i ~ /^[0-9a-f]{64}$/) fp=$i } END { print fp }')
+    [[ "$new_fp" =~ ^[0-9a-f]{64}$ ]] || die "could not parse published image fingerprint from: $pub_out"
+    if [ "$BASE_EXISTS" -eq 1 ]; then
+      incus query -X PATCH -d "{\"target\":\"$new_fp\"}" \
+        '/1.0/images/aliases/agent-base?project=default' >/dev/null \
+        || die "failed to switch 'agent-base' alias to $new_fp (previous alias, image, and profile left unchanged)"
+    else
+      incus image alias create agent-base "$new_fp" --project default \
+        || die "failed to create 'agent-base' alias for $new_fp"
+    fi
     incus delete "$builder" --project "$PROJECT"
     if [ "$DEFER_PROFILE" -eq 1 ]; then
       incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
