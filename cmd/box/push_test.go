@@ -321,6 +321,10 @@ func TestFailureWithPassingDigestKeepsTheTail(t *testing.T) {
 	if !strings.Contains(got, "\nPASS: 3 tests passed (go test)\nlint: bad.go:3\nFull result:") {
 		t.Errorf("message = %q", got)
 	}
+	// No digest and no output: the head and where the result is, no blank line.
+	if got := endedMessage(r, jobEnd{Code: 1}); !strings.Contains(got, "not your user.\nFull result:") {
+		t.Errorf("empty failure = %q", got)
+	}
 }
 
 func TestBoxJobAlwaysReturnsTheFullResult(t *testing.T) {
