@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How agent-box runs</title>
+<meta name="description" content="Follow one run from a dirty laptop worktree through Incus isolation, shared /cache mounts, fair-share queueing, and push delivery back to your agent.">
+<link rel="canonical" href="https://agent-box.afig.dev/how/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="agent-box">
+<meta property="og:url" content="https://agent-box.afig.dev/how/">
+<meta property="og:title" content="How agent-box runs">
+<meta property="og:description" content="Follow one run from a dirty laptop worktree through Incus isolation, shared /cache mounts, fair-share queueing, and push delivery back to your agent.">
+<meta property="og:image" content="https://agent-box.afig.dev/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="735">
+<meta property="og:image:alt" content="The agent-box logo behind reeded glass on blue, over the words: Remote runners on hardware you own. Run heavy builds off your laptop.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.documentElement.classList.add('static');
+}
+</script>
+<style>
+:root {
+  --blue: #225BFF;
+  --cream: #FFFBEA;
+  --butter: #FDEE8C;
+  --ink: #0E1B45;
+  --ink-soft: #3A4670;
+  --badge-bg: #DCE6FF;
+  --badge-ink: #1640BF;
+  --line: #DDD7B8;
+  --good: #2BD06A;
+  --mono: ui-monospace, Menlo, Consolas, monospace;
+  --gutter: clamp(20px, 4vw, 48px);
+  --ease: cubic-bezier(.22, .8, .24, 1);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --flutes: repeating-linear-gradient(90deg,
+    rgba(255, 255, 255, 0.14) 0px,
+    rgba(255, 255, 255, 0.04) 1px,
+    rgba(255, 255, 255, 0) 5px,
+    rgba(14, 27, 69, 0.04) 9px,
+    rgba(14, 27, 69, 0.2) 11px,
+    rgba(14, 27, 69, 0.28) 12px);
+}
+* { box-sizing: border-box; margin: 0; }
+html { background: var(--blue); }
+body {
+  background: var(--blue);
+  color: var(--cream);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+.progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 60;
+  background: var(--butter);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+/* ---------- Floating back pill matching Murmur's /daemon/ aesthetic ---------- */
+.topbar {
+  position: fixed;
+  top: clamp(18px, 3vh, 30px);
+  left: var(--gutter);
+  right: var(--gutter);
+  z-index: 50;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.back {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 42px;
+  padding: 0 18px 0 12px;
+  border-radius: 999px;
+  background: rgba(14, 27, 69, .36);
+  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .28);
+  color: var(--cream);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  text-decoration: none;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: background-color .35s var(--ease), box-shadow .35s var(--ease), color .35s var(--ease), transform .2s var(--ease);
+}
+.back svg { flex: none; display: block; }
+.back .arrow { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .35s var(--ease); }
+.back .mark { width: 22px; height: 22px; fill: currentColor; }
+.back:hover { background: var(--butter); box-shadow: inset 0 0 0 1px var(--butter); color: var(--ink); }
+.back:hover .arrow { transform: translateX(-3px); }
+.back:focus-visible { outline: 3px solid var(--cream); outline-offset: 3px; }
+.step-pill {
+  pointer-events: auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(14, 27, 69, .45);
+  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .22);
+  font: 600 12.5px/1 var(--mono);
+  color: var(--butter);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+/* ---------- Scrollytelling track + pinned stage ---------- */
+.track {
+  position: relative;
+}
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  min-height: 540px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: clamp(76px, 11vh, 108px) var(--gutter) clamp(20px, 4vh, 36px);
+  background:
+    radial-gradient(45% 65% at 88% 20%, rgba(14, 27, 69, .26), rgba(14, 27, 69, 0) 72%),
+    radial-gradient(35% 55% at 8% 92%, rgba(14, 27, 69, .24), rgba(14, 27, 69, 0) 75%),
+    var(--blue);
+}
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--flutes);
+  mix-blend-mode: soft-light;
+  opacity: .55;
+}
+.stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--grain);
+  background-size: 180px 180px;
+  mix-blend-mode: overlay;
+  opacity: .11;
+}
+
+.stage-in {
+  position: relative;
+  z-index: 2;
+  max-width: 1120px;
+  width: 100%;
+  height: 100%;
+  margin: 0 auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(14px, 2.4vh, 24px);
+}
+.band {
+  position: relative;
+  min-height: 112px;
+  max-width: 720px;
+}
+.note {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .22s ease;
+}
+.note.is-on {
+  opacity: 1;
+  visibility: visible;
+}
+.seeking .note { transition: none !important; }
+.note .kicker {
+  display: inline-block;
+  margin-bottom: 8px;
+  font: 700 12.5px/1 var(--mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--butter);
+}
+.note h1, .note h2 {
+  font-size: clamp(28px, 3.6vw, 48px);
+  font-weight: 700;
+  letter-spacing: -.03em;
+  line-height: 1.08;
+  color: var(--butter);
+  text-wrap: balance;
+}
+.note p {
+  margin-top: 10px;
+  font-size: clamp(15.5px, 1.35vw, 18.5px);
+  font-weight: 500;
+  line-height: 1.48;
+  color: var(--cream);
+  text-shadow: 0 1px 14px rgba(14, 27, 69, .45);
+  text-wrap: pretty;
+}
+.note code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(14, 27, 69, .45);
+  color: var(--butter);
+  font: 600 .88em/1.4 var(--mono);
+}
+
+.world-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+#world {
+  width: 100%;
+  height: 100%;
+  max-height: 540px;
+  overflow: visible;
+  display: block;
+}
+
+/* Chapters create scroll height while the stage stays pinned */
+.chapters {
+  position: relative;
+  margin-top: -100svh;
+  pointer-events: none;
+}
+.ch {
+  height: 92svh;
+  min-height: 520px;
+}
+.ch[data-id="open"] { height: 75svh; min-height: 440px; }
+.ch[data-id="pull"] { height: 110svh; }
+.ch-fallback { display: none; }
+
+/* End bar over the final state */
+.end-band {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px var(--gutter) max(20px, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(14, 27, 69, 0) 0%, rgba(14, 27, 69, .78) 45%, rgba(14, 27, 69, .92) 100%);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .25s ease;
+}
+.end-band.is-on { opacity: 1; visibility: visible; }
+.end-band p { font-size: 16px; font-weight: 600; color: var(--cream); }
+.end-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 11px 20px;
+  border-radius: 999px;
+  background: var(--butter);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color .15s ease;
+}
+.btn:hover { background: var(--cream); }
+.btn.sec {
+  background: rgba(255, 251, 234, .12);
+  color: var(--cream);
+  box-shadow: inset 0 0 0 1px rgba(255, 251, 234, .3);
+}
+.btn.sec:hover { background: rgba(255, 251, 234, .22); }
+.btn:focus-visible { outline: 3px solid var(--cream); outline-offset: 2px; }
+
+/* Shared footer */
+.site-foot {
+  background: var(--cream);
+  color: var(--ink);
+  padding: 0 var(--gutter);
+  border-radius: clamp(24px, 3vw, 40px) clamp(24px, 3vw, 40px) 0 0;
+}
+.site-foot nav {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 24px 0 max(28px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 24px;
+}
+.site-foot ul { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; padding: 0; list-style: none; }
+.site-foot li + li::before { content: "·"; padding: 0 12px; color: var(--ink-soft); opacity: .6; }
+.site-foot a { color: var(--ink-soft); font-size: 14px; font-weight: 500; text-decoration: none; }
+.site-foot a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+.site-foot a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.site-foot a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+.foot-logo { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-size: 19px; font-weight: 800; letter-spacing: -.035em; }
+.foot-logo svg { display: block; fill: currentColor; }
+.foot-logo:hover { color: var(--blue); text-decoration: none; }
+
+/* Reduced motion & noscript static view */
+.static .progress,
+.static .stage,
+.static .step-pill,
+.static .end-band { display: none; }
+.static .chapters { margin-top: 0; pointer-events: auto; padding: clamp(78px, 11vh, 108px) var(--gutter) 56px; max-width: 960px; margin-left: auto; margin-right: auto; }
+.static .ch {
+  height: auto;
+  min-height: 0;
+  padding: 28px 0 36px;
+  border-bottom: 1px solid rgba(255, 251, 234, .22);
+}
+.static .ch:last-child { border-bottom: 0; }
+.static .ch-fallback { display: block; }
+.static .ch-fallback h1,
+.static .ch-fallback h2 { font-size: clamp(26px, 3.4vw, 40px); font-weight: 700; color: var(--butter); line-height: 1.1; letter-spacing: -.025em; }
+.static .ch-fallback p { margin-top: 10px; max-width: 62ch; font-size: 17px; line-height: 1.55; color: var(--cream); }
+.static .ch-fallback code { padding: 2px 6px; border-radius: 6px; background: rgba(14, 27, 69, .45); color: var(--butter); font: 600 .88em/1.4 var(--mono); }
+.static .fig { display: block; width: 100%; height: auto; margin-top: 18px; border-radius: 14px; background: rgba(14, 27, 69, .18); }
+
+@media (max-width: 720px) {
+  .band { min-height: 138px; }
+  .end-band { flex-direction: column; align-items: flex-start; }
+  .note h1, .note h2 { font-size: clamp(24px, 6.4vw, 34px); }
+  .note p { font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .back, .back .arrow, .note, .end-band, .btn { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="progress" id="progress" aria-hidden="true"></div>
+<div class="topbar">
+  <a class="back" href="/"><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><svg class="mark" viewBox="0 0 200 194" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg>agent-box</a>
+  <span class="step-pill" id="stepPill">01 / 07 · open</span>
+</div>
+
+<main>
+  <div class="track" id="track">
+    <div class="stage" id="stage">
+      <div class="stage-in">
+        <div class="band" id="band" aria-live="polite">
+          <div class="note is-on" data-note="open">
+            <span class="kicker">agent-box runner</span>
+            <h1>How a remote run works</h1>
+            <p>Your coding agent starts a heavy test or build locally; agent-box ships the snapshot to your own host and wakes the thread when it finishes. Scroll to trace one job.</p>
+          </div>
+          <div class="note" data-note="snapshot">
+            <span class="kicker">01 · Snapshot</span>
+            <h2>Tracks dirty edits without committing</h2>
+            <p>When your agent calls <code>box_run</code>, <code>box</code> tars tracked modifications and untracked files — never adding throwaway commits — over Incus TLS or Tailscale SSH.</p>
+          </div>
+          <div class="note" data-note="cache">
+            <span class="kicker">02 · Incus + /cache</span>
+            <h2>Fresh container, warm build cache</h2>
+            <p>The host creates an isolated <code>Incus</code> container (non-root, capped CPUs and RAM) and mounts shared <code>/cache</code> folders so Go, Cargo, Gradle, and npm stay warm.</p>
+          </div>
+          <div class="note" data-note="queue">
+            <span class="kicker">03 · Fair-share queue</span>
+            <h2>Queues safely when the host is full</h2>
+            <p>When slots fill up, a GPU job holds the RTX card, or your PC is in <code>My PC</code> mode, <code>boxd</code> stores snapshots (up to <code>2 GiB</code>) in fair-share FIFO order.</p>
+          </div>
+          <div class="note" data-note="reclaim">
+            <span class="kicker">04 · Shared PC mode</span>
+            <h2>Freezes and gives back RAM when you game</h2>
+            <p>Flip the Windows tray icon to <code>My PC</code> and <code>boxd</code> freezes running boxes cleanly with cgroups and runs <code>memory.reclaim</code> (about <code>35 s</code> to settle), resuming when you switch back.</p>
+          </div>
+          <div class="note" data-note="digest">
+            <span class="kicker">05 · Failure digest</span>
+            <h2>Cuts noisy logs to what failed</h2>
+            <p>Instead of flooding agent context with 20,000 log lines, <code>box</code> extracts failing specs from Go, pytest, Jest/Vitest, Cargo, and Gradle — plus where the full log lives.</p>
+          </div>
+          <div class="note" data-note="push">
+            <span class="kicker">06 · Push wakeup</span>
+            <h2>Zero polling; laptop stays free</h2>
+            <p>In T3 Code, background runs return right away so your agent thread ends its turn. When exit status arrives, <code>boxd</code> pushes the result straight back to that thread.</p>
+          </div>
+          <div class="note" data-note="pull">
+            <span class="kicker">07 · Pull &amp; cleanup</span>
+            <h2>Fetch artifacts back, leave containers behind</h2>
+            <p>Call <code>box_pull</code> to copy APKs, wheels, or built binaries back into your worktree. Throwaway boxes stay warm up to <code>30 min</code> for pulls while <code>/cache</code> persists across runs.</p>
+          </div>
+        </div>
+
+        <div class="world-wrap">
+          <svg id="world" viewBox="0 0 1000 430" aria-label="Diagram of how agent-box moves work from your laptop to your host and back"></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="chapters">
+      <section class="ch" data-id="open">
+        <div class="ch-fallback">
+          <h1>How a remote run works</h1>
+          <p>Your coding agent starts a heavy test or build locally; agent-box ships the snapshot to your own host and wakes the thread when it finishes.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="snapshot">
+        <div class="ch-fallback">
+          <h2>01 · Snapshot without committing</h2>
+          <p>When an agent calls <code>box_run</code>, <code>box</code> tars modified and untracked files from your working tree without mutating git history.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="cache">
+        <div class="ch-fallback">
+          <h2>02 · Isolated Incus box with warm <code>/cache</code></h2>
+          <p>Every run starts a fresh unprivileged container with persistent <code>/cache</code> volumes mapped for Go, Cargo, Gradle, and Node.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="queue">
+        <div class="ch-fallback">
+          <h2>03 · Crash-safe fair-share queue</h2>
+          <p>If capacity is full or an exclusive <code>gpu</code> box is busy, <code>boxd</code> persists snapshots up to <code>2 GiB</code> and dispatches fair-share FIFO by session.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="reclaim">
+        <div class="ch-fallback">
+          <h2>04 · Windows <code>My PC</code> freeze &amp; RAM reclaim</h2>
+          <p>Switching the Windows tray to <code>My PC</code> freezes active cgroups without killing builds and calls <code>memory.reclaim</code> to hand gigabytes back to Windows.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="digest">
+        <div class="ch-fallback">
+          <h2>05 · Structured failure digests</h2>
+          <p><code>box</code> summarizes test failures for Go, pytest, Jest, Vitest, Cargo, and Gradle so agents read the error, not 20,000 passing lines.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="push">
+        <div class="ch-fallback">
+          <h2>06 · Push notification when done</h2>
+          <p>T3 Code runs return immediately with <code>async: true</code>; <code>boxd</code> pushes completion straight back into the conversation thread.</p>
+        </div>
+      </section>
+      <section class="ch" data-id="pull">
+        <div class="ch-fallback">
+          <h2>07 · Pull artifacts &amp; keep <code>/cache</code></h2>
+          <p><code>box_pull</code> copies binaries, wheels, or APKs back to the laptop worktree within the <code>30 min</code> throwaway window while <code>/cache</code> stays warm.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="end-band" id="endBand">
+      <p>Ready to move heavy builds off your laptop?</p>
+      <div class="end-actions">
+        <a class="btn" href="/#setup">Set up agent-box</a>
+        <a class="btn sec" href="/hosts/">Hosts &amp; GPUs</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<noscript>
+<style>
+  .progress, .stage, .step-pill, .end-band { display: none !important; }
+  .chapters { margin-top: 0 !important; padding: 90px var(--gutter) 56px; max-width: 960px; margin-inline: auto; }
+  .ch { height: auto !important; min-height: 0 !important; padding: 26px 0; border-bottom: 1px solid rgba(255,251,234,.22); }
+  .ch-fallback { display: block !important; }
+</style>
+</noscript>
+
+<footer class="site-foot">
+  <nav aria-label="Site">
+    <a class="foot-logo" href="/" aria-label="agent-box, home"><svg viewBox="0 0 200 194" width="24" height="23" aria-hidden="true"><path d="M50 14H170C179 14 183 21 177 27L151 53C147 57 142 58 137 58H21C14 58 11 52 16 46L40 20C43 16 46 14 50 14Z"/><path fill-rule="evenodd" d="M14 68H142V158C142 172 131 183 117 183H39C25 183 14 172 14 158Z M61 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z M105 107a9.5 15 0 1 0 0 30a9.5 15 0 1 0 0-30Z"/><path d="M153 64L184 33C187 30 189 32 189 37V132C189 139 186 145 181 150L153 178Z"/></svg><span>agent-box</span></a>
+    <ul>
+      <li><a href="/about/">About</a></li>
+      <li><a href="/how/" aria-current="page">How it runs</a></li>
+      <li><a href="/hosts/">Hosts &amp; GPUs</a></li>
+      <li><a href="/privacy/">Privacy</a></li>
+      <li><a href="/contact/">Contact</a></li>
+      <li><a href="https://github.com/a-Fig/agent-box">GitHub</a></li>
+    </ul>
+  </nav>
+</footer>
+
+<script>
+(() => {
+  const ORDER = ['open', 'snapshot', 'cache', 'queue', 'reclaim', 'digest', 'push', 'pull'];
+  const STILLS = { open: .2, snapshot: .85, cache: .9, queue: .85, reclaim: .85, digest: .85, push: .9, pull: .9 };
+  const NS = 'http://www.w3.org/2000/svg';
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const ss = f => { const x = clamp(f); return x * x * (3 - 2 * x); };
+  const lerp = (a, b, f) => a + (b - a) * f;
+  const el = (tag, attrs = {}, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text != null) n.textContent = text;
+    return n;
+  };
+
+  // Build reusable diagram DOM inside a target <svg viewBox="0 0 1000 430">
+  function buildWorld(svg) {
+    svg.setAttribute('viewBox', '0 0 1000 430');
+    svg.replaceChildren();
+
+    const gWires = el('g');
+    const wireL = el('path', { d: 'M 275 188 H 390', fill: 'none', stroke: 'rgba(255,251,234,0.24)', 'stroke-width': 3, 'stroke-dasharray': '6 6' });
+    const wireR = el('path', { d: 'M 600 188 H 698', fill: 'none', stroke: 'rgba(255,251,234,0.24)', 'stroke-width': 3, 'stroke-dasharray': '6 6' });
+    const flowOut = el('path', { d: 'M 275 188 H 698', fill: 'none', stroke: '#FDEE8C', 'stroke-width': 4, 'stroke-linecap': 'round', pathLength: 1, 'stroke-dasharray': '0 1' });
+    const flowBack = el('path', { d: 'M 698 220 H 275', fill: 'none', stroke: '#2BD06A', 'stroke-width': 4, 'stroke-linecap': 'round', pathLength: 1, 'stroke-dasharray': '0 1' });
+    gWires.append(wireL, wireR, flowOut, flowBack);
+
+    // Laptop node (left)
+    const gLap = el('g');
+    gLap.append(
+      el('rect', { x: 16, y: 84, width: 259, height: 196, rx: 16, fill: '#0E1B45', stroke: '#FFFBEA', 'stroke-width': 3 }),
+      el('rect', { x: 16, y: 84, width: 259, height: 34, rx: 16, fill: '#18285E' }),
+      el('rect', { x: 16, y: 106, width: 259, height: 12, fill: '#18285E' }),
+      el('circle', { cx: 36, cy: 101, r: 5, fill: '#2BD06A' }),
+      el('text', { x: 48, y: 106, fill: '#FFFBEA', 'font-size': 13, 'font-weight': 700, 'font-family': 'ui-monospace, Menlo, monospace' }, 'quiet-otter · laptop'),
+      el('rect', { x: 30, y: 132, width: 231, height: 64, rx: 10, fill: '#152459', stroke: 'rgba(255,251,234,0.14)' }),
+      el('text', { x: 42, y: 154, fill: '#FDEE8C', 'font-size': 12.5, 'font-weight': 700, 'font-family': 'ui-monospace, Menlo, monospace' }, '$ box_run("go test -race")'),
+    );
+    const lapSub = el('text', { x: 42, y: 178, fill: '#B8C4F0', 'font-size': 11, 'font-family': 'ui-monospace, Menlo, monospace' }, 'dirty: server.go, app_test.go');
+    const lapResultBox = el('rect', { x: 30, y: 208, width: 231, height: 56, rx: 10, fill: '#FDEE8C', opacity: 0 });
+    const lapResultTxt = el('text', { x: 42, y: 233, fill: '#0E1B45', 'font-size': 12.5, 'font-weight': 800, 'font-family': 'ui-monospace, Menlo, monospace', opacity: 0 }, 'PASS · exit 0 · 420 s');
+    const lapResultSub = el('text', { x: 42, y: 251, fill: '#1640BF', 'font-size': 11, 'font-weight': 700, 'font-family': 'Inter, sans-serif', opacity: 0 }, 'pulled: dist/server (18 MB)');
+    gLap.append(lapSub, lapResultBox, lapResultTxt, lapResultSub);
+
+    // Center Transport / Queue card
+    const gMid = el('g');
+    const midCard = el('rect', { x: 390, y: 58, width: 210, height: 104, rx: 14, fill: '#F7F4E4', stroke: '#0E1B45', 'stroke-width': 2.5 });
+    const midHead = el('rect', { x: 390, y: 58, width: 210, height: 32, rx: 14, fill: '#0E1B45' });
+    const midHeadSq = el('rect', { x: 390, y: 78, width: 210, height: 12, fill: '#0E1B45' });
+    const midTitle = el('text', { x: 406, y: 79, fill: '#FDEE8C', 'font-size': 13, 'font-weight': 700, 'font-family': 'Inter, sans-serif' }, 'Incus TLS / Tailscale');
+    const midLine1 = el('text', { x: 406, y: 112, fill: '#0E1B45', 'font-size': 12, 'font-weight': 700, 'font-family': 'ui-monospace, Menlo, monospace' }, 'tar dirty tree + git HEAD');
+    const midLine2 = el('text', { x: 406, y: 134, fill: '#3A4670', 'font-size': 12, 'font-weight': 600, 'font-family': 'Inter, sans-serif' }, 'no commits created');
+    const midPill = el('rect', { x: 406, y: 144, width: 178, height: 10, rx: 5, fill: '#DDD7B8' });
+    const midFill = el('rect', { x: 406, y: 144, width: 0, height: 10, rx: 5, fill: '#225BFF' });
+    gMid.append(midCard, midHead, midHeadSq, midTitle, midLine1, midLine2, midPill, midFill);
+
+    // Packet pills moving along wires
+    const pillOut = el('g', { opacity: 0 });
+    pillOut.append(
+      el('rect', { x: -46, y: -16, width: 92, height: 32, rx: 16, fill: '#FDEE8C', stroke: '#0E1B45', 'stroke-width': 2 }),
+      el('text', { x: 0, y: 5, 'text-anchor': 'middle', fill: '#0E1B45', 'font-size': 12.5, 'font-weight': 800, 'font-family': 'ui-monospace, Menlo, monospace' }, 'snapshot'),
+    );
+    const pillBack = el('g', { opacity: 0 });
+    const pillBackRect = el('rect', { x: -46, y: -16, width: 92, height: 32, rx: 16, fill: '#2BD06A', stroke: '#0E1B45', 'stroke-width': 2 });
+    const pillBackText = el('text', { x: 0, y: 5, 'text-anchor': 'middle', fill: '#0E1B45', 'font-size': 12.5, 'font-weight': 800, 'font-family': 'ui-monospace, Menlo, monospace' }, 'exit 0');
+    pillBack.append(pillBackRect, pillBackText);
+
+    // Host card (right)
+    const gHost = el('g');
+    gHost.append(
+      el('rect', { x: 698, y: 54, width: 286, height: 300, rx: 18, fill: '#0E1B45', stroke: '#FFFBEA', 'stroke-width': 3 }),
+      el('rect', { x: 698, y: 54, width: 286, height: 38, rx: 18, fill: '#18285E' }),
+      el('rect', { x: 698, y: 78, width: 286, height: 14, fill: '#18285E' }),
+      el('circle', { cx: 718, cy: 73, r: 5.5, fill: '#2BD06A' }),
+      el('text', { x: 731, y: 78, fill: '#FFFBEA', 'font-size': 13.5, 'font-weight': 700, 'font-family': 'Inter, sans-serif' }, 'Host (boxd)'),
+    );
+    const modeTag = el('text', { x: 968, y: 78, 'text-anchor': 'end', fill: '#FDEE8C', 'font-size': 12, 'font-weight': 700, 'font-family': 'ui-monospace, Menlo, monospace' }, 'Full');
+    gHost.append(modeTag);
+
+    // Inside Host: Container slot
+    const boxSlot = el('rect', { x: 714, y: 106, width: 254, height: 92, rx: 12, fill: '#152459', stroke: '#225BFF', 'stroke-width': 2 });
+    const boxName = el('text', { x: 728, y: 128, fill: '#FFFBEA', 'font-size': 13, 'font-weight': 700, 'font-family': 'ui-monospace, Menlo, monospace' }, 'box-lantern (large · 8 CPU)');
+    const boxLine1 = el('text', { x: 728, y: 150, fill: '#2BD06A', 'font-size': 12, 'font-family': 'ui-monospace, Menlo, monospace' }, 'ready');
+    const boxLine2 = el('text', { x: 728, y: 170, fill: '#B8C4F0', 'font-size': 11, 'font-family': 'ui-monospace, Menlo, monospace' }, 'mem: 8.0 GiB · disk: 40 GiB');
+    const boxProgress = el('rect', { x: 728, y: 182, width: 0, height: 6, rx: 3, fill: '#FDEE8C' });
+    gHost.append(boxSlot, boxName, boxLine1, boxLine2, boxProgress);
+
+    // Inside Host: Persistent /cache & Queue / Reclaim strip
+    const cacheBox = el('rect', { x: 714, y: 212, width: 254, height: 60, rx: 12, fill: '#FDEE8C' });
+    const cacheTitle = el('text', { x: 728, y: 235, fill: '#0E1B45', 'font-size': 13, 'font-weight': 800, 'font-family': 'ui-monospace, Menlo, monospace' }, '/cache bind-mounts');
+    const cacheSub = el('text', { x: 728, y: 256, fill: '#1640BF', 'font-size': 11.5, 'font-weight': 700, 'font-family': 'Inter, sans-serif' }, 'Go · Cargo · Gradle · npm · uv');
+    gHost.append(cacheBox, cacheTitle, cacheSub);
+
+    // Bottom status bar inside host: queue & reclaim metrics
+    const hostFoot = el('rect', { x: 714, y: 284, width: 254, height: 54, rx: 10, fill: '#152459' });
+    const hostFoot1 = el('text', { x: 728, y: 306, fill: '#FDEE8C', 'font-size': 11.5, 'font-weight': 700, 'font-family': 'ui-monospace, Menlo, monospace' }, 'queue: 0 pending');
+    const hostFoot2 = el('text', { x: 728, y: 325, fill: '#B8C4F0', 'font-size': 11.5, 'font-family': 'Inter, sans-serif' }, 'cgroups + restricted=true');
+    gHost.append(hostFoot, hostFoot1, hostFoot2);
+
+    // Big metric readout bottom center
+    const bigStat = el('text', { x: 495, y: 332, 'text-anchor': 'middle', fill: '#FDEE8C', 'font-size': 42, 'font-weight': 800, 'font-family': 'Inter, sans-serif', opacity: 0 }, '420 s');
+    const bigSub = el('text', { x: 495, y: 358, 'text-anchor': 'middle', fill: '#FFFBEA', 'font-size': 15, 'font-weight': 600, 'font-family': 'Inter, sans-serif', opacity: 0 }, 'vs 1,013 s on laptop');
+
+    svg.append(gWires, gLap, gMid, gHost, pillOut, pillBack, bigStat, bigSub);
+
+    return {
+      paint(u) {
+        // u in [0, 7.999]: floor(u) = chapter index
+        const ch = Math.floor(u), f = u - ch;
+
+        // Reset defaults cleanly each frame
+        flowOut.setAttribute('stroke-dasharray', '0 1');
+        flowBack.setAttribute('stroke-dasharray', '0 1');
+        pillOut.setAttribute('opacity', 0);
+        pillBack.setAttribute('opacity', 0);
+        lapResultBox.setAttribute('opacity', 0);
+        lapResultTxt.setAttribute('opacity', 0);
+        lapResultSub.setAttribute('opacity', 0);
+        bigStat.setAttribute('opacity', 0);
+        bigSub.setAttribute('opacity', 0);
+        midCard.setAttribute('fill', '#F7F4E4');
+        midTitle.textContent = 'Incus TLS / Tailscale';
+        midLine1.textContent = 'dirty worktree archive';
+        midLine2.textContent = 'no temporary git commits';
+        midFill.setAttribute('width', '0');
+        modeTag.textContent = 'Full · 24 CPU';
+        modeTag.setAttribute('fill', '#FDEE8C');
+        boxSlot.setAttribute('stroke', '#225BFF');
+        boxName.textContent = 'box-lantern (large · 8 CPU)';
+        boxLine1.textContent = 'ready for job';
+        boxLine1.setAttribute('fill', '#2BD06A');
+        boxLine2.textContent = 'mem: 8.0 GiB · disk: 40 GiB';
+        boxProgress.setAttribute('width', '0');
+        cacheBox.setAttribute('fill', '#FDEE8C');
+        cacheTitle.textContent = '/cache bind-mounts';
+        cacheSub.textContent = 'Go · Cargo · Gradle · npm · uv';
+        hostFoot1.textContent = 'queue: 0 pending';
+        hostFoot2.textContent = 'cgroups + restricted=true';
+        lapSub.textContent = 'dirty: server.go, app_test.go';
+
+        if (ch === 0) {
+          // open
+          midFill.setAttribute('width', String(Math.round(35 * ss(f))));
+          boxLine1.textContent = 'listening via boxd :7766';
+        } else if (ch === 1) {
+          // snapshot
+          const p = ss(f);
+          flowOut.setAttribute('stroke-dasharray', `${p.toFixed(3)} 1`);
+          pillOut.setAttribute('opacity', p > 0.05 && p < 0.96 ? '1' : '0');
+          pillOut.setAttribute('transform', `translate(${lerp(275, 698, p).toFixed(1)}, 188)`);
+          midTitle.textContent = 'Worktree Snapshot';
+          midLine1.textContent = 'tracked + untracked tar';
+          midLine2.textContent = '0 git commits added';
+          midFill.setAttribute('width', String(Math.round(178 * p)));
+          boxLine1.textContent = p > 0.7 ? 'unpacking snapshot...' : 'waiting for archive...';
+        } else if (ch === 2) {
+          // cache
+          const p = ss(f);
+          flowOut.setAttribute('stroke-dasharray', '1 1');
+          midTitle.textContent = 'Container Sync';
+          midLine1.textContent = 'box-lantern running';
+          midLine2.textContent = 'non-root Incus UID';
+          midFill.setAttribute('width', '178');
+          boxLine1.textContent = '$ go test -race ./internal/daemon';
+          boxLine2.textContent = 'cache hit: GOMODCACHE + GOCACHE';
+          boxProgress.setAttribute('width', String(Math.round(220 * p)));
+          bigStat.textContent = `${Math.round(lerp(18, 420, p))} s`;
+          bigStat.setAttribute('opacity', '1');
+          bigSub.textContent = 'warm /cache vs 1,013 s on laptop';
+          bigSub.setAttribute('opacity', p > 0.4 ? '1' : '0');
+        } else if (ch === 3) {
+          // queue
+          const p = ss(f);
+          midTitle.textContent = 'Queue Scheduler';
+          midLine1.textContent = 'bundle cap: 2 GiB';
+          midLine2.textContent = 'fair-share FIFO by session';
+          midFill.setAttribute('width', String(Math.round(115 + 63 * p)));
+          modeTag.textContent = 'GPU busy';
+          boxLine1.textContent = 'running: -s gpu (RTX 3070)';
+          boxLine2.textContent = '/dev/dxg · 10 ms vs 590 ms CPU';
+          boxProgress.setAttribute('width', '145');
+          hostFoot1.textContent = p > 0.5 ? 'queue: 2 jobs buffered' : 'queue: 1 job buffered';
+          hostFoot2.textContent = '20m nudge · 24h TTL';
+          bigStat.textContent = 'FIFO';
+          bigStat.setAttribute('opacity', '1');
+          bigSub.textContent = 'runs buffer safely in /var/lib/agent-box/queue';
+          bigSub.setAttribute('opacity', '1');
+        } else if (ch === 4) {
+          // reclaim
+          const p = ss(f);
+          modeTag.textContent = 'My PC (paused)';
+          modeTag.setAttribute('fill', '#FF8F7D');
+          boxSlot.setAttribute('stroke', '#FDEE8C');
+          boxLine1.textContent = 'cgroup freezer: PAUSED';
+          boxLine1.setAttribute('fill', '#FDEE8C');
+          boxLine2.textContent = p > 0.45 ? 'memory.reclaim: 6.5 GiB' : 'memory.reclaim: paging...';
+          hostFoot1.textContent = 'queued jobs freeze safely';
+          hostFoot2.textContent = 'thaw on Shared or Full';
+          bigStat.textContent = p > 0.5 ? '35 s' : '3.2 s';
+          bigStat.setAttribute('opacity', '1');
+          bigSub.textContent = p > 0.5 ? 'RAM returned to Windows desktop' : 'cold pages swap before free';
+          bigSub.setAttribute('opacity', '1');
+        } else if (ch === 5) {
+          // digest
+          midTitle.textContent = 'Failure Parser';
+          midLine1.textContent = 'go · pytest · cargo · vitest';
+          midLine2.textContent = 'failing specs + tail lines';
+          midFill.setAttribute('width', '178');
+          boxLine1.textContent = 'FAIL TestRouterCache (tail)';
+          boxLine1.setAttribute('fill', '#FF8F7D');
+          boxLine2.textContent = '20,000 passing lines omitted';
+          bigStat.textContent = '30 lines';
+          bigStat.setAttribute('opacity', '1');
+          bigSub.textContent = 'keeps agent context sharp on errors';
+          bigSub.setAttribute('opacity', '1');
+        } else if (ch === 6) {
+          // push
+          const p = ss(f);
+          flowBack.setAttribute('stroke-dasharray', `${p.toFixed(3)} 1`);
+          pillBack.setAttribute('opacity', p > 0.05 && p < 0.96 ? '1' : '0');
+          pillBack.setAttribute('transform', `translate(${lerp(698, 275, p).toFixed(1)}, 220)`);
+          pillBackText.textContent = 'exit 0';
+          midTitle.textContent = 'T3 Code Push';
+          midLine1.textContent = 'async: true (zero polling)';
+          midLine2.textContent = 'wakes idle thread on exit';
+          midFill.setAttribute('width', '178');
+          boxLine1.textContent = 'PASS: 913 tests (420 s)';
+          boxProgress.setAttribute('width', '220');
+          if (p > 0.8) {
+            lapResultBox.setAttribute('opacity', '1');
+            lapResultTxt.setAttribute('opacity', '1');
+          }
+          lapSub.textContent = 'turn ended while tests ran';
+        } else {
+          // pull
+          const p = ss(f);
+          flowBack.setAttribute('stroke-dasharray', '1 1');
+          pillBack.setAttribute('opacity', p > 0.1 && p < 0.85 ? '1' : '0');
+          pillBack.setAttribute('transform', `translate(${lerp(698, 275, p).toFixed(1)}, 220)`);
+          pillBackText.textContent = 'artifacts';
+          boxLine1.textContent = 'PASS: 913 tests · /cache warm';
+          boxProgress.setAttribute('width', '220');
+          hostFoot1.textContent = 'throwaway box kept 30 min';
+          hostFoot2.textContent = 'next build reuses /cache';
+          lapSub.textContent = 'worktree clean; build ready';
+          lapResultBox.setAttribute('opacity', '1');
+          lapResultTxt.setAttribute('opacity', '1');
+          lapResultSub.setAttribute('opacity', p > 0.7 ? '1' : '0');
+          bigStat.textContent = '420 s';
+          bigStat.setAttribute('opacity', '1');
+          bigSub.textContent = 'vs 1,013 s on laptop — quiet fans at home';
+          bigSub.setAttribute('opacity', '1');
+        }
+      },
+    };
+  }
+
+  const root = document.documentElement;
+  const chapters = [...document.querySelectorAll('.ch')];
+
+  if (root.classList.contains('static')) {
+    const figures = chapters.map((ch, idx) => {
+      const id = ch.dataset.id;
+      const fig = el('svg', {
+        class: 'fig',
+        role: 'img',
+        'aria-label': `Diagram for chapter ${id}`,
+      });
+      ch.append(fig);
+      return { ctrl: buildWorld(fig), u: idx + (STILLS[id] ?? 0.8) };
+    });
+    const drawAll = () => figures.forEach(f => f.ctrl.paint(f.u));
+    drawAll();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawAll);
+    window.__ready = true;
+    return;
+  }
+
+  const world = buildWorld(document.getElementById('world'));
+  const notes = Object.fromEntries([...document.querySelectorAll('.note')].map(n => [n.dataset.note, n]));
+  const track = document.getElementById('track');
+  const progress = document.getElementById('progress');
+  const stepPill = document.getElementById('stepPill');
+  const endBand = document.getElementById('endBand');
+  const N = ORDER.length;
+  let tops = [], yEnd = 1, pin = 0, topY = 0;
+
+  function measure() {
+    topY = track.getBoundingClientRect().top + scrollY;
+    pin = innerHeight * 0.55;
+    tops = chapters.map(s => s.offsetTop);
+    yEnd = Math.max(1, track.offsetHeight - innerHeight + pin);
+  }
+  function uFromScroll() {
+    const y = scrollY - topY + pin;
+    if (y <= pin) return 0;
+    for (let i = 0; i < N; i++) {
+      const a = i === 0 ? pin : tops[i];
+      const b = i + 1 < N ? tops[i + 1] : yEnd;
+      if (y < b) return i + clamp((y - a) / Math.max(1, b - a));
+    }
+    return N - 0.001;
+  }
+
+  let shown = 0, target = 0, last = 0, raf = false;
+  function draw(u) {
+    const c = Math.min(N - 0.001, Math.max(0, u));
+    world.paint(c);
+    const idx = Math.floor(c);
+    const id = ORDER[idx];
+    for (const [k, node] of Object.entries(notes)) node.classList.toggle('is-on', k === id);
+    stepPill.textContent = `${String(idx).padStart(2, '0')} / 07 · ${id}`;
+    progress.style.transform = `scaleX(${(c / (N - 1)).toFixed(4)})`;
+    endBand.classList.toggle('is-on', c >= N - 1.15);
+  }
+  function tick(now) {
+    const dt = Math.min(64, now - last);
+    last = now;
+    shown += (target - shown) * (1 - Math.exp(-dt / 60));
+    if (Math.abs(target - shown) < 0.0008) { shown = target; raf = false; }
+    draw(shown);
+    if (raf) requestAnimationFrame(tick);
+  }
+  addEventListener('scroll', () => {
+    target = uFromScroll();
+    if (!raf) { raf = true; last = performance.now(); requestAnimationFrame(tick); }
+  }, { passive: true });
+  addEventListener('resize', () => { measure(); shown = target = uFromScroll(); draw(shown); });
+  measure();
+  shown = target = uFromScroll();
+  draw(shown);
+
+  window.__seek = (id, f = 0.5) => {
+    const i = ORDER.indexOf(id);
+    if (i < 0) return -1;
+    root.classList.add('seeking');
+    const a = i === 0 ? pin : tops[i];
+    const b = i + 1 < N ? tops[i + 1] : yEnd;
+    scrollTo({ top: a + (b - a) * f + topY - pin, behavior: 'instant' });
+    shown = target = i + f;
+    draw(shown);
+    requestAnimationFrame(() => root.classList.remove('seeking'));
+    return shown;
+  };
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+wrangler.jsonc
+.assetsignore
+.wrangler
+src
+.dev.vars
+test
+package.json
+package-lock.json
+node_modules

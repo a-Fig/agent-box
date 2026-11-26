@@ -1,0 +1,17 @@
+// Publishes this folder at agent-box.afig.dev as a Cloudflare Worker with static assets.
+// .github/workflows/site.yml deploys it when a push to main changes it.
+{
+  "name": "agent-box-site",
+  "compatibility_date": "2026-11-01",
+  "main": "src/worker.js",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": ["/", "/*.mp4", "/setup", "/setup.md", "/join", "/join.md", "/use", "/use.md"]
+  },
+  // src/worker.js imports docs/agents/*.md as fallback copies when GitHub cannot be reached.
+  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
+  "routes": [{ "pattern": "agent-box.afig.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": true
+}
