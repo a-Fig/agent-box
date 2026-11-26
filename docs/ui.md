@@ -19,7 +19,7 @@ One server, one page, three ways in.
 - **The page** is static files embedded in `boxd`: plain HTML, CSS and JS with no framework and no
   build step, like Murmur's `internal/web/static`. It follows Murmur's look (Tyler, 2026-11-23):
   its tokens and components, and its three themes, Dim by default (Tyler's choice) with Light and
-  Dark, switched in the sidebar and remembered in the browser's `localStorage`.
+  Dark, switched on the Settings page and remembered in the browser's `localStorage`.
 - **Ways in:**
   - `box ui` (laptop) opens the page in the browser.
   - `box app` (laptop) opens it in a window of its own, through
@@ -99,6 +99,12 @@ the jobs it ran before, each linked to its page (#184, 2026-11-25).
 
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
+
+**Settings** (2026-11-26, #158): the theme, a control that saves at once in the browser; and, read-only,
+each host's builds of boxd and the tray, its mode and enforcer, the CPUs a box of each size gets in
+Shared and Full, the caps and expiry times, and whether it has a GPU. Nothing there writes to the PC:
+the mode stays on Overview and in the tray, the caps in the host's setup. `Machine.Config` carries
+the sizes, times and GPU flag (boxd checks for `/dev/dxg`); a host with no tray or no GPU says so.
 
 **History**: charts over a day or a week:
 - jobs per day by result;
