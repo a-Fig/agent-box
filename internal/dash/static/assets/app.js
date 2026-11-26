@@ -3,10 +3,11 @@
 // untrusted text and reaches the page only as text nodes, under a Content-Security-Policy of
 // default-src 'self'. Widths and colors are set through the CSSOM, never a style attribute.
 
-import { h, icon, tickTimes, dur, stamp } from "./dom.js";
+import { h, icon, tickTimes, dur, stamp, clock } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
-import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog } from "./views.js";
+import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog, MODE_HINTS } from "./views.js";
 import { history } from "./history.js";
+import { syncTip, hint } from "./tip.js";
 
 const root = document.getElementById("root");
 const NARROW = window.matchMedia("(max-width: 767px)");
@@ -98,36 +99,81 @@ function sidebar(r) {
       [...S.machines.values()].map((m) =>
         h(
           "div",
-          { class: "side-machine" },
+          hint(modeLabel(m.mode) + ": " + MODE_HINTS[m.mode] + " Change the mode on Overview.", { class: "side-machine" }, "machine-" + m.name),
           h("span", { class: "side-machine-name" }, h("span", { class: "dot " + (m.mode === "mypc" ? "dot-off" : "dot-on") }), m.name),
           h("span", { class: "side-machine-line" }, modeLabel(m.mode), m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) + " pending" : ""),
           trayAlive(m) ? (m.enforcer === "headless" ? h("span", { class: "side-machine-line" }, "Headless: nobody logged on") : null) : h("span", { class: "side-machine-line" }, "Nothing enforcing"),
         ),
       ),
     ),
-    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", { class: "conn" }, h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…"), [...S.machines.values()].map((m) => versions(m, S.machines.size > 1))),
+    h("div", { class: "sidebar-foot" }, themeSwitch(), h("span", hint(S.conn === "live" ? "Connected: the page updates by itself as things change on the PC." : "The page lost its connection to the PC and is trying again; what it shows may be out of date.", { class: "conn" }, "conn"), h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…"), [...S.machines.values()].map((m) => versions(m, S.machines.size > 1))),
   );
 }
 
-// The commits boxd and the tray were built from (dash.Version), and a quiet note when they
-// differ: twice on 2026-11-25 the PC ran builds hours behind the repo and nothing showed it.
+// The builds boxd and the tray run (dash.Version), and a note when they differ: twice on
+// 2026-11-25 the PC ran builds hours behind the repo and nothing showed it. Both follow stable
+// releases and check for one hourly (docs/releasing.md), so a release on one is on the other
+// within the hour, and the note warns only once that is well past.
+const BEHIND_WARN_MS = 2 * 3600e3; // the hourly check, with room for a slow download
+
 function versions(m, named) {
   const b = m.boxd, t = m.tray;
   if (!b && !t) return null;
   const short = (v) => (v && v.commit ? v.commit.slice(0, 7) + (v.modified ? "+" : "") : "unknown");
-  const tip = (who, v) => who + " " + (v && v.commit ? v.commit + (v.time ? ", committed " + stamp(v.time) : "") + (v.modified ? ", with uncommitted changes" : "") : "unknown");
-  let drift = null;
-  if (b && t && b.commit && t.commit && b.commit !== t.commit) {
-    const d = b.time && t.time ? Date.parse(b.time) - Date.parse(t.time) : 0;
-    drift = d ? (d > 0 ? "boxd " + short(b) : "tray " + short(t)) + " (" + dur(Math.abs(d) / 1000).split(" ")[0] + " newer than " + (d > 0 ? "tray" : "boxd") + ")" : "boxd and tray are from different commits";
-  }
+  const name = (v) => (v?.tag ? v.tag : short(v));
+  const about = (who, v) => who + ": " + (v && v.commit ? (v.tag ? v.tag + ", " : "") + v.commit.slice(0, 10) + (v.time ? ", committed " + stamp(v.time) : "") + (v.modified ? ", with uncommitted changes" : "") : "unknown");
+  const lines = ["The builds of boxd (the server behind this page) and of the tray, which applies the mode on the PC.", about("boxd", b), about("tray", t)];
+  const note = drift(b, t, trayAlive(m));
+  if (note) lines.push(note.why);
   return h(
     "div",
-    { class: "versions", title: tip("boxd", b) + "\n" + tip("tray", t) },
-    h("span", null, (named ? m.name + ": " : "") + "boxd " + short(b) + " · tray " + short(t)),
-    drift ? h("span", { class: "versions-drift" }, drift) : null,
+    hint(lines.join("\n"), { class: "versions" }, "versions-" + m.name),
+    h("span", null, (named ? m.name + ": " : "") + "boxd " + name(b) + " · tray " + name(t)),
+    note ? h("span", { class: note.warn ? "versions-drift" : "versions-note" }, note.text) : null,
   );
 }
+
+// What is true when boxd and the tray run different builds: which one updates to which release,
+// and when, or why neither will by itself. null when they are the same build. Which is behind is
+// decided by release tag, as the updaters decide (internal/update.After): a nightly of v0.3.0 is
+// behind v0.3.0 even on the same commit, and commit times can disagree with the tags. trayUp is
+// whether the enforcer's heartbeat is fresh: a tray that isn't running checks for nothing.
+function drift(b, t, trayUp) {
+  if (!b || !t || !b.commit || !t.commit || (b.commit === t.commit && (b.tag || "") === (t.tag || ""))) return null;
+  const kb = tagKey(b.tag), kt = tagKey(t.tag);
+  // A dev build (no release tag) never updates itself; the release beside it can't be ordered
+  // against it.
+  if (!kb && !kt) return { text: "boxd and tray are different builds", why: "Neither is a release, so neither updates itself: build both from the same commit, or install a release." };
+  if (!kb || !kt) {
+    const [dev, rel] = kb ? ["tray", "boxd"] : ["boxd", "tray"];
+    return { text: dev + " is a dev build, " + rel + " a release", why: "A dev build doesn't update itself: install a release, or build both from the same commit." };
+  }
+  const c = cmpKey(kb, kt);
+  if (!c) return { text: "boxd and tray are different builds", why: "Both say " + b.tag + " but were built from different commits." };
+  const [newer, older, behind, ahead] = c > 0 ? [b, t, "tray", "boxd"] : [t, b, "boxd", "tray"];
+  if (behind === "tray" && !trayUp) return { text: "tray is behind boxd", why: "The tray isn't running, so it can't update; it checks for the latest stable release hourly while it runs." };
+  // A prerelease (a nightly or test build) was installed by hand: state both, predict nothing.
+  if (newer.tag.includes("-")) return { text: ahead + " runs " + newer.tag + ", " + behind + " " + older.tag, why: "boxd runs " + b.tag + " and the tray " + t.tag + ". Each updates itself from stable releases only." };
+  // How long they have differed: since the later of boxd's start and the tray's last new build.
+  // A boxd restart starts the count again, so a tray stuck for days reads as pending for 2 hours
+  // after one; the warning comes back after that.
+  const since = Math.max(b.since ? Date.parse(b.since) : 0, t.since ? Date.parse(t.since) : 0);
+  const waited = since ? clock.now() - since : 0;
+  if (waited > BEHIND_WARN_MS) return { warn: true, text: behind + " still on " + older.tag + "; " + ahead + " has had " + newer.tag + " for " + dur(waited / 1000).split(" ")[0], why: behind + " checks for a stable release hourly, so it should have updated by now. Its log on the PC says why it hasn't." };
+  return { text: behind + " updates at its hourly check", why: behind + " checks for the latest stable release hourly and installs it by itself." };
+}
+
+// A release tag's order, as internal/update's key: X, Y, Z, then a stable release above its
+// nightlies (by date and number) and its test prereleases. null for anything else.
+function tagKey(tag) {
+  const m = /^v(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d{8})\.(\d+)|-test\.(\d+))?$/.exec(tag || "");
+  if (!m) return null;
+  const n = (s) => Number(s || 0);
+  if (m[4]) return [n(m[1]), n(m[2]), n(m[3]), 0, n(m[4]), n(m[5])];
+  if (m[6]) return [n(m[1]), n(m[2]), n(m[3]), 0, 0, n(m[6])];
+  return [n(m[1]), n(m[2]), n(m[3]), 1, 0, 0];
+}
+const cmpKey = (a, b) => a.reduce((c, v, i) => c || Math.sign(v - b[i]), 0);
 
 function setDrawer(open) {
   drawer = open && NARROW.matches;
@@ -220,6 +266,7 @@ function draw() {
     current = null;
     shell = null;
     root.replaceChildren(S.conn === "down" ? unreachable() : loading());
+    syncTip();
     toastEl();
     return;
   }
@@ -251,6 +298,7 @@ function draw() {
   finish(shell.content);
   finish(shell.el.firstChild);
   restore(kept);
+  syncTip();
   checkDialog();
   toastEl();
 }

@@ -1,12 +1,13 @@
 // History: charts over a day (hourly buckets) or a week (daily ones), drawn in plain SVG. Each
 // chart is one job: columns for counts over time, a line for memory, bars for totals, and a strip
 // for the mode timeline. Series colors are the reference palette's slots in a fixed order;
-// results wear the status colors. Every mark has a <title>, the browser's own hover tooltip, and
-// every chart with two or more series a legend, so nothing rests on color alone.
+// results wear the status colors. Every mark has a tooltip (tip.js), shown on hover, focus and tap,
+// and every chart with two or more series a legend, so nothing rests on color alone.
 
 import { h, s, icon, dur, bytes, stamp, clock } from "./dom.js";
 import { api, changed } from "./store.js";
-import { empty, section, modeLabel } from "./views.js";
+import { empty, section, modeLabel, MODE_HINTS, RESULT_HINTS } from "./views.js";
+import { rove, hint } from "./tip.js";
 
 export { history };
 
@@ -39,6 +40,10 @@ async function load(range, force) {
 // each chart is made, from the page's width.
 let W = 640;
 const sized = (w, make) => ((W = Math.max(260, Math.floor(w))), make());
+
+// A mark's tooltip text, for tip.js and, as one line, for screen readers. rove makes the first
+// mark of each chart its tab stop.
+const tip = (text, props) => ({ ...props, tabindex: -1, "data-tip": text, "aria-label": text.replace(/\n/g, "; ") });
 
 function label(b, range) {
   const d = new Date(b.start);
@@ -84,14 +89,24 @@ function columns(buckets, range, get, keys, color, fmt = String, height = 150) {
       y -= hgt;
     });
     if (i % every === 0) kids.push(s("text", { x: x + bw / 2, y: height - 4, "text-anchor": "middle" }, label(b, range)));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: top, width: step, height: plotH }, s("title", null, lines.length > 1 ? lines.join("\n") : lines[0] + ": none")));
+    kids.push(s("rect", tip(lines.length > 1 ? lines.join("\n") : lines[0] + ": none", { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
-  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "img" }, kids);
+  return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group" }, kids));
 }
 
-function legend(keys, color, name = (k) => k) {
-  return h("div", { class: "legend" }, keys.map((k, i) => h("span", null, h("i", { "data-bg": color(k, i) }), name(k))));
+// A legend entry with a hint (about) explains its word, for someone who hasn't read the docs.
+function legend(keys, color, name = (k) => k, about = () => null) {
+  return h("div", { class: "legend" }, keys.map((k, i) => h("span", about(k) ? hint(about(k), {}, true) : null, h("i", { "data-bg": color(k, i) }), name(k))));
 }
+
+const SIZE_HINTS = {
+  small: "Hours small boxes existed: the smallest size, for light runs.",
+  medium: "Hours medium boxes existed: the default size.",
+  large: "Hours large boxes existed: for big test suites and builds.",
+  gpu: "Hours the GPU box existed: one at a time, with the PC's GPU.",
+};
+const REFUSED_HINT = "Runs box turned away: it exited 75 and nothing started, because of My PC, no room under the limits, or the GPU in use.";
+const QUEUED_HINT = "Runs that waited in the queue for room, counted when they joined it. They start by themselves once their size fits.";
 
 // Memory in use: a 2px line over a faint area. Use mostly sits far under the cap, so the scale
 // is set by use (the larger of its peak x 1.25 and half the cap), with a gridline and label at
@@ -115,7 +130,7 @@ function memory(buckets, range) {
     kids.push(s("line", { class: "axis", x1: left, x2: W, y1: y(v), y2: y(v) }), s("text", { x: left - 6, y: y(v) + 3, "text-anchor": "end" }, v ? gib(v) : "0"));
   }
   if (cap <= max) {
-    kids.push(s("line", { x1: left, x2: W, y1: y(cap), y2: y(cap), stroke: "var(--destructive-foreground)", "stroke-dasharray": "4 4", "stroke-width": 1 }, s("title", null, "Cap: " + bytes(cap))));
+    kids.push(s("line", tip("Cap: " + bytes(cap), { class: "mark", x1: left, x2: W, y1: y(cap), y2: y(cap), stroke: "var(--destructive-foreground)", "stroke-dasharray": "4 4", "stroke-width": 1 })));
   } else {
     kids.push(s("text", { x: W, y: top + 2, "text-anchor": "end" }, "cap " + bytes(cap) + " ↑"));
   }
@@ -126,9 +141,9 @@ function memory(buckets, range) {
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => {
     if (i % every === 0) kids.push(s("text", { x: x(i), y: height - 4, "text-anchor": "middle" }, label(b, range)));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: top, width: step, height: plotH }, s("title", null, label(b, range) + ": " + bytes(b.memUsed) + " of " + bytes(b.memCap))));
+    kids.push(s("rect", tip(label(b, range) + ": " + bytes(b.memUsed) + " of " + bytes(b.memCap), { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
-  return s("svg", { viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": "Memory in use against the cap" }, kids);
+  return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group", "aria-label": "Memory in use against the cap" }, kids));
 }
 
 // The mode timeline: a strip of the mode, and under it the runs turned away and the runs queued in
@@ -140,11 +155,15 @@ function timeline(d, range) {
   const left = 52;
   const x = (t) => left + ((Math.min(Math.max(t, t0), t0 + span) - t0) / span) * (W - left);
   const kids = [s("text", { x: left - 6, y: 19, "text-anchor": "end" }, "mode")];
+  // Each row's marks in a group of their own, so the arrow keys move along a row and up and down
+  // between rows (tip.js).
+  const segs = [], refusedHits = [], queuedHits = [];
   for (const seg of d.segments || []) {
     const a = x(Date.parse(seg.start)), b = x(Date.parse(seg.end));
     if (b - a < 0.5) continue;
-    kids.push(s("rect", { x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] }, s("title", null, modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")")));
+    segs.push(s("rect", tip(modeLabel(seg.mode) + "\n" + stamp(seg.start) + " – " + stamp(seg.end) + " (" + dur((Date.parse(seg.end) - Date.parse(seg.start)) / 1000) + ")", { class: "mark", x: a + 1, y: 8, width: Math.max(1, b - a - 2), height: 16, rx: 3, fill: MODE_COLORS[seg.mode] })));
   }
+  kids.push(s("g", { class: "row" }, segs));
   const max = Math.max(1, ...buckets.map((b) => sum(b.refusals.byWhy)));
   const step = (W - left) / buckets.length;
   kids.push(s("text", { x: left - 6, y: 52, "text-anchor": "end" }, "refused"), s("line", { class: "axis", x1: left, x2: W, y1: 62, y2: 62 }));
@@ -153,8 +172,9 @@ function timeline(d, range) {
     const bx = left + step * i + step * 0.2;
     if (n) kids.push(s("rect", { x: bx, y: 62 - (n / max) * 26, width: Math.max(2, step * 0.6), height: (n / max) * 26, rx: 2, fill: "var(--s8)" }));
     const why = Object.entries(b.refusals.byWhy || {}).map(([k, v]) => v + " " + (WHY[k] || k));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: 32, width: step, height: 30 }, s("title", null, label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"))));
+    refusedHits.push(s("rect", tip(label(b, range) + ": " + (n ? n + " refused (" + why.join(", ") + ")" : "none refused"), { class: "hit", x: left + step * i, y: 32, width: step, height: 30 })));
   });
+  kids.push(s("g", { class: "row" }, refusedHits));
   // Runs queued, counted when they were queued; a bucket's tooltip also gives the waits of the
   // queued runs that started in it.
   const qmax = Math.max(1, ...buckets.map((b) => b.queued?.jobs || 0));
@@ -166,11 +186,12 @@ function timeline(d, range) {
     if (n) kids.push(s("rect", { x: bx, y: 100 - (n / qmax) * 26, width: Math.max(2, step * 0.6), height: (n / qmax) * 26, rx: 2, fill: "var(--s7)" }));
     const lines = [label(b, range) + ": " + (n ? n + " queued" : "none queued")];
     if (q.started) lines.push(q.started + " started after a median wait of " + dur(q.medianWaitSeconds));
-    kids.push(s("rect", { class: "hit", x: left + step * i, y: 70, width: step, height: 30 }, s("title", null, lines.join("\n"))));
+    queuedHits.push(s("rect", tip(lines.join("\n"), { class: "hit", x: left + step * i, y: 70, width: step, height: 30 })));
   });
+  kids.push(s("g", { class: "row" }, queuedHits));
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => i % every === 0 && kids.push(s("text", { x: left + step * i + step / 2, y: 116, "text-anchor": "middle" }, label(b, range))));
-  return s("svg", { viewBox: `0 0 ${W} 120`, role: "img", "aria-label": "Mode timeline, refused runs and queued runs" }, kids);
+  return rove(s("svg", { viewBox: `0 0 ${W} 120`, role: "group", "aria-label": "Mode timeline, refused runs and queued runs" }, kids));
 }
 
 // Totals as horizontal bars, biggest first, labelled with their value.
@@ -178,13 +199,15 @@ function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "") {
   entries = entries.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return h("p", { class: "row-empty" }, "Nothing in this range.");
   const max = entries[0][1];
-  return h(
-    "div",
-    { class: "hbars" },
-    entries.slice(0, limit).map(([k, v], i) => {
-      const name = k || emptyLabel || "(none)";
-      return h("div", { class: "hbar", title: name + ": " + fmt(v) }, h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
-    }),
+  return rove(
+    h(
+      "div",
+      { class: "hbars" },
+      entries.slice(0, limit).map(([k, v], i) => {
+        const name = k || emptyLabel || "(none)";
+        return h("div", tip(name + ": " + fmt(v), { class: "hbar", role: "img" }), h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
+      }),
+    ),
   );
 }
 
@@ -219,7 +242,7 @@ const history = {
       ].map(([id, l]) =>
         h(
           "button",
-          {
+          hint(id === "day" ? "The last 24 hours, an hour per bar." : "The last 7 days, a day per bar, midnight to midnight UTC.", {
             role: "radio",
             "aria-checked": H.range === id ? "true" : "false",
             onclick: () => {
@@ -227,7 +250,7 @@ const history = {
               load(id);
               changed();
             },
-          },
+          }),
           l,
         ),
       ),
@@ -280,17 +303,17 @@ const history = {
         [
           [jobsN, "jobs"],
           [passRate, "passed, of those not cancelled"],
-          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours"],
-          [refused, "runs turned away"],
-          [queuedN, startedN ? "runs queued; median wait " + dur(wait) : "runs queued"],
-        ].map(([v, l]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", null, l))),
+          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours", "Hours boxes existed, added up over all boxes: two boxes for an hour are 2 box-hours."],
+          [refused, "runs turned away", REFUSED_HINT],
+          [queuedN, startedN ? "runs queued; median wait " + dur(wait) : "runs queued", QUEUED_HINT],
+        ].map(([v, l, tip]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", tip ? hint(tip, {}, true) : null, l))),
       ),
       h(
         "div",
         { class: "charts" },
-        chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel), h("div", { class: "legend" }, h("span", null, h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", null, h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
-        chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])], true),
-        chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)))]),
+        chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel, (k) => MODE_HINTS[k]), h("div", { class: "legend" }, h("span", hint(REFUSED_HINT, {}, true), h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", hint(QUEUED_HINT, {}, true), h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
+        chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
+        chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)), undefined, (k) => SIZE_HINTS[k])]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),
         chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), (k) => slot(KINDS.indexOf(k)))),
         chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)")),

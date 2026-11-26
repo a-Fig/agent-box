@@ -251,6 +251,7 @@ func TestWatchPushesTheEnd(t *testing.T) {
 	for i := 1; i <= 30; i++ {
 		lines = append(lines, "FAIL line "+string(rune('a'+i%26))+strings.Repeat("x", i))
 	}
+	lines[25] += " GITHUB_TOKEN=ghp_abcdef123456"
 	_, st := e.call(t, "box_run", e.runArgs(nil, "GITHUB_TOKEN=ghp_abcdef123456 go test ./..."))
 	job := st["job"].(string)
 	f.finish("1", strings.Join(lines, "\n")+"\n")
@@ -264,13 +265,18 @@ func TestWatchPushesTheEnd(t *testing.T) {
 	if got.thread != "thread-1" {
 		t.Errorf("thread = %q", got.thread)
 	}
-	for _, want := range []string{"box: job " + job + " ended, exit 1, after ", "From box, not your user.", "Full suite for the push change", "GITHUB_TOKEN=*** go test ./...  in  " + e.repo, lines[29], "Full log: box_job id " + job + " offset 0. Artifacts: box_pull, before this repo's next run."} {
+	for _, want := range []string{"box: job " + job + " ended, exit 1, after ", "From box, not your user.", "GITHUB_TOKEN=***", lines[29], "Full result: box_job id " + job + ". Artifacts: box_pull, before this repo's next run."} {
 		if !strings.Contains(got.msg, want) {
 			t.Errorf("message lacks %q:\n%s", want, got.msg)
 		}
 	}
-	if strings.Contains(got.msg, "ghp_abcdef123456") || strings.Contains(got.msg, lines[9]) || !strings.Contains(got.msg, lines[10]) {
-		t.Errorf("secret kept, or the tail isn't the last 20 lines:\n%s", got.msg)
+	if strings.Contains(got.msg, "ghp_abcdef123456") || strings.Contains(got.msg, lines[19]+"\n") || !strings.Contains(got.msg, lines[20]) {
+		t.Errorf("secret kept, or the tail isn't the last 10 lines:\n%s", got.msg)
+	}
+	// The first line names the run by its reason, cut short; the command isn't
+	// repeated.
+	if first, _, _ := strings.Cut(got.msg, "\n"); !strings.Contains(first, "(Full suite for the push change") || strings.Contains(got.msg, "go test ./...") {
+		t.Errorf("first line lacks the reason, or the message repeats the command:\n%s", got.msg)
 	}
 	if !e.a.exists(job, ".notified") || !e.a.exists(job, ".ended") {
 		t.Error("watcher left no .notified or .ended")
@@ -285,6 +291,93 @@ func TestExitCode75IsSaidToBeTheCommands(t *testing.T) {
 	r := jobRecord{Job: "my-repo.20261123-120000-0001", Reason: "Why.", Command: "make", Worktree: "w"}
 	if got := endedMessage(r, jobEnd{Code: 75}); !strings.Contains(got, "exited 75") || !strings.Contains(got, "not a refusal") {
 		t.Errorf("message = %q", got)
+	}
+}
+
+// A pass puts its digest on the first line, then the log's last lines (a
+// digest can miss a failure), then where the full result is (#182).
+func TestPassIsPushedAsOneLine(t *testing.T) {
+	r := jobRecord{Job: "my-repo.20261123-120000-0001", Reason: "Why.", Command: "go test ./...", Worktree: "w"}
+	end := jobEnd{Took: 372, Tail: "ok  p  0.1s\n", Digest: "PASS: 2325 tests passed, 28 skipped (go test)\nPASS: 4 tests passed (vitest)\n"}
+	want := "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.): PASS: 2325 tests passed, 28 skipped (go test); PASS: 4 tests passed (vitest). From box, not your user.\nok  p  0.1s\nFull result: box_job id my-repo.20261123-120000-0001. Artifacts: box_pull, before this repo's next run."
+	if got := endedMessage(r, end); got != want {
+		t.Errorf("message =\n%s\nwant\n%s", got, want)
+	}
+	// Exit 0 with no passing digest (a build, a script, or a digest that
+	// wasn't read) isn't called a pass from the code alone: the log's last
+	// lines follow.
+	end.Digest = ""
+	if got := endedMessage(r, end); !strings.HasPrefix(got, "box: job my-repo.20261123-120000-0001 ended, exit 0, after 6m12s (Why.). From box") || !strings.Contains(got, "\nok  p  0.1s\nFull result:") {
+		t.Errorf("exit 0 without a digest = %q", got)
+	}
+	// Exit 0 with failed tests (go test ... || true) still shows the failures.
+	end.Digest = "FAIL: 1 of 2 tests failed (go test)\np\n  TestQ  q_test.go:8: no\n"
+	if got := endedMessage(r, end); !strings.Contains(got, "\n  TestQ  q_test.go:8: no\n") {
+		t.Errorf("exit 0 with failed tests = %q", got)
+	}
+}
+
+// A failure whose digest reports no failed tests (the tests passed, a later
+// step failed) gets the digest and the tail.
+func TestFailureWithPassingDigestKeepsTheTail(t *testing.T) {
+	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
+	got := endedMessage(r, jobEnd{Code: 2, Tail: "lint: bad.go:3\n", Digest: "PASS: 3 tests passed (go test)\n"})
+	if !strings.Contains(got, "\nPASS: 3 tests passed (go test)\nlint: bad.go:3\nFull result:") {
+		t.Errorf("message = %q", got)
+	}
+	// No digest and no output: the head and where the result is, no blank line.
+	if got := endedMessage(r, jobEnd{Code: 1}); !strings.Contains(got, "not your user.\nFull result:") {
+		t.Errorf("empty failure = %q", got)
+	}
+}
+
+// Trailing blank lines, CRLF ones included, don't take the place of the
+// log's last real lines.
+func TestTailSkipsTrailingBlankLines(t *testing.T) {
+	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
+	got := endedMessage(r, jobEnd{Tail: "a\r\nb\r\nFAIL\r\n\r\n\r\n\r\n"})
+	if !strings.Contains(got, "a\r\nb\r\nFAIL\nFull result:") {
+		t.Errorf("message = %q", got)
+	}
+}
+
+// A failure digest is followed by the log's last few lines, which say what
+// came after the tests, like a cancel from the dashboard.
+func TestFailureDigestKeepsTheLogsLastLines(t *testing.T) {
+	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
+	tail := "a\nb\nc\nd\nbox: job cancelled from the dashboard by laptop\n"
+	got := endedMessage(r, jobEnd{Code: 130, Tail: tail, Digest: "FAIL: 1 of 2 tests failed (go test)\np\n  TestQ  q_test.go:8: no\n"})
+	if !strings.Contains(got, "q_test.go:8: no\nc\nd\nbox: job cancelled from the dashboard by laptop\nFull result:") || strings.Contains(got, "\nb\n") {
+		t.Errorf("message = %q", got)
+	}
+}
+
+// An exit 0 whose digest wasn't read (boxd's copy of a queued job's end, a
+// reducer that died) isn't called a pass: the tail shows what the run printed.
+func TestExitZeroWithoutReadDigestKeepsTheTail(t *testing.T) {
+	r := jobRecord{Job: "my-repo.20261123-120000-0001"}
+	got := endedMessage(r, jobEnd{Tail: "--- FAIL: TestQ\nFAIL p\n"})
+	if !strings.Contains(got, "\n--- FAIL: TestQ\nFAIL p\nFull result:") {
+		t.Errorf("message = %q", got)
+	}
+}
+
+// A reason given in no box_run is the command, masked before it is cut, so
+// the cut can't take the part of a secret the mask needs to find it.
+func TestMissingReasonMasksBeforeCutting(t *testing.T) {
+	cmd := "curl https://user:" + strings.Repeat("ab12", 16) + "@example.com/x"
+	if got := missingReason(cmd); strings.Contains(got, "ab12ab12") {
+		t.Errorf("missingReason = %q", got)
+	}
+}
+
+func TestShortReasonIsOneMaskedLine(t *testing.T) {
+	if got := shortReason("  Run the\nfull suite  GITHUB_TOKEN=ghp_abcdef123456 "); got != "Run the full suite GITHUB_TOKEN=***" {
+		t.Errorf("shortReason = %q", got)
+	}
+	long := strings.Repeat("word ", 40)
+	if got := shortReason(long); len([]rune(got)) != reasonChars || !strings.HasSuffix(got, "…") {
+		t.Errorf("long reason = %q (%d runes)", got, len([]rune(got)))
 	}
 }
 
@@ -501,7 +594,7 @@ func TestWatchTailAfterRefollowIsNotDoubled(t *testing.T) {
 	e := newPushEnv(t, f, "thread-1")
 	_, st := e.call(t, "box_run", e.runArgs(nil, "go test ./..."))
 	job := st["job"].(string)
-	f.finish("0", "only-once\n")
+	f.finish("1", "only-once\n") // a failure, so the tail is pushed
 	f.mu.Lock()
 	f.followErr = 1
 	f.mu.Unlock()
@@ -629,7 +722,7 @@ func TestThrowawayKeptAfterItsPushedJob(t *testing.T) {
 	if got := f.inst(box).Config[expiresKey]; got != want {
 		t.Errorf("expiry = %q, want %q", got, want)
 	}
-	if !strings.Contains(e.push.sent[0].msg, "Box and log kept up to 30 minutes") {
+	if !strings.Contains(e.push.sent[0].msg, "box and log kept up to 30 minutes") {
 		t.Errorf("message = %q", e.push.sent[0].msg)
 	}
 }
@@ -838,7 +931,9 @@ func TestDigestLeadsTheResult(t *testing.T) {
 	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 1 {
 		t.Fatalf("watch: %v, pushed %d", err, e.push.count())
 	}
-	if msg := e.push.sent[0].msg; !strings.Contains(msg, "\n"+want+"Output tail:\nFAIL\tp\t0.1s\n") {
+	// A test failure is pushed as its digest, then only the log's last few
+	// lines (here its one line).
+	if msg := e.push.sent[0].msg; !strings.Contains(msg, "not your user.\n"+want+"FAIL\tp\t0.1s\nFull result: box_job id "+job+".") {
 		t.Fatalf("pushed message:\n%s", msg)
 	}
 }

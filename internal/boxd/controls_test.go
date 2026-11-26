@@ -198,6 +198,21 @@ func TestMachineVersions(t *testing.T) {
 		!m.Tray.Time.Equal(time.Date(2026, 11, 24, 22, 0, 0, 0, time.UTC)) || m.Tray.Time.Location() != time.UTC {
 		t.Fatalf("machine: %+v %+v", m.Boxd, m.Tray)
 	}
+	// Since is when the key took its value: kept while it holds it, moved when it changes.
+	first := t0.UTC().Truncate(time.Second)
+	if m := r.w.Machine(); m.Tray.Since == nil || !m.Tray.Since.Equal(first) {
+		t.Fatalf("since: %v, want %v", m.Tray.Since, first)
+	}
+	r.c.add(time.Hour)
+	r.poll()
+	if m := r.w.Machine(); !m.Tray.Since.Equal(first) {
+		t.Fatalf("since moved with the value unchanged: %v", m.Tray.Since)
+	}
+	r.f.set(func() { r.f.cfg["user.agent-box.tray-version"] = `{"commit":"f5c1be4abc"}` })
+	r.poll()
+	if m := r.w.Machine(); m.Tray.Commit != "f5c1be4abc" || !m.Tray.Since.Equal(first.Add(time.Hour)) {
+		t.Fatalf("after an update: %+v", m.Tray)
+	}
 	r.w.Version = &dash.Version{Commit: "e823842def"}
 	for _, bad := range []string{"not json", `{"commit":"","time":null,"modified":false}`} {
 		r.f.set(func() { r.f.cfg["user.agent-box.tray-version"] = bad })

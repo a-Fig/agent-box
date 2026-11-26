@@ -37,12 +37,16 @@
         "boxd": {
           "commit": "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e",
           "time": "2026-11-23T15:30:00Z",
-          "modified": false
+          "modified": false,
+          "tag": "v0.3.1",
+          "since": "2026-11-24T17:10:00Z"
         },
         "tray": {
-          "commit": "e823842a1f0c9d6b7e5a4c3b2d1e0f9a8b7c6d5e",
-          "time": "2026-11-23T15:30:00Z",
-          "modified": false
+          "commit": "1378501c4d2e8f7a6b5c4d3e2f1a0b9c8d7e6f5a",
+          "time": "2026-11-23T12:30:00Z",
+          "modified": false,
+          "tag": "v0.3.0",
+          "since": "2026-11-24T17:10:00Z"
         }
       }
     ],

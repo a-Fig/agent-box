@@ -44,6 +44,8 @@ type Watcher struct {
 	polled    bool
 	swept     map[string]bool // boxes (name@created) sweepEnded has looked at
 	machine   dash.Machine
+	trayVer   string    // user.agent-box.tray-version as last read
+	traySince time.Time // when it took that value
 	boxes     map[string]dash.Box
 	known     map[string]boxRec // box id -> what was recorded as created
 	live      map[string]*dash.Job
@@ -496,6 +498,13 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 				t := tv.Time.UTC()
 				tv.Time = &t
 			}
+			// When the key took this value, so the page can tell a tray that updates within the
+			// hour from one that is stuck.
+			if v != w.trayVer {
+				w.trayVer, w.traySince = v, now.UTC().Truncate(time.Second)
+			}
+			since := w.traySince
+			tv.Since = &since
 			m.Tray = &tv
 		}
 	}

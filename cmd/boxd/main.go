@@ -55,6 +55,8 @@ func main() {
 	}
 	var ver *dash.Version
 	if v := version.Get(); v.Commit != "" {
+		start := time.Now().UTC().Truncate(time.Second)
+		v.Since = &start
 		ver = &v
 	}
 	w := &boxd.Watcher{Version: ver, Queue: queue, Whois: boxd.TailscaleWhois,
