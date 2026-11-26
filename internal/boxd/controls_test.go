@@ -211,6 +211,29 @@ type extendBeforeReturn struct {
 	afterWrite func()
 }
 
+func TestExtendReplacesStaleCachedJobDeadline(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() {
+		in := inst("w", "Running", "small", created)
+		in.Config["user.expires"] = t0.Add(24 * time.Hour).Format(time.RFC3339)
+		r.f.ins = []Instance{in}
+	})
+	r.poll()
+	r.f.set(func() {
+		r.f.ins[0].Config["user.expires"] = t0.Add(2 * time.Hour).Format(time.RFC3339)
+	})
+	got, err := r.w.ExtendBox(context.Background(), "w", created, 4, "owner")
+	want := t0.Add(6 * time.Hour)
+	if err != nil || got.ExpiresAt == nil || !got.ExpiresAt.Equal(want) {
+		t.Fatalf("extend after cleanup: %+v, %v", got, err)
+	}
+	cached, err := r.w.boxFor("w", created)
+	if err != nil || cached.ExpiresAt == nil || !cached.ExpiresAt.Equal(want) {
+		t.Fatalf("cached box: %+v, %v", cached, err)
+	}
+}
+
 func (f *extendBeforeReturn) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
 	wrote, err := f.Incus.SetConfigIf(ctx, name, decide)
 	if wrote && f.afterWrite != nil {

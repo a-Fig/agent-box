@@ -410,7 +410,10 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	defer w.mu.Unlock()
 	w.record(record{Type: recControl, Control: &controlRec{Action: "extend " + itoa(hours) + "h", Target: name, By: by}})
 	if cur, ok := w.boxes[name]; ok && cur.CreatedAt.Equal(createdAt) {
-		if cur.ExpiresAt != nil && !until.After(*cur.ExpiresAt) {
+		// Only protect a deadline published while this request was in flight.
+		// The original cache entry may predate a job's expiry shortening.
+		if cur.ExpiresAt != nil && (b.ExpiresAt == nil || !cur.ExpiresAt.Equal(*b.ExpiresAt)) &&
+			!until.After(*cur.ExpiresAt) {
 			return cur, nil
 		}
 		cur.ExpiresAt = &until
