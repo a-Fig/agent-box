@@ -98,7 +98,7 @@ func TestReapEndedUnreadJob(t *testing.T) {
 // A job that ended while boxd's reapEnded didn't get to write (a restart cut
 // it short; here another job looked to be running) leaves its throwaway the
 // job's 24 hours. A boxd started again sweeps it to 30 minutes, once nothing
-// runs there (#156), and leaves an extend from the page after that be.
+// runs there (#156), and only on its first poll.
 func TestSweepEndedAfterRestart(t *testing.T) {
 	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
 	job := "w-0001.20261124-180000-ab12"
@@ -156,8 +156,8 @@ func TestSweepEndedAfterRestart(t *testing.T) {
 		t.Fatalf("after restart: expires %s, want %s", got, want)
 	}
 
-	// +4h from the page: no longer the job's 24h, so no reap starts.
-	extended := r.c.now().Add(4 * time.Hour).UTC().Format(time.RFC3339)
+	// The job's 24h again (as a late extend could land): later polls leave it.
+	extended := own
 	r.f.set(func() {
 		c := maps.Clone(r.f.ins[0].Config)
 		c["user.expires"] = extended
@@ -168,6 +168,6 @@ func TestSweepEndedAfterRestart(t *testing.T) {
 	w.Poll(context.Background())
 	time.Sleep(50 * time.Millisecond)
 	if got, c, n := expires(); got != extended || c != checks || n != sets {
-		t.Errorf("after an extend: expires %s (want %s), checks %d→%d, writes %d→%d", got, extended, checks, c, sets, n)
+		t.Errorf("a later poll: expires %s (want %s), checks %d→%d, writes %d→%d", got, extended, checks, c, sets, n)
 	}
 }

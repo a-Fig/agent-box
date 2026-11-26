@@ -529,14 +529,14 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 	}()
 }
 
-// sweepEnded catches the reapEnded that settle missed: a box whose jobs had
-// all ended in boxd's history before this poll (the scan skipped every one),
-// with none of them live, whose expiry is still its last job's own 24h. A
-// boxd restarted while the job ended, or stopped before reapEnded's write,
+// sweepEnded catches, on boxd's first poll, the reapEnded that settle
+// missed: a box whose jobs had all ended in boxd's history (the scan skipped
+// every one), with none of them live, whose expiry is still its last job's
+// own 24h. A boxd restarted while the job ended, or before reapEnded's write,
 // left a throwaway that 24h (#156). An expiry shortened already, or extended
-// from the page since, is no longer the job's, so the sweep leaves it and
-// costs a history lookup a poll; reapEnded does the rest as it would.
-// With w.mu held.
+// from the page since, is no longer the job's, so the sweep leaves it;
+// reapEnded does the rest as it would. Only the first poll, so a late extend
+// that lands near the job's 24h isn't undone. With w.mu held.
 func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]scanned) {
 	for _, in := range ins {
 		jobs := scans[in.Name]
@@ -553,9 +553,7 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 		if !ended {
 			continue
 		}
-		// Names sort by start (a queued job's by when it was queued), so the
-		// last job scanned is the one whose 24h the box has.
-		last, ok := w.Hist.EndedJob(jobs[len(jobs)-1].Job, in.CreatedAt)
+		last, ok := w.Hist.LastEnded(in.Name, in.CreatedAt)
 		if !ok {
 			continue
 		}

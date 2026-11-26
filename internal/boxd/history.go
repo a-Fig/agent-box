@@ -389,19 +389,19 @@ func (h *History) EndedOn(box string, created time.Time) map[string]bool {
 	return out
 }
 
-// EndedJob is job ("<box>.<id>") as recorded ended on the box created at
-// created, with its real start (a queued job's is after its name's).
-func (h *History) EndedJob(job string, created time.Time) (dash.Job, bool) {
+// LastEnded is the job that started last of those recorded on the box
+// created at created, if it has ended: the one whose 24h the box holds. A
+// queued job's name is when it was queued, so the newest name may not be it.
+func (h *History) LastEnded(box string, created time.Time) (dash.Job, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out dash.Job
 	for _, j := range h.jobs {
-		if j.Box+"."+j.ID == job && (j.State == dash.JobDone || j.State == dash.JobLost) && holds(created, j.StartedAt) &&
-			j.StartedAt.After(out.StartedAt) {
+		if j.Box == box && holds(created, j.StartedAt) && j.StartedAt.After(out.StartedAt) {
 			out = *j
 		}
 	}
-	return out, out.Box != ""
+	return out, out.Box != "" && (out.State == dash.JobDone || out.State == dash.JobLost)
 }
 
 // Open returns the jobs recorded as started but not ended, and the boxes
