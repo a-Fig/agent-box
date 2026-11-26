@@ -354,8 +354,43 @@ incus storage volume set default cache size="$CACHE_SIZE" --project "$PROJECT"
 note "cache volume size=$CACHE_SIZE (a cache: it may be wiped at any time)"
 
 step "Default profile of the '$PROJECT' project"
-incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
-note "applied default-profile.yaml (medium-size defaults: limits.cpu=2, limits.memory=4GiB, 30GiB root; nesting, /cache)"
+# Detect whether `agent-base` already exists and whether it is a legacy pre-#194 image (lacking
+# `agent_box.cloud_init=disabled`). Treat unexpected Incus read errors as failures, never as absent.
+aliases=$(incus image alias list --format csv) || die "could not list Incus image aliases"
+BASE_EXISTS=0
+BASE_LEGACY=0
+if printf '%s\n' "$aliases" | cut -d, -f1 | grep -qx agent-base; then
+  BASE_EXISTS=1
+  img_yaml=$(incus image show agent-base) || die "could not read image 'agent-base'"
+  img_ci=$(printf '%s\n' "$img_yaml" | awk '
+    /^properties:/ { in_p=1; next }
+    in_p && /^[^ ]/ { in_p=0 }
+    in_p && /^  agent_box\.cloud_init:/ {
+      sub(/^  agent_box\.cloud_init:[[:space:]]*/, "")
+      gsub(/^["'\'']|["'\'']$/, "")
+      print
+      exit
+    }
+  ')
+  [ "$img_ci" = "disabled" ] || BASE_LEGACY=1
+fi
+profile_ud=$(incus profile get default cloud-init.user-data --project "$PROJECT") \
+  || die "could not read cloud-init.user-data from profile 'default'"
+DEFER_PROFILE=0
+if [ "$BASE_LEGACY" -eq 1 ] && [ -n "$profile_ud" ]; then
+  # Do not strip legacy runtime cloud-init.user-data until a new self-contained `agent-base` has
+  # been published: ordinary reruns keep older images working, and a failed --rebuild-base leaves
+  # both the legacy image and its profile intact (#194).
+  DEFER_PROFILE=1
+  if [ "$REBUILD" -eq 1 ]; then
+    note "deferring default-profile.yaml until --rebuild-base publishes the new 'agent-base' (keeps legacy cloud-init intact if the build fails)"
+  else
+    note "keeping existing default profile (legacy 'agent-base' predates #194 and still relies on its cloud-init); run setup-host.sh --rebuild-base to rebuild the image and update the profile"
+  fi
+else
+  incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
+  note "applied default-profile.yaml (medium-size defaults: limits.cpu=2, limits.memory=4GiB, 30GiB root; nesting, /cache)"
+fi
 
 # ---------------------------------------------------------------- Tailscale
 step "Tailscale"
@@ -428,8 +463,12 @@ warm_image() {
 # ---------------------------------------------------------------- agent-base
 if [ "$BUILD_BASE" -eq 1 ]; then
   step "Building image 'agent-base'"
-  if incus image alias list --format csv | cut -d, -f1 | grep -qx agent-base && [ "$REBUILD" -eq 0 ]; then
-    note "alias exists; pass --rebuild-base to build again"
+  if [ "$BASE_EXISTS" -eq 1 ] && [ "$REBUILD" -eq 0 ]; then
+    if [ "$BASE_LEGACY" -eq 1 ]; then
+      note "legacy alias exists (predates #194); pass --rebuild-base to rebuild it and strip cloud-init from the default profile"
+    else
+      note "alias exists; pass --rebuild-base to build again"
+    fi
     warm_image agent-base agent-base-warm \
       || note "warning: couldn't warm agent-base; the first box launch will unpack it"
   else
@@ -466,8 +505,13 @@ if [ "$BUILD_BASE" -eq 1 ]; then
     incus config unset "$builder" cloud-init.user-data --project "$PROJECT"
     incus stop "$builder" --project "$PROJECT"
     incus publish "$builder" --project "$PROJECT" --alias agent-base --reuse \
-      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries"
+      description="agent-box base: git, build-essential, Go, Node LTS, uv, JDK 17, Android SDK (lazy), gh, Chromium libraries" \
+      agent_box.cloud_init=disabled
     incus delete "$builder" --project "$PROJECT"
+    if [ "$DEFER_PROFILE" -eq 1 ]; then
+      incus profile edit default --project "$PROJECT" < "$HERE/default-profile.yaml"
+      note "applied default-profile.yaml (cloud-init.user-data removed now that 'agent-base' is rebuilt)"
+    fi
     if warm_image agent-base agent-base-warm; then
       note "published and warmed 'agent-base' (images are shared via the default project)"
     else
@@ -476,8 +520,12 @@ if [ "$BUILD_BASE" -eq 1 ]; then
   fi
 else
   step "Image 'agent-base'"
-  if incus image alias list --format csv | cut -d, -f1 | grep -qx agent-base; then
-    note "exists (--rebuild-base builds it again)"
+  if [ "$BASE_EXISTS" -eq 1 ]; then
+    if [ "$BASE_LEGACY" -eq 1 ]; then
+      note "legacy image exists (predates #194); run setup-host.sh --rebuild-base to rebuild it and strip cloud-init from the default profile"
+    else
+      note "exists (--rebuild-base builds it again)"
+    fi
   else
     note "not built. box launches it, so runs fail with 'Image \"agent-base\" not found' until it is. Build with: setup-host.sh --build-base"
   fi
