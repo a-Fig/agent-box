@@ -60,3 +60,19 @@ func TestLegacyJobKeepsBoxdGrace(t *testing.T) {
 		t.Fatal("UID mismatch ignored")
 	}
 }
+
+// A box deleted while the poll scans it keeps its scan: the job's result was read from it.
+func TestScanOfADeletedBoxIsKept(t *testing.T) {
+	c := &clock{t: t0.Add(2 * time.Minute)}
+	f := &fakeIncus{ins: []Instance{inst("w", "Running", "small", t0)}, cfg: map[string]string{"user.agent-box.mode": "full"},
+		jobs: map[string][]fakeJob{"w": {{name: "w.20261124-180100-ab12", state: "done", exit: "0", log: "ok\n", meta: metaJSON, endedAt: t0.Add(90 * time.Second).Unix()}}}}
+	f.onScan = func(string) { f.ins, f.onScan = nil, nil }
+	w := newWatcher(t, t.TempDir(), f, c)
+	w.Poll(context.Background())
+	c.add(3 * time.Second)
+	w.Poll(context.Background())
+	st := w.State()
+	if len(st.Jobs) != 1 || st.Jobs[0].Result() != dash.ResultPass {
+		t.Fatalf("jobs: %+v", st.Jobs)
+	}
+}
