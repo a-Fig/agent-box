@@ -1,9 +1,14 @@
 # The dashboard: a page and an app for people
 
-Planned 2026-11-24, and revised the same day after a Fable review. Tyler: "a UI & app, like I have
+The dashboard shows what machines, boxes and jobs are doing, and gives the owner the same
+controls from the laptop, the PC and a phone.
+Open it with `box ui` or `box app`; start with [Shape](#shape) for the moving parts, or jump to
+[When the PC can't be reached](#when-the-pc-cant-be-reached) when it does not open.
+
+_Origin: planned 2026-11-24, and revised the same day after a Fable review. Tyler: "a UI & app, like I have
 with murmur. Something very clean & modern & light weight that gives me visibility & control into
 machines, boxes, agents, what they are doing, historical data & use cases", running on the laptop
-and on the PC, "both [with] the same level of control".
+and on the PC, "both [with] the same level of control"._
 
 ## Shape
 

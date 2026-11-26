@@ -1,13 +1,18 @@
 # The queue
 
-Planned 2026-11-24. Tyler asked for it; the design below is Claude's, built first and reviewed by
-Tyler afterwards.
+A run that cannot start now can wait on the host instead of falling back to the laptop.
+`box job <id>` follows it, and `box cancel <id>` takes it off.
+For the commands, start with [Using `box`](../README.md#using-box); this page covers queue
+behaviour, storage, scheduling and the API.
+
+_Origin: planned 2026-11-24 at Tyler's request; the design below is Claude's, built first and
+reviewed by Tyler afterwards._
 
 ## Why
 
 Before the queue, a run with no room (the caps were full) or a paused PC (My PC) got exit 75,
 and the agent ran the command on the laptop, often the starving laptop that offloading exists to
-spare. Once results arrive as a pushed turn (see the push design in DESIGN.md), an agent doesn't need
+spare. Once results arrive as a pushed turn (see the push design in [DESIGN.md](DESIGN.md#pushing-results-to-the-agent)), an agent doesn't need
 to sit and wait. So it can hand the run to a queue and keep working.
 
 ## Behaviour

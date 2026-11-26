@@ -6,7 +6,7 @@ Turns a spare Linux machine, or a Windows gaming PC, into on-demand, disposable 
 - **box** is a thin sync-and-run CLI + MCP for agents: `box run --new --reason "..." -- go test ./...`.
 - **boxtray**, on a Windows host, sits in the tray: one click picks *My PC*, *Shared* or *Full*. Without it a host stays in Shared.
 
-See [docs/DESIGN.md](docs/DESIGN.md).
+See the [documentation map](docs/README.md) for the right page, or [docs/DESIGN.md](docs/DESIGN.md) for how it works.
 
 ## Quick start: a Linux server
 
