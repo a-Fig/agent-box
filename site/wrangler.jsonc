@@ -1,5 +1,5 @@
 // Publishes this folder at fano.afig.dev as static assets on Cloudflare Workers.
-// Triggered manually via .github/workflows/site.yml until fano.afig.dev is ready to publish.
+// Deploy manually via .github/workflows/site.yml or Wrangler.
 {
   "name": "fano-site",
   "compatibility_date": "2026-11-01",
@@ -8,5 +8,5 @@
   },
   "routes": [{ "pattern": "fano.afig.dev", "custom_domain": true }],
   "workers_dev": false,
-  "preview_urls": true
+  "preview_urls": false
 }
