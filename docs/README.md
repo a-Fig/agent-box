@@ -21,9 +21,10 @@ These pages explain the choices behind them and what to check when they do not w
 Run `box status` first.
 Its first line is the short answer: whether offloading is worth trying, what room exists, and whether the host is paused or out of reach.
 
-- **Exit 75, or `state: refused`.** Nothing started.
-  The host is paused, full, missing a GPU, or unreachable; the message says which.
+- **Refused: `state: refused`, or the CLI says nothing started.** The host is paused, full,
+  missing a GPU, or unreachable; the message says which.
   Wait, pick a smaller size, or run locally.
+  Do not use exit 75 alone as the signal: a paused job below also returns 75.
 - **Queued.** The run has been handed off and will start when room or the mode allows.
   `box job <id>` follows it; `box cancel <id>` takes it off.
   See [queue.md](queue.md).
@@ -31,7 +32,9 @@ Its first line is the short answer: whether offloading is worth trying, what roo
   It may resume when the owner switches back; `box job <id>` reattaches.
 - **PC unreachable in `box app` or the browser.** The PC may be asleep, off, or its distro stopped.
   See [ui.md](ui.md#when-the-pc-cant-be-reached).
-- **A test result looks wrong.** Boxes run commands as root and share only `/cache` between runs.
+- **A test result looks wrong.** Boxes run commands as root.
+  A reused repo box keeps its checkout and caches between runs; across boxes, only `/cache`
+  is persistence shared between them.
   The root [README](../README.md#using-box) covers the root-user case and box lifetime.
 
 For a change to `box`, provisioning or the tray, use the live smoke test in [testing.md](testing.md#live-smoke-test-on-the-real-pc) before it merges.
