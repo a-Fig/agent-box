@@ -179,8 +179,8 @@ func (m *Manager) storeChosen(ctx context.Context) error {
 // StorePending is for an enforcer that is about to exit (the tray's Quit). It
 // cancels a tick in flight, waits for it to end, then stores the latest pick
 // not yet in the project, so the enforcer that takes over applies it rather
-// than an older one (#204). ctx bounds it all. It reports whether a pick was
-// waiting; with none, it returns at once.
+// than an older one (#204). A failed write is retried until ctx ends. It
+// reports whether a pick was waiting; with none, it returns at once.
 func (m *Manager) StorePending(ctx context.Context) (bool, error) {
 	if !m.Handshake {
 		return false, nil
@@ -204,7 +204,19 @@ func (m *Manager) StorePending(ctx context.Context) (bool, error) {
 	if !dirty {
 		return false, nil
 	}
-	return true, m.storeChosen(ctx)
+	// Incus may still be starting (Quit right after Release memory): keep
+	// trying until ctx ends, not just once.
+	for {
+		err := m.storeChosen(ctx)
+		if err == nil || ctx.Err() != nil {
+			return true, err
+		}
+		select {
+		case <-ctx.Done():
+			return true, err
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // clearRequest empties the request key, but only if it still holds raw: a

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -205,5 +206,36 @@ func TestQuitWithNothingPendingExitsAtOnce(t *testing.T) {
 	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
 	if d := time.Since(start); d > time.Second || inc.calls != 0 {
 		t.Fatalf("took %s with %d Incus calls, want at once with none", d, inc.calls)
+	}
+}
+
+// failIncus fails its first n project writes, as Incus does while the distro boots.
+type failIncus struct {
+	recIncus
+	n int
+}
+
+func (f *failIncus) SetProjectConfig(ctx context.Context, k, v string) error {
+	f.mu.Lock()
+	if f.n > 0 {
+		f.n--
+		f.mu.Unlock()
+		return errors.New("incus is starting")
+	}
+	f.mu.Unlock()
+	return f.recIncus.SetProjectConfig(ctx, k, v)
+}
+
+// Quit right after a release, while Incus is still coming up: the pick is
+// retried until it is stored, within Quit's limit.
+func TestQuitRetriesThePickWhileIncusStarts(t *testing.T) {
+	inc := &failIncus{n: 2}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	mgr.SetChosen(mode.MyPC)
+	var releases sync.WaitGroup
+	beforeQuit(&releases, mgr, 10*time.Second, t.Logf)
+	if inc.count(mode.ProjectChosenKey+`={"mode":"`+string(mode.MyPC)+`"`) != 1 {
+		t.Fatalf("writes %q, want my-pc stored once", inc.snapshot())
 	}
 }

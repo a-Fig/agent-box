@@ -88,11 +88,11 @@ func runHidden(ctx context.Context, exe string, args ...string) (string, error) 
 }
 
 // takeMutex creates the named mutex and reports false only if another process already holds it.
-// Any other failure lets this process go on, as before. After an update it waits up to 20 s for
-// the process it replaces to let go.
+// Any other failure lets this process go on, as before. After an update it waits for the process
+// it replaces to let go: up to quitTimeout, which that process may spend on Quit, and 20 s more.
 func takeMutex(name string) bool {
 	wait := slices.Contains(os.Args[1:], afterUpdate)
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(quitTimeout + 20*time.Second)
 	for {
 		h, err := createMutex(name) // held for the life of the process
 		held := errors.Is(err, windows.ERROR_ALREADY_EXISTS) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
