@@ -24,7 +24,10 @@ One server, one page, three ways in.
   - `box ui` (laptop) opens the page in the browser.
   - `box app` (laptop) opens it in a window of its own, through
     [glaze](https://github.com/crgimenes/glaze), as `mur app` does (see Murmur's
-    `docs/design/desktop.md`).
+    `docs/design/desktop.md`). On Windows it also keeps an `agent-box` shortcut in the Start
+    menu, which carries the AppUserModelID `dev.afig.agentbox` that the window's process takes,
+    so the window's taskbar button pins as the shortcut and starts `box app` again
+    (`internal/desktop/launcher_windows.go`, ported from Murmur's).
   - The tray on the PC gets an **Open dashboard** item, which opens the same window (not built, 2026-11-25).
   - Any browser on the tailnet, a phone included.
 

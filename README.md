@@ -70,7 +70,7 @@ box new scratch --ttl 2h --size small # launch a box (sets user.expires and its 
 box ls                                # boxes, status, expiry
 box rm scratch
 box ui                                # the PC's dashboard in the browser
-box app                               # the dashboard in a window of its own (Windows)
+box app                               # the dashboard in a window of its own (Windows; pinnable)
 box --version                         # the release and commit this box was built from
 box update                            # update box now (box mcp checks hourly); --rollback swaps back
 ```
