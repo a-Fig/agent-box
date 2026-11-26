@@ -740,6 +740,9 @@ code {
 .versions-drift {
   color: var(--warning-foreground);
 }
+.versions-note {
+  color: var(--sidebar-muted-foreground);
+}
 .conn {
   display: flex;
   align-items: center;
@@ -1168,7 +1171,21 @@ code {
 .hbar:focus-visible {
   outline-offset: 2px;
 }
-/* A chart mark's tooltip (tip.js), placed through the CSSOM. */
+/* A word with a hint (tip.js): dotted underneath, so it reads as one that explains itself. A
+   badge, a dot and its label, or a block of lines shows it by the cursor alone. */
+.hint {
+  cursor: help;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 3px;
+}
+.badge.hint,
+.conn.hint,
+.side-machine.hint,
+.versions.hint,
+.queue-pos.hint {
+  text-decoration: none;
+}
+/* A chart mark's or a hint's tooltip (tip.js), placed through the CSSOM. */
 .tip {
   position: fixed;
   z-index: 70;

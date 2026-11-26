@@ -737,13 +737,22 @@ func buildFull(w *world) {
 	w.queued(orbit, 0, "fix/sync-retry", dash.RefusedFull, 2*time.Minute+40*time.Second)
 }
 
+// versions puts boxd on release newer and the enforcer on release older, a build behind. They
+// have differed for behind: boxd started then, with the enforcer already on older.
+func (w *world) versions(newer, older string, behind time.Duration) (*dash.Version, *dash.Version) {
+	built := w.machine.Boxd.Time.Add(-3 * time.Hour)
+	since := w.now.Add(-behind) // boxd's start; the tray's key held its value already, so the same
+	b := &dash.Version{Commit: w.machine.Boxd.Commit, Time: w.machine.Boxd.Time, Tag: newer, Since: &since}
+	t := &dash.Version{Commit: "1378501c4d2e8f7a6b5c4d3e2f1a0b9c8d7e6f5a", Time: &built, Tag: older, Since: &since}
+	return b, t
+}
+
 func buildTrayDown(w *world) {
 	seen := w.now.Add(-14 * time.Minute)
 	w.machine.TrayLastSeen = &seen
 	w.machine.ModeRequested = &dash.ModeRequest{Mode: dash.ModeMyPC, At: w.now.Add(-5 * time.Minute), By: "phone"}
-	// The tray is a build behind boxd, so the page shows its drift note.
-	trayBuilt := w.machine.Boxd.Time.Add(-3 * time.Hour)
-	w.machine.Tray = &dash.Version{Commit: "1378501c4d2e8f7a6b5c4d3e2f1a0b9c8d7e6f5a", Time: &trayBuilt}
+	// boxd has run a newer release for 3h and the tray hasn't updated to it, so the page warns.
+	w.machine.Boxd, w.machine.Tray = w.versions("v0.3.0", "v0.2.0", 3*time.Hour)
 	tb := w.box("tidepool", "medium", tidepool, dash.BoxRunning, false, 90*time.Minute, 23*time.Hour+30*time.Minute)
 	w.load(tb, 0.49, 0.45)
 	w.running(tb, tidepool, 0, "fix/hydration-flash", 2*time.Minute+5*time.Second, dash.JobRunning)
@@ -753,6 +762,8 @@ func buildTrayDown(w *world) {
 
 func buildHeadless(w *world) {
 	w.machine.Mode = dash.ModeFull
+	// boxd updated 20 minutes ago; the enforcer's hourly check hasn't come round yet.
+	w.machine.Boxd, w.machine.Tray = w.versions("v0.3.1", "v0.3.0", 20*time.Minute)
 	w.machine.Enforcer = dash.EnforcerHeadless
 	w.machine.ModeRequested = &dash.ModeRequest{Mode: dash.ModeShared, At: w.now.Add(-7 * time.Minute), By: "phone"}
 	lb := w.box("lantern", "large", lantern, dash.BoxRunning, false, 35*time.Minute, 23*time.Hour+40*time.Minute)
