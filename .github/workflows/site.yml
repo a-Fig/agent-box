@@ -1,11 +1,8 @@
+# Manual deploy only while Project Fano is not yet published publicly.
+# Add a push-to-main trigger when fano.afig.dev is ready to go live.
 name: site
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "site/**"
-      - ".github/workflows/site.yml"
   workflow_dispatch:
 
 permissions:
