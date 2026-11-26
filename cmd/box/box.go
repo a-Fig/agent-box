@@ -1025,13 +1025,35 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		// The tray stops GPU boxes in My PC, and another run may then
 		// delete one. Only then does the job surely not run: a frozen box's
 		// job may resume, so it keeps its job ID below.
-		if sz.GPU {
-			if insts, lerr := a.list(ctx); lerr == nil {
-				if in := find(insts, box); in == nil || in.Status == "Stopped" {
-					fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
-					r.State, r.Code = statePaused, exitPaused
-					return r, nil
+		if insts, lerr := a.list(ctx); lerr == nil {
+			if in := find(insts, box); in != nil && in.Status == "Frozen" {
+				if strings.Contains(err.Error(), "Instance is frozen") {
+					// Incus refused the exec, so the start script never ran
+					// and there is no job to resume: refuse (or queue) it
+					// like a box that was already frozen before the run.
+					_, paused := a.check(ctx, box)
+					if paused == "" {
+						paused = box + " is paused"
+					}
+					// No job started, so a throwaway has nothing to keep
+					// it for: let the launch defer remove it, rather than
+					// leaving it holding a slot and its 24h job expiry.
+					started = false
+					return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
 				}
+				// Any other failure may have happened after the script
+				// started the job, so keep the job ID: it may resume.
+				if sz.GPU {
+					fmt.Fprintln(a.Err, pausedGPU(job))
+				} else {
+					fmt.Fprintln(a.Err, pausedMidRun(job))
+				}
+				r.State, r.Code = statePaused, exitPaused
+				return r, nil
+			} else if sz.GPU && (in == nil || in.Status == "Stopped") {
+				fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
+				r.State, r.Code = statePaused, exitPaused
+				return r, nil
 			}
 		}
 		if o.New {
