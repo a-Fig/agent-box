@@ -37,8 +37,7 @@ checks gain little from offloading.
 - **Modes (shared Windows PCs):** `Full` (full CPUs, 24 GiB cap), `Shared` (half CPUs, 12 GiB cap), `My PC` (boxes paused
   for up to 15 min, or 4 hours once reclaimed to swap; GPU boxes are stopped). Dedicated Linux hosts size CPU/memory caps from the host machine instead.
 - **Exit 75 (`state: refused`):** nothing started (host paused, busy without queue, or unreachable).
-  Retry later, pick a smaller `size`, or run locally if needed. A `done` job with exit 75 is the
-  command's own exit code.
+  Retry later or pick a smaller `size`. A `done` job with exit 75 is the command's own exit code.
 - **Disposable compute:** idle boxes expire after 2 hours; `--new` throwaways stay 30 minutes
   after exit for `box_pull` (unless another run needs room). Only `/cache` survives.
 - **Never put secrets in `env`:** boxes are shared and `box` refuses names matching `TOKEN`,

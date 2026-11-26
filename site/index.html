@@ -884,11 +884,11 @@ h1 span { color: var(--peri); }
       <div class="arch-grid">
         <div class="arch-card">
           <h3>Unprivileged Incus boxes</h3>
-          <p>Runs under <code>restricted=true</code> as a non-root container user with hard CPU, memory, and disk caps (24 CPUs / 10 boxes on Windows PCs; sized from hardware on Linux servers).</p>
+          <p>Runs under <code>restricted=true</code> in unprivileged containers (box root maps to an unprivileged host UID) with hard CPU, memory, and disk caps (24 CPUs / 10 boxes on Windows PCs; sized from hardware on Linux servers).</p>
         </div>
         <div class="arch-card">
-          <h3>Private network only</h3>
-          <p>Control traffic runs over Incus HTTPS TLS client certificates (and <code>tailscale serve</code> on a tailnet). <code>boxd</code> binds only to <code>127.0.0.1:7766</code>.</p>
+          <h3>Client-certificate access only</h3>
+          <p>Incus listens on <code>:8443</code> guarded by restricted TLS client certificates (plus <code>tailscale serve</code> on a tailnet). <code>boxd</code> binds only to <code>127.0.0.1:7766</code>.</p>
         </div>
         <div class="arch-card">
           <h3>No git branch churn</h3>
@@ -1036,8 +1036,8 @@ h1 span { color: var(--peri); }
           <p><code>/cache</code> volumes hold Go build and module caches, Gradle caches, npm packages, and uv wheels on the host across runs, cutting cold Android tests from <code>6m 18s</code> to <code>1m 05s</code>.</p>
         </details>
         <details class="faq-item">
-          <summary>How big can a bundle or queue get?</summary>
-          <p><code>boxd</code> persists bundles up to <code>2 GiB</code> per job in fair-share FIFO order by session and expires unstarted queued jobs after 24 hours. Repo boxes live for 2 hours idle; throwaway <code>--new</code> boxes stay alive up to 30 minutes after exit for <code>box_pull</code>.</p>
+          <summary>How big can the queue get?</summary>
+          <p><code>boxd</code> stores up to <code>2 GiB</code> of queued bundles in all in fair-share FIFO order by session and expires unstarted queued jobs after 24 hours. Repo boxes live for 2 hours idle; throwaway <code>--new</code> boxes stay alive up to 30 minutes after exit for <code>box_pull</code>.</p>
         </details>
         <details class="faq-item">
           <summary>Which agent harnesses work without polling?</summary>
@@ -1100,7 +1100,7 @@ h1 span { color: var(--peri); }
     full: {
       dot: 'rig-dot',
       title: 'Gaming PC · Full',
-      msg: 'Uncapped Windows PC host budget: boxes receive their full CPU limits and GPU access.',
+      msg: 'Full host budget: boxes receive their full CPU limits (GPU boxes run in Shared too).',
       cpu: '24 max', cpuW: '100%', cpuC: '#2BD06A',
       mem: '24 GiB', memW: '100%', memC: '#2BD06A',
       gpu: 'Ready', gpuW: '100%', gpuC: '#2BD06A',
@@ -1116,10 +1116,10 @@ h1 span { color: var(--peri); }
     mypc: {
       dot: 'rig-dot mypc',
       title: 'Gaming PC · My PC',
-      msg: 'boxtray freezes CPU boxes via cgroups (3.1 GB reclaimed in 35 s); GPU boxes stop right away and new jobs queue.',
+      msg: 'boxtray freezes CPU boxes via cgroups (3.1 GB reclaimed in 35 s); GPU boxes stop right away and new CPU jobs queue.',
       cpu: 'Paused', cpuW: '0%', cpuC: '#F59E0B',
-      mem: '3.1 GB free', memW: '22%', memC: '#F59E0B',
-      gpu: 'Yours', gpuW: '0%', gpuC: '#F59E0B',
+      mem: '3.1 GB reclaimed', memW: '22%', memC: '#F59E0B',
+      gpu: 'Stopped', gpuW: '0%', gpuC: '#F59E0B',
     },
   };
   const BENCHES = {
@@ -1165,25 +1165,28 @@ h1 span { color: var(--peri); }
 
   // ---------- 2. Copy feedback + screen-reader live announcement ----------
   const copyLive = document.getElementById('copyLive');
-  const copyFeedback = (btn, orig, msg) => {
-    btn.textContent = 'Copied';
-    btn.classList.add('copied');
-    if (copyLive) copyLive.textContent = msg;
+  const writeCopy = async (btn, orig, text, okMsg) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      if (copyLive) copyLive.textContent = okMsg;
+    } catch {
+      btn.textContent = 'Copy unavailable';
+      if (copyLive) copyLive.textContent = 'Clipboard permission blocked; copy text manually.';
+    }
     setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
   };
   document.querySelectorAll('[data-copy]').forEach(btn => {
     const orig = btn.textContent;
-    btn.addEventListener('click', () => {
-      navigator.clipboard?.writeText(btn.dataset.copy).catch(() => {});
-      copyFeedback(btn, orig, 'Setup prompt copied to clipboard.');
-    });
+    btn.addEventListener('click', () => writeCopy(btn, orig, btn.dataset.copy, 'Setup prompt copied to clipboard.'));
   });
   document.querySelectorAll('[data-copy-target]').forEach(btn => {
     const orig = btn.textContent;
     btn.addEventListener('click', () => {
       const target = document.getElementById(btn.dataset.copyTarget);
-      if (target) navigator.clipboard?.writeText(target.textContent).catch(() => {});
-      copyFeedback(btn, orig, 'Command copied to clipboard.');
+      if (target) writeCopy(btn, orig, target.textContent, 'Command copied to clipboard.');
     });
   });
 

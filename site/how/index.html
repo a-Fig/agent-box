@@ -315,12 +315,12 @@ body {
           <div class="note" data-note="cache" aria-hidden="true">
             <span class="kicker">02 · Incus + /cache</span>
             <h2>Isolated box, warm build cache</h2>
-            <p>Each repo reuses its own non-root <code>Incus</code> box for up to <code>2 h</code> idle (or pass <code>new: true</code> for a <code>30 min</code> throwaway) with shared <code>/cache</code> volumes for Go, Gradle, npm, and uv.</p>
+            <p>Each repo reuses its own unprivileged <code>Incus</code> box for up to <code>2 h</code> idle (or pass <code>new: true</code> for a <code>30 min</code> throwaway) with shared <code>/cache</code> volumes for Go, Gradle, npm, and uv.</p>
           </div>
           <div class="note" data-note="queue" aria-hidden="true">
             <span class="kicker">03 · Fair-share queue</span>
             <h2>Queues safely when the host is full</h2>
-            <p>When slots fill up, a <code>--gpu</code> job holds the GPU, or your PC is in <code>My PC</code> mode, <code>boxd</code> stores bundles (up to <code>2 GiB</code>) in fair-share FIFO order and expires waiting jobs after <code>24 h</code>.</p>
+            <p>When slots fill up or a <code>--gpu</code> job holds the GPU, <code>boxd</code> stores up to <code>2 GiB</code> of queued bundles in all in fair-share FIFO order and expires waiting jobs after <code>24 h</code> (GPU jobs during <code>My PC</code> exit 75 instead).</p>
           </div>
           <div class="note" data-note="reclaim" aria-hidden="true">
             <span class="kicker">04 · Shared PC mode</span>
@@ -372,7 +372,7 @@ body {
       <section class="ch" data-id="queue">
         <div class="ch-fallback">
           <h2>03 · Crash-safe fair-share queue</h2>
-          <p>If capacity is full or an exclusive <code>--gpu</code> box is busy, <code>boxd</code> persists bundles up to <code>2 GiB</code> and dispatches fair-share FIFO by session.</p>
+          <p>If capacity is full or an exclusive <code>--gpu</code> box is busy, <code>boxd</code> persists up to <code>2 GiB</code> of queued bundles in all and dispatches fair-share FIFO by session.</p>
         </div>
       </section>
       <section class="ch" data-id="reclaim">
@@ -577,7 +577,7 @@ body {
           flowOut.setAttribute('stroke-dasharray', '1 1');
           midTitle.textContent = 'Repo Box (2 h TTL)';
           midLine1.textContent = 'box-lantern running';
-          midLine2.textContent = 'non-root Incus UID';
+          midLine2.textContent = 'unprivileged container';
           midFill.setAttribute('width', '178');
           boxLine1.textContent = '$ go test -race ./internal/daemon';
           boxLine2.textContent = 'cache hit: GOMODCACHE + GOCACHE';
@@ -590,7 +590,7 @@ body {
         } else if (ch === 3) {
           const p = ss(f);
           midTitle.textContent = 'Queue Scheduler';
-          midLine1.textContent = 'bundle cap: 2 GiB';
+          midLine1.textContent = 'total queue cap: 2 GiB';
           midLine2.textContent = 'fair-share FIFO by session';
           midFill.setAttribute('width', String(Math.round(115 + 63 * p)));
           modeTag.textContent = 'GPU busy';
