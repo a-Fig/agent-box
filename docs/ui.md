@@ -48,7 +48,8 @@ Incus's own UI stays on port 8443, for raw admin.
 
 `boxd` lives in the distro, so it is gone whenever the PC is off or asleep, or WSL has stopped. The
 tray's **Release memory** stops it until the enforcer starts it again, within a minute or so: it terminates the distro, and once the distro runs
-again the tray drops the page cache once (about 1GiB freed on 2026-11-25), leaving about 2GiB in
+again the tray drops the page cache once (about 1GiB freed on 2026-11-25; best effort, only
+while the tray stays open — quitting first discards it), leaving about 2GiB in
 `vmmemWSL` while the distro runs. The cache belongs to the shared WSL VM, so that drop is
 VM-wide: any other running distro loses its cached pages too (re-reads, not data). The page then shows a clear "PC unreachable" screen
 naming the likely reason (asleep, or memory released from the tray) and retries every 10s. A
@@ -141,8 +142,9 @@ The same set everywhere, since everywhere is the same page.
   boxes or running commands. Agents run work; the page watches and steers.
 - **Release memory stays tray-only**, because it stops `boxd` itself, briefly. It terminates the distro
   only (not the WSL VM); after the distro restarts, the tray drops the shared VM's page cache
-  once (every distro in the VM loses its cached pages), freeing about 1GiB, with about 2GiB
-  staying while the distro runs (see When the PC can't be reached).
+  once if it is still open (quitting first discards the pending drop; every distro in the VM loses
+  its cached pages), freeing about 1GiB, with about 2GiB staying while the distro runs (see When
+  the PC can't be reached).
 
 ### The mode handshake
 

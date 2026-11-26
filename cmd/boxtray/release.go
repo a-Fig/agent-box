@@ -26,6 +26,12 @@ const dropCachesScript = `sync && echo 1 > /proc/sys/vm/drop_caches && echo 1 > 
 // failure is logged, not retried: the cache costs memory until reclaim,
 // not correctness.
 //
+// Best effort, tray-open only: the arm lives only in this tray process,
+// so the tray must stay open until the distro returns. Quitting (or any
+// tray exit) before then discards a pending drop, and the headless
+// enforcer that brings the distro back has no drop of its own. Nothing
+// is persisted, by design: the cache is a cost, not correctness.
+//
 // The drop calls wsl.exe, so it coordinates with Release memory like the
 // background reclaim work does: observe starts nothing while a release
 // runs (busy), and stop cancels an in-flight drop and waits for it, so
