@@ -185,6 +185,32 @@ func TestDeleteGuardFrozenExecRefusedFailsClosed(t *testing.T) {
 	}
 }
 
+// A box in a transient or unknown state cannot be probed, so it is never
+// deleted warningless: the retryable error, and no delete. A Stopped box
+// starts no jobs, so it alone deletes without a probe.
+func TestDeleteGuardUnknownStatusFailsClosed(t *testing.T) {
+	created := t0.Add(-time.Hour)
+	r := newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Created", "small", created)} })
+	r.poll()
+	code, b := r.post("/api/boxes/w/delete", deleteBody(created, false))
+	if code != 502 || !strings.Contains(string(b), dash.CodeIncus) || strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("unknown status, unconfirmed: %d %s", code, b)
+	}
+	for _, c := range r.f.cli {
+		if c == "delete w --force" {
+			t.Fatalf("the box was deleted in an unknown state: %v", r.f.cli)
+		}
+	}
+
+	r = newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Stopped", "small", created)} })
+	r.poll()
+	if code, b := r.post("/api/boxes/w/delete", deleteBody(created, false)); code != 204 {
+		t.Fatalf("stopped, unconfirmed: %d %s", code, b)
+	}
+}
+
 // A direct box run can start after boxd's last poll: neither live nor the
 // history knows it yet. An unconfirmed delete must probe the running box
 // fresh, refuse, and delete nothing (#251 review).

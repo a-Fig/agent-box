@@ -442,7 +442,9 @@ func (w *Watcher) classifyScan(in Instance, jobs []scanned) dash.DeleteWarning {
 // (classifyScan); it changes no job state. Running boxes go through
 // scanAll, which drops a scan whose box was replaced while it was read.
 // A Frozen box's processes are paused, so it is read with a short exec
-// directly; failing that, its state is unknown. Any failure is errProbe.
+// directly; failing that, its state is unknown. A Stopped box starts no
+// jobs and needs no probe. Any other status is transient or unknown, so
+// it is errProbe too: never a warningless delete.
 func (w *Watcher) probeDelete(ctx context.Context, in Instance) (dash.DeleteWarning, error) {
 	switch in.Status {
 	case "Running":
@@ -464,8 +466,10 @@ func (w *Watcher) probeDelete(ctx context.Context, in Instance) (dash.DeleteWarn
 			return dash.DeleteWarning{}, errProbe
 		}
 		return w.classifyScan(in, parseScan(out, skip)), nil
+	case "Stopped":
+		return dash.DeleteWarning{}, nil
 	}
-	return dash.DeleteWarning{}, nil
+	return dash.DeleteWarning{}, errProbe
 }
 
 func mergeWarning(warn *dash.DeleteWarning, more dash.DeleteWarning) {
@@ -505,9 +509,9 @@ func mergeWarning(warn *dash.DeleteWarning, more dash.DeleteWarning) {
 // and no warning to confirm past.
 //
 // What the guard can guarantee is still bounded by #217: Incus deletes by
-// name with no conditional delete, so the remaining window is the delete
-// call itself — a box replaced, or a job starting, in that gap is not
-// covered.
+// name with no conditional delete. A job or a replacement can arrive after
+// the last check and before or during the delete call; that arrival is
+// not covered.
 func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Time, confirmed bool, by string) error {
 	b, err := w.boxFor(name, createdAt)
 	if err != nil {
