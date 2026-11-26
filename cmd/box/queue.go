@@ -435,31 +435,34 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// CancelAny cancels a job wherever it is, for box_cancel and box cancel:
-// waiting in boxd's queue (removed, it never ran), or running in its box. A
-// job queued from elsewhere has no record here, so when its box can't stop
-// it, boxd's queue is asked too (#100); a job that isn't waiting there keeps
-// the box's error.
+// CancelAny cancels a job in the selected host's queue or box. A qualified ID
+// can come from another client, so its queue is checked without a local record.
+// Legacy IDs without a queue marker still try the default host's box first.
 func (a *App) CancelAny(ctx context.Context, job string) (removed, cancelled bool, code int, err error) {
-	if a.wasQueued(job) {
-		removed, err = a.cancelQueuedOrStarted(ctx, job)
+	lookup, err := a.lookupJob(job)
+	if err != nil {
+		return false, false, 0, err
+	}
+	target, id := lookup.app, lookup.id
+	if id.hostTag != "" || target.wasQueued(id.ID) {
+		removed, err = target.cancelQueuedOrStarted(ctx, id.Bare)
 		if err != nil {
-			return false, false, 0, fmt.Errorf("cancel %s: %w", job, err)
+			return false, false, 0, fmt.Errorf("cancel %s: %w", id.ID, err)
 		}
 	}
 	if !removed {
-		cancelled, code, err = a.Cancel(ctx, job)
-		if err != nil && a.cancelQueued(ctx, job) == nil {
+		cancelled, code, err = target.cancelJob(ctx, id)
+		if err != nil && target.cancelQueued(ctx, id.Bare) == nil {
 			removed, err = true, nil
 		}
 	}
 	if removed {
-		a.markNotified(job, "cancel")
+		target.markNotified(id.ID, "cancel")
 	}
 	return removed, cancelled, code, err
 }
 
-// cancelQueuedOrStarted cancels a job this laptop queued. A job boxd is
+// cancelQueuedOrStarted tries to remove a job from the queue. A job boxd is
 // starting right now can't be taken off the queue, nor stopped in its box
 // yet, so it waits for the start, up to a minute, then stops it there.
 // removed is false when the job wasn't boxd's to cancel; the caller then
