@@ -117,6 +117,7 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	given := fs.String("url", "", "the dashboard's address (default: https://<host>/ of the remote)")
 	wait := fs.Bool("wait", false, "stay until the window closes")
 	devtools := fs.Bool("devtools", false, "let the window open the web view's developer tools")
+	fromLauncher := fs.Bool("from-launcher", false, "started from the window's Start menu shortcut, with no terminal to tell")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -142,6 +143,9 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	if !*fromLauncher {
+		putLauncher(a, exe)
+	}
 	logPath, err := appLog()
 	if err != nil {
 		return fail(err)
@@ -160,6 +164,9 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	if *fromLauncher {
+		return 0 // nobody is at a terminal to be told it opened
+	}
 	select {
 	case err := <-exited:
 		if err == nil { // closed by the person, quickly
@@ -171,6 +178,23 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	}
 	fmt.Fprintln(a.Out, "Opened", page)
 	return 0
+}
+
+// putLauncher puts the window's launcher in place for this box (on Windows, a Start menu shortcut
+// whose taskbar button can be pinned), or moves it here if box has moved, and says so when it did.
+// Failing to is no reason not to open the window.
+func putLauncher(a *App, exe string) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	where, changed, err := desktop.InstallLauncher(exe, filepath.Join(dir, "agent-box"))
+	switch {
+	case err != nil:
+		fmt.Fprintln(a.Err, "box: couldn't add the window's Start menu shortcut:", err)
+	case changed:
+		fmt.Fprintln(a.Out, "Added agent-box to the Start menu; the window pinned to the taskbar starts from it:", where)
+	}
 }
 
 // appLogMax is the size at which the window's log starts over, keeping a copy of what it held.
