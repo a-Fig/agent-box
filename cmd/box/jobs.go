@@ -337,10 +337,15 @@ func isWindowsPath(p string) bool {
 		p[1] == ':' && (p[2] == '/' || p[2] == '\\')
 }
 
-func (a *App) checkStoppedOwner(ctx context.Context, box, job, repo string) error {
+func (a *App) checkFileOwner(ctx context.Context, box, job, repo string) error {
 	cur, err := a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+repo+".checkout", "-")
 	if err != nil {
-		return nil // older box without .checkout, or unreadable
+		switch err.Error() {
+		case "incus file: Error: file does not exist", "incus file: Error: not found":
+			return nil // older boxes have no .checkout file
+		default:
+			return fmt.Errorf("read checkout owner for %s: %w", job, err)
+		}
 	}
 	if cur = strings.TrimSpace(cur); cur != "" && cur != job {
 		return fmt.Errorf("job %s's checkout %s/%s was replaced by job %s; pull right after a job, or run with --new (new: true)", job, workRoot, repo, cur)
@@ -352,8 +357,8 @@ func (a *App) checkStoppedOwner(ctx context.Context, box, job, repo string) erro
 // checkout. owned is true when repo matches job's checkout (so callers recheck
 // it after transferring files into staging).
 func (a *App) checkCheckoutOwner(ctx context.Context, box, job, repo string) (owned bool, err error) {
-	out, stopped, err := a.execCheckoutScript(ctx, box, checkoutOwnerScript(job, repo))
-	if err != nil && stopped {
+	out, filesOnly, err := a.execCheckoutScript(ctx, box, checkoutOwnerScript(job, repo))
+	if err != nil && filesOnly {
 		jobRepo, rerr := a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+job+".repo", "-")
 		if rerr != nil {
 			return false, rerr
@@ -361,7 +366,7 @@ func (a *App) checkCheckoutOwner(ctx context.Context, box, job, repo string) (ow
 		if strings.TrimSpace(jobRepo) != repo {
 			return false, nil
 		}
-		return true, a.checkStoppedOwner(ctx, box, job, repo)
+		return true, a.checkFileOwner(ctx, box, job, repo)
 	}
 	if err != nil {
 		return false, err
@@ -374,7 +379,7 @@ func inCheckout(cleaned, base string) bool {
 	return cleaned == base || strings.HasPrefix(cleaned, base+"/")
 }
 
-func (a *App) execCheckoutScript(ctx context.Context, box, script string) (stdout string, stopped bool, err error) {
+func (a *App) execCheckoutScript(ctx context.Context, box, script string) (stdout string, filesOnly bool, err error) {
 	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", script}})
 	if err != nil {
 		return "", false, err
@@ -390,7 +395,8 @@ func (a *App) execCheckoutScript(ctx context.Context, box, script string) (stdou
 		return "", false, errors.New(msg)
 	default:
 		msg := strings.TrimSpace(res.Stderr)
-		return "", strings.Contains(msg, "Instance is not running"), fmt.Errorf("incus exec: %s", msg)
+		filesOnly := strings.Contains(msg, "Instance is not running") || strings.Contains(msg, "Instance is frozen")
+		return "", filesOnly, fmt.Errorf("incus exec: %s", msg)
 	}
 }
 
@@ -441,17 +447,17 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	}
 	var checkedRepo string
 	if !path.IsAbs(remote) {
-		base, stopped, err := a.execCheckoutScript(ctx, box, checkoutScript(job))
-		if err != nil && job != "" && stopped {
-			// A GPU box My PC stopped is kept for its files, and file pull
-			// reads a stopped box: the job's .repo names its checkout (#117).
+		base, filesOnly, err := a.execCheckoutScript(ctx, box, checkoutScript(job))
+		if err != nil && job != "" && filesOnly {
+			// Use the job files directly when a frozen or stopped box
+			// cannot execute the checkout script.
 			var repo string
 			repo, err = a.incusOK(ctx, "file", "pull", a.target(box)+workRoot+"/.box/"+job+".repo", "-")
 			if repo = strings.TrimSpace(repo); err == nil && (repo == "" || strings.ContainsAny(repo, "/\x00\n") || repo == "." || repo == "..") {
 				err = fmt.Errorf("job %s names no checkout; give an absolute path", job)
 			}
 			if err == nil {
-				err = a.checkStoppedOwner(ctx, box, job, repo)
+				err = a.checkFileOwner(ctx, box, job, repo)
 			}
 			base = workRoot + "/" + repo
 		}

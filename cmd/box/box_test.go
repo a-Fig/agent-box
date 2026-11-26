@@ -58,6 +58,7 @@ type fakePC struct {
 	stillRunning bool              // with stopFor: incus still lists the box Running
 	remotes      string            // output of incus remote list --format json
 	files        map[string]string // content of each pushed file, by its target
+	fileReadErr  map[string]string // incus errors when reading individual files
 	cancelled    bool              // the .cancelled probe finds the mark
 	followErr    int               // this many follows fail with a transport error
 	kept         map[string]bool   // boxes the kept-jobs check finds kept
@@ -180,6 +181,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 	case "file":
 		if args[1] == "pull" && args[3] == "-" { // one file to stdout
 			f.pulls = append(f.pulls, args[2])
+			if msg := f.fileReadErr[args[2]]; msg != "" {
+				return Result{Code: 1, Stderr: msg}, nil
+			}
 			if s, ok := f.files[args[2]]; ok {
 				return Result{Stdout: s}, nil
 			}
@@ -218,6 +222,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{Stderr: `Error: Failed to fetch instance "x" in project "agents": Instance not found`, Code: 1}, nil
 		}
 		for _, in := range f.insts {
+			if "pc:"+in.Name == args[1] && in.Status == "Frozen" && isScript(c, "# checkout") {
+				return Result{Stderr: "Error: Instance is frozen", Code: 1}, nil
+			}
 			if "pc:"+in.Name == args[1] && in.Status == "Stopped" {
 				if c.Stderr != nil { // incus streams it there, as the real runner does
 					io.WriteString(c.Stderr, "Error: Instance is not running\n")

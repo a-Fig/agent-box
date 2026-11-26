@@ -330,6 +330,34 @@ func TestPullFromStoppedBox(t *testing.T) {
 	}
 }
 
+func TestPullFromFrozenBoxUsesFileOwnership(t *testing.T) {
+	const box = "my-repo-725d"
+	const job = box + ".20261123-120000-0001"
+	const prefix = "pc:" + box + "/work/.box/"
+	const owner = prefix + "my-repo.checkout"
+	f := &fakePC{
+		t: t, insts: []instance{{Name: box, Status: "Frozen"}},
+		files: map[string]string{prefix + job + ".repo": "my-repo\n", owner: job + "\n"},
+	}
+	f.pull = func(_, dest string) { write(t, filepath.Join(dest, "result.txt"), "done\n") }
+	a, _ := testApp(f)
+	ctx := context.Background()
+	if _, err := a.Pull(ctx, job, "/work/my-repo/result.txt", t.TempDir()); err != nil {
+		t.Fatalf("pull from frozen checkout: %v", err)
+	}
+	f.pull = func(_, staging string) {
+		write(t, filepath.Join(staging, "result.txt"), "unverified\n")
+		f.fileReadErr = map[string]string{owner: "Error: connection closed"}
+	}
+	local := t.TempDir()
+	if _, err := a.Pull(ctx, job, "result.txt", local); err == nil || !strings.Contains(err.Error(), "read checkout owner") {
+		t.Fatalf("pull after ownership read failed = %v", err)
+	}
+	if entries, err := os.ReadDir(local); err != nil || len(entries) != 0 {
+		t.Fatalf("failed pull published files: %v, %v", entries, err)
+	}
+}
+
 func TestPullRejectsWindowsPathsAndNamesRemoteOnError(t *testing.T) {
 	f := &fakePC{t: t, pullErr: "Error: file does not exist"}
 	a, _ := testApp(f)
