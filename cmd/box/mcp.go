@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/a-Fig/agent-box/internal/mask"
 	"io"
-	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
 )
@@ -117,6 +115,7 @@ func sizeEnum() []string {
 var jobOutput = obj(map[string]any{
 	"job":      str("Job ID, for box_job."),
 	"box":      str("Box the job runs in."),
+	"host":     str("Host name for a qualified job ID."),
 	"state":    str("done (exitCode is the command's), running, queued (waiting in the PC's queue), paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
 	"push":     map[string]any{"type": "boolean", "description": "box_run, state running or queued: the result will arrive as a turn in your thread."},
 	"position": map[string]any{"type": "integer", "description": "State queued: place in line, from 1."},
@@ -310,6 +309,9 @@ func pageResult(p Page) map[string]any {
 	if !utf8.ValidString(p.Text) {
 		structured["logBase64"] = base64.StdEncoding.EncodeToString([]byte(p.Text))
 	}
+	if p.Host != "" {
+		structured["host"] = p.Host
+	}
 	res["structuredContent"] = structured
 	return res
 }
@@ -340,7 +342,11 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		head += fmt.Sprintf(", push: %t", *r.Push)
 	}
 	if r.Job != "" {
-		head = fmt.Sprintf("job %s on box %s: %s", r.Job, r.Box, head)
+		location := r.Box
+		if r.Host != "" {
+			location += " on " + r.Host
+		}
+		head = fmt.Sprintf("job %s on box %s: %s", r.Job, location, head)
 	} else if r.Box != "" {
 		head = fmt.Sprintf("box %s: %s", r.Box, head)
 	}
@@ -355,6 +361,7 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	out := struct {
 		Job      string   `json:"job,omitempty"`
 		Box      string   `json:"box,omitempty"`
+		Host     string   `json:"host,omitempty"`
 		State    string   `json:"state,omitempty"`
 		ExitCode *int     `json:"exitCode"` // null while the job is running
 		Push     *bool    `json:"push,omitempty"`
@@ -366,7 +373,7 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		// result has both (#33), so what the agent reads is here too.
 		Tail  string `json:"tail"`
 		Error string `json:"error,omitempty"`
-	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, ""}
+	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, ""}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -555,6 +562,10 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			res["structuredContent"] = map[string]any{"jobs": append([]JobInfo{}, jobs...), "warnings": append([]string{}, warnings...)}
 			return res
 		}
+		lookup, err := a.lookupJob(args.ID)
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
 		if args.Offset != nil || args.Limit != nil {
 			var off, lim int64
 			if args.Offset != nil {
@@ -563,14 +574,14 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			if args.Limit != nil {
 				lim = *args.Limit
 			}
-			pg, err := a.LogPage(ctx, args.ID, off, lim)
+			pg, end, err := lookup.page(ctx, off, lim)
 			if err != nil {
 				// The box can't be read (gone, most likely): its recorded end
 				// is all there is. A bad offset or limit is still an error.
-				if end, ok := a.endedElsewhere(ctx, args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
-					box, _, _ := strings.Cut(args.ID, ".")
+				if end != nil {
+					box := lookup.id.Box
 					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
-					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code, Digest: end.Digest}, nil, end.Tail, warnings)
+					return jobResult(JobResult{Job: lookup.id.ID, Box: box, Host: lookup.host, State: stateDone, Code: end.Code, Digest: end.Digest}, nil, end.Tail, warnings)
 				}
 				return textResult(err.Error(), true)
 			}
@@ -580,13 +591,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		if a.wasQueued(args.ID) { // still waiting: there is nothing in a box to wait on
-			if j, found, err := a.queuedJob(ctx, args.ID); err == nil && found && j.State == dash.JobQueued {
-				return jobResult(JobResult{Job: args.ID, Box: j.Box, State: stateQueued, Position: j.Position, Why: j.Why}, nil, "", warnings)
-			}
+		if j, queued, err := lookup.queued(ctx); err == nil && queued {
+			return jobResult(JobResult{Job: lookup.id.ID, Box: j.Box, Host: lookup.host, State: stateQueued, Position: j.Position, Why: j.Why}, nil, "", warnings)
 		}
-		r, err := a.Job(ctx, args.ID, wait)
-		a.markRead(args.ID, r, err, "box_job")
+		r, err := lookup.job(ctx, wait)
+		a.markRead(lookup.id.ID, r, err, "box_job")
 		return jobResult(r, err, out.String(), warnings)
 	}
 	return textResult("unknown tool "+p.Name, true)

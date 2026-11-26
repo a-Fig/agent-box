@@ -175,6 +175,7 @@ func printJobs(a *App, jobs []JobInfo) error {
 // Page is a piece of a job's log.
 type Page struct {
 	JobInfo
+	Host       string `json:"host,omitempty"`
 	Offset     int64  `json:"offset"`
 	NextOffset int64  `json:"nextOffset"`
 	More       bool   `json:"more"` // the log goes on past this page, or the job is still writing it
@@ -228,7 +229,11 @@ func (a *App) LogPage(ctx context.Context, job string, offset, limit int64) (Pag
 
 // pageHead is the one-line summary of a log page.
 func (p Page) pageHead() string {
-	s := fmt.Sprintf("job %s on box %s: %s, log bytes %d-%d of %d", p.Job, p.Box, p.stateText(), p.Offset, p.NextOffset, p.LogBytes)
+	location := p.Box
+	if p.Host != "" {
+		location += " on " + p.Host
+	}
+	s := fmt.Sprintf("job %s on box %s: %s, log bytes %d-%d of %d", p.Job, location, p.stateText(), p.Offset, p.NextOffset, p.LogBytes)
 	if p.More {
 		s += fmt.Sprintf("; next offset %d", p.NextOffset)
 	}
