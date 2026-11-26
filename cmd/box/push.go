@@ -57,7 +57,14 @@ const (
 	recordKeep = 7 * 24 * time.Hour
 	tempKeep   = time.Hour
 	tailLines  = 20
-	endedKeep  = jobrun.EndedKeep
+	// endedLines is how much of the tail a failure with no digest is pushed with.
+	endedLines = 10
+	// endedLinesAfterDigest is how many of the log's last lines follow a
+	// failure digest; reasonChars is how much of the reason a push's first
+	// line keeps.
+	endedLinesAfterDigest = 3
+	reasonChars           = 80
+	endedKeep             = jobrun.EndedKeep
 )
 
 // Pusher sends a message into a T3 thread as its next turn.
@@ -578,19 +585,80 @@ func (r jobRecord) context() string {
 	return fmt.Sprintf("%s\n%s  in  %s", mask.Mask(r.Reason), mask.Mask(r.Command), r.Worktree)
 }
 
+// endedMessage is the push for a job that ran to an exit code. It is short,
+// because the agent may read the result with box_job too (#182): a clean
+// pass is one line; a test failure is its digest (#57), which names what the
+// agent reads next; any other failure is its last endedLines lines. box_job
+// always has the full result, and the message says so.
 func endedMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s ended, exit %d, after %s. %s\n%s\n", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second), fromBox, r.context())
-	if e.Digest != "" {
-		msg += mask.Mask(e.Digest) + "Output tail:\n"
+	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second))
+	if why := shortReason(r.Reason); why != "" {
+		head += " (" + why + ")" // which run this is, after compaction or among parallel runs
 	}
-	msg += mask.Mask(e.Tail) + "\n"
+	where := fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull, before this repo's next run.", r.Job)
+	if r.New {
+		where = fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull; box and log kept up to %d minutes (a queued job or another launch that needs the room takes them sooner).", r.Job, int(endedKeep.Minutes()))
+	}
+	digest := strings.TrimRight(mask.Mask(e.Digest), "\n")
+	failed := testsFailed(digest)
+	// A passing digest goes on the first line. It never stands alone: a digest
+	// can miss a failure (a report cut short, a second runner with its own
+	// reporters, boxd's copy of the end with none), so the log's last lines
+	// always follow.
+	msg := head + ". " + fromBox + "\n"
+	if e.Code == 0 && !failed && testsPassed(digest) {
+		msg = head + ": " + strings.Join(strings.Split(digest, "\n"), "; ") + ". " + fromBox + "\n"
+	} else if digest != "" {
+		msg += digest + "\n"
+	}
+	// An exit 0 and a failure digest get only the log's last few lines: they
+	// carry what came last, like a cancel from the dashboard, a later step's
+	// error or a test summary. Any other failure gets more.
+	n := endedLines
+	if failed || e.Code == 0 {
+		n = endedLinesAfterDigest
+	}
+	// Trailing blank lines (CRLF ones too) would take the place of the last real ones.
+	if tail := lastLines(strings.TrimRight(mask.Mask(e.Tail), " \t\r\n"), n); tail != "" {
+		msg += tail + "\n"
+	}
 	if e.Code == exitPaused {
 		msg += "(The command itself exited 75: this is its result, not a refusal.)\n"
 	}
-	if r.New {
-		msg += fmt.Sprintf("Box and log kept up to %d minutes (a queued job or another launch that needs the room takes them sooner). ", int(endedKeep.Minutes()))
+	return msg + where
+}
+
+// shortReason is the agent's reason for a run, masked, on one line and cut to
+// reasonChars, to say which run a push is about.
+func shortReason(reason string) string {
+	s := strings.Join(strings.Fields(mask.Mask(reason)), " ")
+	if r := []rune(s); len(r) > reasonChars {
+		s = strings.TrimRight(string(r[:reasonChars-1]), " ") + "…"
 	}
-	return msg + fmt.Sprintf("Full log: box_job id %s offset 0. Artifacts: box_pull, before this repo's next run.", r.Job)
+	return s
+}
+
+// testsPassed says whether a digest reports passing tests and no failures.
+func testsPassed(digest string) bool {
+	if testsFailed(digest) {
+		return false
+	}
+	for _, l := range strings.Split(digest, "\n") {
+		if strings.HasPrefix(l, "PASS:") {
+			return true
+		}
+	}
+	return false
+}
+
+// testsFailed says whether a digest reports failed tests or packages.
+func testsFailed(digest string) bool {
+	for _, l := range strings.Split(digest, "\n") {
+		if strings.HasPrefix(l, "FAIL:") {
+			return true
+		}
+	}
+	return false
 }
 
 func pausedMessage(r jobRecord) string {
