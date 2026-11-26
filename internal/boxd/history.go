@@ -436,6 +436,10 @@ func (h *History) LastMode() *modeRec {
 // Filter is GET /api/jobs's query.
 type Filter struct {
 	Repo, Agent, Kind, Machine, Result, Q string
+	// Box is a box name; Since keeps jobs started at or after it, so the page
+	// can ask for one box's jobs and not those of an older box of that name.
+	Box   string
+	Since time.Time
 	// Before is the last job of the page before: the page is the jobs after
 	// it in newest-first order.
 	Before *dash.Job
@@ -456,7 +460,8 @@ func (f Filter) match(j *dash.Job) bool {
 		return false
 	}
 	if (f.Agent != "" && f.Agent != j.Agent.Session) || (f.Kind != "" && f.Kind != j.Kind) ||
-		(f.Machine != "" && f.Machine != j.Machine) || (f.Result != "" && f.Result != j.Result()) {
+		(f.Machine != "" && f.Machine != j.Machine) || (f.Result != "" && f.Result != j.Result()) ||
+		(f.Box != "" && f.Box != j.Box) || j.StartedAt.Before(f.Since) {
 		return false
 	}
 	if f.Before != nil && newest(*f.Before, *j) >= 0 {

@@ -539,7 +539,8 @@ func TestAPI(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, "events-2026-11-24.jsonl")); strings.Contains(string(b), "abcdefgh12345") {
 		t.Fatal("secret written to the history")
 	}
-	if get("/api/history?range=year", nil) != 400 || get("/api/jobs?limit=500", nil) != 400 {
+	if get("/api/history?range=year", nil) != 400 || get("/api/jobs?limit=500", nil) != 400 ||
+		get("/api/jobs?since=yesterday", nil) != 400 {
 		t.Fatal("bad queries accepted")
 	}
 	var page dash.JobsPage

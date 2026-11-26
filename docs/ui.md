@@ -93,7 +93,9 @@ answers, the window goes to it (2026-11-24).
 - each box: name, repo, size, state, memory and CPU use, and its expiry;
 - running jobs: command, agent, repo and branch, how long they have run, and a live log tail.
 
-**Boxes**: every box with its full state.
+**Boxes**: every box with its full state. A row opens in place (a click, or Enter on its name) to
+show the job running there now, with its log's last lines, or how long the box has been idle, and
+the jobs it ran before, each linked to its page (#184, 2026-11-25).
 
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
@@ -307,7 +309,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 |---|---|
 | `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
 | `GET /api/events` | SSE, as above |
-| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
+| `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&since=&q=&before=&limit=` | `{jobs, more}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` a box name and `since` an RFC3339 time the job started at or after (the Boxes page asks for a box's jobs with its name and `createdAt` less `JobBoxGrace`), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
 | `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |

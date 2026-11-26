@@ -891,6 +891,92 @@ code {
 .queue-item .queue-pos:first-child {
   margin-top: -0.125rem;
 }
+/* Boxes: a row opens in place to show its jobs. */
+.box-row {
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease);
+}
+.box-row:hover {
+  background: var(--row-hover);
+}
+.box-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: -0.25rem;
+  padding: 0 0.25rem 0 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.box-toggle .icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--muted-foreground);
+  transition: transform 0.15s var(--ease);
+}
+.box-toggle[aria-expanded="true"] .icon {
+  transform: rotate(90deg);
+}
+.box-detail {
+  background: color-mix(in oklab, var(--background) 35%, transparent);
+}
+.box-detail > .row-link + .log,
+.box-detail > div > .log {
+  border-top: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+}
+.box-detail-label {
+  padding: 0.625rem 1rem 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.box-idle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 1rem 0.75rem;
+  font-size: 0.8125rem;
+}
+.box-idle a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.box-job {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4375rem 1rem;
+  font-size: 0.8125rem;
+  transition: background-color 0.15s var(--ease);
+}
+.box-job:hover {
+  background: var(--row-hover);
+}
+.box-job .badge {
+  justify-self: start;
+}
+.box-job-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.box-job-when {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.box-detail > .row-empty:last-child,
+.box-detail > .box-job:last-child {
+  padding-bottom: 0.75rem;
+}
 .row-title-link:hover .row-title {
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -1437,6 +1523,13 @@ code {
   }
   .row-control {
     justify-content: flex-start;
+  }
+  .box-job {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .box-job-when {
+    grid-column: 2;
+    margin-top: -0.5rem;
   }
   .machine-head .segmented {
     margin-left: 0;

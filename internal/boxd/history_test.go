@@ -54,6 +54,12 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 	if p := h.Finished(Filter{Q: "", Result: "fail"}); len(p.Jobs) != 1 {
 		t.Fatalf("fail filter: %+v", p)
 	}
+	if p := h.Finished(Filter{Box: "a", Since: t0.Add(-100 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
+		t.Fatalf("box since filter: %+v", p)
+	}
+	if p := h.Finished(Filter{Box: "b"}); len(p.Jobs) != 0 {
+		t.Fatalf("box filter: %+v", p)
+	}
 	first := h.Finished(Filter{Limit: 1}).Jobs[0]
 	if p := h.Finished(Filter{Before: &first, Limit: 5}); len(p.Jobs) != 2 || p.Jobs[0].ID != "1" || p.More {
 		t.Fatalf("second page: %+v", p)

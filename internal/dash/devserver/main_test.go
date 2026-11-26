@@ -195,6 +195,26 @@ func TestJobsFilter(t *testing.T) {
 	}
 }
 
+// box and since ask for one box's jobs: those of its name started from since on.
+func TestJobsOfBox(t *testing.T) {
+	s, ts := start(t, "week")
+	j := s.done[len(s.done)/2]
+	_, _, body := call(t, ts, "GET", "/api/jobs?limit=200&box="+url.QueryEscape(j.Box)+"&since="+url.QueryEscape(j.StartedAt.Format(time.RFC3339)), "", false)
+	var p dash.JobsPage
+	json.Unmarshal(body, &p)
+	if len(p.Jobs) == 0 {
+		t.Fatal("no jobs")
+	}
+	for _, x := range p.Jobs {
+		if x.Box != j.Box || x.StartedAt.Before(j.StartedAt) {
+			t.Errorf("%s started %v doesn't match", x.Box, x.StartedAt)
+		}
+	}
+	if code, _, _ := call(t, ts, "GET", "/api/jobs?since=soon", "", false); code != 400 {
+		t.Errorf("bad since: %d", code)
+	}
+}
+
 // The stream starts with the state, then sends what changes.
 func TestEvents(t *testing.T) {
 	s, ts := start(t, "busy")

@@ -180,6 +180,15 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "result must be one of "+strings.Join(dash.Results, ", "))
 		return
 	}
+	var since time.Time
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "since must be an RFC3339 time")
+			return
+		}
+		since = t
+	}
 	text := q.Get("q")
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,6 +202,8 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 			q.Get("kind") != "" && q.Get("kind") != j.Kind,
 			q.Get("machine") != "" && q.Get("machine") != j.Machine,
 			q.Get("result") != "" && q.Get("result") != j.Result(),
+			q.Get("box") != "" && q.Get("box") != j.Box,
+			j.StartedAt.Before(since),
 			before != nil && newest(*before, j) >= 0,
 			text != "" && !matchesText(text, j.Reason, j.Command, j.Branch):
 			continue
