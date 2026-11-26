@@ -1,6 +1,7 @@
 package boxd
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -128,6 +129,58 @@ func TestDeleteGuardProbesFrozenBox(t *testing.T) {
 	for _, c := range r.f.cli {
 		if c == "delete w --force" {
 			t.Fatalf("the frozen box was deleted without a warning: %v", r.f.cli)
+		}
+	}
+}
+
+// An old dead job whose log is still on the box is not active work: its
+// wrapper is gone and it never wrote an exit. It must not warn forever —
+// only live and history get to call a loss recent.
+func TestDeleteGuardOldDeadLogDoesNotWarn(t *testing.T) {
+	created := t0.Add(-time.Hour)
+	r := newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Running", "small", created)} })
+	r.poll()
+	old := "w.20261124-173000-ab12" // on this box, 30 minutes before now
+	r.f.set(func() {
+		r.f.jobs["w"] = []fakeJob{{name: old, state: "died", log: "x", meta: metaJSON}}
+	})
+	if code, b := r.post("/api/boxes/w/delete", deleteBody(created, false)); code != 204 {
+		t.Fatalf("old dead log, unconfirmed: %d %s", code, b)
+	}
+	deleted := false
+	for _, c := range r.f.cli {
+		deleted = deleted || c == "delete w --force"
+	}
+	if !deleted {
+		t.Fatalf("the box was not deleted past an old dead log: %v", r.f.cli)
+	}
+}
+
+type scanRefusedIncus struct{ Incus }
+
+func (s scanRefusedIncus) Exec(ctx context.Context, name, script string, args ...string) ([]byte, error) {
+	if strings.HasPrefix(script, "# boxd scan") {
+		return nil, &ExitError{Code: 1, Stderr: "Instance is frozen"}
+	}
+	return s.Incus.Exec(ctx, name, script, args...)
+}
+
+// A Frozen box Incus refuses to exec in cannot have its job state verified:
+// a retryable error, no warning dialog, and no delete.
+func TestDeleteGuardFrozenExecRefusedFailsClosed(t *testing.T) {
+	created := t0.Add(-time.Hour)
+	r := newQueueRig(t, nil)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Frozen", "small", created)} })
+	r.poll()
+	r.w.Incus = scanRefusedIncus{r.f}
+	code, b := r.post("/api/boxes/w/delete", deleteBody(created, false))
+	if code != 502 || !strings.Contains(string(b), dash.CodeIncus) || strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("frozen exec refused, unconfirmed: %d %s", code, b)
+	}
+	for _, c := range r.f.cli {
+		if c == "delete w --force" {
+			t.Fatalf("the box was deleted when its state could not be checked: %v", r.f.cli)
 		}
 	}
 }

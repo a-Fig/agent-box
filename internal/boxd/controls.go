@@ -417,11 +417,14 @@ func (w *Watcher) classifyScan(in Instance, jobs []scanned) dash.DeleteWarning {
 			if j.EndedAt == nil {
 				j.EndedAt = &now
 			}
-		case "running", "starting", "died":
+		case "running", "starting":
 			j.State = dash.JobRunning
 			if in.Status == "Frozen" {
 				j.State = dash.JobPaused
 			}
+		// A "died" job's wrapper is gone with no exit written: it is not
+		// active, however old its log is. Only live and history classify a
+		// loss as recent, so a dead log left on a repo box can't warn forever.
 		default:
 			continue
 		}
