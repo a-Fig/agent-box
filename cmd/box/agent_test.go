@@ -1168,6 +1168,7 @@ func TestSkill(t *testing.T) {
 }
 
 func TestMCPAgentTools(t *testing.T) {
+	hostsTestPath(t)
 	f := &fakePC{t: t, mode: "shared", project: map[string]string{"limits.instances": "3"}, memory: "4GiB",
 		insts:  []instance{{Name: "my-repo", Status: "Running"}},
 		jobs:   map[string]string{"my-repo": "my-repo.20261123-120000-0001 running - 7\n"},
@@ -1208,6 +1209,9 @@ func TestMCPAgentTools(t *testing.T) {
 	}
 	if s := got[1].Result.Structured; s["slotsFree"] != 2.0 || s["mode"] != "shared" || s["room"] != "2 large, or 2 medium, or 2 small" {
 		t.Errorf("box_status structured = %v", s)
+	}
+	if _, exists := got[1].Result.Structured["hosts"]; exists {
+		t.Error("box_status has a fleet report without a registry")
 	}
 	if l := first(2); l != "1 job(s), 1 running" {
 		t.Errorf("box_job list first line = %q", l)

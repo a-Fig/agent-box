@@ -31,10 +31,11 @@ type StatusReport struct {
 	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none (disk: 205GiB of 210GiB allocated)"; "no limit"
 	// GPU is "free", "free, but no room ...", "in use: job X",
 	// "unavailable: ..." (My PC) or gpuNone.
-	GPU     string   `json:"gpu"`
-	Repo    string   `json:"repo,omitempty"`    // when run in a git repo
-	RepoBox *RepoBox `json:"repoBox,omitempty"` // the repo's own box, when it exists
-	Update  string   `json:"update,omitempty"`  // a newer stable release is out than this box
+	GPU     string            `json:"gpu"`
+	Repo    string            `json:"repo,omitempty"`    // when run in a git repo
+	RepoBox *RepoBox          `json:"repoBox,omitempty"` // the repo's own box, when it exists
+	Update  string            `json:"update,omitempty"`  // a newer stable release is out than this box
+	Hosts   []fleetHostStatus `json:"hosts,omitempty"`
 }
 
 // SizeRoom is one box size, what a box of it gets now, and how many more
@@ -366,11 +367,15 @@ func firstLine(s string) string {
 
 // writeStatus prints a report: the advice first, then the details.
 func writeStatus(w io.Writer, s StatusReport) {
+	if len(s.Hosts) > 0 {
+		writeFleet(w, s.Hosts)
+		fmt.Fprintf(w, "selected host %s: ", s.Remote)
+	}
 	fmt.Fprintln(w, s.Advice)
 	if s.Update != "" {
 		fmt.Fprintln(w, s.Update)
 	}
-	if !s.Reachable {
+	if !s.Reachable || s.Error != "" {
 		return
 	}
 	m := s.Mode

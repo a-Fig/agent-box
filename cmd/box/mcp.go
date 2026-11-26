@@ -64,7 +64,7 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue (a GPU run doesn't wait)"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
+	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length. The advice, available and repo box fields describe the host box_run currently uses. Without a registry, the first line is that host's advice.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
 	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
@@ -436,7 +436,10 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 
 	switch p.Name {
 	case "box_status":
-		st := a.Status(ctx, args.Dir)
+		st, err := a.fleetStatus(ctx, args.Dir, false)
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
 		var b strings.Builder
 		writeStatus(&b, st)
 		res := textResult(withWarnings(strings.TrimRight(b.String(), "\n")), false)

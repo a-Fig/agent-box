@@ -39,7 +39,11 @@ func (a *App) boxdDo(ctx context.Context, method, path, contentType string, body
 	if host == "" {
 		return 0, nil, errors.New("no address for boxd (incus remote " + a.Remote + ")")
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "https://"+host+path, body)
+	return a.boxdRequest(ctx, method, "https://"+host+path, contentType, body)
+}
+
+func (a *App) boxdRequest(ctx context.Context, method, url, contentType string, body io.Reader) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return 0, nil, err
 	}

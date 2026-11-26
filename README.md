@@ -55,6 +55,7 @@ Install it with the quick start above, or build it with `go build ./cmd/box`. It
 
 ```sh
 box status                            # worth offloading now? PC, mode, room per size, this repo's box
+box hosts                             # list configured hosts and their current capacity
 box run --reason "Full test suite for the parser change." -- go test ./...
                                       # sync this worktree to the repo's box and run there
                                       # (--reason is required; left out below)
@@ -102,6 +103,19 @@ Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4,
 `box join` sets up only the agents it finds: one whose CLI is on PATH or whose config folder exists (`~/.claude` or `$CLAUDE_CONFIG_DIR`, `~/.codex` or `$CODEX_HOME`, the Antigravity homes below). It says which it set up and which it skipped; with none, it changes nothing and prints the server entry to add by hand. It registers `box mcp` as a user-scope MCP server: Claude Code and Codex via their CLIs (one whose folder exists but whose CLI isn't on PATH gets the skill but not the server), and Antigravity via `config/mcp_config.json` in `$GEMINI_HOME`, `~/.gemini`, and T3 Code's Antigravity provider homes (`~/.t3/userdata/providers/antigravity/*`, or `$T3CODE_HOME`). It installs the [box skill](skills/box/SKILL.md) in `skills/box/` of each Claude Code and Codex folder it found, and `config/skills/box/` in each Antigravity home. Run `box join` from a built binary at its final path. In each Claude Code folder it also adds `box hook` to the `hooks.PostToolUse` of `settings.json`: T3 holds a pushed result until the agent's turn ends, so the hook shows a busy agent its ended jobs after its next tool call instead, and the watcher then sends nothing. `box join --leave` unregisters the servers and removes the installed skill files and the hook. A skill file with different contents is kept.
 
 `BOX_REMOTE`, `BOX_PROJECT` and `BOX_IMAGE` override `pc`, `agents` and `agent-base`.
+
+For multiple hosts, create `agent-box/hosts.json` in your user config directory (`%APPDATA%` on Windows, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `~/Library/Application Support` on macOS). Each remote must already be configured in Incus.
+
+```json
+{
+  "hosts": [
+    {"name": "primary", "remote": "pc"},
+    {"name": "overflow", "remote": "spare", "project": "agents", "dashboard_url": "https://spare.example.com"}
+  ]
+}
+```
+
+`project` defaults to `BOX_PROJECT`. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs. A host's queue shows as `unknown` if its dashboard is unavailable. `BOX_REMOTE` and `BOX_PROJECT` still select where `box run` sends a job and determine the `box status` exit code. An absent or empty registry keeps the usual single-host behavior.
 
 ## Website previews
 
