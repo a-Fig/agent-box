@@ -1,6 +1,8 @@
-# agent-box
+# Project Fano
 
-Turns a spare Linux machine, or a Windows gaming PC, into on-demand, disposable Linux boxes that coding agents run heavy work on: test suites, `-race`, builds.
+Turns a spare Linux server or Windows gaming PC into on-demand, disposable Linux boxes that coding agents run heavy work on: test suites, `-race`, and builds. Named for Robert Fano (1917–2016), who founded MIT's Project MAC in 1963 and pioneered time-sharing.
+
+> Early work in progress — built for daily use on one setup first and not ready for outside users yet. The repository and CLI still use `agent-box` and `box`. [Project Fano website](https://fano.afig.dev/)
 
 - **Incus** on the host does the boxes, API, auth and web UI.
 - **box** is a thin sync-and-run CLI + MCP for agents: `box run --new --reason "..." -- go test ./...`.
@@ -100,3 +102,14 @@ Sizes are small (1 CPU in Shared, 2 in Full, 2GiB RAM, 18GiB disk), medium (2/4,
 `box join` sets up only the agents it finds: one whose CLI is on PATH or whose config folder exists (`~/.claude` or `$CLAUDE_CONFIG_DIR`, `~/.codex` or `$CODEX_HOME`, the Antigravity homes below). It says which it set up and which it skipped; with none, it changes nothing and prints the server entry to add by hand. It registers `box mcp` as a user-scope MCP server: Claude Code and Codex via their CLIs (one whose folder exists but whose CLI isn't on PATH gets the skill but not the server), and Antigravity via `config/mcp_config.json` in `$GEMINI_HOME`, `~/.gemini`, and T3 Code's Antigravity provider homes (`~/.t3/userdata/providers/antigravity/*`, or `$T3CODE_HOME`). It installs the [box skill](skills/box/SKILL.md) in `skills/box/` of each Claude Code and Codex folder it found, and `config/skills/box/` in each Antigravity home. Run `box join` from a built binary at its final path. In each Claude Code folder it also adds `box hook` to the `hooks.PostToolUse` of `settings.json`: T3 holds a pushed result until the agent's turn ends, so the hook shows a busy agent its ended jobs after its next tool call instead, and the watcher then sends nothing. `box join --leave` unregisters the servers and removes the installed skill files and the hook. A skill file with different contents is kept.
 
 `BOX_REMOTE`, `BOX_PROJECT` and `BOX_IMAGE` override `pc`, `agents` and `agent-base`.
+
+## Website previews
+
+Run the preview command from a trusted checkout of `main`, with `gh` and Wrangler signed in. Pass the PR number while staying on `main`. The command prints a public preview link and a link pinned to this deployment.
+
+```sh
+npm ci --prefix site
+npm --prefix site run preview -- 202
+```
+
+The preview serves committed static files from the selected PR through the `fano-site-preview` Worker. Run the same command after a new push to refresh its link.
