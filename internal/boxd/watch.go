@@ -32,6 +32,7 @@ type Watcher struct {
 	MachineID   string
 	MachineName string
 	WSLMemory   func() int64  // bytes the distro's VM holds; nil reads 0
+	HasGPU      func() bool   // whether this host can give a box a GPU; nil reads false
 	Version     *dash.Version // this boxd's build, shown as Machine.Boxd; nil if unknown
 	Logf        func(format string, args ...any)
 	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
@@ -78,7 +79,7 @@ func (w *Watcher) init() {
 	w.repoOf, w.cpu, w.subs = map[string]string{}, map[string]cpuMark{}, map[chan dash.Event]struct{}{}
 	w.died, w.qview = map[string]time.Time{}, map[string]dash.Job{}
 	w.noRoom, w.started = map[string]time.Time{}, map[string]dash.Job{}
-	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName, Boxd: w.Version}
+	w.machine = dash.Machine{ID: w.MachineID, Name: w.MachineName, Boxd: w.Version, Config: HostConfig(false)}
 	jobs, boxes := w.Hist.Open()
 	for _, j := range jobs {
 		w.live[j.Key] = &j
@@ -535,10 +536,40 @@ func (w *Watcher) applyBoxes(now time.Time, ins []Instance, boxes map[string]das
 	w.boxes = boxes
 }
 
+// gpuProjectKey is the project key that tells a GPU host from one without (cmd/box's gpuKey):
+// setup-host.sh sets it to allow on WSL and to block elsewhere.
+const gpuProjectKey = "restricted.devices.unix-char"
+
+// incusTrue reads an Incus boolean as Incus does (shared/util/boolean.go): true, 1, yes or on,
+// in any case.
+func incusTrue(v string) bool {
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxes map[string]dash.Box) {
 	cfg := proj.Config
 	m := dash.Machine{ID: w.MachineID, Name: w.MachineName, Reachable: true, Mode: cfg[mode.ProjectModeKey],
-		Boxd: w.Version}
+		Boxd: w.Version, Config: HostConfig(w.HasGPU != nil && w.HasGPU())}
+	// A GPU box needs the device and the project's say-so, as box's own check reads it: "block"
+	// refuses, and so does an unset key on a restricted project, where Incus defaults it to block.
+	blocked := cfg[gpuProjectKey] == "block" || (cfg[gpuProjectKey] == "" && incusTrue(cfg["restricted"]))
+	switch {
+	case blocked && !m.Config.GPU:
+		m.Config.GPUWhy = "both"
+	case blocked:
+		m.Config.GPUWhy = "blocked"
+	case !m.Config.GPU:
+		m.Config.GPUWhy = "device"
+	}
+	m.Config.GPU = m.Config.GPU && !blocked
+	for key, set := range map[string]*bool{"limits.cpu": &m.Config.Capped.CPU, "limits.memory": &m.Config.Capped.Memory,
+		"limits.instances": &m.Config.Capped.Instances, "limits.disk": &m.Config.Capped.Disk} {
+		*set = cfg[key] != ""
+	}
 	if v := cfg[mode.ProjectTrayVersionKey]; v != "" {
 		var tv dash.Version
 		if json.Unmarshal([]byte(v), &tv) == nil && tv.Commit != "" {

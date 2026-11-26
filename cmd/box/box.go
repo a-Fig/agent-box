@@ -329,11 +329,28 @@ func (errNoGPU) Error() string {
 // elsewhere, where a GPU box can't start.
 const gpuKey = "restricted.devices.unix-char"
 
-// hasGPU says whether the host can run a GPU box. Only block says no: an
-// unset or unreadable key counts as a GPU host, so a failed read never turns
-// the GPU away, and a launch that can't get the devices fails on its own.
+// hasGPU says whether the host can run a GPU box. block says no, and so does
+// an unset key on a restricted project, where Incus defaults it to block. An
+// unreadable key counts as a GPU host, so a failed read never turns the GPU
+// away, and a launch that can't get the devices fails on its own.
 func (a *App) hasGPU(ctx context.Context) bool {
-	return a.projectKey(ctx, gpuKey) != "block"
+	switch a.projectKey(ctx, gpuKey) {
+	case "block":
+		return false
+	case "":
+		return !incusTrue(a.projectKey(ctx, "restricted"))
+	}
+	return true
+}
+
+// incusTrue reads an Incus boolean as Incus does (shared/util/boolean.go): true, 1, yes or on,
+// in any case.
+func incusTrue(v string) bool {
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // isTempFail says whether err means "not now": no room, the GPU is taken, or

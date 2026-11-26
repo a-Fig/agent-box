@@ -402,6 +402,13 @@ func TestGPUHostDetection(t *testing.T) {
 		}
 	}
 
+	// Unset on a restricted project is Incus's default, block.
+	rf := &fakePC{t: t, mode: "shared", project: map[string]string{"restricted": "true"}}
+	ra, _ := testApp(rf)
+	if s := ra.Status(context.Background(), ""); s.GPU == "free" {
+		t.Errorf("restricted project, key unset: gpu = %q", s.GPU)
+	}
+
 	block := map[string]string{gpuKey: "block", "limits.instances": "6", "limits.cpu": "24", "limits.memory": "12GiB"}
 	for _, m := range []string{"shared", "mypc"} {
 		f := &fakePC{t: t, mode: m, project: block}

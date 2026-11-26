@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/boxd"
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
@@ -178,10 +179,21 @@ func newWorld(name string, now time.Time) *world {
 			Caps:      dash.Resources{CPU: 24, Memory: 12 << 30, Instances: 6, Disk: 150 << 30},
 			WSLMemory: 3 << 30,
 			Boxd:      &v, Tray: &v,
+			Config: hostConfig(true),
 		},
 		logs:  map[string]string{},
 		since: now.Add(-24 * time.Hour),
 	}
+}
+
+// hostConfig is boxd's HostConfig with every cap set and, without a GPU, the device missing.
+func hostConfig(gpu bool) dash.Config {
+	c := boxd.HostConfig(gpu)
+	c.Capped = dash.Capped{CPU: true, Memory: true, Instances: true, Disk: true}
+	if !gpu {
+		c.GPUWhy = "device"
+	}
+	return c
 }
 
 func sizeOf(name string) mode.Size {
@@ -702,6 +714,7 @@ func tail(log string) string {
 
 func buildEmpty(w *world) {
 	w.machine.WSLMemory = 1200 << 20
+	w.machine.Config = hostConfig(false) // a bare host: no GPU
 	w.segment(w.now.Add(-24*time.Hour), w.now, dash.ModeShared)
 }
 

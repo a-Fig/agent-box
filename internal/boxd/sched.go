@@ -32,6 +32,19 @@ const (
 
 var errNoRoom = errors.New("no room")
 
+// HostConfig is Machine.Config: the size table and the expiry constants, and whether this host
+// has a GPU for a GPU box.
+func HostConfig(gpu bool) dash.Config {
+	c := dash.Config{GPU: gpu, IdleExpiry: int(idleTTL / time.Second), JobExpiry: int(jobTTL / time.Second),
+		KeptAfterJob: int(jobrun.EndedKeep / time.Second)}
+	for _, s := range mode.Sizes {
+		mem, _ := mode.ParseBytes(s.Memory)
+		disk, _ := mode.ParseBytes(s.Disk)
+		c.Sizes = append(c.Sizes, dash.SizeSpec{Name: s.Name, SharedCPUs: s.SharedCPUs, FullCPUs: s.FullCPUs, Memory: mem, Disk: disk, GPU: s.GPU})
+	}
+	return c
+}
+
 // sizeOf is a waiting job's size.
 func (it *queued) sizeOf() mode.Size {
 	if sz, ok := mode.LookupSize(it.Size); ok {
