@@ -121,6 +121,15 @@ func runApp(ctx context.Context, a *App, fs *flag.FlagSet, args []string) int {
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2
 	}
+	if *fromLauncher {
+		// Started from the shortcut, box has no terminal: what goes wrong goes to the window's log.
+		if p, err := appLog(); err == nil {
+			if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+				defer f.Close()
+				a.Err = io.MultiWriter(a.Err, f)
+			}
+		}
+	}
 	fail := func(err error) int {
 		fmt.Fprintln(a.Err, "box:", err)
 		return 1

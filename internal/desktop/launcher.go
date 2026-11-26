@@ -37,8 +37,9 @@ const stampFile = "launcher.json"
 // InstallLauncher puts the launcher for exe, the installed box, in place, or moves it onto exe.
 // dir is box's directory in the user's config directory, which keeps the record and the icon the
 // shortcut shows. It says where the launcher is, and whether it made or changed it now. It leaves
-// alone a launcher of the same name that isn't box's, one the person took out (until box moves),
-// and everything when exe is a build in a temporary directory, as `go run` makes.
+// alone a launcher of the same name that isn't box's, one the person took out (until box moves or
+// launcherVersion goes up), and everything when exe is a build in a temporary directory, as
+// `go run` makes. Two `box app`s at once may both write the shortcut, the same one.
 func InstallLauncher(exe, dir string) (where string, changed bool, err error) {
 	want := stamp{Version: launcherVersion, Exe: exe, Where: launcherPath()}
 	if want.Where == "" || devBuild(exe) {
@@ -61,6 +62,7 @@ func InstallLauncher(exe, dir string) (where string, changed bool, err error) {
 	}
 	b, _ := json.Marshal(want)
 	if err := os.WriteFile(filepath.Join(dir, stampFile), b, 0o600); err != nil {
+		os.Remove(want.Where) // unrecorded, it would read as someone else's from then on
 		return "", false, err
 	}
 	return want.Where, true, nil
