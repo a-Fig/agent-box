@@ -529,18 +529,29 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 	}()
 }
 
-// sweepEnded catches, on boxd's first poll, the reapEnded that settle
-// missed: a box whose jobs had all ended in boxd's history (the scan skipped
+// sweepEnded catches, once for each box, on the first poll that scans it
+// running (a box frozen when boxd starts waits for its thaw), the reapEnded
+// that settle missed: a box whose jobs had all ended in boxd's history (the scan skipped
 // every one), with none of them live, whose expiry is still its last job's
 // own 24h. A boxd restarted while the job ended, or before reapEnded's write,
 // left a throwaway that 24h (#156). An expiry shortened already, or extended
 // from the page since, is no longer the job's, so the sweep leaves it;
-// reapEnded does the rest as it would. Only the first poll, so a late extend
-// that lands near the job's 24h isn't undone. With w.mu held.
+// reapEnded does the rest as it would. Once, so a late extend that lands
+// near the job's 24h isn't undone. With w.mu held.
 func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]scanned) {
+	seen := make(map[string]bool, len(ins))
 	for _, in := range ins {
-		jobs := scans[in.Name]
-		if in.Status != "Running" || len(jobs) == 0 || w.boxBusy(in.Name, "") {
+		key := in.Name + "@" + in.CreatedAt.UTC().Format(time.RFC3339Nano)
+		jobs, scanned := scans[in.Name]
+		if w.swept[key] {
+			seen[key] = true
+			continue
+		}
+		if in.Status != "Running" || !scanned {
+			continue // swept once it is
+		}
+		seen[key] = true
+		if len(jobs) == 0 || w.boxBusy(in.Name, "") {
 			continue
 		}
 		ended := true
@@ -565,6 +576,7 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 			w.reapEnded(&last)
 		}
 	}
+	w.swept = seen
 }
 
 // boxBusy says whether a job other than own runs, or is being started, in

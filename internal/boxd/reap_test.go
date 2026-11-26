@@ -98,7 +98,8 @@ func TestReapEndedUnreadJob(t *testing.T) {
 // A job that ended while boxd's reapEnded didn't get to write (a restart cut
 // it short; here another job looked to be running) leaves its throwaway the
 // job's 24 hours. A boxd started again sweeps it to 30 minutes, once nothing
-// runs there (#156), and only on its first poll.
+// runs there (#156): on the first poll that finds the box running (it was
+// frozen for My PC when boxd started), and only that once.
 func TestSweepEndedAfterRestart(t *testing.T) {
 	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
 	job := "w-0001.20261124-180000-ab12"
@@ -140,9 +141,15 @@ func TestSweepEndedAfterRestart(t *testing.T) {
 		t.Fatalf("reaped while another job ran: %s", got)
 	}
 
-	r.f.set(func() { r.f.running = nil })
+	r.f.set(func() { r.f.running, r.f.ins[0].Status = nil, "Frozen" })
 	r.c.add(time.Hour)
 	w := r.restart()
+	w.Poll(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if got, c, _ := expires(); got != own || c != 1 {
+		t.Fatalf("swept a frozen box: expires %s, checks %d", got, c)
+	}
+	r.f.set(func() { r.f.ins[0].Status = "Running" })
 	w.Poll(context.Background())
 	waitChecks(2)
 	want := r.c.now().Add(jobrun.EndedKeep).UTC().Format(time.RFC3339)

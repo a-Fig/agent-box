@@ -42,7 +42,7 @@ type Watcher struct {
 
 	mu        sync.Mutex
 	polled    bool
-	swept     bool // sweepEnded has run
+	swept     map[string]bool // boxes (name@created) sweepEnded has looked at
 	machine   dash.Machine
 	boxes     map[string]dash.Box
 	known     map[string]boxRec // box id -> what was recorded as created
@@ -150,10 +150,7 @@ func (w *Watcher) Poll(ctx context.Context) {
 	}
 	// Jobs first, so a box's repo is known before the box is built.
 	w.applyJobs(now, ins, scans, "")
-	if !w.swept {
-		w.swept = true
-		w.sweepEnded(now, ins, scans)
-	}
+	w.sweepEnded(now, ins, scans)
 	for _, in := range ins {
 		boxes[in.Name] = w.box(now, in)
 	}
