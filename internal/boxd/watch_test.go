@@ -380,6 +380,66 @@ func TestWatcherFollowsAJobFromStartToEnd(t *testing.T) {
 	}
 }
 
+// A job is the box's it was first seen on, by that box's volatile.uuid: a box made seconds later
+// under the same name doesn't take its jobs, and a job named before its box was made (box run
+// --new, or the laptop's clock behind) is still its box's.
+func TestJobsCarryTheirBoxUID(t *testing.T) {
+	dir := t.TempDir()
+	c := &clock{t: t0}
+	withUUID := func(in Instance, u string) Instance { in.Config["volatile.uuid"] = u; return in }
+	f := &fakeIncus{
+		ins: []Instance{withUUID(inst("widget", "Running", "medium", t0), "u1")},
+		cfg: map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.cpu": "24", "limits.instances": "10", "limits.disk": "210GiB"},
+		jobs: map[string][]fakeJob{"widget": {
+			{name: "widget.20261124-175940-aa01", state: "done", exit: "0", endedAt: t0.Add(30 * time.Second).Unix(), meta: metaJSON},
+			{name: "widget.20261124-180040-bb02", state: "done", exit: "0", endedAt: t0.Add(50 * time.Second).Unix(), meta: metaJSON},
+		}},
+	}
+	w := newWatcher(t, dir, f, c)
+	c.add(52 * time.Second)
+	w.Poll(context.Background())
+	if b, _ := w.Box("widget"); b.UID != "u1" {
+		t.Fatalf("box UID %q", b.UID)
+	}
+	// The replacement, made 5s after the last job ended, runs a job its agent named 3s before it.
+	repl := t0.Add(55 * time.Second)
+	f.set(func() {
+		f.ins = []Instance{withUUID(inst("widget", "Running", "medium", repl), "u2")}
+		f.jobs = map[string][]fakeJob{"widget": {{name: "widget.20261124-180052-cc03", state: "running", meta: metaJSON}}}
+	})
+	c.add(5 * time.Second)
+	w.Poll(context.Background())
+	f.set(func() {
+		f.jobs["widget"][0].state, f.jobs["widget"][0].exit = "done", "0"
+		f.jobs["widget"][0].endedAt = t0.Add(90 * time.Second).Unix()
+	})
+	c.add(40 * time.Second)
+	w.Poll(context.Background())
+
+	ids := func(b dash.Box) (out []string, last string) {
+		p := w.Hist.Finished(Filter{Box: b})
+		for _, j := range p.Jobs {
+			out = append(out, j.ID)
+		}
+		if p.Last != nil {
+			last = p.Last.ID
+		}
+		return out, last
+	}
+	if got, last := ids(dash.Box{Name: "widget", Machine: "pc", UID: "u2", CreatedAt: repl}); strings.Join(got, ",") != "20261124-180052-cc03" || last != got[0] {
+		t.Fatalf("the replacement's jobs: %v, last %s", got, last)
+	}
+	if got, last := ids(dash.Box{Name: "widget", Machine: "pc", UID: "u1", CreatedAt: t0}); strings.Join(got, ",") != "20261124-180040-bb02,20261124-175940-aa01" || last != got[0] {
+		t.Fatalf("the first box's jobs: %v, last %s", got, last)
+	}
+
+	// Without a volatile.uuid, a box's UID is its creation time to the nanosecond.
+	in := inst("bare", "Running", "small", t0.Add(123*time.Millisecond))
+	if got := boxUID(in); got != "2026-11-24T18:00:00.123Z" {
+		t.Fatalf("UID without volatile.uuid: %q", got)
+	}
+}
+
 func TestWatcherPausesAndLosesJobs(t *testing.T) {
 	dir := t.TempDir()
 	c := &clock{t: t0.Add(5 * time.Minute)}
@@ -539,7 +599,8 @@ func TestAPI(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, "events-2026-11-24.jsonl")); strings.Contains(string(b), "abcdefgh12345") {
 		t.Fatal("secret written to the history")
 	}
-	if get("/api/history?range=year", nil) != 400 || get("/api/jobs?limit=500", nil) != 400 {
+	if get("/api/history?range=year", nil) != 400 || get("/api/jobs?limit=500", nil) != 400 ||
+		get("/api/jobs?box=widget", nil) != 400 || get("/api/jobs?box=widget&machine=pc&uid=u1&created=soon", nil) != 400 {
 		t.Fatal("bad queries accepted")
 	}
 	var page dash.JobsPage
