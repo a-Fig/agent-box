@@ -383,10 +383,11 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	// the expiry (a job starting there, or another extend), and the new
 	// expiry is counted from the one Incus holds now.
 	var until time.Time
-	if err := jobrun.RetryETag(ctx, func() error {
-		in, err := w.checkCreated(ctx, name, createdAt)
-		if err != nil {
-			return err
+	var replaced bool
+	wrote, err := w.Incus.SetConfigIf(ctx, name, func(in Instance) map[string]string {
+		replaced = !in.CreatedAt.Equal(createdAt)
+		if replaced {
+			return nil
 		}
 		from := w.Now().UTC()
 		if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
@@ -394,15 +395,24 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 		}
 		until = mode.Held(in.Config, from).UTC().Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
 		at := until.Format(time.RFC3339)
-		_, err = w.Incus.CLI(ctx, "", "config", "set", name, jobrun.ExpiresKey+"="+at, mode.HoldKey+"="+at)
-		return err
-	}); err != nil {
+		return map[string]string{jobrun.ExpiresKey: at, mode.HoldKey: at}
+	})
+	if err != nil {
 		return b, err
+	}
+	if replaced {
+		return b, errNameNew
+	}
+	if !wrote {
+		return b, errBoxGone
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.record(record{Type: recControl, Control: &controlRec{Action: "extend " + itoa(hours) + "h", Target: name, By: by}})
 	if cur, ok := w.boxes[name]; ok && cur.CreatedAt.Equal(createdAt) {
+		if cur.ExpiresAt != nil && !until.After(*cur.ExpiresAt) {
+			return cur, nil
+		}
 		cur.ExpiresAt = &until
 		w.boxes[name] = cur
 		w.emit(dash.Event{Name: dash.EventBox, Data: cur})
