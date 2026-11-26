@@ -149,6 +149,7 @@ func (w *Watcher) Poll(ctx context.Context) {
 	}
 	// Jobs first, so a box's repo is known before the box is built.
 	w.applyJobs(now, ins, scans, "")
+	w.sweepEnded(now, ins, scans)
 	for _, in := range ins {
 		boxes[in.Name] = w.box(now, in)
 	}

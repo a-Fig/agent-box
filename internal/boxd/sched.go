@@ -529,6 +529,38 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 	}()
 }
 
+// sweepEnded catches the reapEnded that settle missed: a box whose jobs had
+// all ended in boxd's history before this poll (the scan skipped every one),
+// with none of them live, whose expiry is still its last job's. A boxd
+// restarted while the job ended, or stopped before reapEnded's write, left a
+// throwaway its 24h (#156). The check is endedExpiry alone, so a box once
+// shortened costs nothing more; reapEnded does the rest as it would.
+// With w.mu held.
+func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]scanned) {
+	for _, in := range ins {
+		jobs := scans[in.Name]
+		if in.Status != "Running" || len(jobs) == 0 || w.boxBusy(in.Name, "") {
+			continue
+		}
+		var last dash.Job
+		for _, s := range jobs {
+			if !s.Skipped || s.State != "done" {
+				last = dash.Job{}
+				break // one boxd hasn't recorded as ended goes through settle
+			}
+			if j, ok := w.Hist.EndedJob(s.Job, in.CreatedAt); ok && !j.StartedAt.Before(last.StartedAt) {
+				last = dash.Job{Box: j.Box, ID: j.ID, StartedAt: j.StartedAt}
+			}
+		}
+		if last.Box == "" {
+			continue
+		}
+		if _, ok := endedExpiry(in, last.StartedAt, now); ok {
+			w.reapEnded(&last)
+		}
+	}
+}
+
 // boxBusy says whether a job other than own runs, or is being started, in
 // box, as far as boxd knows. With w.mu held.
 func (w *Watcher) boxBusy(box, own string) bool {

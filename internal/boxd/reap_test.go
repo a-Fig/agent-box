@@ -1,6 +1,7 @@
 package boxd
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -90,5 +91,61 @@ func TestReapEndedUnreadJob(t *testing.T) {
 		case tc != "alone" && len(sets) != 0:
 			t.Errorf("%s: cut a running job's expiry: sets %v, expires %s", tc, sets, expires)
 		}
+	}
+}
+
+// A job that ended while boxd's reapEnded didn't get to write (a restart cut
+// it short; here another job looked to be running) leaves its throwaway the
+// job's 24 hours. A boxd started again sweeps it to 30 minutes, once nothing
+// runs there (#156).
+func TestSweepEndedAfterRestart(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB"})
+	job := "w-0001.20261124-180000-ab12"
+	own := t0.Add(jobTTL).Format(time.RFC3339)
+	r.f.set(func() {
+		in := inst("w-0001", "Running", "small", t0)
+		in.Config[jobrun.ThrowawayKey] = "true"
+		in.Config["user.expires"] = own
+		r.f.ins = []Instance{in}
+		r.f.jobs["w-0001"] = []fakeJob{{name: job, state: "running", log: "x", meta: metaJSON}}
+	})
+	r.poll()
+	r.c.add(time.Hour)
+	r.f.set(func() {
+		r.f.jobs["w-0001"][0].state, r.f.jobs["w-0001"][0].exit = "done", "0"
+		r.f.running = map[string][]string{"w-0001": {"w-0001.20261124-185000-cd34"}}
+	})
+	r.poll()
+	expires := func() string {
+		r.f.mu.Lock()
+		defer r.f.mu.Unlock()
+		return r.f.ins[0].Config["user.expires"]
+	}
+	time.Sleep(100 * time.Millisecond) // the declined reap
+	if got := expires(); got != own {
+		t.Fatalf("reaped while another job ran: %s", got)
+	}
+
+	r.f.set(func() { r.f.running = nil })
+	r.c.add(time.Hour)
+	w := r.restart()
+	w.Poll(context.Background())
+	want := r.c.now().Add(jobrun.EndedKeep).UTC().Format(time.RFC3339)
+	for i := 0; i < 50 && expires() != want; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := expires(); got != want {
+		t.Fatalf("after restart: expires %s, want %s", got, want)
+	}
+	sets := func() []string {
+		r.f.mu.Lock()
+		defer r.f.mu.Unlock()
+		return append([]string(nil), r.f.expirySets...)
+	}
+	n := len(sets())
+	w.Poll(context.Background()) // shortened already: no second write
+	time.Sleep(50 * time.Millisecond)
+	if got := sets(); len(got) != n {
+		t.Errorf("wrote again: %v", got)
 	}
 }

@@ -389,6 +389,21 @@ func (h *History) EndedOn(box string, created time.Time) map[string]bool {
 	return out
 }
 
+// EndedJob is job ("<box>.<id>") as recorded ended on the box created at
+// created, with its real start (a queued job's is after its name's).
+func (h *History) EndedJob(job string, created time.Time) (dash.Job, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out dash.Job
+	for _, j := range h.jobs {
+		if j.Box+"."+j.ID == job && (j.State == dash.JobDone || j.State == dash.JobLost) && holds(created, j.StartedAt) &&
+			j.StartedAt.After(out.StartedAt) {
+			out = *j
+		}
+	}
+	return out, out.Box != ""
+}
+
 // Open returns the jobs recorded as started but not ended, and the boxes
 // recorded as created but not deleted: what a restart reconciles.
 func (h *History) Open() (jobs []dash.Job, boxes []boxRec) {

@@ -64,7 +64,7 @@ type Manager struct {
 	// Persist, if set, is called with a mode adopted from the project or a
 	// request, so the tray can save it to boxtray.json like a menu click.
 	Persist func(Mode)
-	// Logf, if set, records adopted and dropped requests.
+	// Logf, if set, records adopted and dropped requests, and each box reaped.
 	Logf func(format string, args ...any)
 
 	mu          sync.Mutex // guards chosen, choiceAt, chosenDirty
@@ -225,6 +225,7 @@ func (m *Manager) reap(ctx context.Context, now time.Time, ins []Instance, errs 
 			keep = append(keep, in) // still there; counted and retried next tick
 			continue
 		}
+		m.logf("reaped %s (expired %s)", in.Name, val) // so a box that vanished can be explained (#156)
 		delete(m.frozenSince, in.Name)
 	}
 	for name := range m.badExpires {
