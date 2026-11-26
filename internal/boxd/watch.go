@@ -176,7 +176,7 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 		if in.Status != "Running" {
 			continue
 		}
-		skip := w.Hist.EndedOn(in.Name, in.CreatedAt)
+		skip := w.Hist.EndedOn(in)
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
@@ -202,6 +202,13 @@ func (w *Watcher) scanAll(ctx context.Context, ins []Instance) map[string][]scan
 // on the box decides the rest.
 func holds(created, started time.Time) bool {
 	return !created.After(started.Add(dash.JobBoxGrace))
+}
+
+// ranOnInstance says whether j ran on the box in is: dash.Job.RanOn, by the box's UID, with its
+// time rule for jobs recorded before they had one. The reaper reads Incus instances, not
+// dash.Boxes, so the box is made the way the dashboard's is (boxUID).
+func ranOnInstance(j dash.Job, in Instance) bool {
+	return j.RanOn(dash.Box{Name: in.Name, Machine: j.Machine, UID: boxUID(in), CreatedAt: in.CreatedAt.UTC()})
 }
 
 // EndJob applies box's report of how a job ended (POST /api/jobs/ended). It
@@ -345,7 +352,7 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 		in, ok := byName[j.Box]
 		before := *j
 		switch {
-		case !ok || !holds(in.CreatedAt, j.StartedAt):
+		case !ok || !ranOnInstance(*j, in):
 			j.State, j.EndedAt = dash.JobLost, &now // the box went (or is a new one by the same name)
 		case in.Status == "Frozen":
 			j.State = dash.JobPaused

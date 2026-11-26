@@ -164,7 +164,7 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, ok := s.W.Box(j.Box)
-	if !ok || !holds(b.CreatedAt, j.StartedAt) {
+	if !ok || !j.RanOn(b) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "the job's box is gone")
 		return
 	}
