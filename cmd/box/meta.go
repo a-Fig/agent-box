@@ -71,17 +71,18 @@ type agentInfo struct {
 
 // jobMeta is /work/.box/<job>.meta, which boxd reads.
 type jobMeta struct {
-	V         int       `json:"v"`
-	Reason    string    `json:"reason"`
-	Command   string    `json:"command"`
-	Repo      string    `json:"repo"`
-	Branch    string    `json:"branch"`
-	Commit    string    `json:"commit"`
-	Agent     agentInfo `json:"agent"`
-	Size      string    `json:"size"`
-	GPU       bool      `json:"gpu"`
-	EnvNames  []string  `json:"envNames"`
-	StartedAt string    `json:"startedAt"`
+	V         int                  `json:"v"`
+	Reason    string               `json:"reason"`
+	Command   string               `json:"command"`
+	Repo      string               `json:"repo"`
+	Branch    string               `json:"branch"`
+	Commit    string               `json:"commit"`
+	Source    *dash.SourceRevision `json:"source,omitempty"`
+	Agent     agentInfo            `json:"agent"`
+	Size      string               `json:"size"`
+	GPU       bool                 `json:"gpu"`
+	EnvNames  []string             `json:"envNames"`
+	StartedAt string               `json:"startedAt"`
 }
 
 // The bodies box posts to boxd are the dashboard's contract, internal/dash.
@@ -142,14 +143,17 @@ func (a *App) agent(worktree string) agentInfo {
 func (a *App) runInfo(ctx context.Context, rp repo, o RunOpts, sz mode.Size) jobMeta {
 	origin, _ := git(ctx, a.R, rp.Top, nil, "remote", "get-url", "origin")
 	branch, _ := git(ctx, a.R, rp.Top, nil, "symbolic-ref", "-q", "--short", "HEAD")
-	commit, _ := git(ctx, a.R, rp.Top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}")
 	names := []string{}
 	for k := range o.Env {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	return jobMeta{V: 1, Reason: o.Reason, Command: displayCommand(o.Cmd), Repo: stripCredentials(origin),
-		Branch: branch, Commit: commit, Agent: a.agent(rp.Top), Size: sz.Name, GPU: sz.GPU, EnvNames: names}
+		Branch: branch, Agent: a.agent(rp.Top), Size: sz.Name, GPU: sz.GPU, EnvNames: names}
+}
+
+func (m *jobMeta) setSource(source *dash.SourceRevision) {
+	m.Source, m.Commit = source, source.Commit
 }
 
 // stripCredentials drops the userinfo from a remote URL, where tokens go

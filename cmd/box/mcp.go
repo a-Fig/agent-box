@@ -513,7 +513,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		// would hear when it starts (docs/queue.md).
 		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
 		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Fresh: args.Fresh, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
-		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
+		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}, Source: r.Source}
 		switch {
 		case err != nil:
 		case r.Job == "" && r.State == statePaused:

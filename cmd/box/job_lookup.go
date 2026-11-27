@@ -67,7 +67,7 @@ func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
 }
 
 func (l jobLookup) job(ctx context.Context, wait time.Duration) (JobResult, error) {
-	r, err := l.app.job(ctx, l.id, wait)
+	r, err := l.app.job(ctx, l.id, wait, nil)
 	r.Host = l.host
 	return r, err
 }

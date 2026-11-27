@@ -23,7 +23,7 @@ type fakeBoxd struct {
 	mu     sync.Mutex
 	calls  []string
 	req    dash.QueueRequest
-	bundle int // bytes received
+	bundle []byte
 	code   int // POST /api/queue's status; 0 is 201
 	reply  dash.QueueReply
 	views  []dash.Job // GET /api/queue/{job} answers in turn; the last repeats
@@ -50,8 +50,10 @@ func (b *fakeBoxd) do(req *http.Request) (*http.Response, error) {
 			b.t.Fatalf("first part %q", p.FormName())
 		}
 		p, _ = mr.NextPart()
-		n, _ := io.Copy(io.Discard, p)
-		b.bundle = int(n)
+		b.bundle, err = io.ReadAll(p)
+		if err != nil {
+			b.t.Fatal(err)
+		}
 		if b.code != 0 {
 			rec.WriteHeader(b.code)
 			json.NewEncoder(rec).Encode(dash.ErrorBody{Error: "the queue is full", Code: dash.CodeQueueFull})
@@ -119,8 +121,8 @@ func TestRunWithNoRoomIsQueued(t *testing.T) {
 	}
 	r := b.req
 	if !r.New || r.Box != "my-repo" || r.Checkout != "my-repo" || r.Size != "medium" || r.Timeout != 90 ||
-		r.Env["CI"] != "1" || len(r.Command) != 1 || r.Command[0] != "go test ./..." || r.Ref == "" || b.bundle == 0 {
-		t.Errorf("request = %+v, bundle %d bytes", r, b.bundle)
+		r.Env["CI"] != "1" || len(r.Command) != 1 || r.Command[0] != "go test ./..." || r.Ref == "" || len(b.bundle) == 0 {
+		t.Errorf("request = %+v, bundle %d bytes", r, len(b.bundle))
 	}
 	var meta jobMeta
 	if json.Unmarshal(r.Meta, &meta) != nil || meta.Reason == "" || meta.Command != "go test ./..." {

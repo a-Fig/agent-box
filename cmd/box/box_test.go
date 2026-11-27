@@ -425,11 +425,11 @@ func TestSnapshot(t *testing.T) {
 	head := gitT(t, dir, "rev-parse", "HEAD")
 	before := gitT(t, dir, "status", "--porcelain")
 
-	bundle, err := snapshot(ctx, execRunner{}, dir, "my-repo.20261123-120000-0001")
+	snap, err := snapshot(ctx, execRunner{}, dir, "my-repo.20261123-120000-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(filepath.Dir(bundle))
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
 
 	if after := gitT(t, dir, "status", "--porcelain"); after != before {
 		t.Errorf("user's index changed:\n%s\nwant:\n%s", after, before)
@@ -441,7 +441,8 @@ func TestSnapshot(t *testing.T) {
 	// Unpack the bundle elsewhere and look at the snapshot.
 	clone := t.TempDir()
 	gitT(t, clone, "init", "-q")
-	gitT(t, clone, "fetch", "-q", bundle, "refs/agent-box/my-repo.20261123-120000-0001")
+	gitT(t, clone, "fetch", "-q", snap.bundle, "refs/agent-box/my-repo.20261123-120000-0001")
+	requireSourceRevision(t, snap.source, head, true, gitT(t, clone, "rev-parse", "FETCH_HEAD"))
 	if p := gitT(t, clone, "rev-parse", "FETCH_HEAD^"); p != head {
 		t.Errorf("parent = %s, want HEAD %s", p, head)
 	}
@@ -458,11 +459,17 @@ func TestSnapshotWithoutCommits(t *testing.T) {
 	dir := t.TempDir()
 	gitT(t, dir, "init", "-q")
 	write(t, filepath.Join(dir, "x"), "x\n")
-	bundle, err := snapshot(context.Background(), execRunner{}, dir, "x.20261123-120000-0001")
+	const ref = "x.20261123-120000-0001"
+	snap, err := snapshot(context.Background(), execRunner{}, dir, ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(filepath.Dir(bundle))
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+	clone := fetchSnapshot(t, snap.bundle, ref)
+	head := gitT(t, clone, "rev-parse", "FETCH_HEAD")
+	if s := snap.source; s == nil || s.Commit != "" || s.Dirty != nil || s.SnapshotCommit != head {
+		t.Fatalf("unborn source = %+v, snapshot %s", s, head)
+	}
 	if s := gitT(t, dir, "status", "--porcelain"); s != "?? x" {
 		t.Errorf("status = %q", s)
 	}

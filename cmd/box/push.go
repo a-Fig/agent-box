@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mask"
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -176,10 +177,11 @@ func startDetached(start func(breakaway bool) error) error {
 
 // jobRecord is <job>.json.
 type jobRecord struct {
-	Job       string      `json:"job"`
-	Thread    string      `json:"thread"` // the session the result is for
-	T3BaseDir string      `json:"t3BaseDir,omitempty"`
-	Host      *jobLocator `json:"host,omitempty"`
+	Job       string               `json:"job"`
+	Thread    string               `json:"thread"` // the session the result is for
+	T3BaseDir string               `json:"t3BaseDir,omitempty"`
+	Host      *jobLocator          `json:"host,omitempty"`
+	Source    *dash.SourceRevision `json:"source,omitempty"`
 	// Session is Claude Code's session ID, when box_run ran under Claude
 	// Code: box hook tells only that session, not a claude started inside it.
 	Session  string `json:"session,omitempty"`
@@ -233,11 +235,12 @@ type jobEnd struct {
 	Code int  `json:"code"`
 	Lost bool `json:"lost,omitempty"`
 	// Dropped is a queued job that left the queue without running.
-	Dropped    bool   `json:"dropped,omitempty"`
-	Took       int64  `json:"tookSeconds"`
-	Tail       string `json:"tail,omitempty"`
-	Digest     string `json:"digest,omitempty"`     // a test run's failure digest
-	Completion string `json:"completion,omitempty"` // observed along with the exit file
+	Dropped    bool                 `json:"dropped,omitempty"`
+	Took       int64                `json:"tookSeconds"`
+	Tail       string               `json:"tail,omitempty"`
+	Digest     string               `json:"digest,omitempty"`     // a test run's failure digest
+	Completion string               `json:"completion,omitempty"` // observed along with the exit file
+	Source     *dash.SourceRevision `json:"source,omitempty"`
 }
 
 const (
@@ -453,7 +456,7 @@ func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, 
 	if err == nil && id.hostTag == "" && baseDir != "" {
 		host = &jobLocator{Remote: a.Remote, Project: a.Project, DashboardURL: a.dashboardURL}
 	}
-	rec := jobRecord{Job: job, Host: host, Thread: a.thread(), T3BaseDir: baseDir, Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
+	rec := jobRecord{Job: job, Host: host, Source: info.Source, Thread: a.thread(), T3BaseDir: baseDir, Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	if err == nil && (id.hostTag != "" || rec.Host != nil) {
 		_, err = rec.watchHost(id)
 	}
@@ -640,6 +643,17 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 		}
 	}
 	return jobEnd{}, false
+}
+
+func (a *App) savedJobSource(job string) *dash.SourceRevision {
+	if a.StateDir == "" {
+		return nil
+	}
+	if rec, err := a.readWatchRecord(job); err == nil && rec.Source != nil {
+		return rec.Source
+	}
+	end, _ := a.recordedEnd(job)
+	return end.Source
 }
 
 // lineTail keeps the end of what it is written, for the last lines of a log.
@@ -930,6 +944,9 @@ func (a *App) Watch(ctx context.Context, job string) error {
 			}
 			return nil // cancelled by the agent: nothing to tell it
 		}
+		if end.Source == nil {
+			end.Source = rec.Source
+		}
 		if err := writeJSON(a.statePath(job, ".ended"), end); err != nil {
 			return fmt.Errorf("recording the end of %s: %w", job, err)
 		}
@@ -960,9 +977,10 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 	w.Thread = rec.Thread
 	w.KeepEnded = endedKeep
 	start := jobStart(id.Bare)
+	source := rec.Source
 	took := func() int64 { return int64(a.Now().Sub(start) / time.Second) }
 	lost := func() (jobEnd, bool) {
-		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines)}, true
+		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines), Source: source}, true
 	}
 	if rec.Queued {
 		var out queueOutcome
@@ -972,6 +990,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 		} else {
 			out, ok = w.waitQueuedJob(ctx, rec, id.Bare, false)
 		}
+		source = out.source
 		switch {
 		case !ok:
 			return jobEnd{}, false
@@ -987,7 +1006,10 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 		// Each follow prints the whole log from its start, so a follow after
 		// a pause or a broken connection mustn't add to the last one's.
 		tail.reset()
-		res, err := w.job(ctx, id, 0)
+		res, err := w.job(ctx, id, 0, source)
+		if res.Source != nil {
+			source = res.Source
+		}
 		if ctx.Err() != nil {
 			return jobEnd{}, false
 		}
@@ -998,7 +1020,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
-			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest}, true
+			return jobEnd{Code: res.Code, Took: took(), Tail: tail.lastLines(tailLines), Digest: res.Digest, Source: source}, true
 		case err == nil && res.State == statePaused && rec.GPU:
 			return lost() // a GPU box is stopped in My PC, not frozen
 		case err == nil && res.State == statePaused:

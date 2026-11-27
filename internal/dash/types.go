@@ -212,6 +212,13 @@ type Agent struct {
 	Worktree string `json:"worktree"` // the worktree's path
 }
 
+// SourceRevision identifies the worktree snapshot a job was given.
+type SourceRevision struct {
+	Commit         string `json:"commit"`         // empty when source HEAD is unknown
+	Dirty          *bool  `json:"dirty"`          // whether the bundled tree differs from HEAD, null if unknown
+	SnapshotCommit string `json:"snapshotCommit"` // the commit advertised in the bundle
+}
+
 // Job is one command run on a box.
 type Job struct {
 	Key string `json:"key"` // box/id/startedAt: names and IDs get reused
@@ -227,16 +234,17 @@ type Job struct {
 	EndedAt   *time.Time `json:"endedAt"`
 	// Reason is the agent's one or two sentences on why this runs on a box,
 	// the job's headline. box run requires it; a job from before that has "".
-	Reason  string `json:"reason"`
-	Command string `json:"command"`
-	Kind    string `json:"kind"`
-	Repo    string `json:"repo"`
-	Branch  string `json:"branch"`
-	Commit  string `json:"commit"`
-	Agent   Agent  `json:"agent"`
-	Size    string `json:"size"`
-	GPU     bool   `json:"gpu"`
-	Tail    string `json:"tail"` // the log's last TailBytes, kept after the box goes
+	Reason  string          `json:"reason"`
+	Command string          `json:"command"`
+	Kind    string          `json:"kind"`
+	Repo    string          `json:"repo"`
+	Branch  string          `json:"branch"`
+	Commit  string          `json:"commit"`
+	Source  *SourceRevision `json:"source,omitempty"`
+	Agent   Agent           `json:"agent"`
+	Size    string          `json:"size"`
+	GPU     bool            `json:"gpu"`
+	Tail    string          `json:"tail"` // the log's last TailBytes, kept after the box goes
 	// QueuedAt is when a job that went through the queue was queued; null
 	// for one box started at once. While it waits, StartedAt is QueuedAt
 	// too, Position is its place in line from 1, and Why is what it waits

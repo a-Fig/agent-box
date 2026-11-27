@@ -155,6 +155,7 @@ func TestRunWritesMeta(t *testing.T) {
 	head := gitT(t, dir, "rev-parse", "HEAD")
 	f := &fakePC{t: t, insts: []instance{{Name: "repo", Status: "Running"}}, exit: "0"}
 	a, out := testApp(f)
+	a.StateDir = t.TempDir()
 	a.Getenv = envMap(map[string]string{"T3CODE_THREAD_ID": "thread-1", "CLAUDE_CODE_SESSION_ID": "claude-1"})
 	r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"go", "test", "./..."}, Reason: testReason,
 		Env: map[string]string{"FOO": "hidden-value", "BAR": "x"}})
@@ -162,6 +163,15 @@ func TestRunWritesMeta(t *testing.T) {
 		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
 	}
 	m, raw := metaOf(t, f)
+	if r.Source == nil || r.Source.SnapshotCommit == "" || r.Source.SnapshotCommit == head {
+		t.Fatalf("run source = %+v", r.Source)
+	}
+	requireSourceRevision(t, r.Source, head, true, r.Source.SnapshotCommit)
+	end, ok := a.recordedEnd(r.Job)
+	if !ok {
+		t.Fatalf("no retained result for %s", r.Job)
+	}
+	requireSourceRevision(t, end.Source, head, true, r.Source.SnapshotCommit)
 	if !strings.HasPrefix(raw, "pc:repo"+workRoot+"/.box/"+r.Job+".meta\n") {
 		t.Errorf("pushed to %q", strings.SplitN(raw, "\n", 2)[0])
 	}
@@ -170,7 +180,7 @@ func TestRunWritesMeta(t *testing.T) {
 	}
 	host, _ := os.Hostname()
 	want := jobMeta{V: 1, Reason: testReason, Command: "go test ./...", Repo: "https://github.com/owner/repo.git",
-		Branch: "feat/x", Commit: head, Size: "medium", EnvNames: []string{"BAR", "FOO"}, StartedAt: "2026-11-23T12:00:00Z",
+		Branch: "feat/x", Commit: head, Source: r.Source, Size: "medium", EnvNames: []string{"BAR", "FOO"}, StartedAt: "2026-11-23T12:00:00Z",
 		Agent: agentInfo{Client: "cli", Session: "thread-1", SessionSource: "t3", Host: host, Worktree: m.Agent.Worktree, Display: "My_Repo"}}
 	if got, _ := json.Marshal(m); string(got) != string(must(json.Marshal(want))) {
 		t.Errorf("meta =\n%s\nwant\n%s", got, must(json.Marshal(want)))

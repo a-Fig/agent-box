@@ -283,6 +283,9 @@ func TestStoppedJobLogPageKeepsRawBytes(t *testing.T) {
 
 func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 	a, _, west, east := lookupTestApp(t, "work")
+	dirty := true
+	westSource := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	eastSource := &dash.SourceRevision{Commit: strings.Repeat("c", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("d", 40)}
 	posted := map[string]int{}
 	a.Post = func(_ context.Context, url string, body []byte) error {
 		var end dash.JobEndedBody
@@ -308,10 +311,17 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 				t.Fatalf("attach sent a qualified ID to Incus: %q", cmd.Args)
 			}
 			code := 4
+			src := westSource
 			if cmd.Args[3] == "east:repo" {
 				code = 7
+				src = eastSource
 			}
 			fmt.Fprint(cmd.Stdout, cmd.Args[3]+" tail")
+			meta, err := json.Marshal(jobMeta{Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintln(cmd.Stderr, metaMarker+base64.StdEncoding.EncodeToString(meta))
 			fmt.Fprintf(cmd.Stderr, "%s%d\n", exitMarker, code)
 			return Result{}, nil
 		}
@@ -332,6 +342,17 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 		t.Fatalf("ended reports went to %v", posted)
 	}
 	gone = true
+	for id, want := range map[string]*dash.SourceRevision{westID: westSource, eastID: eastSource} {
+		lookup, err := a.lookupJob(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := lookup.job(context.Background(), 0)
+		if err != nil || r.State != stateDone {
+			t.Fatalf("offline lookup %s = %+v, %v", id, r, err)
+		}
+		requireSourceRevision(t, r.Source, want.Commit, *want.Dirty, want.SnapshotCommit)
+	}
 	for _, tc := range []struct {
 		id, tail string
 		code     float64

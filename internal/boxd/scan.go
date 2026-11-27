@@ -86,12 +86,13 @@ type scanned struct {
 
 // meta is /work/.box/<job>.meta as box writes it (cmd/box/meta.go).
 type meta struct {
-	V       int    `json:"v"`
-	Reason  string `json:"reason"`
-	Command string `json:"command"`
-	Repo    string `json:"repo"`
-	Branch  string `json:"branch"`
-	Commit  string `json:"commit"`
+	V       int                  `json:"v"`
+	Reason  string               `json:"reason"`
+	Command string               `json:"command"`
+	Repo    string               `json:"repo"`
+	Branch  string               `json:"branch"`
+	Commit  string               `json:"commit"`
+	Source  *dash.SourceRevision `json:"source"`
 	Agent   struct {
 		Client   string `json:"client"`
 		Session  string `json:"session"`

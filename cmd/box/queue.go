@@ -88,29 +88,30 @@ func queueable(why string, sz mode.Size) bool {
 
 // queueRun is what enqueue needs from Run.
 type queueRun struct {
-	o      RunOpts
-	rp     repo
-	box    string // the repo's box, or with new the base of a throwaway's name
-	new    bool
-	sz     mode.Size
-	info   jobMeta
-	bundle string // a snapshot made already, or "" to make one
-	ref    string
+	o    RunOpts
+	rp   repo
+	box  string // the repo's box, or with new the base of a throwaway's name
+	new  bool
+	sz   mode.Size
+	info jobMeta
+	snap worktreeSnapshot // a snapshot made already, or zero to make one
+	ref  string
 }
 
 // enqueue sends the run to boxd's queue. ok is false when it isn't queued;
 // msg then says why, for the refusal.
 func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, msg string) {
-	bundle, ref := q.bundle, q.ref
-	if bundle == "" {
+	snap, ref := q.snap, q.ref
+	if snap.bundle == "" {
 		ref = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
-		b, err := snapshot(ctx, a.R, q.rp.Top, ref)
+		s, err := snapshot(ctx, a.R, q.rp.Top, ref)
 		if err != nil {
 			return r, false, "can't snapshot the worktree for the queue: " + err.Error()
 		}
-		defer os.RemoveAll(filepath.Dir(b))
-		bundle = b
+		defer os.RemoveAll(filepath.Dir(s.bundle))
+		snap = s
 	}
+	q.info.setSource(snap.source)
 	meta, err := json.Marshal(q.info)
 	if err != nil {
 		return r, false, err.Error()
@@ -124,7 +125,7 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, ms
 	if q.new && req.Size == "" {
 		req.Size = q.sz.Name
 	}
-	f, err := os.Open(bundle)
+	f, err := os.Open(snap.bundle)
 	if err != nil {
 		return r, false, err.Error()
 	}
@@ -172,7 +173,7 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, ms
 		on = "on a new box, " + box + ","
 	}
 	fmt.Fprintf(a.Err, "box: queued job %s, %s (%s); it starts %s when it can\n", rep.Job, place(rep.Position), waitText(rep.Why), on)
-	return JobResult{Job: rep.Job, Box: box, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new}, true, ""
+	return JobResult{Job: rep.Job, Box: box, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, Source: snap.source, throwaway: q.new}, true, ""
 }
 
 // place says where a queued job is in line.
@@ -280,6 +281,7 @@ func droppedMessage(r jobRecord) string {
 type queueOutcome struct {
 	started time.Time
 	end     *jobEnd
+	source  *dash.SourceRevision
 }
 
 // jobInBox says whether the job's log exists in its box: it started there.
@@ -299,8 +301,10 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 
 func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, seen bool) (out queueOutcome, ok bool) {
 	queuedAt := jobStart(bare) // boxd names a queued job by when it was queued
+	out.source = rec.Source
 	dropped := func() (queueOutcome, bool) {
-		return queueOutcome{end: &jobEnd{Code: exitPaused, Lost: true, Dropped: true, Took: int64(a.Now().Sub(queuedAt) / time.Second)}}, true
+		out.end = &jobEnd{Code: exitPaused, Lost: true, Dropped: true, Took: int64(a.Now().Sub(queuedAt) / time.Second), Source: out.source}
+		return out, true
 	}
 	backoff := 15 * time.Second
 	gone := 0 // 404s in a row since boxd answered queued
@@ -309,6 +313,9 @@ func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, see
 			return out, false // box_cancel took it off the queue
 		}
 		j, found, err := a.queuedJob(ctx, bare)
+		if err == nil && found && out.source == nil {
+			out.source = j.Source
+		}
 		switch {
 		case err != nil:
 			// Out of reach: keep waiting, but not past the queue's own limit.
@@ -351,13 +358,15 @@ func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, see
 		case j.State == dash.JobDone && j.Exit != nil:
 			// It ran and ended while nobody watched: boxd has the result, and
 			// its kept box may be gone already.
-			e := &jobEnd{Code: *j.Exit, Tail: lastLines(j.Tail, tailLines)}
+			e := &jobEnd{Code: *j.Exit, Tail: lastLines(j.Tail, tailLines), Source: out.source}
 			if j.EndedAt != nil {
 				e.Took = int64(j.EndedAt.Sub(j.StartedAt) / time.Second)
 			}
-			return queueOutcome{end: e}, true
+			out.end = e
+			return out, true
 		}
-		return queueOutcome{started: j.StartedAt}, true // running or paused: the box has it
+		out.started = j.StartedAt
+		return out, true // running or paused: the box has it
 	}
 	return out, false
 }
@@ -369,7 +378,7 @@ func (a *App) recordQueued(info jobMeta, job string, gpu, throwaway bool) {
 	if a.StateDir == "" || os.MkdirAll(a.StateDir, 0o755) != nil {
 		return
 	}
-	rec := jobRecord{Job: job, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
+	rec := jobRecord{Job: job, Source: info.Source, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: recording queued job " + job + ": " + err.Error())
 	}
@@ -394,26 +403,26 @@ func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResu
 	switch {
 	case !ok && a.notifiedBy(job) == "cancel":
 		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
-		return JobResult{Job: job, Box: box, State: stateDone, Code: exitDetached}, nil
+		return JobResult{Job: job, Box: box, State: stateDone, Code: exitDetached, Source: out.source}, nil
 	case !ok:
 		// Interrupted: 130 as for a detach from a running job, not 75, which
 		// says nothing started, though the job will still run on the PC.
 		fmt.Fprintf(a.Err, "box: job %s is still queued; box job %s follows it, box cancel %s takes it off\n", job, job, job)
-		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitDetached}, nil
+		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitDetached, Source: out.source}, nil
 	case out.end != nil && out.end.Dropped:
 		fmt.Fprintf(a.Err, "box: job %s left the queue without running (it waited %s at most, or couldn't start)\n", job, elapsed(dash.QueueMaxAge))
-		return JobResult{Job: job, Box: box, State: stateDone, Code: exitPaused}, nil
+		return JobResult{Job: job, Box: box, State: stateDone, Code: exitPaused, Source: out.source}, nil
 	case out.end != nil:
 		// It ran and ended between two looks: its kept box has the full log
 		// and digest; boxd's tail is the fallback once the box is gone.
-		if r, err := a.job(ctx, id, 0); err == nil && r.State == stateDone {
+		if r, err := a.job(ctx, id, 0, out.source); err == nil && r.State == stateDone {
 			return r, nil // not a pause: a kept box frozen by My PC doesn't undo an end boxd has
 		}
 		io.WriteString(a.Out, out.end.Tail+"\n")
-		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code}, nil
+		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code, Source: out.source}, nil
 	}
 	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box)
-	return a.job(ctx, id, 0)
+	return a.job(ctx, id, 0, out.source)
 }
 
 // notifiedBy is who wrote job's .notified ("cancel", "watcher", "box run",

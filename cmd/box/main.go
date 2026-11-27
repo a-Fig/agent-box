@@ -200,7 +200,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, New: *isNew, Fresh: *fresh, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why, Queue: !*noQueue})
 		if err == nil && r.State == stateQueued {
 			// This process follows the job through the queue and into its box (#93).
-			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}}
+			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}, Source: r.Source}
 			a.recordQueued(info, r.Job, *size == mode.GPUSize, r.throwaway)
 			r, err = a.followQueued(ctx, r.Job)
 			a.markRead(r.Job, r, err, "box run")
