@@ -824,19 +824,20 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 // Full, just when box sets the job's expiry, or on any mode change.
 func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
 	return jobrun.RetryETag(ctx, func() error {
-		hold, _ := a.incusOK(ctx, "config", "get", a.target(box), mode.HoldKey)
-		until := mode.Held(map[string]string{mode.HoldKey: strings.TrimSpace(hold)}, a.Now().Add(ttl))
-		_, err := a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+until.UTC().Format(time.RFC3339))
+		until := a.heldExpiry(ctx, box, a.Now().Add(ttl))
+		_, err := a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+until)
 		return err
 	})
+}
+
+func (a *App) heldExpiry(ctx context.Context, box string, until time.Time) string {
+	hold, _ := a.incusOK(ctx, "config", "get", a.target(box), mode.HoldKey)
+	return mode.Held(map[string]string{mode.HoldKey: strings.TrimSpace(hold)}, until).UTC().Format(time.RFC3339)
 }
 
 // Publish the setup owner before pushing files. The second reservation read
 // also catches a cleanup that reserved the box while config set was starting.
 func (a *App) reserveSetup(ctx context.Context, box, job string, pooled bool) error {
-	if a.Project != mode.Project {
-		return nil
-	}
 	check := func() error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -854,8 +855,13 @@ func (a *App) reserveSetup(ctx context.Context, box, job string, pooled bool) er
 		if err := check(); err != nil {
 			return err
 		}
-		args := []string{"config", "set", a.target(box), expiresKey + "=" + jobrun.ProtectedExpiry,
-			jobrun.SetupKey + "=" + jobrun.SetupValue(job, a.Now())}
+		now := a.Now()
+		expiry := jobrun.ProtectedExpiry
+		if a.Project != mode.Project {
+			expiry = a.heldExpiry(ctx, box, now.Add(jobTTL))
+		}
+		args := []string{"config", "set", a.target(box), expiresKey + "=" + expiry,
+			jobrun.SetupKey + "=" + jobrun.SetupValue(job, now)}
 		if pooled {
 			args = append(args, jobrun.ThrowawayClaimKey+"=")
 		}
@@ -1249,11 +1255,6 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 	}
 	if err := a.pushMeta(setupCtx, box, remote, filepath.Dir(bundle), info); err != nil {
 		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
-	}
-	if a.Project != mode.Project {
-		if err := a.setExpiry(setupCtx, box, jobTTL); err != nil {
-			return setupFailed(r, fmt.Errorf("set job expiry: %w", err))
-		}
 	}
 	if err := setupCtx.Err(); err != nil {
 		return setupFailed(r, err)

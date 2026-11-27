@@ -38,6 +38,7 @@ type fakeFleetHost struct {
 	queueError     string
 	preStartError  string
 	lateBox        *instance
+	onBundle       func() // during bundle upload, with mu held
 
 	mu          sync.Mutex
 	pushedFiles []string
@@ -195,8 +196,13 @@ func (ff *fakeFleet) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, nil
 		}
 	case "file":
-		if h.preStartError == "bundle" && strings.HasSuffix(args[len(args)-1], ".bundle") {
-			return Result{Code: 1, Stderr: "connection reset"}, nil
+		if strings.HasSuffix(args[len(args)-1], ".bundle") {
+			if h.preStartError == "bundle" {
+				return Result{Code: 1, Stderr: "connection reset"}, nil
+			}
+			if h.onBundle != nil {
+				h.onBundle()
+			}
 		}
 		h.pushedFiles = append(h.pushedFiles, args[len(args)-1])
 		return Result{}, nil
@@ -418,7 +424,7 @@ func TestFleetRunPicksBestHostIssuesQualifiedIDAndBareGuestID(t *testing.T) {
 		t.Fatalf("beta followJobs = %v, want bare ID", beta.followJobs)
 	}
 	cfg := beta.insts[0].Config
-	if cfg[jobrun.SetupKey] != "" || cfg[expiresKey] != a.Now().Add(idleTTL).UTC().Format(time.RFC3339) {
+	if owner, _ := jobrun.SetupOwner(cfg); owner != id.Bare || cfg[expiresKey] != a.Now().Add(idleTTL).UTC().Format(time.RFC3339) {
 		t.Fatalf("custom-project box after completion: %v", cfg)
 	}
 	// Non-agents project must make zero boxd HTTP requests or end reports.
@@ -449,23 +455,47 @@ func TestFleetRunCustomProjectKeepsFiniteExpiryWhenDetached(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		throwaway bool
+		reuse     bool
 	}{
 		{name: "repo box"},
 		{name: "throwaway", throwaway: true},
+		{name: "reused repo box protected during upload", reuse: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			host := fleetHost{Name: "beta", Remote: "r2", Project: "work"}
 			beta := &fakeFleetHost{remote: host.Remote, project: host.Project, mode: "full", detachFollow: true}
 			ff := newFakeFleet(t, beta)
 			a, out, dir := fleetDispatchTestApp(t, ff, []fleetHost{host})
+			now := a.Now()
+			deadline := now.Add(jobTTL).UTC().Format(time.RFC3339)
+			idleDeadline := now.Add(idleTTL).UTC().Format(time.RFC3339)
+			if tc.reuse {
+				beta.insts = []instance{{Name: "widget", Status: "Running", Config: map[string]string{
+					mode.SizeKey: "medium", expiresKey: idleDeadline,
+				}}}
+			}
+			uploaded := false
+			beta.onBundle = func() {
+				uploaded = true
+				in := beta.insts[0]
+				if owner, until := jobrun.SetupOwner(in.Config); owner == "" || !until.Equal(now.Add(jobrun.SetupTTL)) || in.Config[expiresKey] != deadline {
+					t.Fatalf("missing finite setup reservation during upload: %v", in.Config)
+				}
+				if tc.reuse {
+					in.Config[expiresKey] = idleDeadline // an older client collected the previous result
+					if idleRepoConfig(in, now) {
+						t.Fatal("pressure eviction admitted a repo box during upload")
+					}
+				}
+			}
 			r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"true"},
 				New: tc.throwaway, Wait: 20 * time.Millisecond, Reason: "Check finite expiry for a detached job in a custom project."})
-			if err != nil || r.State != stateDetached || r.Host != host.Name || len(beta.insts) != 1 {
+			if err != nil || !uploaded || r.State != stateDetached || r.Host != host.Name || len(beta.insts) != 1 {
 				t.Fatalf("run = %+v, boxes = %v, error = %v\n%s", r, beta.insts, err, out)
 			}
 			cfg := beta.insts[0].Config
-			if cfg[jobrun.SetupKey] != "" || cfg[expiresKey] != a.Now().Add(jobTTL).UTC().Format(time.RFC3339) {
-				t.Fatalf("detached custom-project box should have 24h expiry without a setup owner: %v", cfg)
+			if cfg[expiresKey] != deadline {
+				t.Fatalf("detached custom-project box should have 24h expiry: %v", cfg)
 			}
 		})
 	}
