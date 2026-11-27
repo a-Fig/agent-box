@@ -8,7 +8,7 @@ import (
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
-// quitTimeout bounds what the tray does on Quit before it exits.
+// quitTimeout bounds each of Quit's waits: finishing a release and storing the pick.
 const quitTimeout = 30 * time.Second
 
 // releaseStoreTimeout bounds Release memory's write of a pick not yet stored.
@@ -35,27 +35,29 @@ func releaseMemory(mgr *mode.Manager, terminate func() error, poke func(), logf 
 	poke()
 }
 
-// beforeQuit runs when the tray is about to exit. Within limit, it waits for
-// a Release memory in flight (releases) to finish, then stores a pick not yet
-// in the project, so the headless enforcer that takes over applies the
-// owner's last pick (#204). With neither, it returns at once.
+// beforeQuit waits for Release memory to finish, then gives the pending pick
+// its own deadline so Incus has time to start and retry the write (#204).
+// The tray menu and mode loop must have stopped taking actions. With no
+// release or pending pick, it returns at once.
 func beforeQuit(releases *sync.WaitGroup, mgr *mode.Manager, limit time.Duration, logf func(string, ...any)) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
-	defer cancel()
 	done := make(chan struct{})
 	go func() { releases.Wait(); close(done) }()
 	select {
 	case <-done:
 	default:
 		logf("quit: waiting for Release memory to finish")
+		timer := time.NewTimer(limit)
+		defer timer.Stop()
 		select {
 		case <-done:
 			logf("quit: Release memory finished")
-		case <-ctx.Done():
+		case <-timer.C:
 			logf("quit: gave up waiting for Release memory after %s; the pick may not be stored", limit)
 			return
 		}
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
 	stored, err := mgr.StorePending(ctx)
 	switch {
 	case err != nil:
@@ -63,4 +65,11 @@ func beforeQuit(releases *sync.WaitGroup, mgr *mode.Manager, limit time.Duration
 	case stored:
 		logf("quit: stored the chosen mode %s", mgr.Chosen())
 	}
+}
+
+// finishUpdate starts the replacement after the slow work. Even older
+// binaries (v0.1.7) give the outgoing tray only 20 s to free its mutex.
+func finishUpdate(releases *sync.WaitGroup, mgr *mode.Manager, limit time.Duration, logf func(string, ...any), start func() bool) bool {
+	beforeQuit(releases, mgr, limit, logf)
+	return start()
 }

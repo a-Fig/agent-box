@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -238,4 +239,60 @@ func TestQuitRetriesThePickWhileIncusStarts(t *testing.T) {
 	if inc.count(mode.ProjectChosenKey+`={"mode":"`+string(mode.MyPC)+`"`) != 1 {
 		t.Fatalf("writes %q, want my-pc stored once", inc.snapshot())
 	}
+}
+
+func TestQuitRetryGetsItsOwnDeadlineAfterSlowRelease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inc := &failIncus{n: 2} // fail before termination and on the first attempt after it
+		mgr := mode.New(inc, mode.Full)
+		mgr.Handshake = true
+		mgr.SetChosen(mode.MyPC)
+		var releases sync.WaitGroup
+		releases.Add(1)
+		go func() {
+			defer releases.Done()
+			releaseMemory(mgr, func() error {
+				time.Sleep(quitTimeout - 500*time.Millisecond)
+				return nil
+			}, func() {}, t.Logf)
+		}()
+		beforeQuit(&releases, mgr, quitTimeout, t.Logf)
+		if inc.count(mode.ProjectChosenKey+`={"mode":"mypc"`) != 1 {
+			t.Fatalf("writes %q, want My PC stored on retry", inc.snapshot())
+		}
+	})
+}
+
+func TestUpdateStartsReplacementAfterQuit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inc := &recIncus{}
+		mgr := mode.New(inc, mode.Full)
+		mgr.Handshake = true
+		var releases sync.WaitGroup
+		completed := make(chan struct{})
+		releases.Add(1)
+		go func() {
+			defer releases.Done()
+			releaseMemory(mgr, func() error {
+				time.Sleep(25 * time.Second) // longer than v0.1.7's mutex wait
+				mgr.SetChosen(mode.MyPC)
+				return nil
+			}, func() {}, t.Logf)
+			close(completed)
+		}()
+		launched := finishUpdate(&releases, mgr, quitTimeout, t.Logf, func() bool {
+			select {
+			case <-completed:
+			default:
+				t.Error("started the replacement while Release memory was running")
+			}
+			if inc.count(mode.ProjectChosenKey+`={"mode":"mypc"`) != 1 {
+				t.Errorf("started the replacement before My PC was stored: %q", inc.snapshot())
+			}
+			return true
+		})
+		if !launched {
+			t.Fatal("replacement was not launched")
+		}
+	})
 }

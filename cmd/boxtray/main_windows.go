@@ -144,11 +144,36 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hb := newHeartbeat(mgr.Incus, mode.EnforcerTray, lg.Printf)
-	up := autoUpdater(os.Args[1:], lg.Printf, func() {
-		if t == nil {
-			os.Exit(0)
+	restarts := make(chan func() bool, 1)
+	up := autoUpdater(os.Args[1:], lg.Printf, func(start func() bool) {
+		finish := func() bool {
+			if finishUpdate(&releases, mgr, quitTimeout, lg.Printf, start) {
+				cancel()
+				return true
+			}
+			return false
 		}
-		t.close() // the message loop ends, the icon goes, main returns
+		if t == nil {
+			if finish() {
+				os.Exit(0)
+			}
+			return
+		}
+		// The mode loop stays here until the menu has stopped and the handoff
+		// has finished. On a launch failure, both loops can resume.
+		done := make(chan struct{})
+		restarts <- func() bool {
+			defer close(done)
+			return finish()
+		}
+		if !t.requestRestart() {
+			<-restarts
+			return
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
 	})
 	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Logf: lg.Printf, Maintain: up.maintain}
 	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
@@ -157,7 +182,12 @@ func main() {
 	if t == nil {
 		select {} // nothing to pump; only a kill ends this
 	}
-	t.loop()
+	for t.loop() {
+		if (<-restarts)() {
+			return
+		}
+		t.restartIcon()
+	}
 	lg.Printf("exit: message loop ended")
 	// Stop ticking, then let a release in flight finish and store the last
 	// pick, so the headless enforcer that takes over applies it (#204).
