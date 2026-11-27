@@ -598,6 +598,7 @@ const (
 	CodeFrozen       = "frozen"             // 409: the box is frozen for My PC
 	CodeNotRunning   = "not-running"        // 409: the job has already ended
 	CodeGone         = "gone"               // 409: the box of that name is another one now
+	CodeStopping     = "stopping"           // 409: an idle stop has reserved the box
 	CodeNeedsConfirm = "needs-confirmation" // 409: deleting needs the warning first (#247)
 	CodeIncus        = "incus"              // 502: Incus failed
 	CodeQueueFull    = "queue-full"         // 507: the queue's snapshots would pass QueueBytes

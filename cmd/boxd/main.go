@@ -66,7 +66,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go w.Run(ctx)
+	go w.Run(ctx, cfg.CoolIdleThrowaways, cfg.ReuseThrowaways)
 
 	srv := &boxd.Server{
 		W:               w,

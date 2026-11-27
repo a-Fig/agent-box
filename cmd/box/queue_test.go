@@ -303,13 +303,18 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 		}}
 	f.refuseOnce = true
 	a, out := testApp(f)
+	a.dashboardURL = "https://fixture.example.com"
+	a.HTTP = func(*http.Request) (*http.Response, error) {
+		body := io.NopCloser(strings.NewReader(`{"code":"not-found","error":"no such endpoint"}`))
+		return &http.Response{StatusCode: http.StatusNotFound, Body: body}, nil
+	}
 	if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "small")); err != nil {
 		t.Fatalf("launch: %v\n%s", err, out)
 	}
 	if names := f.names(); strings.Contains(names, "old-0001") || !strings.Contains(names, "fresh-0002") || !strings.Contains(names, "far-0003") {
 		t.Errorf("boxes left: %s (calls %s)", names, f.callList())
 	}
-	if calls := f.callList(); calls != "launch list list exec exec project project project project project exec list delete launch" {
+	if calls := f.callList(); calls != "launch list list exec exec project project project project project exec list config exec list delete launch" {
 		t.Errorf("calls: %s", calls)
 	}
 	if !strings.Contains(out.String(), "box: deleted old-0001, kept after its job, to make room") {

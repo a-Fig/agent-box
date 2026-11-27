@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -343,6 +344,7 @@ func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
 		{"short of instances", "limits.instances=2"},
 		{"short of disk", "limits.disk=66GiB"},
 		{"already stopped", "limits.instances=2"},
+		{"stopped after idle", "limits.instances=2"},
 		{"stopped by first delete attempt", "limits.instances=2"},
 	} {
 		t.Run(tt.name, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, tt.limit, tt.name) })
@@ -413,6 +415,11 @@ func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short, scenario string) 
 	switch scenario {
 	case "already stopped":
 		r.f.set(func() { r.f.ins[1].Status = "Stopped" })
+	case "stopped after idle":
+		r.f.set(func() {
+			r.f.ins[1].Status = "Stopped"
+			r.f.ins[1].Config[jobrun.ThrowawayStopKey] = jobrun.ThrowawayStopped
+		})
 	case "stopped by first delete attempt":
 		deletes = 2
 		r.f.set(func() {

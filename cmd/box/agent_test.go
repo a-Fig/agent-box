@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/digest"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/skills"
 )
 
@@ -283,16 +284,22 @@ func TestMCPLogPagePreservesSplitUTF8(t *testing.T) {
 	}
 }
 
-// A GPU box that My PC stopped can't exec, but its files still pull: the
-// job's .repo names the checkout (#117).
+// A stopped throwaway can't exec, but its files still pull using the
+// job's .repo and checkout ownership marker.
 func TestPullFromStoppedBox(t *testing.T) {
 	job := "my-repo-725d.20261123-120000-0001"
-	f := &fakePC{t: t, insts: []instance{{Name: "my-repo-725d", Status: "Stopped"}},
-		files: map[string]string{"pc:my-repo-725d/work/.box/" + job + ".repo": "my-repo\n"}}
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo-725d", Status: "Stopped",
+		Config: map[string]string{jobrun.ThrowawayKey: "true", jobrun.ThrowawayStopKey: jobrun.ThrowawayStopped}}},
+		files: map[string]string{"pc:my-repo-725d/work/.box/" + job + ".repo": "my-repo\n",
+			"pc:my-repo-725d/work/.box/my-repo.checkout": job + "\n"}}
 	f.pull = func(src, dst string) { write(t, filepath.Join(dst, "result.txt"), "done\n") }
 	a, out := testApp(f)
-	if _, err := a.Pull(context.Background(), job, "result.txt", t.TempDir()); err != nil {
+	dest := t.TempDir()
+	if _, err := a.Pull(context.Background(), job, "result.txt", dest); err != nil {
 		t.Fatalf("Pull: %v\n%s", err, out)
+	}
+	if data, err := os.ReadFile(filepath.Join(dest, "result.txt")); err != nil || string(data) != "done\n" {
+		t.Fatalf("stopped artifact = %q, %v", data, err)
 	}
 	pulledResult := false
 	for _, p := range f.pulls {
