@@ -23,12 +23,12 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 	}
 
 	type listing struct {
-		host     fleetHost
-		bare     bool
-		jobs     []JobInfo
-		queued   []JobInfo
-		warnings []string
-		err      error
+		host      fleetHost
+		bare      bool
+		jobs      []JobInfo
+		queueJobs []JobInfo
+		warnings  []string
+		err       error
 	}
 	defaultHost := fleetHost{Name: a.Remote, Remote: a.Remote, Project: a.Project}
 	defaultKey := [2]string{a.Remote, a.Project}
@@ -77,7 +77,7 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 			wg.Go(func() {
 				hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
 				defer cancel()
-				result.queued = app.listQueuedJobs(hostCtx, host.DashboardURL)
+				result.queueJobs = app.listQueueJobs(hostCtx, host.DashboardURL)
 			})
 		}
 	}
@@ -97,8 +97,8 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 		for _, msg := range result.warnings {
 			a.warn(fmt.Sprintf("box: %s: %s", label, strings.TrimPrefix(msg, "box: ")))
 		}
-		seen := make(map[string]bool, len(result.jobs)+len(result.queued))
-		for _, job := range append(result.jobs, result.queued...) {
+		seen := make(map[string]bool, len(result.jobs)+len(result.queueJobs))
+		for _, job := range append(result.jobs, result.queueJobs...) {
 			if seen[job.Job] {
 				continue
 			}
@@ -134,17 +134,18 @@ func (a *App) hasJobRecord(job string) bool {
 	return a.StateDir != "" && (a.exists(job, ".json") || a.exists(job, ".result"))
 }
 
-// listQueuedJobs also recovers jobs whose submission reply was lost. They have
-// no guest log yet, and boxd already publishes their bare ID in its state.
-func (a *App) listQueuedJobs(ctx context.Context, dashboardURL string) []JobInfo {
+// listQueueJobs recovers jobs whose submission reply was lost, even when
+// they started or ended before Incus shows a guest log. Boxd bounds the
+// finished jobs in this snapshot.
+func (a *App) listQueueJobs(ctx context.Context, dashboardURL string) []JobInfo {
 	state, ok := a.readFleetBoxdState(ctx, dashboardURL)
-	if !ok || !state.Queue {
+	if !ok {
 		return nil
 	}
 	var jobs []JobInfo
 	for _, j := range state.Jobs {
-		if j.State == dash.JobQueued {
-			jobs = append(jobs, JobInfo{Job: j.Box + "." + j.ID, Box: j.Box, State: stateQueued, Started: j.StartedAt})
+		if j.State == dash.JobQueued || j.QueuedAt != nil {
+			jobs = append(jobs, JobInfo{Job: j.Box + "." + j.ID, Box: j.Box, State: j.State, Code: j.Exit, Started: j.StartedAt})
 		}
 	}
 	return jobs

@@ -119,7 +119,7 @@ For multiple hosts, create `agent-box/hosts.json` in your user config directory 
 
 With a host registry, `box run` and `box_run` prefer a host that can start without waiting on another checkout. Repo affinity and registry order break ties. If no host can start, runs that allow queuing wait on an eligible host. Results name the host and include a qualified job ID for follow-up commands. `box run --host <name>` pins a host for debugging. `--box` uses the default host unless pinned. `BOX_REMOTE` and `BOX_PROJECT` set the default host. An absent or empty registry keeps single-host behavior and bare job IDs.
 
-`box jobs` and `box_job` without an ID list jobs on the default and configured hosts, including jobs waiting in configured queues. Fleet listings qualify IDs for configured hosts and honor existing bare records on the default host. `box jobs --box` looks up a box on the default host.
+`box jobs` and `box_job` without an ID list jobs on the default and configured hosts, including waiting jobs and recent runs reported by configured queues. Fleet listings qualify IDs for configured hosts and honor existing bare records on the default host. `box jobs --box` looks up a box on the default host.
 
 ## Website previews
 

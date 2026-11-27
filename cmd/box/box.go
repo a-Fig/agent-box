@@ -1035,6 +1035,12 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 		defer os.RemoveAll(filepath.Dir(bundle))
 	}
 
+	setupFailed := func(r JobResult, err error) (JobResult, *turnAwayInfo, error) {
+		if targetHost != nil && ctx.Err() == nil {
+			return r, &turnAwayInfo{msg: err.Error()}, err
+		}
+		return r, nil, err
+	}
 	started := false // from here on the remote job may be running
 	setupCtx := ctx
 	reused := false
@@ -1049,7 +1055,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 		case isTempFail(err):
 			return handleTurnAway(false, err.Error(), errCause(err))
 		case err != nil:
-			return JobResult{Code: 1}, nil, err
+			return setupFailed(JobResult{Code: 1}, err)
 		case paused != "":
 			return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
 		default:
@@ -1097,26 +1103,20 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 	}
 	hostName := a.jobHostName
 	r := JobResult{Job: pubID.ID, Box: box, Host: hostName, Code: 1, throwaway: o.New, fleetHost: targetHost}
-	setupFailed := func(err error) (JobResult, *turnAwayInfo, error) {
-		if targetHost != nil && ctx.Err() == nil {
-			return r, &turnAwayInfo{msg: err.Error()}, err
-		}
-		return r, nil, err
-	}
 	remote := workRoot + "/.box/" + job
 	if _, err := a.incusOK(setupCtx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
-		return setupFailed(err)
+		return setupFailed(r, err)
 	}
 	if err := a.pushMeta(setupCtx, box, remote, filepath.Dir(bundle), info); err != nil {
 		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
 	}
 	if !reused {
 		if err := a.setExpiry(setupCtx, box, jobTTL); err != nil {
-			return setupFailed(fmt.Errorf("set job expiry: %w", err))
+			return setupFailed(r, fmt.Errorf("set job expiry: %w", err))
 		}
 	}
 	if err := setupCtx.Err(); err != nil {
-		return setupFailed(err)
+		return setupFailed(r, err)
 	}
 	// Say the job ID before starting it, so a dropped connection can't lose it.
 	fmt.Fprintf(a.Err, "box: job %s on %s%s\n", pubID.ID, box, onHost(hostName))

@@ -274,7 +274,8 @@ func (ff *fakeFleet) httpDo(req *http.Request) (*http.Response, error) {
 		}
 		if h.loseQueueReply {
 			box, id, _ := strings.Cut(job, ".")
-			h.queuedJobs = append(h.queuedJobs, dash.Job{ID: id, Box: box, State: dash.JobQueued, StartedAt: jobStart(job)})
+			at := jobStart(job)
+			h.queuedJobs = append(h.queuedJobs, dash.Job{ID: id, Box: box, State: dash.JobQueued, StartedAt: at, QueuedAt: &at})
 			return nil, io.ErrUnexpectedEOF
 		}
 		rep, _ := json.Marshal(dash.QueueReply{Job: job, Position: 1, Why: dash.RefusedFull})
@@ -574,6 +575,17 @@ func TestFleetRunQueueFallbackOnEnqueueFailure(t *testing.T) {
 	if jobs[0].Job != id.ID {
 		t.Fatalf("recovered ID = %s, want %s", jobs[0].Job, id.ID)
 	}
+	// A started or dropped queue job can appear in boxd before Incus has
+	// any guest log. Recent non-queue jobs should not enter via this path.
+	first.queuedJobs = append(first.queuedJobs, dash.Job{ID: pending.ID, Box: "unrelated", State: dash.JobRunning, StartedAt: pending.StartedAt})
+	for _, state := range []string{dash.JobRunning, dash.JobLost, dash.JobDone} {
+		first.queuedJobs[0].State = state
+		jobs, err := a.listJobs(context.Background(), "")
+		if err != nil || len(jobs) != 1 || jobs[0].Job != id.ID || jobs[0].State != state {
+			t.Fatalf("recover %s job = %+v, %v", state, jobs, err)
+		}
+	}
+	first.queuedJobs[0].State = dash.JobQueued
 	var listing bytes.Buffer
 	a.Out = &listing
 	if code := run(context.Background(), a, []string{"jobs"}, nil); code != 0 || !strings.Contains(listing.String(), id.ID) || !strings.Contains(listing.String(), "queued") {
@@ -753,10 +765,13 @@ func TestFleetRunQueuesTheLiveSizeFallback(t *testing.T) {
 }
 
 func TestFleetRunRetriesPreStartSetupFailures(t *testing.T) {
-	for _, failure := range []string{"bundle", "expiry"} {
+	for _, failure := range []string{"bundle", "expiry", "repo launch"} {
 		t.Run(failure, func(t *testing.T) {
 			first := &fakeFleetHost{remote: "r1", project: "work", mode: "full", preStartError: failure}
 			second := &fakeFleetHost{remote: "r2", project: "work", mode: "full"}
+			if failure == "repo launch" {
+				first.refuseLaunch = "Failed creating instance from image: Instance metadata contained disallowed entries: [/var/lib/incus/...]"
+			}
 			ff := newFakeFleet(t, first, second)
 			hosts := []fleetHost{
 				{Name: "first", Remote: first.remote, Project: first.project},
@@ -770,7 +785,7 @@ func TestFleetRunRetriesPreStartSetupFailures(t *testing.T) {
 				}
 			}
 			r, err := a.Run(context.Background(), RunOpts{
-				Dir: dir, New: true, Cmd: []string{"true"}, Reason: "Retry on a healthy host when the first host fails during setup.",
+				Dir: dir, New: failure != "repo launch", Cmd: []string{"true"}, Reason: "Retry on a healthy host when the first host fails during setup.",
 			})
 			if err != nil || r.Code != 0 || r.Host != "second" || len(first.startJobs) != 0 || len(second.startJobs) != 1 ||
 				len(starts) != 1 || starts[0].Host != "second" || ff.snapshots != 1 {
