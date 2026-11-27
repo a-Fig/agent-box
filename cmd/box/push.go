@@ -356,6 +356,11 @@ func (a *App) markNotified(job, who string) {
 	if a.StateDir == "" {
 		return
 	}
+	if who == "cancel" {
+		if tag, err := jobHostTag(fleetHost{Remote: a.Remote, Project: a.Project}); err == nil {
+			who += "\n" + tag
+		}
+	}
 	if _, err := a.claimBy(job, ".notified", who); err != nil {
 		a.warn("box: warning: recording that " + job + " was delivered: " + err.Error())
 	}

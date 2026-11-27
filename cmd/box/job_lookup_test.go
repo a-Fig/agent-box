@@ -445,11 +445,67 @@ func TestBareJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		t.Fatal(err)
 	}
-	a.markNotified(job, "cancel")
+	a.jobHostApp(west).markNotified(job, "cancel")
 	if code := run(context.Background(), a, []string{"job", job}, nil); code != exit ||
 		!strings.Contains(out.String(), "queued tail") || !strings.Contains(out.String(), sourceLine(source)) ||
 		strings.Contains(out.String(), "taken off the queue") {
 		t.Fatalf("CLI follow = %d, %q", code, out)
+	}
+}
+
+func TestBareQueueFollowIgnoresForeignCancellationAfter404(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			a, out, west, east := lookupTestApp(t, "agents")
+			a.dashboardURL, a.Err = east.DashboardURL, out
+			a.WatchPoll = time.Millisecond
+			const job = testBareJobID
+			rec := jobRecord{Job: job, Queued: true, Host: &jobLocator{Remote: east.Remote, Project: east.Project}}
+			if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
+				t.Fatal(err)
+			}
+			a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+				return Result{Code: 3}, nil // no guest log
+			})
+			eastReads := 0
+			a.HTTP = func(req *http.Request) (*http.Response, error) {
+				if req.Method == http.MethodPost && req.URL.String() == west.DashboardURL+"api/queue/"+job+"/cancel" {
+					return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+				}
+				if req.Method != http.MethodGet || req.URL.String() != east.DashboardURL+"/api/queue/"+job {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL)
+				}
+				eastReads++
+				if eastReads == 2 {
+					return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+				}
+				exit := 7
+				j := dash.Job{Box: "repo", State: dash.JobQueued, Position: 1}
+				if eastReads >= 3 {
+					j.State, j.Exit, j.Tail = dash.JobDone, &exit, "east result"
+				}
+				raw, _ := json.Marshal(j)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+			}
+			ctx := context.Background()
+			if legacy {
+				write(t, a.statePath(job, ".notified"), "cancel")
+			} else {
+				target := a.jobHostApp(west)
+				removed, _, _, err := target.CancelAny(ctx, job)
+				if err != nil || !removed {
+					t.Fatalf("west cancel = %t, %v", removed, err)
+				}
+				id, err := parseJobID(job)
+				if err != nil || !target.cancelledOnHost(id) {
+					t.Fatalf("marker did not identify west: %v", err)
+				}
+			}
+			if code := run(ctx, a, []string{"job", job}, nil); code != 7 || eastReads < 3 ||
+				!strings.Contains(out.String(), "east result") || strings.Contains(out.String(), "taken off the queue") {
+				t.Fatalf("east follow = %d after %d reads, %q", code, eastReads, out)
+			}
+		})
 	}
 }
 

@@ -337,7 +337,7 @@ func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, id jobID, seen, 
 			// restart forgets a start it hasn't scanned yet), the box says the
 			// rest. A job boxd had queued that is in no box was taken off the
 			// queue (from the page): it never ran.
-			cancelled := !watching && a.jobSourceMatchesHost(id, rec.Host) && a.notifiedBy(rec.Job) == "cancel"
+			cancelled := !watching && a.cancelledOnHost(id)
 			if (seen || cancelled) && a.jobInBox(ctx, bare) {
 				return out, true
 			}
@@ -449,11 +449,35 @@ func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResu
 // notifiedBy is who wrote job's .notified ("cancel", "watcher", "box run",
 // ...), or "" when there is none.
 func (a *App) notifiedBy(job string) string {
+	who, _ := a.notification(job)
+	return who
+}
+
+// A cancellation marker can carry the writing host's tag on its second line.
+func (a *App) notification(job string) (who, tag string) {
+	if a.StateDir == "" {
+		return "", ""
+	}
 	b, err := os.ReadFile(a.statePath(job, ".notified"))
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	return strings.TrimSpace(string(b))
+	who, tag, _ = strings.Cut(strings.TrimSpace(string(b)), "\n")
+	return who, tag
+}
+
+func (a *App) cancelledOnHost(id jobID) bool {
+	who, tag := a.notification(id.ID)
+	if who != "cancel" {
+		return false
+	}
+	if id.hostTag != "" {
+		return tag == "" || tag == id.hostTag // a legacy qualified ID already names its host
+	}
+	// A legacy bare marker still acknowledges delivery. Its target is
+	// unknown, so a manual follow relies on the selected host's queue.
+	want, err := jobHostTag(fleetHost{Remote: a.Remote, Project: a.Project})
+	return err == nil && tag == want
 }
 
 // lastLines is the last n lines of s.
