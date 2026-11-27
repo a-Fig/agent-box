@@ -834,6 +834,9 @@ func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) erro
 // Publish the setup owner before pushing files. The second reservation read
 // also catches a cleanup that reserved the box while config set was starting.
 func (a *App) reserveSetup(ctx context.Context, box, job string, pooled bool) error {
+	if a.Project != mode.Project {
+		return nil
+	}
 	check := func() error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -871,6 +874,9 @@ func (a *App) reserveSetup(ctx context.Context, box, job string, pooled bool) er
 func (a *App) confirmProtection(ctx context.Context, box, job string) error {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
+	if a.Project != mode.Project {
+		return a.setExpiry(ctx, box, jobTTL)
+	}
 	return jobrun.RetryETag(ctx, func() error {
 		raw, err := a.incusOK(ctx, "config", "get", a.target(box), expiresKey)
 		if err != nil || mode.ProtectedDeadline(strings.TrimSpace(raw)) {
@@ -883,6 +889,22 @@ func (a *App) confirmProtection(ctx context.Context, box, job string) error {
 		_, err = a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+jobrun.ProtectedExpiry)
 		return err
 	})
+}
+
+func (a *App) launchSetup(job string) []string {
+	if a.Project != mode.Project {
+		return nil
+	}
+	return []string{"-c", jobrun.SetupKey + "=" + jobrun.SetupValue(job, a.Now())}
+}
+
+// Only agents has a host reaper to reconcile a protected deadline.
+func (a *App) hostManagesExpiry(ctx context.Context, box string) (bool, error) {
+	if a.Project != mode.Project {
+		return false, nil
+	}
+	owner, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.SetupKey)
+	return strings.TrimSpace(owner) != "", err
 }
 
 // isConflict says whether a launch failed because the name is taken.
@@ -1228,6 +1250,11 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 	if err := a.pushMeta(setupCtx, box, remote, filepath.Dir(bundle), info); err != nil {
 		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
 	}
+	if a.Project != mode.Project {
+		if err := a.setExpiry(setupCtx, box, jobTTL); err != nil {
+			return setupFailed(r, fmt.Errorf("set job expiry: %w", err))
+		}
+	}
 	if err := setupCtx.Err(); err != nil {
 		return setupFailed(r, err)
 	}
@@ -1236,8 +1263,10 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 	a.notify(jobNotice{Event: "starting_job", Box: box, Job: pubID.ID, Host: hostName})
 	started = true
 	_, err = a.incusOK(setupCtx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o)))
-	if protectErr := a.confirmProtection(ctx, box, job); protectErr != nil && err == nil {
-		a.warn(fmt.Sprintf("box: warning: checking job protection on %s: %v", box, protectErr))
+	if err == nil || a.Project == mode.Project {
+		if protectErr := a.confirmProtection(ctx, box, job); protectErr != nil && err == nil {
+			a.warn(fmt.Sprintf("box: warning: checking job protection on %s: %v", box, protectErr))
+		}
 	}
 	if err != nil {
 		// The tray stops GPU boxes in My PC, and another run may then
@@ -1322,7 +1351,7 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		}
 		a.notify(jobNotice{Event: "launching_box", Box: name, Host: a.jobHostName})
 		job := name + "." + ref
-		config := []string{"-c", jobrun.SetupKey + "=" + jobrun.SetupValue(job, a.Now())}
+		config := a.launchSetup(job)
 		if repoKey != "" {
 			config = append(config, "-c", jobrun.ThrowawayRepoKey+"="+repoKey, "-c", jobrun.ThrowawayOwnerKey+"="+job)
 		}
@@ -1359,7 +1388,7 @@ func (a *App) ensureBox(ctx context.Context, box, job string, inst *instance, sz
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
-		err = a.launch(ctx, box, idleTTL, false, sz, "-c", jobrun.SetupKey+"="+jobrun.SetupValue(job, a.Now()))
+		err = a.launch(ctx, box, idleTTL, false, sz, a.launchSetup(job)...)
 	} else {
 		if err := a.reserveSetup(ctx, box, job, false); err != nil {
 			return mode.Size{}, "", err
@@ -1441,11 +1470,11 @@ func (a *App) cleanup(ctx context.Context, box string, ours, pooled bool) {
 		return
 	}
 	if a.KeepEnded > 0 {
-		owner, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.SetupKey)
+		managed, err := a.hostManagesExpiry(ctx, box)
 		if err != nil {
 			return
 		}
-		if strings.TrimSpace(owner) == "" {
+		if !managed {
 			if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
 				a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
 				return
@@ -1857,8 +1886,8 @@ func (a *App) probeCtx(ctx context.Context) (context.Context, context.CancelFunc
 func (a *App) markIdle(ctx context.Context, box, job string) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
-	owner, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.SetupKey)
-	if err != nil || strings.TrimSpace(owner) != "" {
+	managed, err := a.hostManagesExpiry(ctx, box)
+	if err != nil || managed {
 		return // the host reconciles managed deadlines from the job files
 	}
 	repoKey, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.ThrowawayRepoKey)

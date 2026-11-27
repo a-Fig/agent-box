@@ -418,8 +418,8 @@ func TestFleetRunPicksBestHostIssuesQualifiedIDAndBareGuestID(t *testing.T) {
 		t.Fatalf("beta followJobs = %v, want bare ID", beta.followJobs)
 	}
 	cfg := beta.insts[0].Config
-	if owner, until := jobrun.SetupOwner(cfg); owner != id.Bare || !until.After(a.Now()) || cfg[expiresKey] != jobrun.ProtectedExpiry {
-		t.Fatalf("beta setup owner = %q, expires = %q, reservation = %v", owner, cfg[expiresKey], until)
+	if cfg[jobrun.SetupKey] != "" || cfg[expiresKey] != a.Now().Add(idleTTL).UTC().Format(time.RFC3339) {
+		t.Fatalf("custom-project box after completion: %v", cfg)
 	}
 	// Non-agents project must make zero boxd HTTP requests or end reports.
 	if beta.boxdHits != 0 || len(beta.endReports) != 0 {
@@ -442,6 +442,32 @@ func TestFleetRunPicksBestHostIssuesQualifiedIDAndBareGuestID(t *testing.T) {
 	out.Reset()
 	if code := run(context.Background(), a, []string{"jobs", "--box", "widget"}, nil); code != 0 || !slices.Contains(strings.Fields(out.String()), r.Job) {
 		t.Fatalf("box jobs --box code=%d out=%q", code, out.String())
+	}
+}
+
+func TestFleetRunCustomProjectKeepsFiniteExpiryWhenDetached(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		throwaway bool
+	}{
+		{name: "repo box"},
+		{name: "throwaway", throwaway: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := fleetHost{Name: "beta", Remote: "r2", Project: "work"}
+			beta := &fakeFleetHost{remote: host.Remote, project: host.Project, mode: "full", detachFollow: true}
+			ff := newFakeFleet(t, beta)
+			a, out, dir := fleetDispatchTestApp(t, ff, []fleetHost{host})
+			r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"true"},
+				New: tc.throwaway, Wait: 20 * time.Millisecond, Reason: "Check finite expiry for a detached job in a custom project."})
+			if err != nil || r.State != stateDetached || r.Host != host.Name || len(beta.insts) != 1 {
+				t.Fatalf("run = %+v, boxes = %v, error = %v\n%s", r, beta.insts, err, out)
+			}
+			cfg := beta.insts[0].Config
+			if cfg[jobrun.SetupKey] != "" || cfg[expiresKey] != a.Now().Add(jobTTL).UTC().Format(time.RFC3339) {
+				t.Fatalf("detached custom-project box should have 24h expiry without a setup owner: %v", cfg)
+			}
+		})
 	}
 }
 
