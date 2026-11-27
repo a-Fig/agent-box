@@ -24,33 +24,34 @@ var (
 func u32(name string) *windows.LazyProc { return user32.NewProc(name) }
 
 const (
-	wmNull       = 0x0000
-	wmDestroy    = 0x0002
-	wmClose      = 0x0010
-	wmEndSession = 0x0016
-	wmTimer      = 0x0113
-	wmLButtonUp  = 0x0202
-	wmRButtonUp  = 0x0205
-	wmTray       = 0x8001 // WM_APP+1: icon callback
-	wmRefresh    = 0x8002 // WM_APP+2: status changed
-	nimAdd       = 0
-	nimModify    = 1
-	nimDelete    = 2
-	nifMessage   = 1
-	nifIcon      = 2
-	nifTip       = 4
-	mfGrayed     = 1
-	mfChecked    = 8
-	mfSeparator  = 0x800
-	tpmRightBtn  = 0x2
-	tpmBottom    = 0x20
-	tpmReturnCmd = 0x100
-	idModeBase   = 1 // 1..3 select a mode
-	idRelease    = 10
-	idQuit       = 11
-	trayIconID   = 1
-	iconTimerID  = 1
-	className    = "AgentBoxTray"
+	wmNull        = 0x0000
+	wmDestroy     = 0x0002
+	wmEndSession  = 0x0016
+	wmTimer       = 0x0113
+	wmLButtonUp   = 0x0202
+	wmRButtonUp   = 0x0205
+	wmTray        = 0x8001 // WM_APP+1: icon callback
+	wmRefresh     = 0x8002 // WM_APP+2: status changed
+	wmRestart     = 0x8003 // WM_APP+3: pause the loop for an update
+	quitForUpdate = 1      // WM_QUIT wParam
+	nimAdd        = 0
+	nimModify     = 1
+	nimDelete     = 2
+	nifMessage    = 1
+	nifIcon       = 2
+	nifTip        = 4
+	mfGrayed      = 1
+	mfChecked     = 8
+	mfSeparator   = 0x800
+	tpmRightBtn   = 0x2
+	tpmBottom     = 0x20
+	tpmReturnCmd  = 0x100
+	idModeBase    = 1 // 1..3 select a mode
+	idRelease     = 10
+	idQuit        = 11
+	trayIconID    = 1
+	iconTimerID   = 1
+	className     = "AgentBoxTray"
 )
 
 type notifyIconData struct {
@@ -197,8 +198,8 @@ func (t *tray) modifyIcon() {
 	}
 }
 
-// loop pumps messages until Quit.
-func (t *tray) loop() {
+// loop pumps messages until Quit or a restart request, and removes the icon.
+func (t *tray) loop() bool {
 	var m winMsg
 	for {
 		r, _, _ := u32("GetMessageW").Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
@@ -206,17 +207,22 @@ func (t *tray) loop() {
 			lg.Printf("GetMessageW failed; leaving the message loop")
 		}
 		if int32(r) <= 0 {
-			break
+			shellNI.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
+			return r == 0 && m.wParam == quitForUpdate
 		}
 		u32("TranslateMessage").Call(uintptr(unsafe.Pointer(&m)))
 		u32("DispatchMessageW").Call(uintptr(unsafe.Pointer(&m)))
 	}
-	shellNI.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
 }
 
-// close ends the tray from another goroutine: WM_CLOSE destroys the window, WM_DESTROY quits the
-// message loop, and loop removes the icon.
-func (t *tray) close() { u32("PostMessageW").Call(t.hwnd, wmClose, 0, 0) }
+// requestRestart pauses the menu on its own thread before shutdown starts.
+func (t *tray) requestRestart() bool {
+	ok, _, err := u32("PostMessageW").Call(t.hwnd, wmRestart, 0, 0)
+	if ok == 0 {
+		lg.Printf("update: can't request a tray restart: %v", err)
+	}
+	return ok != 0
+}
 
 // setStatus is called from the poll goroutine; the icon is updated on the UI thread.
 func (t *tray) setStatus(st mode.Status) {
@@ -265,7 +271,7 @@ func (t *tray) showMenu() {
 	}
 	add(mfSeparator, 0, "")
 	add(0, idRelease, "Release memory")
-	add(0, idQuit, "Quit")
+	add(0, idQuit, "Quit (agent-box keeps running in the background)")
 
 	var pt point
 	u32("GetCursorPos").Call(uintptr(unsafe.Pointer(&pt)))
@@ -297,6 +303,10 @@ func wndProc(hwnd, m, wparam, lparam uintptr) uintptr {
 		return 0
 	case t != nil && m == wmRefresh:
 		t.modifyIcon()
+		return 0
+	case t != nil && m == wmRestart:
+		u32("EndMenu").Call() // dismiss a menu that is pumping its own messages
+		u32("PostQuitMessage").Call(quitForUpdate)
 		return 0
 	case t != nil && m == wmTimer && wparam == iconTimerID:
 		t.stepIcon()

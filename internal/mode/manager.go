@@ -113,8 +113,8 @@ type Manager struct {
 	last        Status
 
 	// Release memory (BeginRelease) holds this while `wsl --terminate`
-	// runs; no tick, reclaim or swap call starts then. cancelMu guards
-	// tickCancel, which cancels the tick in progress.
+	// runs; no tick, reclaim, swap call or StartHost starts then. cancelMu
+	// guards tickCancel, which cancels the tick or StartHost in progress.
 	releasing  atomic.Bool
 	cancelMu   sync.Mutex
 	tickCancel context.CancelFunc
@@ -487,11 +487,17 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 
 // BeginRelease is called before the tray's "Release memory" runs `wsl
 // --terminate`. It returns false, doing nothing, if a release is already
-// running: one termination at a time. Otherwise it cancels the tick in
-// progress and waits for it, drops queued and running reclaims and waits
-// for their wsl.exe calls to end, and keeps any new tick from calling out
-// until EndRelease.
-func (m *Manager) BeginRelease() bool {
+// running: one termination at a time. Otherwise it cancels the tick or
+// StartHost in progress and waits for it, drops queued and running reclaims
+// and waits for their wsl.exe calls to end, and keeps any new tick or start
+// from calling out until EndRelease.
+//
+// With Handshake set it then stores the latest pick that no tick has stored
+// yet (a click the cancelled tick never wrote, or one made during that
+// write), bounded by ctx: once the distro is
+// down, an enforcer that takes over (the headless one, after Quit) reads the
+// pick from the project, and would otherwise apply an older one (#204).
+func (m *Manager) BeginRelease(ctx context.Context) bool {
 	if !m.releasing.CompareAndSwap(false, true) {
 		return false
 	}
@@ -502,6 +508,11 @@ func (m *Manager) BeginRelease() bool {
 	m.cancelMu.Unlock()
 	m.tickMu.Lock()
 	m.rc.forgetAll()
+	if m.Handshake {
+		if err := m.storeChosen(ctx); err != nil {
+			m.logf("release memory: %v", err)
+		}
+	}
 	m.tickMu.Unlock()
 	m.rc.wait()
 	return true
@@ -509,3 +520,27 @@ func (m *Manager) BeginRelease() bool {
 
 // EndRelease lets ticks and reclaims call out again.
 func (m *Manager) EndRelease() { m.releasing.Store(false) }
+
+// StartHost calls start, which brings the Incus host up, unless a release is
+// running. It holds the tick lock, so a release that begins meanwhile cancels
+// start's context and waits for it to return before it terminates anything.
+// It reports whether start ran to the end with no release in the way; one
+// that didn't hasn't tried, so the caller can try again soon.
+func (m *Manager) StartHost(ctx context.Context, start func(context.Context) error) (bool, error) {
+	m.tickMu.Lock()
+	defer m.tickMu.Unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m.cancelMu.Lock()
+	m.tickCancel = cancel
+	m.cancelMu.Unlock()
+	defer func() { m.cancelMu.Lock(); m.tickCancel = nil; m.cancelMu.Unlock() }()
+	if m.releasing.Load() {
+		return false, nil
+	}
+	err := start(ctx)
+	if m.releasing.Load() {
+		return false, err
+	}
+	return true, err
+}
