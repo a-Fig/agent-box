@@ -105,7 +105,7 @@ func (a *App) evictThroughBoxd(ctx context.Context, in instance, action string) 
 		return nil
 	case http.StatusConflict:
 		return errNotIdle
-	case http.StatusForbidden:
+	case http.StatusForbidden, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		if canUseIncus {
 			return errDirectEviction
 		}

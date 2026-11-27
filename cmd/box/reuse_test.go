@@ -109,8 +109,19 @@ func TestKeptEvictionRefusesUnverifiedLegacyFallback(t *testing.T) {
 }
 
 func TestLaunchReclaimsUnpooledThrowawayWhenBoxdIsUnavailable(t *testing.T) {
-	for _, scenario := range []string{"offline", "forbidden", "stop reserved during fallback"} {
-		t.Run(scenario, func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   int
+		stopping bool
+	}{
+		{name: "offline"},
+		{name: "forbidden", status: http.StatusForbidden},
+		{name: "bad gateway", status: http.StatusBadGateway},
+		{name: "service unavailable", status: http.StatusServiceUnavailable},
+		{name: "gateway timeout", status: http.StatusGatewayTimeout},
+		{name: "stop reserved during fallback", status: http.StatusBadGateway, stopping: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			const name = "kept"
 			cfg := map[string]string{
 				jobrun.ThrowawayKey: "true",
@@ -122,14 +133,14 @@ func TestLaunchReclaimsUnpooledThrowawayWhenBoxdIsUnavailable(t *testing.T) {
 			a, out := testApp(f)
 			a.dashboardURL = "https://fixture.example.com"
 			a.HTTP = func(*http.Request) (*http.Response, error) {
-				if scenario == "forbidden" {
-					return &http.Response{StatusCode: http.StatusForbidden, Body: http.NoBody}, nil
+				if tc.status != 0 {
+					return &http.Response{StatusCode: tc.status, Body: http.NoBody}, nil
 				}
 				return nil, errors.New("boxd unavailable")
 			}
 			a.R = lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
 				args := strings.Join(cmd.Args, " ")
-				if strings.Contains(args, "config set pc:"+name+" "+jobrun.DirectEvictKey+"=") && scenario == "stop reserved during fallback" {
+				if tc.stopping && strings.Contains(args, "config set pc:"+name+" "+jobrun.DirectEvictKey+"=") {
 					cfg[jobrun.ThrowawayStopKey] = "stop token"
 				}
 				if strings.Contains(args, "delete pc:"+name+" ") {
@@ -141,7 +152,7 @@ func TestLaunchReclaimsUnpooledThrowawayWhenBoxdIsUnavailable(t *testing.T) {
 				return f.Run(ctx, cmd)
 			})
 			err := a.launch(context.Background(), "new", time.Hour, true, mustSize(t, "small"))
-			if scenario == "stop reserved during fallback" {
+			if tc.stopping {
 				if !isNoRoom(err) || f.names() != name || strings.Contains(f.callList(), "delete") {
 					t.Fatalf("evicted while cooling: %v, %s\n%s", err, f.names(), out)
 				}
