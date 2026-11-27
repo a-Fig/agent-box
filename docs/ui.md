@@ -47,7 +47,7 @@ Incus's own UI stays on port 8443, for raw admin.
 ### When the PC can't be reached
 
 `boxd` lives in the distro, so it is gone whenever the PC is off or asleep, or WSL has stopped. The
-tray's **Release memory** does exactly that. The page then shows a clear "PC unreachable" screen
+tray's **Release memory** stops it until the enforcer starts it again, within a minute or so. The page then shows a clear "PC unreachable" screen
 naming the likely reason (asleep, or memory released from the tray) and retries every 10s. A
 browser that can't load the page at all shows its own error, so `box ui` only opens the address.
 `box app` starts on the page's copy built into `box`, served on loopback, where every `/api` call
@@ -105,10 +105,11 @@ the jobs it ran before, each linked to its page (#184, 2026-11-25).
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
 
-**Settings** (2026-11-26, #158): the theme, a control that saves at once in the browser; and, read-only,
-each host's builds of boxd and the tray, its mode and enforcer, the CPUs a box of each size gets in
-Shared and Full, the caps and expiry times, and whether it has a GPU. Nothing there writes to the PC:
-the mode stays on Overview and in the tray, the caps in the host's setup. `Machine.Config` carries
+**Settings** (2026-11-26, #158, #250) holds the browser's theme and shows each host's boxd and tray
+builds, mode and enforcer, sizes, caps, expiry times and GPU availability. **Check for updates**
+compares the running builds with the latest stable release on GitHub. It downloads release
+metadata only. The latest release reads as unknown until the first check succeeds. Boxd keeps
+the last successful result in memory, so it starts fresh after a restart. `Machine.Config` carries
 the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
 
 **History**: charts over a day or a week:
@@ -136,7 +137,7 @@ The same set everywhere, since everywhere is the same page.
 
 - **Not in the first version:** stop or start a box (a stopped box still holds the caps), creating
   boxes or running commands. Agents run work; the page watches and steers.
-- **Release memory stays tray-only**, because it stops `boxd` itself.
+- **Release memory stays tray-only**, because it stops `boxd` itself, briefly.
 
 ### The mode handshake
 
@@ -323,7 +324,7 @@ JSON over HTTPS, on the same origin as the page.
 The page polls nothing. It opens one `GET /api/events` server-sent-events stream.
 - The first event is `state`, the full `/api/state`.
 - After that, each event carries one whole object, which replaces the old one: `machine`, `box`,
-  `job`, `box-gone` and `job-gone`.
+  `job`, `box-gone`, `job-gone` and `updates`.
 - On reconnect the page starts over from `state`. There is no replay. If `/api/state` fails too, the
   page shows "PC unreachable" and tries again every 10s.
 - A running job's `job` events carry its `tail`, so Overview's log tails are live without a call.
@@ -334,7 +335,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 | Method and path | Returns or does |
 |---|---|
-| `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
+| `GET /api/state` | `{machines, boxes, jobs, updates, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. `updates` is `{latest, checkedAt}`. Before the first successful check, `checkedAt` is omitted. An empty `latest` after a successful check means there is no stable release. |
 | `GET /api/events` | SSE, as above |
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&uid=&created=&q=&before=&limit=` | `{jobs, more, last}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` with `machine`, `uid` and `created` (its `createdAt`) one box: its jobs as above, and `last`, the one of them that ended last (400 without all four), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
@@ -346,6 +347,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
+| `POST /api/updates/check` | `{}`. Queries GitHub for the latest stable release (read-only, coalescing concurrent clicks), updates `State.updates`, broadcasts `updates` over SSE, and answers 200 with `{latest, checkedAt}` (or 502 `update-check` on lookup failure). |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
 | `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
 | `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |

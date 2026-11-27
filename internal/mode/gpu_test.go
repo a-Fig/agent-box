@@ -38,7 +38,7 @@ func TestMyPCStopsGPUBoxInsteadOfPausing(t *testing.T) {
 	}
 }
 
-func TestMyPCStopsFrozenGPUBoxAndReapsIt(t *testing.T) {
+func TestMyPCStopsFrozenGPUBox(t *testing.T) {
 	f := gpuFake(later)
 	f.state["g"] = "Frozen" // an agent can't revive VRAM by pausing first
 	m := New(f, MyPC)
@@ -48,9 +48,9 @@ func TestMyPCStopsFrozenGPUBoxAndReapsIt(t *testing.T) {
 		"set g user.box.stopped=mypc", "stop g", "set g user.expires=2026-01-01T12:30:00Z",
 		"pause a",
 	})
-	// The reaper deletes it once the short expiry passes, still in My PC.
+	// The tray leaves expiry to the distro timer.
 	tick(m, GPUStoppedTTL+time.Second)
-	equal(t, f.take(), []string{"delete g", "stop a"}) // a has been frozen 15 minutes
+	equal(t, f.take(), []string{"stop a"}) // a has been frozen 15 minutes
 }
 
 func TestGPUStopKeepsEarlierExpiry(t *testing.T) {

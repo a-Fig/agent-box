@@ -21,8 +21,15 @@ import (
 const jobDir = "/work/.box"
 
 const jobStateFn = `jobstate() {
-  if [ -f "$1.exit" ]; then echo "done $(head -c 16 "$1.exit")"
-  elif alive "$(head -c 16 "$1.pid" 2>/dev/null)" "$1"; then echo "running -"
+  local pid=
+  if [ -f "$1.exit" ]; then echo "done $(head -c 16 "$1.exit")"; return; fi
+  if [ -e "$1.pid" ] || [ -L "$1.pid" ]; then
+    if ! pid=$(head -c 16 -- "$1.pid") || [[ ! $pid =~ ^[1-9][0-9]*$ ]]; then
+      echo "unknown -"
+      return
+    fi
+  fi
+  if alive "$pid" "$1"; then echo "running -"
   elif [ -f "$1.exit" ]; then echo "done $(head -c 16 "$1.exit")"
   elif [ -f "$1.pid" ] || [ -n "$(find "$1.log" -mmin +1 2>/dev/null)" ]; then echo "died -"
   else echo "starting -"

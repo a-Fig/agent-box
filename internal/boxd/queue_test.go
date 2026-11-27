@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"mime/multipart"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -166,16 +166,21 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 		t.Fatalf("running: %+v", st.Jobs)
 	}
 
-	// It ends: boxd keeps the throwaway it launched for half an hour.
-	r.f.set(func() { r.f.jobs[box][0].state, r.f.jobs[box][0].exit = "done", "0" })
+	// It ends: the cleanup timer keeps the throwaway for half an hour.
+	r.f.set(func() {
+		j := &r.f.jobs[box][0]
+		j.state, j.exit, j.endedAt = "done", "0", r.c.now().Unix()
+	})
 	r.c.add(3 * time.Second)
 	r.poll()
-	time.Sleep(50 * time.Millisecond)
+	if err := r.w.ReapExpired(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
 	r.f.mu.Lock()
 	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	start := box + " " + r.c.now().Add(-6*time.Second).UTC().Add(24*time.Hour).Format(time.RFC3339)
-	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 2 || sets[0] != start || sets[1] != want {
+	start := box + " " + jobrun.ProtectedExpiry
+	if want := box + " " + r.c.now().UTC().Add(30*time.Minute-3*time.Second).Format(time.RFC3339); len(sets) != 2 || sets[0] != start || sets[1] != want {
 		t.Fatalf("throwaway's expiry: %v, want the job's %s then %s", sets, start, want)
 	}
 	var h dash.History
@@ -281,7 +286,8 @@ func TestQueueRefusalsAndLimits(t *testing.T) {
 		t.Fatal("stray bundle kept")
 	}
 
-	// A start that fails drops the job as lost and removes its throwaway.
+	// A failed reply after dispatch drops the queue entry. The timer checks
+	// the protected box before deciding whether the start was abandoned.
 	r.f.set(func() {
 		r.f.cfg["user.agent-box.mode"] = "full"
 		r.f.cliErr = func(args []string) error {
@@ -303,8 +309,8 @@ func TestQueueRefusalsAndLimits(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].State != dash.JobLost {
 		t.Fatalf("after a failed start: %+v", jobs)
 	}
-	if last := r.f.cli[len(r.f.cli)-1]; !strings.HasPrefix(last, "delete ") {
-		t.Fatalf("throwaway kept: %s", fmt.Sprint(r.f.cli))
+	if last := r.f.cli[len(r.f.cli)-1]; !strings.HasPrefix(last, "exec ") {
+		t.Fatalf("commands after dispatch: %v", r.f.cli)
 	}
 
 	// Over 24 hours waiting: dropped.
@@ -359,6 +365,7 @@ func TestQueueDeletesKeptThrowawayForRoom(t *testing.T) {
 		{"short of instances", "limits.instances=2"},
 		{"short of disk", "limits.disk=66GiB"},
 		{"already stopped", "limits.instances=2"},
+		{"stopped after idle", "limits.instances=2"},
 		{"stopped by first delete attempt", "limits.instances=2"},
 	} {
 		t.Run(tt.name, func(t *testing.T) { testQueueDeletesKeptThrowawayForRoom(t, tt.limit, tt.name) })
@@ -429,6 +436,11 @@ func testQueueDeletesKeptThrowawayForRoom(t *testing.T, short, scenario string) 
 	switch scenario {
 	case "already stopped":
 		r.f.set(func() { r.f.ins[1].Status = "Stopped" })
+	case "stopped after idle":
+		r.f.set(func() {
+			r.f.ins[1].Status = "Stopped"
+			r.f.ins[1].Config[jobrun.ThrowawayStopKey] = jobrun.ThrowawayStopped
+		})
 	case "stopped by first delete attempt":
 		deletes = 2
 		r.f.set(func() {
@@ -551,29 +563,40 @@ func TestQueueDeletesIdleRepoBoxForRoom(t *testing.T) {
 	}
 }
 
-// An idle repo box is read again just before its delete: one a person
-// extended since the poll that found it idle is left (#187).
+// Recheck a repo box after the guest probe catches a hold or setup
+// reservation that arrived after it was selected for pressure eviction.
 func TestQueueRechecksIdleRepoBoxBeforeDelete(t *testing.T) {
-	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
-	r.f.set(func() {
-		r.f.afterRun = func(box string) {
-			if box == "murmur" {
-				r.f.ins[0].Config = maps.Clone(r.f.ins[0].Config)
-				r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
-				r.f.afterRun = nil
+	for _, state := range []string{"held", "setup with a shortened legacy deadline"} {
+		t.Run(state, func(t *testing.T) {
+			r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+			r.f.set(func() {
+				r.f.afterRun = func(box string) {
+					if box != "murmur" {
+						return
+					}
+					cfg := maps.Clone(r.f.ins[0].Config)
+					if state == "held" {
+						cfg[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
+					} else {
+						cfg[jobrun.SetupKey] = jobrun.SetupValue("murmur.20261124-180000-0001", r.c.now())
+						cfg[jobrun.ExpiresKey] = r.c.now().Add(idleTTL).Format(time.RFC3339)
+					}
+					r.f.ins[0].Config = cfg
+					r.f.afterRun = nil
+				}
+			})
+			if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+				t.Fatalf("enqueue: %d %+v", code, rep)
 			}
-		}
-	})
-	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
-		t.Fatalf("enqueue: %d %+v", code, rep)
-	}
-	r.c.add(3 * time.Second)
-	r.poll()
-	if len(r.f.cli) != 0 {
-		t.Fatalf("deleted a box extended since the poll: %v", r.f.cli)
-	}
-	if q := r.w.Queued(); len(q) != 1 {
-		t.Fatalf("queued: %+v", q)
+			r.c.add(3 * time.Second)
+			r.poll()
+			if len(r.f.cli) != 0 {
+				t.Fatalf("deleted a reserved box: %v", r.f.cli)
+			}
+			if q := r.w.Queued(); len(q) != 1 {
+				t.Fatalf("queued: %+v", q)
+			}
+		})
 	}
 }
 

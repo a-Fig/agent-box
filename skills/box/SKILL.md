@@ -8,18 +8,18 @@ description: Run heavy test suites and builds from your worktree on a disposable
 **Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, and parallel builds.
 
 1. `box_status` with `dir` reports room per host.
-2. `box_run` takes `dir`, `command`, and `reason`. It syncs uncommitted and untracked files, skipping ignored ones. `timeout` exits 124. With `pipefail`, `| head` can exit 141.
+2. `box_run` takes `dir`, `command`, and `reason` (owner-visible). Syncs uncommitted and untracked files, excluding ignored files. Fleet results include host and qualified job ID. `timeout` limits runtime (124). With `pipefail`, `| head` can exit 141.
 3. A run ending within 30 s returns its result; else `running`:
    - `push: true`: **don't wait or poll.** Expect "box: job …" (Claude Code: mid-turn). Notices retry on Box MCP restart in the same T3 profile. Details in `box_job`.
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
    - **Subagents pass `push: false`** (it would wake the parent).
 4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; snapshot waits for the host; `box_cancel` drops it.
-5. **`state: refused` (exit 75)**: nothing started. Retry later or use a smaller `size` if full. A paused job may resume. A lost job stopped before finishing. `done` with exit 75 is the command's own.
+5. **`state: refused` (exit 75)**: nothing started. Capacity results name the limit and may suggest a smaller size. Paused jobs may resume. Lost jobs never finished. `done` with exit 75 is the command's own.
 6. `go test`/vitest show failures first (file:line). `box_job` pages logs (`offset`/`limit`) or lists fleet jobs (no `id`).
 7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel: `new: true`.
 
 CPU throwaways can be reused. `fresh: true` launches clean.
-Results and notices show source HEAD, dirty state, and the bundled commit.
+Results and notices show HEAD, dirty state, and snapshot commit.
 An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).

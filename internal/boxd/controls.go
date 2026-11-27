@@ -31,6 +31,7 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/throwaway-pool", s.throwawayPool)
 	mux.Handle("POST /api/boxes/{name}/claim", control(http.HandlerFunc(s.claimThrowaway)))
 	mux.Handle("POST /api/boxes/{name}/evict-idle", control(http.HandlerFunc(s.evictThrowaway)))
+	mux.Handle("POST /api/boxes/{name}/evict-kept", control(http.HandlerFunc(s.evictKeptThrowaway)))
 	mux.Handle("POST /api/boxes/{name}/pool-expiry", control(http.HandlerFunc(s.poolExpiry)))
 }
 
@@ -65,6 +66,14 @@ func (s *Server) claimThrowaway(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) evictThrowaway(w http.ResponseWriter, r *http.Request) {
+	s.evictThrowawayKind(w, r, true)
+}
+
+func (s *Server) evictKeptThrowaway(w http.ResponseWriter, r *http.Request) {
+	s.evictThrowawayKind(w, r, false)
+}
+
+func (s *Server) evictThrowawayKind(w http.ResponseWriter, r *http.Request, pooled bool) {
 	var req struct{ UID string }
 	if !decode(w, r, &req) {
 		return
@@ -76,7 +85,7 @@ func (s *Server) evictThrowaway(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
 	defer cancel()
-	evicted, err := s.W.evictPooled(ctx, box, req.UID)
+	evicted, err := s.W.evictThrowaway(ctx, box, req.UID, pooled)
 	poolReply(w, evicted, err)
 }
 
@@ -519,11 +528,30 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
+	busy := &controlError{http.StatusConflict, dash.CodeStopping, "the box is being stopped or deleted; try again"}
+	w.mu.Lock()
+	if w.idleStopping == name || w.deleting[name] {
+		w.mu.Unlock()
+		return busy
+	}
+	if w.deleting == nil {
+		w.deleting = make(map[string]bool)
+	}
+	w.deleting[name] = true
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		delete(w.deleting, name)
+		w.mu.Unlock()
+	}()
 	// Incus has no compare-and-delete; check identity again just before, so
 	// the window for a reuse of the name is the length of one call.
 	in, err := w.checkCreated(ctx, name, createdAt)
 	if err != nil {
 		return err
+	}
+	if jobrun.IdleStopReserved(in.Config) {
+		return busy
 	}
 	if !confirmed {
 		probed, probeErr := w.probeDelete(ctx, in)
@@ -542,7 +570,17 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 			return &controlError{http.StatusBadGateway, dash.CodeIncus, "couldn't check " + name + " for jobs, so nothing was deleted; try again"}
 		}
 	}
-	if err := w.delete(ctx, name); err != nil {
+	if err := jobrun.RetryETag(ctx, func() error {
+		in, err := w.checkCreated(ctx, name, createdAt)
+		if err != nil {
+			return err
+		}
+		if jobrun.IdleStopReserved(in.Config) {
+			return busy
+		}
+		_, err = w.Incus.CLI(ctx, "", "delete", name, "--force")
+		return err
+	}); err != nil {
 		return err
 	}
 	w.mu.Lock()
@@ -582,18 +620,24 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	// the expiry (a job starting there, or another extend), and the new
 	// expiry is counted from the one Incus holds now.
 	var until time.Time
-	var replaced bool
+	var replaced, stopping bool
 	wrote, err := w.Incus.SetConfigIf(ctx, name, func(in Instance) map[string]string {
 		replaced = !in.CreatedAt.Equal(createdAt)
-		if replaced {
+		stopping = jobrun.IdleStopReserved(in.Config) || jobrun.DeleteReserved(in.Config, w.Now())
+		if replaced || stopping {
 			return nil
 		}
 		from := w.Now().UTC()
-		if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil && t.After(from) {
+		raw := in.Config[jobrun.ExpiresKey]
+		protected := mode.ProtectedDeadline(raw)
+		if t, err := time.Parse(time.RFC3339, raw); !protected && err == nil && t.After(from) {
 			from = t.UTC()
 		}
 		until = mode.Held(in.Config, from).UTC().Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
 		at := until.Format(time.RFC3339)
+		if protected {
+			return map[string]string{mode.HoldKey: at}
+		}
 		return map[string]string{jobrun.ExpiresKey: at, mode.HoldKey: at}
 	})
 	if err != nil {
@@ -601,6 +645,9 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	}
 	if replaced {
 		return b, errNameNew
+	}
+	if stopping {
+		return b, &controlError{http.StatusConflict, dash.CodeStopping, "the box is being stopped and its files are kept until its expiry"}
 	}
 	if !wrote {
 		return b, errBoxGone

@@ -46,6 +46,7 @@ func (a *App) lookupJob(raw string) (jobLookup, error) {
 func (a *App) jobHostApp(host fleetHost) *App {
 	scoped := *a
 	scoped.Remote, scoped.Project, scoped.dashboardURL = host.Remote, host.Project, host.DashboardURL
+	scoped.jobHostName = host.Name
 	scoped.boxdDisabled = host.Project != mode.Project
 	return &scoped
 }

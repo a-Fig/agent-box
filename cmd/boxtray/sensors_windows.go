@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -15,6 +17,11 @@ import (
 )
 
 const distro = "agents"
+
+// keepAliveTask is the scheduled task provision/install-pc.ps1 registers: its
+// `wsl.exe -d agents --exec sleep infinity` keeps the distro running. When the
+// distro is terminated that wsl.exe exits 1 and the task doesn't rerun it.
+const keepAliveTask = "agent-box-wsl-keepalive"
 
 var (
 	shell32  = windows.NewLazySystemDLL("shell32.dll")
@@ -38,6 +45,7 @@ const (
 	wslRootTimeout      = mode.ReclaimTimeout + 15*time.Second // the reclaim's own bound, plus start-up
 	wslListTimeout      = 10 * time.Second
 	wslTerminateTimeout = time.Minute
+	schtasksTimeout     = 30 * time.Second
 )
 
 // wslIncus runs `incus <args>` inside the agents distro. Inside WSL the
@@ -72,6 +80,19 @@ func (*winSensors) HostUp(ctx context.Context) bool {
 	defer cancel()
 	out, err := hidden(exec.CommandContext(ctx, "wsl.exe", "-l", "--running", "-q")).Output()
 	return err == nil && distroListed(out, distro)
+}
+
+// StartHost runs the keep-alive task, which starts the distro and keeps it
+// running outside this process. With the task already running it does nothing
+// (MultipleInstances IgnoreNew).
+func (*winSensors) StartHost(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, schtasksTimeout)
+	defer cancel()
+	out, err := hidden(exec.CommandContext(ctx, "schtasks.exe", "/run", "/tn", keepAliveTask)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("schtasks /run %s: %v: %s", keepAliveTask, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // reasonContext is REASON_CONTEXT with a simple string. The union is as big

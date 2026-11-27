@@ -196,16 +196,28 @@ type jobRecord struct {
 }
 
 type jobLocator struct {
+	Name         string `json:"name,omitempty"`
 	Remote       string `json:"remote"`
 	Project      string `json:"project"`
 	DashboardURL string `json:"dashboard_url,omitempty"`
+}
+
+func locateJobHost(h fleetHost) *jobLocator {
+	return &jobLocator{Name: h.Name, Remote: h.Remote, Project: h.Project, DashboardURL: h.DashboardURL}
+}
+
+func (rec jobRecord) noticeJob() string {
+	if rec.Host == nil {
+		return rec.Job
+	}
+	return rec.Job + onHost(rec.Host.Name)
 }
 
 func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 	if rec.Host == nil {
 		return fleetHost{}, fmt.Errorf("no saved host for qualified job %s", id.ID)
 	}
-	host := fleetHost{Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
+	host := fleetHost{Name: rec.Host.Name, Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
 	tag, err := jobHostTag(host)
 	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
 		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)
@@ -241,7 +253,27 @@ type jobEnd struct {
 	Digest     string               `json:"digest,omitempty"`     // a test run's failure digest
 	Completion string               `json:"completion,omitempty"` // observed along with the exit file
 	Source     *dash.SourceRevision `json:"source,omitempty"`
-	Host       *jobLocator          `json:"host,omitempty"` // proves which target produced a bare job's source
+	Host       string               `json:"host,omitempty"`
+	Locator    *jobLocator          `json:"hostLocator,omitempty"` // identifies the target for bare job IDs
+}
+
+// Early provenance builds stored the locator in the host field.
+func (e *jobEnd) UnmarshalJSON(data []byte) error {
+	type plainEnd jobEnd
+	fields := struct {
+		*plainEnd
+		Host json.RawMessage `json:"host"`
+	}{plainEnd: (*plainEnd)(e)}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Host) == 0 {
+		return nil
+	}
+	if fields.Host[0] == '{' && e.Locator == nil {
+		return json.Unmarshal(fields.Host, &e.Locator)
+	}
+	return json.Unmarshal(fields.Host, &e.Host)
 }
 
 const (
@@ -446,7 +478,7 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 }
 
 func (a *App) startWatchOnHost(info jobMeta, job string, host fleetHost, gpu, throwaway, queued bool) bool {
-	locator := &jobLocator{Remote: host.Remote, Project: host.Project, DashboardURL: host.DashboardURL}
+	locator := locateJobHost(host)
 	return a.startWatchRecord(info, job, locator, gpu, throwaway, queued)
 }
 
@@ -646,7 +678,7 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 	for _, ext := range []string{".result", ".ended"} {
 		var end jobEnd
 		if readJSON(a.statePath(job, ext), &end) == nil && !end.Lost && !end.Dropped &&
-			(end.Host == nil || a.jobSourceMatchesHost(id, end.Host)) {
+			(end.Locator == nil || a.jobSourceMatchesHost(id, end.Locator)) {
 			return end, true
 		}
 	}
@@ -668,7 +700,7 @@ func (a *App) savedJobSource(id jobID) *dash.SourceRevision {
 	if a.StateDir == "" {
 		return nil
 	}
-	if end, ok := a.recordedEnd(id.ID); ok && end.Source.Valid() && a.jobSourceMatchesHost(id, end.Host) {
+	if end, ok := a.recordedEnd(id.ID); ok && end.Source.Valid() && a.jobSourceMatchesHost(id, end.Locator) {
 		return end.Source
 	}
 	if rec, err := a.readWatchRecord(id.ID); err == nil && rec.Source.Valid() && a.jobSourceMatchesHost(id, rec.Host) {
@@ -753,7 +785,7 @@ func (r jobRecord) context() string {
 // agent reads next; any other failure is its last endedLines lines. box_job
 // always has the full result, and the message says so.
 func endedMessage(r jobRecord, e jobEnd) string {
-	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second))
+	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.noticeJob(), e.Code, elapsed(time.Duration(e.Took)*time.Second))
 	if why := shortReason(r.Reason); why != "" {
 		head += " (" + why + ")" // which run this is, after compaction or among parallel runs
 	}
@@ -827,11 +859,11 @@ func pausedMessage(r jobRecord) string {
 	// T3 may deliver this long after it was sent, when the job has resumed
 	// (#96); the end push follows either way.
 	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. Once it resumes, box_cancel this job if you no longer need it. %s\n%s",
-		r.Job, frozenWindow, fromBox, r.context())
+		r.noticeJob(), frozenWindow, fromBox, r.context())
 }
 
 func lostMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.Job, fromBox, r.context())
+	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.noticeJob(), fromBox, r.context())
 	if e.Tail != "" {
 		msg += "\n" + mask.Mask(e.Tail)
 	}
@@ -974,7 +1006,8 @@ func (a *App) Watch(ctx context.Context, job string) error {
 		if end.Source == nil {
 			end.Source = rec.Source
 		}
-		end.Host = &jobLocator{Remote: target.Remote, Project: target.Project}
+		end.Host = target.jobHostName
+		end.Locator = &jobLocator{Remote: target.Remote, Project: target.Project}
 		if err := writeJSON(a.statePath(job, ".ended"), end); err != nil {
 			return fmt.Errorf("recording the end of %s: %w", job, err)
 		}
@@ -989,7 +1022,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 	job := rec.Job
 	var saved jobEnd
 	if readJSON(a.statePath(job, ".result"), &saved) == nil && !saved.Lost && !saved.Dropped &&
-		(saved.Host == nil || a.jobSourceMatchesHost(id, saved.Host)) {
+		(saved.Locator == nil || a.jobSourceMatchesHost(id, saved.Locator)) {
 		switch saved.Completion {
 		case completionExited:
 			return saved, true

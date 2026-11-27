@@ -69,6 +69,8 @@ type fakePC struct {
 	digest       string            // canned digest.Script output the follow reports
 	etagFails    int               // this many config sets fail as if another write came first
 	gone         map[string]bool   // boxes exec can't find
+	afterBundle  func(string)      // runs when a bundle is uploaded, under f.mu
+	onStart      func()            // runs when the start script dispatches, under f.mu
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -207,6 +209,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, nil
 		}
 		f.pushed++
+		if f.afterBundle != nil && strings.HasSuffix(args[4], ".bundle") {
+			f.afterBundle(args[4])
+		}
 		if b, err := os.ReadFile(args[3]); err != nil {
 			f.t.Errorf("pushed file missing: %v", err)
 		} else if strings.HasSuffix(args[4], ".meta") {
@@ -302,6 +307,8 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 				return Result{Stdout: f.exit}, nil
 			case f.startErr:
 				return Result{}, errors.New("connection reset")
+			case f.onStart != nil && strings.Contains(c.Args[len(c.Args)-1], "setsid nohup"):
+				f.onStart()
 			}
 			return Result{}, nil
 		}
@@ -482,31 +489,27 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file file config config exec config config exec config exec config config exec" {
+	if got := f.callList(); !strings.Contains(got, "start config config config file file exec") {
 		t.Errorf("incus calls = %s", got)
 	}
-	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
-		t.Errorf("idle expiry = %q", got)
+	if got := f.inst("my-repo").Config[expiresKey]; got != jobrun.ProtectedExpiry {
+		t.Errorf("expiry before host reconciliation = %q", got)
 	}
 	if !strings.Contains(out.String(), "ok\n") || !strings.Contains(out.String(), "job my-repo.20261123-120000-0001") {
 		t.Errorf("output = %q", out)
 	}
 }
 
-// A box a person extended (mode.HoldKey) keeps that time through a job's
-// start and end: box writes the later of its own deadline and the hold (#198).
+// The host uses the hold once it decides the job's retention deadline.
 func TestRunKeepsTheHold(t *testing.T) {
-	for hold, want := range map[string]string{
-		"2026-11-23T18:00:00Z": "2026-11-23T18:00:00Z", // later than the 2h idle expiry
-		"2026-11-23T13:00:00Z": "2026-11-23T14:00:00Z", // passed by then
-	} {
+	for _, hold := range []string{"2026-11-23T18:00:00Z", "2026-11-23T13:00:00Z"} {
 		f := &fakePC{t: t, insts: []instance{{Name: "my-repo", Status: "Running", Config: map[string]string{mode.HoldKey: hold}}}, log: "ok\n", exit: "0\n"}
 		a, out := testApp(f)
 		if r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}}); err != nil || r.Code != 0 {
 			t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 		}
-		if got := f.inst("my-repo").Config[expiresKey]; got != want {
-			t.Errorf("held until %s: expiry after the job = %q, want %q", hold, got, want)
+		if got := f.inst("my-repo").Config[mode.HoldKey]; got != hold {
+			t.Errorf("hold after the job = %q, want %q", got, hold)
 		}
 	}
 }
@@ -520,8 +523,31 @@ func TestRunRetriesExpiryOnETagRace(t *testing.T) {
 	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := strings.Count(f.callList(), "config"); got != 11 { // pool lookup plus five hold/read and set attempts
+	if got := strings.Count(f.callList(), "config"); got != 9 {
 		t.Errorf("config calls = %d: %s", got, f.callList())
+	}
+}
+
+func TestRunRestoresProtectionAfterLegacyCompletionDuringUpload(t *testing.T) {
+	const box, job = "my-repo", "my-repo.20261123-120000-0001"
+	f := &fakePC{t: t, block: true, insts: []instance{{Name: box, Status: "Running"}}}
+	a, out := testApp(f)
+	legacyWrite := false
+	f.afterBundle = func(string) {
+		in := f.inst(box)
+		if in.Config[expiresKey] != jobrun.ProtectedExpiry || f.running != "" {
+			t.Fatalf("during upload: config %v, running %q", in.Config, f.running)
+		}
+		in.Config[expiresKey] = a.Now().Add(idleTTL).Format(time.RFC3339)
+		legacyWrite = true
+	}
+	f.onStart = func() { f.running = job + "\n" }
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Wait: 10 * time.Millisecond})
+	if err != nil || r.State != stateDetached || !legacyWrite {
+		t.Fatalf("Run = %+v, legacy write = %v, error = %v\n%s", r, legacyWrite, err, out)
+	}
+	if got := f.inst(box).Config[expiresKey]; got != jobrun.ProtectedExpiry {
+		t.Fatalf("legacy deadline left behind: %s", got)
 	}
 }
 
@@ -532,7 +558,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config config exec config config exec config exec config config exec exec delete" {
+	if got := f.callList(); !strings.Contains(got, "launch config config config file file exec") || !strings.HasSuffix(got, "delete") {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {
@@ -673,7 +699,7 @@ func TestNewSetsExpiry(t *testing.T) {
 	}
 }
 
-func TestDetachedRunAndReattachRefreshExpiry(t *testing.T) {
+func TestDetachedRunAndReattachLeaveExpiryToHost(t *testing.T) {
 	f := &fakePC{t: t, block: true}
 	a, out := testApp(f)
 	started := a.Now()
@@ -681,17 +707,23 @@ func TestDetachedRunAndReattachRefreshExpiry(t *testing.T) {
 	if err != nil || r.State != stateDetached {
 		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
 	}
-	if got := f.inst(r.Box).Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
+	if got := f.inst(r.Box).Config[expiresKey]; got != jobrun.ProtectedExpiry {
 		t.Errorf("detached job expiry = %q", got)
 	}
-	a.Now = func() time.Time { return started.Add(3 * time.Hour) }
+	a.Now = func() time.Time { return started.Add(25 * time.Hour) }
+	// The old tray reads the timestamp and hold without looking in the box.
+	cfg := f.inst(r.Box).Config
+	legacyExpiry, err := time.Parse(time.RFC3339, cfg[expiresKey])
+	if err != nil || mode.Held(cfg, legacyExpiry).Before(a.Now()) {
+		t.Fatalf("legacy tray would reap the detached job: %v", cfg)
+	}
 	f.block, f.exit = false, "0"
 	finished, err := a.Job(context.Background(), r.Job, 0)
 	if err != nil || finished.State != stateDone {
 		t.Fatalf("Job = %+v, %v\n%s", finished, err, out)
 	}
-	if got := f.inst(r.Box).Config[expiresKey]; got != "2026-11-23T17:00:00Z" {
-		t.Errorf("reattached job idle expiry = %q", got)
+	if got := f.inst(r.Box).Config[expiresKey]; got != jobrun.ProtectedExpiry {
+		t.Errorf("reattached job expiry before host reconciliation = %q", got)
 	}
 }
 
@@ -871,8 +903,8 @@ func TestRunKeepsJobExpiryWhileAnotherJobRuns(t *testing.T) {
 	if _, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}}); err != nil {
 		t.Fatalf("Run: %v\n%s", err, out)
 	}
-	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-24T12:00:00Z" {
-		t.Errorf("expiry = %q, want the 24h job expiry kept", got)
+	if got := f.inst("my-repo").Config[expiresKey]; got != jobrun.ProtectedExpiry {
+		t.Errorf("expiry = %q, want the running job protected", got)
 	}
 }
 

@@ -22,17 +22,17 @@ import (
 const afterUpdate = "--after-update"
 
 // autoUpdater is the updater the mode loop runs, or nil when AGENT_BOX_NO_UPDATE is set.
-func autoUpdater(args []string, logf func(string, ...any), quit func()) *trayUpdater {
+func autoUpdater(args []string, logf func(string, ...any), restart func(start func() bool)) *trayUpdater {
 	if os.Getenv("AGENT_BOX_NO_UPDATE") != "" {
 		logf("update: off (AGENT_BOX_NO_UPDATE)")
 		return nil
 	}
-	return newTrayUpdater(args, logf, quit)
+	return newTrayUpdater(args, logf, restart)
 }
 
 // newTrayUpdater is this process's updater. args are the process's own (without the program),
-// passed on to the new boxtray; quit ends this process.
-func newTrayUpdater(args []string, logf func(string, ...any), quit func()) *trayUpdater {
+// passed on to the new boxtray; restart handles when to start it and exit.
+func newTrayUpdater(args []string, logf func(string, ...any), restart func(start func() bool)) *trayUpdater {
 	exe, err := os.Executable()
 	if err != nil {
 		logf("update: off (%v)", err)
@@ -44,23 +44,25 @@ func newTrayUpdater(args []string, logf func(string, ...any), quit func()) *tray
 	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == afterUpdate })
 	return &trayUpdater{Exe: exe, Pin: filepath.Join(filepath.Dir(logPath()), "boxtray-update.json"), Tag: version.Tag, GitHub: update.Client{}, Run: runHidden, Now: time.Now, Logf: logf,
 		Restart: func() {
-			cmd := exec.Command(exe, append(args, afterUpdate)...)
-			// Its own process group, and out of the scheduled task's job object when the job
-			// allows it, so it outlives this process.
-			cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_BREAKAWAY_FROM_JOB}
-			err := cmd.Start()
-			if errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-				cmd = exec.Command(exe, append(args, afterUpdate)...)
-				cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
-				err = cmd.Start()
-			}
-			if err != nil {
-				logf("update: can't start %s (%v): carrying on with this one", exe, err)
-				return
-			}
-			cmd.Process.Release()
-			logf("exit: replaced by the updated boxtray (pid %d)", cmd.Process.Pid)
-			quit()
+			restart(func() bool {
+				cmd := exec.Command(exe, append(args, afterUpdate)...)
+				// Its own process group, and out of the scheduled task's job object when the job
+				// allows it, so it outlives this process.
+				cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_BREAKAWAY_FROM_JOB}
+				err := cmd.Start()
+				if errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+					cmd = exec.Command(exe, append(args, afterUpdate)...)
+					cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
+					err = cmd.Start()
+				}
+				if err != nil {
+					logf("update: can't start %s (%v): carrying on with this one", exe, err)
+					return false
+				}
+				logf("exit: replaced by the updated boxtray (pid %d)", cmd.Process.Pid)
+				cmd.Process.Release()
+				return true
+			})
 		}}
 }
 
@@ -68,7 +70,7 @@ func newTrayUpdater(args []string, logf func(string, ...any), quit func()) *tray
 // it did in boxtray.log and its exit code.
 func installByHand(tag string) int {
 	lg = openLog(logPath(), maxLogBytes)
-	u := newTrayUpdater(nil, lg.Printf, func() {}) // AGENT_BOX_NO_UPDATE stops the hourly check, not this
+	u := newTrayUpdater(nil, lg.Printf, nil) // AGENT_BOX_NO_UPDATE stops the hourly check, not this
 	if u == nil {
 		return 1
 	}
@@ -88,8 +90,8 @@ func runHidden(ctx context.Context, exe string, args ...string) (string, error) 
 }
 
 // takeMutex creates the named mutex and reports false only if another process already holds it.
-// Any other failure lets this process go on, as before. After an update it waits up to 20 s for
-// the process it replaces to let go.
+// Any other failure lets this process go on, as before. After an update it waits for the process
+// it replaces to let go.
 func takeMutex(name string) bool {
 	wait := slices.Contains(os.Args[1:], afterUpdate)
 	deadline := time.Now().Add(20 * time.Second)

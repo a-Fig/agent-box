@@ -193,6 +193,8 @@ func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
 	exit := 3
 	box, suffix, _ := strings.Cut(testBareJobID, ".")
 	j := dash.Job{Box: box, ID: suffix, BoxUID: "agents-only", State: dash.JobDone, StartedAt: jobStart(testBareJobID), Exit: &exit, Tail: "legacy tail"}
+	dirty := true
+	j.Source = &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
 	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
 		if len(cmd.Args) != 8 || cmd.Args[1] != a.Project || cmd.Args[3] != west.Remote+":"+box {
@@ -220,7 +222,7 @@ func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || fullReads != 1 {
+	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || fullReads != 1 || !reflect.DeepEqual(p.Source, j.Source) {
 		t.Fatalf("agents page = %+v, %v, full reads %d", p, err, fullReads)
 	}
 	a.Project = "work"
@@ -228,7 +230,7 @@ func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end == nil || end.Tail != j.Tail || fullReads != 1 {
+	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end == nil || end.Tail != j.Tail || fullReads != 1 || end.Source != nil {
 		t.Fatalf("work project page = %+v, end %+v, %v, full reads %d", p, end, err, fullReads)
 	}
 }
@@ -513,8 +515,14 @@ func TestBareJobRejectsRetainedResultFromAnotherHost(t *testing.T) {
 	a, _, west, east := lookupTestApp(t, "agents")
 	a.dashboardURL = east.DashboardURL
 	const job = testBareJobID
-	if err := writeJSON(a.statePath(job, ".result"), jobEnd{Code: 4, Tail: "west tail", Host: &jobLocator{Remote: west.Remote, Project: west.Project}}); err != nil {
+	// The first provenance builds wrote a locator object in the host field.
+	if err := writeJSON(a.statePath(job, ".result"), map[string]any{
+		"code": 4, "tail": "west tail", "host": jobLocator{Remote: west.Remote, Project: west.Project},
+	}); err != nil {
 		t.Fatal(err)
+	}
+	if end, ok := a.jobHostApp(west).recordedEnd(job); !ok || end.Code != 4 {
+		t.Fatalf("legacy result = %+v, found = %t", end, ok)
 	}
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
 		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" {

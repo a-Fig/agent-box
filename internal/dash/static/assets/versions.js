@@ -5,7 +5,7 @@ import { h, dur, stamp, clock } from "./dom.js";
 import { trayAlive } from "./store.js";
 import { hint } from "./tip.js";
 
-export { versions, drift };
+export { versions, drift, releaseStatus };
 
 // The builds boxd and the tray run (dash.Version), and a note when they differ: twice on
 // 2026-11-25 the PC ran builds hours behind the repo and nothing showed it. Both follow stable
@@ -38,6 +38,9 @@ function versions(m, named) {
 function drift(b, t, trayUp) {
   if (!b || !t || !b.commit || !t.commit || (b.commit === t.commit && (b.tag || "") === (t.tag || ""))) return null;
   const kb = tagKey(b.tag), kt = tagKey(t.tag);
+  if ((b.tag && !kb) || (t.tag && !kt)) {
+    return { text: "boxd and tray are different builds", why: "The order of these builds is unknown." };
+  }
   // A dev build (no release tag) never updates itself; the release beside it can't be ordered
   // against it.
   if (!kb && !kt) return { text: "boxd and tray are different builds", why: "Neither is a release, so neither updates itself: build both from the same commit, or install a release." };
@@ -71,4 +74,64 @@ function tagKey(tag) {
   return [n(m[1]), n(m[2]), n(m[3]), 1, 0, 0];
 }
 const cmpKey = (a, b) => a.reduce((c, v, i) => c || Math.sign(v - b[i]), 0);
+
+// How one reported build compares to the latest stable release (updates: { latest, checkedAt }).
+// Uses the same tag order as internal/update.After: a nightly of vX.Y.Z is behind vX.Y.Z.
+// Returns { label, cls, why } for a reported build, or null when no build is reported.
+function releaseStatus(v, updates) {
+  if (!v || !v.commit) return null;
+  if (!v.tag) {
+    return {
+      label: "dev build",
+      cls: "badge-outline",
+      why: "Built without a release tag, so it doesn't follow stable releases or update itself.",
+    };
+  }
+  if (!updates || !updates.checkedAt) {
+    return {
+      label: "not checked",
+      cls: "badge-outline",
+      why: "Click Check for updates to compare this build with the latest stable release.",
+    };
+  }
+  if (!updates.latest) {
+    return {
+      label: "no stable release",
+      cls: "badge-outline",
+      why: "No stable release has been published on GitHub yet.",
+    };
+  }
+  // The release workflow also publishes custom prereleases. Their version
+  // numbers suffice to compare them with a stable release.
+  const prerelease = /^v(\d+)\.(\d+)\.(\d+)-[0-9A-Za-z.-]+$/.exec(v.tag);
+  const kv = prerelease ? [...prerelease.slice(1).map(Number), 0, 0, 0] : tagKey(v.tag);
+  const kl = tagKey(updates.latest);
+  if (!kv || kl?.[3] !== 1) {
+    return {
+      label: "unknown",
+      cls: "badge-outline",
+      why: "This build couldn't be compared with the latest stable release.",
+    };
+  }
+  const c = cmpKey(kv, kl);
+  if (c === 0) {
+    return {
+      label: "up to date",
+      cls: "badge-on",
+      why: "Matches the latest stable release (" + updates.latest + ").",
+    };
+  }
+  if (c < 0) {
+    return {
+      label: "update available",
+      cls: "badge-warn",
+      why: "Behind the latest stable release (" + updates.latest + ").",
+    };
+  }
+  return {
+    label: "ahead of stable",
+    cls: "badge-info",
+    why: "Newer than the latest stable release (" + updates.latest + ").",
+  };
+}
 

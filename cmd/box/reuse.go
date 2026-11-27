@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -62,23 +63,41 @@ func (a *App) poolEnabled(ctx context.Context) bool {
 }
 
 func (a *App) poolPost(ctx context.Context, box, action string, req any) (int, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return 0, err
-	}
-	probe, cancel := context.WithTimeout(ctx, refusalTimeout)
-	defer cancel()
-	status, _, err := a.boxdDo(probe, http.MethodPost, "/api/boxes/"+box+"/"+action, "application/json", bytes.NewReader(body))
+	status, _, err := a.poolRequest(ctx, box, action, req)
 	return status, err
 }
 
+func (a *App) poolRequest(ctx context.Context, box, action string, req any) (int, []byte, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	probe, cancel := context.WithTimeout(ctx, refusalTimeout)
+	defer cancel()
+	return a.boxdDo(probe, http.MethodPost, "/api/boxes/"+box+"/"+action, "application/json", bytes.NewReader(body))
+}
+
 func (a *App) evictPooled(ctx context.Context, in instance) error {
+	return a.evictThroughBoxd(ctx, in, "evict-idle")
+}
+
+var errDirectEviction = errors.New("kept box eviction can use Incus directly")
+
+func (a *App) evictKept(ctx context.Context, in instance) error {
+	return a.evictThroughBoxd(ctx, in, "evict-kept")
+}
+
+func (a *App) evictThroughBoxd(ctx context.Context, in instance, action string) error {
 	uid := in.Config["volatile.uuid"]
 	if uid == "" {
 		uid = in.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	status, err := a.poolPost(ctx, in.Name, "evict-idle", struct{ UID string }{uid})
+	status, body, err := a.poolRequest(ctx, in.Name, action, struct{ UID string }{uid})
+	canUseIncus := action == "evict-kept" && in.Status == "Running" && in.Config[jobrun.ThrowawayStopKey] == ""
 	if err != nil {
+		if canUseIncus && ctx.Err() == nil {
+			return errDirectEviction
+		}
 		return err
 	}
 	switch status {
@@ -86,9 +105,45 @@ func (a *App) evictPooled(ctx context.Context, in instance) error {
 		return nil
 	case http.StatusConflict:
 		return errNotIdle
-	default:
-		return fmt.Errorf("boxd eviction returned HTTP %d", status)
+	case http.StatusForbidden, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		if canUseIncus {
+			return errDirectEviction
+		}
+	case http.StatusNotFound:
+		var legacy dash.ErrorBody
+		if canUseIncus &&
+			json.Unmarshal(body, &legacy) == nil && legacy.Code == dash.CodeNotFound && legacy.Error == "no such endpoint" {
+			return errDirectEviction
+		}
+		return errNotIdle
 	}
+	return fmt.Errorf("boxd eviction returned HTTP %d", status)
+}
+
+// The CLI can use Incus even when boxd is unavailable. Its short reservation
+// keeps cooling out, and a fresh read catches a stop that reserved first.
+func (a *App) evictKeptDirect(ctx context.Context, in instance) error {
+	ctx, cancel := context.WithTimeout(ctx, jobrun.EvictTTL/2)
+	defer cancel()
+	until := a.Now().Add(jobrun.EvictTTL).UTC()
+	lease := until.Format(time.RFC3339Nano)
+	err := jobrun.RetryETag(ctx, func() error {
+		if !a.stillIdle(ctx, in, "") {
+			return errNotIdle
+		}
+		_, err := a.incusOK(ctx, "config", "set", a.target(in.Name), jobrun.DirectEvictKey+"="+lease)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return jobrun.RetryETag(ctx, func() error {
+		if ctx.Err() != nil || !until.After(a.Now()) || !a.stillIdle(ctx, in, lease) {
+			return errNotIdle
+		}
+		_, err := a.incusOK(ctx, "delete", a.target(in.Name), "--force")
+		return err
+	})
 }
 
 func (a *App) poolExpiry(ctx context.Context, box, job string, ended bool) {

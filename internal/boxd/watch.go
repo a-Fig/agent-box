@@ -41,30 +41,32 @@ type Watcher struct {
 	// the login.
 	Whois func(ctx context.Context, ip string) string
 
-	mu        sync.Mutex
-	polled    bool
-	swept     map[string]bool // boxes (name@created) sweepEnded has looked at
-	machine   dash.Machine
-	trayVer   string    // user.agent-box.tray-version as last read
-	traySince time.Time // when it took that value
-	boxes     map[string]dash.Box
-	known     map[string]boxRec // box id -> what was recorded as created
-	live      map[string]*dash.Job
-	repoOf    map[string]string    // box -> the repo of its latest job
-	died      map[string]time.Time // job key -> when a scan first saw it died
-	qview     map[string]dash.Job  // queued job -> as last announced
-	starting  string               // the queued job being started, one at a time
-	startDone time.Time            // when the last start finished
-	noRoom    map[string]time.Time // queued job -> not before, after Incus refused its launch
-	promoting map[string]bool      // box -> a claimed job's expiry write is in flight
-	started   map[string]dash.Job  // queued jobs started, until a scan sees them
-	lastIns   []Instance
-	lastProj  Project
-	listed    bool // lastIns is from a poll that listed the boxes
-	cpu       map[string]cpuMark
-	lastMode  *modeRec
-	sampled   time.Time
-	subs      map[chan dash.Event]struct{}
+	mu           sync.Mutex
+	polled       bool
+	swept        map[string]bool // boxes (name@created) sweepEnded has looked at
+	machine      dash.Machine
+	trayVer      string    // user.agent-box.tray-version as last read
+	traySince    time.Time // when it took that value
+	boxes        map[string]dash.Box
+	known        map[string]boxRec // box id -> what was recorded as created
+	live         map[string]*dash.Job
+	repoOf       map[string]string    // box -> the repo of its latest job
+	died         map[string]time.Time // job key -> when a scan first saw it died
+	qview        map[string]dash.Job  // queued job -> as last announced
+	starting     string               // the queued job being started, one at a time
+	startDone    time.Time            // when the last start finished
+	noRoom       map[string]time.Time // queued job -> not before, after Incus refused its launch
+	promoting    map[string]bool      // box -> a claimed job's expiry write is in flight
+	started      map[string]dash.Job  // queued jobs started, until a scan sees them
+	lastIns      []Instance
+	lastProj     Project
+	listed       bool // lastIns is from a poll that listed the boxes
+	cpu          map[string]cpuMark
+	lastMode     *modeRec
+	sampled      time.Time
+	subs         map[chan dash.Event]struct{}
+	idleStopping string          // box selected by the idle stop worker
+	deleting     map[string]bool // dashboard deletes in flight
 }
 
 type cpuMark struct {
@@ -99,7 +101,7 @@ func (w *Watcher) logf(format string, args ...any) {
 }
 
 // Run polls until ctx ends.
-func (w *Watcher) Run(ctx context.Context) {
+func (w *Watcher) Run(ctx context.Context, coolIdle, keepWarm bool) {
 	t := time.NewTicker(PollEvery)
 	defer t.Stop()
 	prune := time.NewTicker(time.Hour)
@@ -109,6 +111,11 @@ func (w *Watcher) Run(ctx context.Context) {
 	}
 	for {
 		w.Poll(ctx)
+		if coolIdle {
+			w.coolIdleThrowaways(ctx, keepWarm)
+		} else {
+			w.reconcileIdleStops(ctx)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -365,6 +372,8 @@ func (w *Watcher) applyJobs(now time.Time, ins []Instance, scans map[string][]sc
 				j.Tail = s.Tail
 			}
 			switch s.State {
+			case "unknown":
+				// Keep the last known state until the PID can be checked.
 			case "done":
 				j.State, j.Exit, j.EndedAt = dash.JobDone, s.Exit, s.EndedAt
 				if j.EndedAt == nil {
@@ -517,7 +526,11 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 	}
 	b := dash.Box{Name: in.Name, Machine: w.MachineID, Size: sz.Name, GPU: sz.GPU, State: strings.ToLower(in.Status),
 		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC(), UID: boxUID(in)}
-	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil {
+	if raw := in.Config[jobrun.ExpiresKey]; mode.ProtectedDeadline(raw) {
+		if hold := mode.Held(in.Config, now); hold.After(now) {
+			b.ExpiresAt = &hold
+		}
+	} else if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		t = mode.Held(in.Config, t).UTC() // when the reaper deletes it
 		b.ExpiresAt = &t
 	}

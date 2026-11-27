@@ -56,17 +56,17 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var pausedHint = "state refused (exit 75) means box couldn't run it now and nothing started: the PC is busy, paused or out of reach, and the run wasn't queued. Retry later, or with a smaller size if it said no room. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
+var pausedHint = "state refused (exit 75) means nothing started or queued. A capacity result names the limit and may estimate a smaller size that fits. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
 
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
 
 var tools = []tool{
-	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length. The advice, available and repo box fields describe the host box_run currently uses. Without a registry, the first line is that host's advice.`, obj(map[string]any{
+	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length; box_run routes each run to the best host. The advice, available and repo box fields describe the default host.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. With a host registry, box_run picks the best host that can start now (or queues on the best one), names the host in the result, and returns a qualified job ID. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box (and host when routed) and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
@@ -121,6 +121,10 @@ var jobOutput = obj(map[string]any{
 	"push":     map[string]any{"type": "boolean", "description": "box_run, state running or queued: the result will arrive as a turn in your thread."},
 	"position": map[string]any{"type": "integer", "description": "State queued: place in line, from 1."},
 	"why":      str("State queued: what it waits for: full (room), gpu-busy, or mypc."),
+	"capacity": obj(map[string]any{
+		"limits":      map[string]any{"type": "array", "items": str("Limiting resource, or unknown.")},
+		"smallerSize": str("Smaller size that appears to fit on the selected host now."),
+	}, "limits"),
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -385,10 +389,11 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Digest   string   `json:"digest,omitempty"`
 		// Claude Code shows structuredContent instead of the text when a
 		// result has both (#33), so what the agent reads is here too.
-		Tail   string               `json:"tail"`
-		Error  string               `json:"error,omitempty"`
-		Source *dash.SourceRevision `json:"source"`
-	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Source}
+		Tail     string               `json:"tail"`
+		Error    string               `json:"error,omitempty"`
+		Capacity *capacityDetail      `json:"capacity,omitempty"`
+		Source   *dash.SourceRevision `json:"source"`
+	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity, r.Source}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -529,16 +534,22 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
 		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Fresh: args.Fresh, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
 		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}, Source: r.Source}
+		startWatch := func(throwaway, queued bool) bool {
+			if r.fleetHost != nil {
+				return a.startWatchOnHost(info, r.Job, *r.fleetHost, args.Size == mode.GPUSize, throwaway, queued)
+			}
+			return a.startWatch(info, r.Job, args.Size == mode.GPUSize, throwaway, queued)
+		}
 		switch {
 		case err != nil:
 		case r.Job == "" && r.State == statePaused:
 			r.State = stateRefused
 		case r.State == stateQueued:
-			if !a.startWatch(info, r.Job, args.Size == mode.GPUSize, r.throwaway, true) {
+			if !startWatch(r.throwaway, true) {
 				// Nobody would hear when it runs: take it back, and refuse.
-				if cerr := a.cancelQueued(ctx, r.Job); cerr == nil {
+				if cerr := a.cancelQueuedResult(ctx, r); cerr == nil {
 					job := r.Job
-					r = JobResult{State: stateRefused, Code: exitPaused}
+					r = JobResult{Host: r.Host, State: stateRefused, Code: exitPaused, Capacity: r.Capacity}
 					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; nothing ran\n", job)
 					break
 				}
@@ -547,7 +558,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			r.Push = &push
 		case r.Job != "" && (r.State == stateDetached || r.State == statePaused):
 			if push {
-				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New || args.Fresh, false)
+				push = startWatch(r.throwaway || args.New || args.Fresh, false)
 			}
 			r.Push = &push
 		}

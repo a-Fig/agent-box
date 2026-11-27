@@ -29,8 +29,8 @@ type fleetHostStatus struct {
 	Queued    *int       `json:"queued,omitempty"`
 }
 
-// fleetStatus retains the currently selected remote's advice and exit status.
-// A configured host becoming available does not change where box run goes.
+// fleetStatus reports fleet capacity while retaining the default host's
+// advice and exit status.
 func (a *App) fleetStatus(ctx context.Context, dir string, listOnly bool) (StatusReport, error) {
 	hosts, err := a.configuredHosts()
 	if err != nil {
@@ -104,22 +104,30 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 	return current
 }
 
-func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool) {
-	var err error
+type fleetBoxdSnapshot struct {
+	Queue bool       `json:"queue"`
+	Jobs  []dash.Job `json:"jobs"`
+}
+
+func (a *App) readFleetBoxdState(ctx context.Context, dashboardURL string) (fleetBoxdSnapshot, bool) {
 	if dashboardURL == "" {
+		var err error
 		dashboardURL, err = a.DashURL(ctx)
 		if err != nil {
-			return nil, false
+			return fleetBoxdSnapshot{}, false
 		}
 	}
 	code, body, err := a.boxdRequest(ctx, http.MethodGet, strings.TrimRight(dashboardURL, "/")+"/api/state", "", nil)
-	var state struct {
-		Queue bool `json:"queue"`
-		Jobs  []struct {
-			State string `json:"state"`
-		} `json:"jobs"`
-	}
+	var state fleetBoxdSnapshot
 	if err != nil || code != http.StatusOK || json.Unmarshal(body, &state) != nil || state.Jobs == nil {
+		return fleetBoxdSnapshot{}, false
+	}
+	return state, true
+}
+
+func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool) {
+	state, ok := a.readFleetBoxdState(ctx, dashboardURL)
+	if !ok {
 		return nil, false
 	}
 	n := 0
