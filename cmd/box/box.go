@@ -397,6 +397,37 @@ func (a *App) beingCreated(in instance) bool {
 	return in.Status == "Stopped" && in.Config[mode.StoppedKey] == "" && a.starting(in)
 }
 
+type gpuBoxState int
+
+const (
+	gpuBoxFree gpuBoxState = iota
+	gpuBoxReclaimable
+	gpuBoxBusy
+)
+
+// inspectGPUBox classifies one GPU instance using the same read-only rules
+// claimGPU applies: unheld throwaways that are stopped past startup (or
+// tray-stopped) or running idle past startup are reclaimable; held, starting,
+// paused, busy, non-throwaway, or unverified boxes still hold the GPU.
+func (a *App) inspectGPUBox(ctx context.Context, in instance) (gpuBoxState, string) {
+	throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
+	if in.Status == "Stopped" {
+		switch {
+		case a.beingCreated(in):
+			return gpuBoxBusy, "box " + in.Name + ", starting"
+		case throwaway:
+			return gpuBoxReclaimable, ""
+		default:
+			return gpuBoxFree, ""
+		}
+	}
+	holder, idle := a.gpuHolder(ctx, in)
+	if idle && throwaway && !a.starting(in) {
+		return gpuBoxReclaimable, ""
+	}
+	return gpuBoxBusy, holder
+}
+
 // claimGPU checks that no box but except holds the GPU, so only one GPU box
 // runs at a time. Throwaway GPU boxes that are done are deleted on the way,
 // since they hold 8GiB of the project's memory and would block the next one:
@@ -409,22 +440,12 @@ func (a *App) claimGPU(ctx context.Context, insts []instance, except string) err
 		if in.Name == except || !mode.IsGPU(in.Config) {
 			continue
 		}
-		throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
-		if in.Status == "Stopped" {
-			switch {
-			case a.beingCreated(in):
-				return &errGPUBusy{holder: "box " + in.Name + ", starting"}
-			case throwaway:
-				a.removeQuietly(ctx, in.Name)
-			}
-			continue
-		}
-		holder, idle := a.gpuHolder(ctx, in)
-		if idle && throwaway && !a.starting(in) {
+		switch state, holder := a.inspectGPUBox(ctx, in); state {
+		case gpuBoxReclaimable:
 			a.removeQuietly(ctx, in.Name)
-			continue
+		case gpuBoxBusy:
+			return &errGPUBusy{holder: holder}
 		}
-		return &errGPUBusy{holder: holder}
 	}
 	return nil
 }

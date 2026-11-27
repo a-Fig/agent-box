@@ -117,6 +117,51 @@ func TestResolveFleetTargetsBypassAndPinning(t *testing.T) {
 			t.Fatalf("err = %v, want empty host name error", err)
 		}
 	})
+
+	t.Run("compatible aliases collapse in registry order and resolve dashboard URL consistently", func(t *testing.T) {
+		aliased := []fleetHost{
+			{Name: "primary", Remote: "pc", Project: mode.Project},
+			{Name: "primary-dash", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"},
+			{Name: "spare", Remote: "spare", Project: mode.Project},
+		}
+		targets, bypass, err := resolveFleetTargets(def, aliased, "", "")
+		want := []fleetHost{
+			{Name: "primary", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"},
+			{Name: "spare", Remote: "spare", Project: mode.Project},
+		}
+		if err != nil || bypass || !slices.Equal(targets, want) {
+			t.Fatalf("unpinned aliases = %v, %v, %v; want %v", targets, bypass, err, want)
+		}
+
+		// Pinning an alias keeps that alias name with the tuple's resolved dashboard URL.
+		targets, bypass, err = resolveFleetTargets(def, aliased, "primary", "")
+		if err != nil || bypass || !slices.Equal(targets, []fleetHost{{Name: "primary", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"}}) {
+			t.Fatalf("pinned primary = %v, %v, %v", targets, bypass, err)
+		}
+		targets, bypass, err = resolveFleetTargets(def, aliased, "primary-dash", "")
+		if err != nil || bypass || !slices.Equal(targets, []fleetHost{{Name: "primary-dash", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"}}) {
+			t.Fatalf("pinned primary-dash = %v, %v, %v", targets, bypass, err)
+		}
+	})
+
+	t.Run("conflicting dashboard URLs on same tuple are rejected unpinned and pinned", func(t *testing.T) {
+		conflicting := []fleetHost{
+			{Name: "a", Remote: "pc", Project: mode.Project, DashboardURL: "https://one.example.com"},
+			{Name: "b", Remote: "pc", Project: mode.Project, DashboardURL: "https://two.example.com"},
+			{Name: "other", Remote: "spare", Project: mode.Project},
+		}
+		if _, _, err := resolveFleetTargets(def, conflicting, "", ""); err == nil || !strings.Contains(err.Error(), "conflicting dashboard URLs") {
+			t.Fatalf("unpinned conflicting = %v, want conflicting dashboard URLs", err)
+		}
+		if _, _, err := resolveFleetTargets(def, conflicting, "a", ""); err == nil || !strings.Contains(err.Error(), "conflicting dashboard URLs") {
+			t.Fatalf("pinned conflicting = %v, want conflicting dashboard URLs", err)
+		}
+		// Pinning an unrelated unambiguous tuple still succeeds.
+		targets, bypass, err := resolveFleetTargets(def, conflicting, "other", "")
+		if err != nil || bypass || !slices.Equal(targets, []fleetHost{{Name: "other", Remote: "spare", Project: mode.Project}}) {
+			t.Fatalf("pinned unambiguous = %v, %v, %v", targets, bypass, err)
+		}
+	})
 }
 
 func TestPickFleetHostStartEligibility(t *testing.T) {
@@ -358,7 +403,7 @@ func TestPickFleetHostAffinityStoppedAtCapAndStableOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("throwaway run prefers claimable warm throwaway only on boxd-capable agents host", func(t *testing.T) {
+	t.Run("throwaway run prefers claimable warm throwaway on agents host only", func(t *testing.T) {
 		cold := readyHost("cold", "r1", mode.Project)
 
 		nonAgentsWarm := readyHost("non-agents-warm", "r2", "other")
@@ -366,25 +411,22 @@ func TestPickFleetHostAffinityStoppedAtCapAndStableOrder(t *testing.T) {
 		nonAgentsWarm.BoxdAvailable = true
 		nonAgentsWarm.WarmThrowaway = true // ignored outside mode.Project
 
-		noBoxdWarm := readyHost("no-boxd-warm", "r3", mode.Project)
-		noBoxdWarm.Sizes = testCPUSizes(0, 0, 0)
-		noBoxdWarm.BoxdAvailable = false
-		noBoxdWarm.WarmThrowaway = true // ignored without boxd capability
+		// A verified warm throwaway on agents works even when boxd queue is off.
+		agentsWarmNoQueue := readyHost("agents-warm", "r3", mode.Project)
+		agentsWarmNoQueue.Sizes = testCPUSizes(0, 0, 0)
+		agentsWarmNoQueue.BoxdAvailable = false
+		agentsWarmNoQueue.WarmThrowaway = true
 
-		agentsWarm := readyHost("agents-warm", "r4", mode.Project)
-		agentsWarm.Sizes = testCPUSizes(0, 0, 0)
-		agentsWarm.WarmThrowaway = true
-
-		pick := pickFleetHost([]fleetCandidate{cold, nonAgentsWarm, noBoxdWarm, agentsWarm}, pickRequest{Repo: "repo", New: true})
+		pick := pickFleetHost([]fleetCandidate{cold, nonAgentsWarm, agentsWarmNoQueue}, pickRequest{Repo: "repo", New: true})
 		if pick.Action != pickStart || pick.Host.Name != "agents-warm" || pick.Affinity != affinityDirectWarm {
 			t.Fatalf("pick = %+v", pick)
 		}
 
 		// With --fresh, warm throwaway cannot be claimed so full host is skipped;
 		// a host with room + warm repo evidence still beats a cold host.
-		agentsWarmWithRoom := readyHost("agents-warm-room", "r5", mode.Project)
+		agentsWarmWithRoom := readyHost("agents-warm-room", "r4", mode.Project)
 		agentsWarmWithRoom.WarmThrowaway = true
-		pick = pickFleetHost([]fleetCandidate{cold, agentsWarm, agentsWarmWithRoom}, pickRequest{Repo: "repo", New: true, Fresh: true})
+		pick = pickFleetHost([]fleetCandidate{cold, agentsWarmNoQueue, agentsWarmWithRoom}, pickRequest{Repo: "repo", New: true, Fresh: true})
 		if pick.Action != pickStart || pick.Host.Name != "agents-warm-room" || pick.Affinity != affinityWarmHost {
 			t.Fatalf("fresh pick = %+v", pick)
 		}

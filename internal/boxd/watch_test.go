@@ -586,9 +586,18 @@ func TestAPI(t *testing.T) {
 		return resp.StatusCode
 	}
 	var st dash.State
-	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 {
-		t.Fatalf("state %+v", st)
+	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 || st.Queue {
+		t.Fatalf("state %+v (want Queue=false when W.Queue is nil)", st)
 	}
+	q, err := OpenQueue(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Queue = q
+	if get("/api/state", &st) != 200 || !st.Queue {
+		t.Fatalf("state with queue = %+v, want Queue=true", st)
+	}
+	w.Queue = nil
 	key := url.PathEscape(st.Jobs[0].Key)
 	var chunk dash.LogChunk
 	if code := get("/api/jobs/"+key+"/log?offset=0", &chunk); code != 200 || chunk.EOF || len(chunk.Data) > dash.MaxLogChunk ||
