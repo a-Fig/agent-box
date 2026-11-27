@@ -30,10 +30,11 @@ function changed() {
 }
 
 class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, warning) {
     super(message);
     this.status = status;
     this.code = code;
+    this.warning = warning;
   }
 }
 
@@ -51,7 +52,7 @@ async function api(path, opts = {}) {
   } catch {}
   if (!res.ok) {
     const fallback = res.status >= 502 ? "The PC didn't answer." : "Request failed (" + res.status + ").";
-    throw new ApiError(res.status, body?.code || "http-" + res.status, body?.error || fallback);
+    throw new ApiError(res.status, body?.code || "http-" + res.status, body?.error || fallback, body?.warning);
   }
   return body;
 }

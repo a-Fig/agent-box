@@ -30,7 +30,7 @@ need no PC.
 
 ## CI
 
-`.github/workflows/test.yml` runs on every PR and every push to `dev` and `main`:
+`.github/workflows/test.yml` runs on every PR and every push to `main`:
 
 - **Linux:** `gofmt`, `go vet` (also with `GOOS=windows`), `go test -race`, `bash -n` and
   shellcheck on `setup-host.sh`, and a YAML parse of `provision/*.yaml`.

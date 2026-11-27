@@ -23,11 +23,12 @@ func cancelText(job string, cancelled bool, code int) string {
 }
 
 const usage = `usage:
-  box status                                is offloading worth it now? (PC, mode, room, this repo's box)
+  box status                                is offloading worth it now? (hosts, room, this repo's box)
+  box hosts                                 list hosts and their current capacity
   box run --reason "why" [--box name | --new] [--size S | --gpu] [--env K=V]... [--timeout 30m]
           [--no-queue] -- <cmd...>          sync this worktree to a box and run cmd
   box job <id> [--offset N] [--limit N]     reattach to a job, or read a piece of its log
-  box jobs [--box name]                     list jobs, newest first
+  box jobs [--box name]                     list fleet jobs, newest first (--box uses the default host)
   box cancel <id>                           stop a running job, or take a queued one off the queue
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
@@ -214,20 +215,28 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		paged := false
 		fs.Visit(func(f *flag.Flag) { paged = paged || f.Name == "offset" || f.Name == "limit" })
+		lookup, err := a.lookupJob(fs.Arg(0))
+		if err != nil {
+			if !paged {
+				return code(JobResult{Code: 2}, err)
+			}
+			return fail(err)
+		}
 		if !paged {
 			var r JobResult
 			var err error
-			if a.wasQueued(fs.Arg(0)) && a.stillQueued(ctx, fs.Arg(0)) {
-				r, err = a.followQueued(ctx, fs.Arg(0)) // it waits in boxd's queue, with no box yet
+			if _, queued, queueErr := lookup.queued(ctx); queued {
+				seen := lookup.id.hostTag != "" && queueErr == nil
+				r, err = lookup.app.followQueuedJob(ctx, lookup.id, seen)
 			} else {
-				r, err = a.Job(ctx, fs.Arg(0), 0)
+				r, err = lookup.job(ctx, 0)
 			}
-			a.markRead(fs.Arg(0), r, err, "box job")
+			a.markRead(lookup.id.ID, r, err, "box job")
 			return code(r, err)
 		}
-		p, err := a.LogPage(ctx, fs.Arg(0), *offset, *limit)
+		p, end, err := lookup.page(ctx, *offset, *limit)
 		if err != nil {
-			if end, ok := a.endedElsewhere(ctx, fs.Arg(0)); ok && *offset >= 0 && *limit >= 0 {
+			if end != nil {
 				fmt.Fprintf(a.Err, "box: can't read the log (%s); this is the tail recorded when the job ended\n", firstLine(err.Error()))
 				io.WriteString(a.Out, end.Tail)
 				return 0
@@ -237,13 +246,24 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		fmt.Fprintln(a.Err, "box: "+p.pageHead())
 		io.WriteString(a.Out, p.Text)
 		return 0
-	case "status":
+	case "status", "hosts":
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
 		dir, _ := os.Getwd()
-		s := a.Status(ctx, dir)
+		listOnly := args[0] == "hosts"
+		if listOnly {
+			dir = ""
+		}
+		s, err := a.fleetStatus(ctx, dir, listOnly)
+		if err != nil {
+			return fail(err)
+		}
+		if listOnly {
+			writeFleet(a.Out, s.Hosts)
+			return 0
+		}
 		writeStatus(a.Out, s)
 		if !s.Available {
 			return exitPaused
@@ -255,7 +275,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			fmt.Fprint(a.Err, usageText())
 			return 2
 		}
-		jobs, err := a.Jobs(ctx, *box)
+		jobs, err := a.listJobs(ctx, *box)
 		if err != nil {
 			return fail(err)
 		}
@@ -322,7 +342,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if exe, err := os.Executable(); err == nil {
 			a.MCPExe = exe
 		}
-		if err := serveMCP(ctx, a, stdin, a.Out); err != nil {
+		mcpCtx, stop := context.WithCancel(ctx)
+		defer stop()
+		go a.reconcilePushes(mcpCtx, pushReconcileInterval)
+		if err := serveMCP(mcpCtx, a, stdin, a.Out); err != nil {
 			return fail(err)
 		}
 		return 0

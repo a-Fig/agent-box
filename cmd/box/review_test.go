@@ -541,7 +541,7 @@ func TestAttachCompletionBeatsCancellation(t *testing.T) {
 	}
 }
 
-func TestFollowScriptPrintsTheExitCode(t *testing.T) {
+func TestFollowScriptPrintsTheTerminalMarker(t *testing.T) {
 	bash := gitBash(t)
 	old := workRoot
 	workRoot = filepath.ToSlash(t.TempDir())
@@ -558,7 +558,7 @@ func TestFollowScriptPrintsTheExitCode(t *testing.T) {
 	if err != nil || res.Code != 0 || out.String() != "hi\n" {
 		t.Fatalf("follow = %+v, %v, %q", res, err, out.String())
 	}
-	if code, ok := ef.exit(); !ok || code != "42" {
-		t.Errorf("exit = %q, %v", code, ok)
+	if marker, ok := ef.exit(); !ok || marker != "42 "+completionExited {
+		t.Errorf("exit marker = %q, %v", marker, ok)
 	}
 }

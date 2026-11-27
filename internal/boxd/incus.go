@@ -26,6 +26,9 @@ type Incus interface {
 	// Exec runs a bash script in a running instance and returns its stdout.
 	// A non-zero exit is an *ExitError.
 	Exec(ctx context.Context, name, script string, args ...string) ([]byte, error)
+	// FileRange reads a bounded byte range without starting the instance.
+	// It returns the full file size, including when offset is past EOF.
+	FileRange(ctx context.Context, name, path string, offset, limit int64) ([]byte, int64, error)
 	// CLI runs `incus <args...>` in the project, with stdin (often ""), for
 	// what starting a queued job takes: launch, file push, config set, exec.
 	CLI(ctx context.Context, stdin string, args ...string) ([]byte, error)

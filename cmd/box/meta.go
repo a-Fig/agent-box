@@ -314,8 +314,8 @@ func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refusalTimeout)
 	defer cancel()
-	host := a.pcHost(ctx)
-	if host == "" {
+	address := a.boxdURL(ctx, "/api/jobs/ended")
+	if address == "" {
 		return
 	}
 	box, id, _ := strings.Cut(job, ".")
@@ -323,7 +323,20 @@ func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.
 	if err != nil {
 		return
 	}
-	a.Post(ctx, "https://"+host+"/api/jobs/ended", b)
+	a.Post(ctx, address, b)
+}
+
+func (a *App) boxdURL(ctx context.Context, path string) string {
+	if a.boxdDisabled {
+		return ""
+	}
+	if a.dashboardURL != "" {
+		return strings.TrimRight(a.dashboardURL, "/") + path
+	}
+	if host := a.pcHost(ctx); host != "" {
+		return "https://" + host + path
+	}
+	return ""
 }
 
 // pcHost is the host of the Incus remote, where boxd also answers (behind

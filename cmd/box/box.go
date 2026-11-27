@@ -79,6 +79,10 @@ type App struct {
 	// HTTP sends requests to boxd for the queue (queue.go); nil is
 	// http.DefaultClient. Tests replace it.
 	HTTP func(*http.Request) (*http.Response, error)
+	// dashboardURL overrides the derived boxd address for a configured job host.
+	dashboardURL string
+	// boxdDisabled keeps a qualified lookup outside boxd's fixed project on Incus.
+	boxdDisabled bool
 	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
 	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
 	// per-job files. Any of them nil or empty means no push.
@@ -393,6 +397,37 @@ func (a *App) beingCreated(in instance) bool {
 	return in.Status == "Stopped" && in.Config[mode.StoppedKey] == "" && a.starting(in)
 }
 
+type gpuBoxState int
+
+const (
+	gpuBoxFree gpuBoxState = iota
+	gpuBoxReclaimable
+	gpuBoxBusy
+)
+
+// inspectGPUBox classifies one GPU instance using the same read-only rules
+// claimGPU applies: unheld throwaways that are stopped past startup (or
+// tray-stopped) or running idle past startup are reclaimable; held, starting,
+// paused, busy, non-throwaway, or unverified boxes still hold the GPU.
+func (a *App) inspectGPUBox(ctx context.Context, in instance) (gpuBoxState, string) {
+	throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
+	if in.Status == "Stopped" {
+		switch {
+		case a.beingCreated(in):
+			return gpuBoxBusy, "box " + in.Name + ", starting"
+		case throwaway:
+			return gpuBoxReclaimable, ""
+		default:
+			return gpuBoxFree, ""
+		}
+	}
+	holder, idle := a.gpuHolder(ctx, in)
+	if idle && throwaway && !a.starting(in) {
+		return gpuBoxReclaimable, ""
+	}
+	return gpuBoxBusy, holder
+}
+
 // claimGPU checks that no box but except holds the GPU, so only one GPU box
 // runs at a time. Throwaway GPU boxes that are done are deleted on the way,
 // since they hold 8GiB of the project's memory and would block the next one:
@@ -405,22 +440,12 @@ func (a *App) claimGPU(ctx context.Context, insts []instance, except string) err
 		if in.Name == except || !mode.IsGPU(in.Config) {
 			continue
 		}
-		throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
-		if in.Status == "Stopped" {
-			switch {
-			case a.beingCreated(in):
-				return &errGPUBusy{holder: "box " + in.Name + ", starting"}
-			case throwaway:
-				a.removeQuietly(ctx, in.Name)
-			}
-			continue
-		}
-		holder, idle := a.gpuHolder(ctx, in)
-		if idle && throwaway && !a.starting(in) {
+		switch state, holder := a.inspectGPUBox(ctx, in); state {
+		case gpuBoxReclaimable:
 			a.removeQuietly(ctx, in.Name)
-			continue
+		case gpuBoxBusy:
+			return &errGPUBusy{holder: holder}
 		}
-		return &errGPUBusy{holder: holder}
 	}
 	return nil
 }
@@ -862,6 +887,7 @@ const (
 type JobResult struct {
 	Job   string `json:"job,omitempty"`
 	Box   string `json:"box,omitempty"`
+	Host  string `json:"host,omitempty"`
 	State string `json:"state,omitempty"`
 	Code  int    `json:"exitCode"`
 	// Push is set on a box_run that returned a running or queued job:
@@ -1101,7 +1127,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 
-	r.State, r.Code, r.Digest, err = a.attach(ctx, job, o.Wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, jobID{ID: job, Bare: job, Box: box}, o.Wait)
 	switch {
 	case !o.New:
 	case err == nil && r.State == stateDone:
@@ -1279,11 +1305,11 @@ var validJob = regexp.MustCompile(`^[a-z][a-z0-9-]*\.[0-9]{8}-[0-9]{6}-[0-9a-f]+
 // here when box read its exit, else boxd's record, which holds every job's
 // end, including one nobody here read (a run that exited on a pause, a push
 // that never came) whose box a launch then took (#90).
-func (a *App) endedElsewhere(ctx context.Context, job string) (jobEnd, bool) {
-	if end, ok := a.recordedEnd(job); ok {
+func (a *App) endedElsewhere(ctx context.Context, id jobID) (jobEnd, bool) {
+	if end, ok := a.recordedEnd(id.ID); ok {
 		return end, true
 	}
-	j, found, err := a.queuedJob(ctx, job)
+	j, found, err := a.queuedJob(ctx, id.Bare)
 	if err != nil || !found || j.State != dash.JobDone || j.Exit == nil {
 		return jobEnd{}, false
 	}
@@ -1311,19 +1337,24 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 	if !validJob.MatchString(job) {
 		return JobResult{Code: 2}, fmt.Errorf("bad job id %q", job)
 	}
+	box, _, _ := strings.Cut(job, ".")
+	return a.job(ctx, jobID{ID: job, Bare: job, Box: box}, wait)
+}
+
+func (a *App) job(ctx context.Context, id jobID, wait time.Duration) (JobResult, error) {
 	if wait < 0 {
 		return JobResult{Code: 2}, errors.New("wait can't be negative")
 	}
-	box, _, _ := strings.Cut(job, ".")
+	job, box := id.ID, id.Box
 	r := JobResult{Job: job, Box: box}
 	var err error
-	r.State, r.Code, r.Digest, err = a.attach(ctx, job, wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, id, wait)
 	if err != nil {
 		// A job whose exit was read once has ended: when its box has gone
 		// since (a throwaway's 30 minutes ran out, or a launch short of room
 		// took it), its recorded end is the result, not "lost".
-		if end, ok := a.endedElsewhere(ctx, job); ok {
-			if by := a.evictedFor(ctx, job); by != "" {
+		if end, ok := a.endedElsewhere(ctx, id); ok {
+			if by := a.evictedFor(ctx, id.Bare); by != "" {
 				fmt.Fprintf(a.Err, "box: %s; this is the result recorded when it ended\n", evictedText(box, by))
 			} else {
 				fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
@@ -1362,7 +1393,9 @@ while :; do
     off=$size
   fi
   if [ $fin = 1 ]; then
-    printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
+    completion=%[6]s
+    [ -f %[1]s.cancelled ] && completion=%[7]s
+    printf '%%s%%s %%s\n' %[3]s "$(cat %[1]s.exit)" "$completion" >&2
     d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0)
     [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     exit 0
@@ -1374,7 +1407,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker))
+`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker), completionExited, completionCancelled)
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
@@ -1387,8 +1420,8 @@ const (
 )
 
 // exitMarker starts the line followScript prints on stderr when the job has
-// ended, followed by its exit code. attach reads it from that exec, so it
-// needs no second exec that a freeze could cut off.
+// ended, followed by its exit code and completion kind. attach reads these
+// from one exec so a freeze cannot interrupt a separate cancellation check.
 const exitMarker = "\x01box-exit "
 
 // digestMarker starts the line followScript prints on stderr after the exit
@@ -1542,8 +1575,8 @@ func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFun
 // If the box is frozen meanwhile it returns statePaused promptly. The
 // follow itself reports the job's exit code, and a code it reported wins
 // over any cancellation after it.
-func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state string, code int, dg string, err error) {
-	box, _, _ := strings.Cut(job, ".")
+func (a *App) attach(ctx context.Context, id jobID, wait time.Duration) (state string, code int, dg string, err error) {
+	job, box := id.ID, id.Box
 	follow := ctx
 	if wait > 0 {
 		var cancel context.CancelFunc
@@ -1565,22 +1598,23 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	kept := &lineTail{}
 	tail := &tailWriter{w: &lockedWriter{&wmu, io.MultiWriter(a.Out, kept)}}
 	res, err := a.incus(run, Cmd{
-		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
+		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(id.Bare)},
 		Stdout: tail, Stderr: ef,
 	})
 	stop()
 	<-watched
 	ef.flush()
 	if text, ok := ef.exit(); ok {
-		code, cerr := strconv.Atoi(text)
-		if cerr != nil {
+		codeText, completion, hasCompletion := strings.Cut(text, " ")
+		code, cerr := strconv.Atoi(codeText)
+		if cerr != nil || (hasCompletion && completion != completionExited && completion != completionCancelled) {
 			return "", 1, "", fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
 		ended := a.Now()
-		a.markIdle(ctx, box, job)
-		a.reportEnded(ctx, job, code, ended, tail.String())
+		a.markIdle(ctx, box, id.Bare)
+		a.reportEnded(ctx, id.Bare, code, ended, tail.String())
 		dg = ef.digest()
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
+		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg, Completion: completion})
 		return stateDone, code, dg, nil
 	}
 	if hit.Load() && ctx.Err() == nil {
