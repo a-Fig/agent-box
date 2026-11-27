@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 type sentMsg struct{ thread, msg string }
@@ -718,7 +720,7 @@ func TestThrowawayKeptAfterItsPushedJob(t *testing.T) {
 	if !strings.Contains(f.names(), box) {
 		t.Fatalf("the throwaway %s was deleted before the agent could pull from it", box)
 	}
-	want := e.a.Now().Add(endedKeep).UTC().Format(time.RFC3339)
+	want := jobrun.ProtectedExpiry // the host, not the watcher, sets retention
 	if got := f.inst(box).Config[expiresKey]; got != want {
 		t.Errorf("expiry = %q, want %q", got, want)
 	}

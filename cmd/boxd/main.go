@@ -31,9 +31,21 @@ func main() {
 	socket := flag.String("socket", "/var/lib/incus/unix.socket", "Incus's unix socket")
 	page := flag.String("static", "", "serve the page from this folder instead of the embedded copy")
 	showVersion := flag.Bool("version", false, "print the release and commit this boxd was built from, and exit")
+	reap := flag.Bool("reap", false, "run one expiry pass without starting the HTTP service")
+	project := flag.String("project", mode.Project, "Incus project for the expiry pass")
+	dryRun := flag.Bool("dry-run", false, "report expiry decisions without writing or deleting")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version.Text("boxd", version.Get()))
+		return
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if *reap {
+		w := &boxd.Watcher{Incus: boxd.NewSocket(*socket, *project), Now: time.Now, Logf: log.Printf}
+		if err := w.ReapExpired(ctx, *dryRun); err != nil {
+			log.Fatalf("reaper: %v", err)
+		}
 		return
 	}
 	cfg, err := boxd.LoadConfig(*cfgPath)
@@ -64,8 +76,6 @@ func main() {
 		Incus: boxd.NewSocket(*socket, mode.Project), Hist: hist, Now: time.Now,
 		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, HasGPU: hasGPU, Logf: log.Printf,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	go w.Run(ctx, cfg.CoolIdleThrowaways, cfg.ReuseThrowaways)
 
 	srv := &boxd.Server{

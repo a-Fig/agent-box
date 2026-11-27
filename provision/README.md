@@ -46,6 +46,18 @@ Released builds update themselves (docs/releasing.md). `agent-box-update.timer` 
 
 Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume), `agent-base.yaml` (build-only cloud-init passed during `--build-base` / `--rebuild-base`, disabled in the published image), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
+### Switching the expiry timer to host job state
+
+Setup, checkout deploys and release updates install the wrapper used by the existing
+`agent-box-reaper.timer`. Run `/usr/local/sbin/agent-box-reaper --dry-run` as root in
+the distro to verify the installed path. Update both the interactive tray and the
+headless enforcer to a build that leaves expiry to the timer.
+
+The wrapper uses timestamp expiry on hosts with an older or missing boxd. This keeps
+idle boxes expiring during setup and rollback. Timestamp expiry leaves protected boxes
+in place until a capable boxd returns and can reconcile them. Drain older jobs carrying
+the 24-hour deadline before relying on timestamp expiry.
+
 ## What changes on the PC, and how to undo it
 
 | Script | Change | Undo |

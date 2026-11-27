@@ -182,7 +182,7 @@ function limitRows(m) {
     row("Memory", "Most memory all boxes together may be given. The tray sets it from the mode.", cap("memory", bytes)),
     row("Disk", "Most disk all boxes together, and the image they start from, may use.", cap("disk", bytes)),
     row("Idle expiry", "A box made for a run expires this long after it is made unless a job keeps it.", value(dur(k.idleExpiry))),
-    row("Expiry during a job", "While a job runs, its box's expiry is pushed out to this long from the start.", value(dur(k.jobExpiry))),
+    row("Expiry during a job", "The host checks for active work before deleting a box. A job's own timeout can still end its command.", value("Protected while active")),
     row("Kept after a job", "A throwaway box and its log stay up to this long once the job ends, so an agent can pull what it built. A queued job, or another launch that needs the room, takes it sooner.", value(dur(k.keptAfterJob))),
   ];
 }

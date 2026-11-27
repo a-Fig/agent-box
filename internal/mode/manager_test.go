@@ -536,7 +536,7 @@ func TestCLIArgs(t *testing.T) {
 	c.Pause(ctx, "a")
 	c.Resume(ctx, "a")
 	c.Stop(ctx, "a")
-	c.Delete(ctx, "a")
+
 	c.SetInstanceConfig(ctx, "a", "limits.cpu", "2")
 	c.SetProjectConfig(ctx, ProjectModeKey, "full")
 	c.ProjectConfig(ctx, MemoryCapKey)
@@ -545,7 +545,6 @@ func TestCLIArgs(t *testing.T) {
 		{"pause", "a", "--project", "agents"},
 		{"start", "a", "--project", "agents"},
 		{"stop", "a", "--force", "--project", "agents"},
-		{"delete", "a", "--force", "--project", "agents"},
 		{"config", "set", "a", "limits.cpu=2", "--project", "agents"},
 		{"project", "set", "agents", "user.agent-box.mode=full"},
 		{"project", "get", "agents", "limits.memory"},
@@ -553,58 +552,6 @@ func TestCLIArgs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
-}
-
-func expiry(f *fake, name string, at time.Time) { f.setCfg(name, ExpiresKey, at.Format(time.RFC3339)) }
-
-func TestReaperDeletesOnlyExpiredInEveryMode(t *testing.T) {
-	for _, md := range []Mode{MyPC, Shared, Full} {
-		f := newFake("old", "Running", "fresh", "Running", "none", "Running", "gone", "Stopped")
-		expiry(f, "old", t0.Add(-time.Second))
-		expiry(f, "fresh", t0.Add(time.Hour))
-		expiry(f, "gone", t0.Add(-24*time.Hour))
-		m := New(f, md)
-		var logged []string
-		m.Logf = func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
-		st := tick(m, 0)
-		if st.Err != nil {
-			t.Fatalf("%s: err %v", md, st.Err)
-		}
-		equal(t, logged, []string{
-			"reaped old (expired " + t0.Add(-time.Second).Format(time.RFC3339) + ")",
-			"reaped gone (expired " + t0.Add(-24*time.Hour).Format(time.RFC3339) + ")",
-		})
-		var dels []string
-		for _, c := range f.calls {
-			if strings.HasPrefix(c, "delete ") {
-				dels = append(dels, c)
-			}
-		}
-		equal(t, dels, []string{"delete old", "delete gone"})
-		for _, c := range f.calls {
-			if strings.HasSuffix(c, " old") && !strings.HasPrefix(c, "delete") {
-				t.Fatalf("%s: touched the deleted instance after deleting it: %q", md, f.calls)
-			}
-		}
-	}
-}
-
-// A person's extend (HoldKey) outlives an expiry a job's end shortened: the
-// reaper waits for both (#198).
-func TestReaperWaitsForTheHold(t *testing.T) {
-	f := newFake("held", "Running", "done", "Running")
-	expiry(f, "held", t0.Add(-time.Minute))
-	f.setCfg("held", HoldKey, t0.Add(time.Hour).Format(time.RFC3339))
-	expiry(f, "done", t0.Add(-time.Minute))
-	f.setCfg("done", HoldKey, t0.Add(-time.Second).Format(time.RFC3339))
-	tick(New(f, Shared), 0)
-	var dels []string
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "delete ") {
-			dels = append(dels, c)
-		}
-	}
-	equal(t, dels, []string{"delete done"})
 }
 
 func TestHeld(t *testing.T) {
@@ -617,76 +564,6 @@ func TestHeld(t *testing.T) {
 	}
 	if got := Held(map[string]string{HoldKey: "soon"}, t0); !got.Equal(t0) {
 		t.Errorf("Held with a bad hold = %v", got)
-	}
-}
-
-func TestReaperKeepsInstanceExpiringExactlyNow(t *testing.T) {
-	f := newFake("a", "Running")
-	expiry(f, "a", t0)
-	tick(New(f, Shared), 0)
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "delete") {
-			t.Fatalf("deleted at the exact expiry time: %q", f.calls)
-		}
-	}
-}
-
-func TestReaperReportsBadValueOnceAndSkips(t *testing.T) {
-	f := newFake("a", "Running")
-	f.setCfg("a", ExpiresKey, "tomorrow")
-	m := New(f, Shared)
-	st := tick(m, 0)
-	if st.Err == nil || !strings.Contains(st.Err.Error(), "tomorrow") {
-		t.Fatalf("first tick should report the bad value: %v", st.Err)
-	}
-	if st.Running != 1 {
-		t.Fatalf("running = %d", st.Running)
-	}
-	if st = tick(m, time.Minute); st.Err != nil {
-		t.Fatalf("second tick repeated the report: %v", st.Err)
-	}
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "delete") {
-			t.Fatalf("deleted an instance with a bad value: %q", f.calls)
-		}
-	}
-	// A different bad value is news; so is the same one on a new instance.
-	f.setCfg("a", ExpiresKey, "next week")
-	if st = tick(m, 2*time.Minute); st.Err == nil {
-		t.Fatal("changed bad value should be reported")
-	}
-	// Once the instance is gone and a new one has the same bad value, report again.
-	delete(f.config, "a")
-	tick(m, 3*time.Minute)
-	f.setCfg("a", ExpiresKey, "next week")
-	if st = tick(m, 4*time.Minute); st.Err == nil {
-		t.Fatal("bad value still reported once per instance lifetime")
-	}
-}
-
-func TestReaperRetriesFailedDelete(t *testing.T) {
-	f := newFake("a", "Running")
-	expiry(f, "a", t0.Add(-time.Minute))
-	m := New(f, Full)
-	f.failOn = "delete"
-	st := tick(m, 0)
-	if st.Err == nil || !strings.Contains(st.Err.Error(), "boom") {
-		t.Fatalf("delete failure not reported: %v", st.Err)
-	}
-	if st.Running != 1 {
-		t.Fatalf("an instance that could not be deleted still runs: %d", st.Running)
-	}
-	f.failOn = ""
-	f.take()
-	st = tick(m, 10*time.Second)
-	if st.Err != nil {
-		t.Fatalf("retry: %v", st.Err)
-	}
-	if got := f.take(); !reflect.DeepEqual(got, []string{"delete a"}) {
-		t.Fatalf("retry calls %q", got)
-	}
-	if st.Running != 0 {
-		t.Fatalf("running after reap = %d", st.Running)
 	}
 }
 

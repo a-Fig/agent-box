@@ -57,7 +57,7 @@ job=$("$BOX" run --no-queue --reason "deploy-boxd.sh: build boxd at $commit to d
 [ -s "$STAGE/boxd" ] || { echo "== box pull brought back no boxd from $job" >&2; exit 1; }
 # The scripts and unit go as LF, whatever the checkout did to them.
 tr -d '\r' < provision/systemd/agent-box-boxd.service > "$STAGE/agent-box-boxd.service"
-tr -d '\r' < provision/install-boxd.sh > "$STAGE/install-boxd.sh"
+sh provision/package-boxd-install.sh | tr -d '\r' > "$STAGE/install-boxd.sh"
 (cd "$STAGE" && sha256sum boxd agent-box-boxd.service install-boxd.sh > SHA256SUMS)
 run=boxd-deploy-$(date +%Y%m%d-%H%M%S)-$$
 tar -cf "$STAGE/$run.tar" -C "$STAGE" boxd agent-box-boxd.service install-boxd.sh SHA256SUMS

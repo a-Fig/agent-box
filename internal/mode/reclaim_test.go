@@ -211,8 +211,8 @@ func TestStalledReclaimDoesntBlockTheTick(t *testing.T) {
 	if f.state["a"] != "Frozen" {
 		t.Fatalf("a is %s", f.state["a"])
 	}
-	// The reaper deleting the box cancels its reclaim.
-	expiry(f, "a", t0)
+	// A box deleted between ticks has its reclaim cancelled.
+	f.Delete(context.Background(), "a")
 	m.Tick(context.Background(), t0.Add(2*time.Second))
 	m.rc.wait()
 	if _, ok := f.state["a"]; ok {

@@ -548,7 +548,9 @@ fi
 
 # ---------------------------------------------------------------- VM capability
 step "Reaper (deletes expired boxes every minute, with or without the tray)"
-install -m 0755 "$HERE/reaper.sh" /usr/local/sbin/agent-box-reaper
+# The wrapper uses timestamp expiry until a capable boxd is installed.
+install -m 0755 "$HERE/reaper.sh" /usr/local/sbin/agent-box-reaper.new
+mv -f /usr/local/sbin/agent-box-reaper.new /usr/local/sbin/agent-box-reaper
 install -m 0644 "$HERE/systemd/agent-box-reaper.service" "$HERE/systemd/agent-box-reaper.timer" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now agent-box-reaper.timer >/dev/null 2>&1

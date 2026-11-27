@@ -15,6 +15,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 BIN=/opt/agent-box/bin
 UNIT=/etc/systemd/system/agent-box-boxd.service
+REAPER=/usr/local/sbin/agent-box-reaper
 SETTLE=${SETTLE:-8}
 SVC=agent-box-boxd.service
 
@@ -31,6 +32,16 @@ flock -n 9 || fail "another boxd install is running"
 [ -f boxd ] && [ -f agent-box-boxd.service ] && [ -f SHA256SUMS ] || fail "boxd, agent-box-boxd.service or SHA256SUMS missing in $HERE"
 sha256sum --quiet -c SHA256SUMS || fail "checksum mismatch: nothing was changed"
 say "checksums OK"
+
+# The wrapper works with either binary, so it can be installed before the
+# swap and left in place on rollback. Use a rename for the running timer.
+if declare -F write_packaged_reaper >/dev/null; then
+  write_packaged_reaper > "$REAPER.new"
+else
+  cat "$HERE/reaper.sh" > "$REAPER.new"
+fi
+chmod 0755 "$REAPER.new"
+mv -f "$REAPER.new" "$REAPER"
 
 # Healthy: systemd says active, the service hasn't restarted itself while we
 # waited, something answers HTTP on boxd's address (any status: the owner
