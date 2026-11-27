@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 
@@ -14,8 +13,9 @@ import (
 // back to another eligible host or queue destination before printing a final
 // refusal.
 type turnAwayInfo struct {
-	why string
-	msg string
+	why   string
+	msg   string
+	queue queueRun
 }
 
 type fleetRun struct {
@@ -78,9 +78,17 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		}
 	}()
 
+	var failedSetup JobResult
+	var setupErr error
 	for {
 		pick := pickFleetHost(candidates, pickReq)
 		if pick.Action == pickRefuse {
+			if pick.Invalid {
+				return JobResult{Code: 2}, fmt.Errorf("%s", pick.Reason)
+			}
+			if setupErr != nil {
+				return failedSetup, setupErr
+			}
 			msg := pick.Reason + "; nothing started"
 			if len(candidates) == 1 && pick.Why != "" && candidates[0].BoxdAvailable {
 				a.jobHostApp(candidates[0].Host).refuse(ctx, msg, info, func(context.Context) string { return pick.Why })
@@ -102,28 +110,36 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		hostApp := a.jobHostApp(selected)
 		if pick.Action == pickStart {
 			r, away, err := hostApp.runOnHost(ctx, o, sz, &selected, &prepared)
-			if away == nil {
+			if away == nil || ctx.Err() != nil {
 				return r, err
+			}
+			if err != nil {
+				failedSetup, setupErr = r, fmt.Errorf("%s: %w", selected.Name, err)
 			}
 			candidate.startRefusal = away
 			continue
 		}
 
-		q := fleetQueueRun(o, prepared, box, sz, &selected, *candidate, pick.Why)
-		r, msg, status := hostApp.enqueue(ctx, q)
+		var q queueRun
+		if candidate.startRefusal != nil {
+			q = candidate.startRefusal.queue
+		} else {
+			q = fleetQueueRun(o, prepared, box, sz, &selected, *candidate, pick.Why)
+		}
+		r, msg, failure := hostApp.enqueue(ctx, q)
 		if msg == "" {
 			return r, nil
 		}
 		// Only try another queue when boxd explicitly rejected the request.
 		// A lost reply can mean the job was accepted and may already be running.
-		switch status {
-		case http.StatusNotFound, http.StatusConflict, http.StatusInsufficientStorage:
+		switch failure {
+		case queueRejected:
 			candidate.BoxdAvailable = false
 			candidate.queueError = msg
-		case http.StatusBadRequest, http.StatusForbidden:
+		case queueInvalid:
 			return JobResult{Host: selected.Name, Code: 1}, fmt.Errorf("%s: %s", selected.Name, msg)
 		default:
-			return JobResult{Host: selected.Name, Code: 1}, fmt.Errorf("%s: queue submission could not be confirmed: %s", selected.Name, msg)
+			return JobResult{Host: selected.Name, Code: 1}, fmt.Errorf("%s: queue submission could not be confirmed: %s. Check box jobs for the job before retrying", selected.Name, msg)
 		}
 	}
 }

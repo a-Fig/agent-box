@@ -323,6 +323,10 @@ func (e *errGPUBusy) Error() string {
 	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
 }
 
+func invalidGPUBox(box string) error {
+	return fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
+}
+
 // errNoGPU is a GPU box asked for on a host without one (hasGPU). Callers
 // exit 75 as for a refusal, though waiting won't help.
 type errNoGPU struct{}
@@ -979,7 +983,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 			cctx, cancel := context.WithTimeout(ctx, refusalTimeout)
 			why := cause(cctx)
 			cancel()
-			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{why: why, msg: msg}, nil
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{why: why, msg: msg, queue: qr(paused)}, nil
 		}
 		return a.turnAway(ctx, qr(paused), msg, cause), nil, nil
 	}
@@ -992,7 +996,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 		if o.Box == "" {
 			o.New = true
 		} else if inst = find(insts, box); inst == nil || !mode.IsGPU(inst.Config) {
-			return JobResult{Box: box, Code: 2}, nil, fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
+			return JobResult{Box: box, Code: 2}, nil, invalidGPUBox(box)
 		}
 		except := ""
 		if !o.New {
@@ -1093,24 +1097,30 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 	}
 	hostName := a.jobHostName
 	r := JobResult{Job: pubID.ID, Box: box, Host: hostName, Code: 1, throwaway: o.New, fleetHost: targetHost}
+	setupFailed := func(err error) (JobResult, *turnAwayInfo, error) {
+		if targetHost != nil && ctx.Err() == nil {
+			return r, &turnAwayInfo{msg: err.Error()}, err
+		}
+		return r, nil, err
+	}
 	remote := workRoot + "/.box/" + job
 	if _, err := a.incusOK(setupCtx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
-		return r, nil, err
+		return setupFailed(err)
 	}
 	if err := a.pushMeta(setupCtx, box, remote, filepath.Dir(bundle), info); err != nil {
 		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
 	}
 	if !reused {
 		if err := a.setExpiry(setupCtx, box, jobTTL); err != nil {
-			return r, nil, fmt.Errorf("set job expiry: %w", err)
+			return setupFailed(fmt.Errorf("set job expiry: %w", err))
 		}
+	}
+	if err := setupCtx.Err(); err != nil {
+		return setupFailed(err)
 	}
 	// Say the job ID before starting it, so a dropped connection can't lose it.
 	fmt.Fprintf(a.Err, "box: job %s on %s%s\n", pubID.ID, box, onHost(hostName))
 	a.notify(jobNotice{Event: "starting_job", Box: box, Job: pubID.ID, Host: hostName})
-	if err := setupCtx.Err(); err != nil {
-		return r, nil, err
-	}
 	started = true
 	if _, err := a.incusOK(setupCtx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
 		// The tray stops GPU boxes in My PC, and another run may then

@@ -34,6 +34,9 @@ type fakeFleetHost struct {
 	queueCapable   bool
 	queueHTTPCode  int
 	loseQueueReply bool
+	queueError     string
+	preStartError  string
+	lateBox        *instance
 
 	mu          sync.Mutex
 	pushedFiles []string
@@ -43,6 +46,8 @@ type fakeFleetHost struct {
 	enqueued    []dash.QueueRequest
 	cancelled   []string
 	boxdHits    int
+	listCalls   int
+	queuedJobs  []dash.Job
 }
 
 func (h *fakeFleetHost) projectKeys() map[string]string {
@@ -125,6 +130,10 @@ func (ff *fakeFleet) Run(ctx context.Context, c Cmd) (Result, error) {
 
 	switch args[0] {
 	case "list":
+		h.listCalls++
+		if h.listCalls == 2 && h.lateBox != nil {
+			h.insts = append(h.insts, *h.lateBox)
+		}
 		b, _ := json.Marshal(h.insts)
 		return Result{Stdout: string(b)}, nil
 	case "project":
@@ -169,6 +178,9 @@ func (ff *fakeFleet) Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 		if args[1] == "set" {
 			k, v, _ := strings.Cut(args[3], "=")
+			if k == expiresKey && h.preStartError == "expiry" {
+				return Result{Code: 1, Stderr: "connection reset"}, nil
+			}
 			for i := range h.insts {
 				if h.insts[i].Name == name {
 					if h.insts[i].Config == nil {
@@ -180,6 +192,9 @@ func (ff *fakeFleet) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, nil
 		}
 	case "file":
+		if h.preStartError == "bundle" && strings.HasSuffix(args[len(args)-1], ".bundle") {
+			return Result{Code: 1, Stderr: "connection reset"}, nil
+		}
 		h.pushedFiles = append(h.pushedFiles, args[len(args)-1])
 		return Result{}, nil
 	case "exec":
@@ -222,8 +237,8 @@ func (ff *fakeFleet) httpDo(req *http.Request) (*http.Response, error) {
 	h.boxdHits++
 	switch {
 	case req.Method == http.MethodGet && req.URL.Path == "/api/state":
-		body := fmt.Sprintf(`{"queue":%t,"jobs":[]}`, h.queueCapable)
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		body, _ := json.Marshal(fleetBoxdSnapshot{Queue: h.queueCapable, Jobs: append([]dash.Job{}, h.queuedJobs...)})
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	case req.Method == http.MethodPost && req.URL.Path == "/api/queue":
 		mr, err := req.MultipartReader()
 		if err != nil {
@@ -245,26 +260,40 @@ func (ff *fakeFleet) httpDo(req *http.Request) (*http.Response, error) {
 			}
 		}
 		h.enqueued = append(h.enqueued, qr)
-		if h.loseQueueReply {
-			return nil, io.ErrUnexpectedEOF
-		}
 		if h.queueHTTPCode != 0 && h.queueHTTPCode != http.StatusCreated {
-			return &http.Response{StatusCode: h.queueHTTPCode, Body: io.NopCloser(strings.NewReader(`{"error":"queue full"}`))}, nil
+			message := h.queueError
+			if message == "" {
+				message = "queue full"
+			}
+			body, _ := json.Marshal(dash.ErrorBody{Error: message})
+			return &http.Response{StatusCode: h.queueHTTPCode, Body: io.NopCloser(bytes.NewReader(body))}, nil
 		}
 		job := qr.Box + "." + qr.Ref
 		if qr.New {
 			job = qr.Box + "-a1b2." + qr.Ref
 		}
+		if h.loseQueueReply {
+			box, id, _ := strings.Cut(job, ".")
+			h.queuedJobs = append(h.queuedJobs, dash.Job{ID: id, Box: box, State: dash.JobQueued, StartedAt: jobStart(job)})
+			return nil, io.ErrUnexpectedEOF
+		}
 		rep, _ := json.Marshal(dash.QueueReply{Job: job, Position: 1, Why: dash.RefusedFull})
 		return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(bytes.NewReader(rep))}, nil
 	case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/api/queue/"):
 		bare := strings.TrimPrefix(req.URL.Path, "/api/queue/")
+		for _, job := range h.queuedJobs {
+			if job.Box+"."+job.ID == bare {
+				body, _ := json.Marshal(job)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			}
+		}
 		box, _, _ := strings.Cut(bare, ".")
 		j, _ := json.Marshal(dash.Job{ID: bare, Box: box, State: dash.JobRunning, StartedAt: time.Date(2026, 11, 26, 12, 0, 1, 0, time.UTC)})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(j))}, nil
 	case req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/api/queue/") && strings.HasSuffix(req.URL.Path, "/cancel"):
 		bare := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/queue/"), "/cancel")
 		h.cancelled = append(h.cancelled, bare)
+		h.queuedJobs = slices.DeleteFunc(h.queuedJobs, func(j dash.Job) bool { return j.Box+"."+j.ID == bare })
 		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
 	default:
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
@@ -400,6 +429,12 @@ func TestFleetRunPicksBestHostIssuesQualifiedIDAndBareGuestID(t *testing.T) {
 	if err != nil || len(jobs) != 1 || jobs[0].Job != r.Job || jobs[0].Host != r.Host {
 		t.Fatalf("fleet jobs = %+v, %v, want %s on %s", jobs, err, r.Job, r.Host)
 	}
+	// An earlier filtered listing may have created a second, bare result.
+	a.recordEnd(id.Bare, jobEnd{Code: 1})
+	out.Reset()
+	if code := run(context.Background(), a, []string{"jobs", "--box", "widget"}, nil); code != 0 || !slices.Contains(strings.Fields(out.String()), r.Job) {
+		t.Fatalf("box jobs --box code=%d out=%q", code, out.String())
+	}
 }
 
 func TestFleetRunFallsBackOnPreStartRaceButNotOnCommandFailure(t *testing.T) {
@@ -528,6 +563,25 @@ func TestFleetRunQueueFallbackOnEnqueueFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "first: queue submission could not be confirmed") || r.Host != "first" || len(second.enqueued) != 0 {
 		t.Fatalf("lost queue reply = %+v, %v (second enqueues=%d)", r, err, len(second.enqueued))
 	}
+	// Queue state can still answer while the Incus hosts are unavailable.
+	first.unreachable, second.unreachable = true, true
+	jobs, err := a.listJobs(context.Background(), "")
+	if err != nil || len(jobs) != 1 || jobs[0].Host != "first" || jobs[0].State != stateQueued {
+		t.Fatalf("jobs after lost queue reply = %+v, %v", jobs, err)
+	}
+	pending := first.queuedJobs[0]
+	id := requireQualifiedJobID(t, hosts[0], pending.Box+"."+pending.ID)
+	if jobs[0].Job != id.ID {
+		t.Fatalf("recovered ID = %s, want %s", jobs[0].Job, id.ID)
+	}
+	var listing bytes.Buffer
+	a.Out = &listing
+	if code := run(context.Background(), a, []string{"jobs"}, nil); code != 0 || !strings.Contains(listing.String(), id.ID) || !strings.Contains(listing.String(), "queued") {
+		t.Fatalf("box jobs code=%d listing=%q", code, listing.String())
+	}
+	if code := run(context.Background(), a, []string{"cancel", id.ID}, nil); code != 0 || !slices.Equal(first.cancelled, []string{id.Bare}) || len(second.cancelled) != 0 {
+		t.Fatalf("cancel recovered job code=%d first=%v second=%v", code, first.cancelled, second.cancelled)
+	}
 }
 
 func TestFleetRunCLIPinningAndBoxGuard(t *testing.T) {
@@ -568,6 +622,15 @@ func TestFleetRunCLIPinningAndBoxGuard(t *testing.T) {
 	code = run(context.Background(), a, []string{"run", "--host", "beta", "--reason", "Pinned down host must refuse.", "--", "true"}, nil)
 	if code != exitPaused || len(alpha.startJobs) != 0 || !strings.Contains(out.String(), "beta: unreachable") {
 		t.Fatalf("pinned down code=%d alpha=%d out=%q", code, len(alpha.startJobs), out.String())
+	}
+
+	beta.unreachable = false
+	beta.keys = map[string]string{gpuKey: "allow"}
+	beta.insts = []instance{{Name: "namedbox", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}}
+	out.Reset()
+	code = run(context.Background(), a, []string{"run", "--host", "beta", "--box", "namedbox", "--gpu", "--reason", "A CPU box is invalid for a GPU request.", "--", "true"}, nil)
+	if code != 2 || !strings.Contains(out.String(), "isn't a GPU box") || len(beta.startJobs) != 1 {
+		t.Fatalf("pinned CPU box with --gpu: code=%d out=%q", code, out.String())
 	}
 
 	// Explicit --box without --host bypasses fleet probes and runs on default host with bare ID.
@@ -664,5 +727,91 @@ func TestMCPBoxRunFleetWatcherAndSchemaUnchanged(t *testing.T) {
 	json.Unmarshal(raw, &sc)
 	if sc.State != stateRefused || len(beta.cancelled) != 1 || strings.Contains(beta.cancelled[0], jobHostPrefix) {
 		t.Fatalf("queued cancel fallback = %+v, cancelled=%v (raw=%s)", sc, beta.cancelled, raw)
+	}
+}
+
+func TestFleetRunQueuesTheLiveSizeFallback(t *testing.T) {
+	host := fleetHost{Name: "first", Remote: "r1", Project: mode.Project, DashboardURL: "https://first.example.com"}
+	first := &fakeFleetHost{
+		remote: host.Remote, project: host.Project, mode: "full", queueCapable: true,
+		lateBox:      &instance{Name: "widget", Status: "Running", Config: map[string]string{mode.SizeKey: "small"}},
+		refuseLaunch: memoryRefusal,
+	}
+	ff := newFakeFleet(t, first)
+	ff.dashHosts[host.DashboardURL] = first
+	a, out, dir := fleetDispatchTestApp(t, ff, []fleetHost{host})
+	r, err := a.Run(context.Background(), RunOpts{
+		Dir: dir, Size: "medium", Queue: true, Cmd: []string{"true"}, Reason: "Queue the requested size after a smaller repo box appears.",
+	})
+	if err != nil || r.State != stateQueued || len(first.enqueued) != 1 || !strings.Contains(out.String(), "widget is small") {
+		t.Fatalf("run = %+v, %v, enqueued=%+v, out=%q", r, err, first.enqueued, out)
+	}
+	q := first.enqueued[0]
+	if !q.New || q.Box != "widget" || q.Size != "medium" {
+		t.Fatalf("queued stale target: %+v", q)
+	}
+}
+
+func TestFleetRunRetriesPreStartSetupFailures(t *testing.T) {
+	for _, failure := range []string{"bundle", "expiry"} {
+		t.Run(failure, func(t *testing.T) {
+			first := &fakeFleetHost{remote: "r1", project: "work", mode: "full", preStartError: failure}
+			second := &fakeFleetHost{remote: "r2", project: "work", mode: "full"}
+			ff := newFakeFleet(t, first, second)
+			hosts := []fleetHost{
+				{Name: "first", Remote: first.remote, Project: first.project},
+				{Name: "second", Remote: second.remote, Project: second.project},
+			}
+			a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+			var starts []jobNotice
+			a.Notify = func(n jobNotice) {
+				if n.Event == "starting_job" {
+					starts = append(starts, n)
+				}
+			}
+			r, err := a.Run(context.Background(), RunOpts{
+				Dir: dir, New: true, Cmd: []string{"true"}, Reason: "Retry on a healthy host when the first host fails during setup.",
+			})
+			if err != nil || r.Code != 0 || r.Host != "second" || len(first.startJobs) != 0 || len(second.startJobs) != 1 ||
+				len(starts) != 1 || starts[0].Host != "second" || ff.snapshots != 1 {
+				t.Fatalf("run = %+v, %v; starts=%+v, snapshots=%d; out=%q", r, err, starts, ff.snapshots, out)
+			}
+		})
+	}
+}
+
+func TestFleetRunDistinguishesQueueStorageFailureFromInvalidRequest(t *testing.T) {
+	keys := map[string]string{"limits.instances": "1"}
+	insts := []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}}
+	first := &fakeFleetHost{
+		remote: "r1", project: mode.Project, mode: "full", keys: keys, insts: insts, queueCapable: true,
+		queueHTTPCode: http.StatusBadRequest, queueError: "storing the snapshot: no space left on device",
+	}
+	second := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", keys: keys, insts: insts, queueCapable: true}
+	ff := newFakeFleet(t, first, second)
+	hosts := []fleetHost{
+		{Name: "first", Remote: first.remote, Project: first.project, DashboardURL: "https://first.example.com"},
+		{Name: "second", Remote: second.remote, Project: second.project, DashboardURL: "https://second.example.com"},
+	}
+	ff.dashHosts[hosts[0].DashboardURL], ff.dashHosts[hosts[1].DashboardURL] = first, second
+	a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+	opts := RunOpts{Dir: dir, Queue: true, Cmd: []string{"true"}, Reason: "Try another queue after a confirmed host storage failure."}
+	r, err := a.Run(context.Background(), opts)
+	if err != nil || r.State != stateQueued || r.Host != "second" || len(first.enqueued) != 1 || len(second.enqueued) != 1 {
+		t.Fatalf("storage rejection = %+v, %v; %s", r, err, out)
+	}
+
+	opts.Host = "first"
+	out.Reset()
+	r, err = a.Run(context.Background(), opts)
+	if err != nil || r.Code != exitPaused || !strings.Contains(out.String(), "storing the snapshot") {
+		t.Fatalf("single queue storage rejection = %+v, %v; %s", r, err, out)
+	}
+
+	opts.Host = ""
+	first.queueError = "invalid bundle request"
+	r, err = a.Run(context.Background(), opts)
+	if err == nil || r.Code != 1 || !strings.Contains(err.Error(), "invalid bundle request") || len(second.enqueued) != 1 {
+		t.Fatalf("invalid request = %+v, %v; second queue requests=%d", r, err, len(second.enqueued))
 	}
 }

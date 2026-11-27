@@ -99,22 +99,29 @@ type queueRun struct {
 	host   *fleetHost // non-nil for fleet dispatch (qualifies returned job ID)
 }
 
-// enqueue sends the run to boxd's queue. msg reports a failed submission.
-// status is the HTTP status when a response was read.
-func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string, status int) {
+type queueFailure uint8
+
+const (
+	queueUnconfirmed queueFailure = iota
+	queueRejected
+	queueInvalid
+)
+
+// enqueue sends the run to boxd. Only a confirmed host rejection can be retried.
+func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string, failure queueFailure) {
 	bundle, ref := q.bundle, q.ref
 	if bundle == "" {
 		ref = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
 		b, err := snapshot(ctx, a.R, q.rp.Top, ref)
 		if err != nil {
-			return r, "can't snapshot the worktree for the queue: " + err.Error(), 0
+			return r, "can't snapshot the worktree for the queue: " + err.Error(), queueInvalid
 		}
 		defer os.RemoveAll(filepath.Dir(b))
 		bundle = b
 	}
 	meta, err := json.Marshal(q.info)
 	if err != nil {
-		return r, err.Error(), 0
+		return r, err.Error(), queueInvalid
 	}
 	timeout := int(q.o.Timeout.Round(time.Second) / time.Second)
 	if q.o.Timeout > 0 && timeout == 0 {
@@ -127,7 +134,7 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string,
 	}
 	f, err := os.Open(bundle)
 	if err != nil {
-		return r, err.Error(), 0
+		return r, err.Error(), queueInvalid
 	}
 	defer f.Close()
 
@@ -157,18 +164,19 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string,
 	pr.Close()
 	switch {
 	case err != nil:
-		return r, "can't reach boxd to queue the run: " + firstLine(err.Error()), 0
+		return r, "can't reach boxd to queue the run: " + firstLine(err.Error()), queueUnconfirmed
 	case code != http.StatusCreated:
-		return r, "boxd didn't queue the run: " + boxdError(code, b), code
+		msg := boxdError(code, b)
+		return r, "boxd didn't queue the run: " + msg, classifyQueueRejection(code, msg)
 	}
 	var rep dash.QueueReply
 	if err := json.Unmarshal(b, &rep); err != nil || !validJob.MatchString(rep.Job) {
-		return r, "boxd's answer to the queue: " + string(b), code
+		return r, "boxd's answer to the queue: " + string(b), queueUnconfirmed
 	}
 	box, _, _ := strings.Cut(rep.Job, ".")
 	pubID, err := runJobID(q.host, rep.Job, box)
 	if err != nil {
-		return r, err.Error(), code
+		return r, err.Error(), queueUnconfirmed
 	}
 	hostName := a.jobHostName
 	// The launch above, if any, was refused: say which box the job will be
@@ -178,7 +186,25 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string,
 		on = "on a new box, " + box + ","
 	}
 	fmt.Fprintf(a.Err, "box: queued job %s%s, %s (%s); it starts %s when it can\n", pubID.ID, onHost(hostName), place(rep.Position), waitText(rep.Why), on)
-	return JobResult{Job: pubID.ID, Box: box, Host: hostName, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new, fleetHost: q.host}, "", code
+	return JobResult{Job: pubID.ID, Box: box, Host: hostName, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new, fleetHost: q.host}, "", 0
+}
+
+// Boxd uses 400 for both request validation and failures
+// storing a snapshot. The latter have a distinct error message.
+func classifyQueueRejection(status int, message string) queueFailure {
+	switch status {
+	case http.StatusNotFound, http.StatusConflict, http.StatusInsufficientStorage:
+		return queueRejected
+	case http.StatusBadRequest:
+		if strings.HasPrefix(message, "storing the snapshot: ") {
+			return queueRejected
+		}
+		return queueInvalid
+	case http.StatusForbidden:
+		return queueInvalid
+	default:
+		return queueUnconfirmed
+	}
 }
 
 // place says where a queued job is in line.

@@ -11,9 +11,9 @@ import (
 //
 // Following Borg and Kubernetes (docs/prior-art.md), picking runs in two steps:
 // filter hosts that can start the run now (reachability, mode, room for new
-// allocations, and GPU capability/occupancy), then rank eligible hosts by
-// repo-scoped affinity where concrete evidence exists, breaking ties by stable
-// configuration order. Configurable per-host priority (#171) is a separate
+// allocations, and GPU capability/occupancy), then prefer hosts without
+// checkout contention. Use repo affinity and stable configuration order to
+// break ties. Configurable per-host priority (#171) is a separate
 // issue and is not modeled here.
 //
 // Target filtering (--host pinning, single-host no-registry bypass, and keeping
@@ -106,6 +106,7 @@ type fleetPick struct {
 	Action   pickAction
 	Host     fleetHost
 	Affinity pickAffinity
+	Invalid  bool
 	Why      string // refusedFull, refusedGPUBusy, refusedMyPC, or ""
 	Reason   string
 }
@@ -254,6 +255,7 @@ type hostEval struct {
 	index        int
 	candidate    fleetCandidate
 	canStart     bool
+	invalid      bool
 	startAff     pickAffinity
 	startReason  string
 	canQueue     bool
@@ -316,6 +318,11 @@ func evaluateCandidate(index int, c fleetCandidate, req pickRequest, sz mode.Siz
 
 func evaluateGPUCandidate(ev hostEval, req pickRequest, sz mode.Size) hostEval {
 	c := ev.candidate
+	if req.Box != "" && (c.RepoBox == nil && c.HasGPU || c.RepoBox != nil && c.RepoBox.Size != mode.GPUSize) {
+		ev.invalid = true
+		ev.markUnavailable("", invalidGPUBox(req.Box).Error(), req, sz)
+		return ev
+	}
 	if !c.HasGPU {
 		ev.markUnavailable("", "no GPU on this host", req, sz)
 		return ev
@@ -454,6 +461,11 @@ func canQueueOnHost(c fleetCandidate, why string, sz mode.Size) (bool, string) {
 }
 
 func betterStart(a, b hostEval) bool {
+	// A running job holds the checkout lock on an otherwise reusable box.
+	aBusy, bBusy := a.startAff == affinityRepoBusy, b.startAff == affinityRepoBusy
+	if aBusy != bBusy {
+		return !aBusy
+	}
 	if a.startAff != b.startAff {
 		return a.startAff > b.startAff
 	}
@@ -498,9 +510,10 @@ func buildRefusal(evals []hostEval) fleetPick {
 	if len(evals) == 1 {
 		ev := evals[0]
 		return fleetPick{
-			Action: pickRefuse,
-			Why:    ev.refuseWhy,
-			Reason: fmt.Sprintf("%s: %s", hostLabel(ev.candidate.Host), ev.refuseReason),
+			Action:  pickRefuse,
+			Invalid: ev.invalid,
+			Why:     ev.refuseWhy,
+			Reason:  fmt.Sprintf("%s: %s", hostLabel(ev.candidate.Host), ev.refuseReason),
 		}
 	}
 	parts := make([]string, len(evals))
