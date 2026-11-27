@@ -29,6 +29,8 @@ type Incus interface {
 	// FileRange reads a bounded byte range without starting the instance.
 	// It returns the full file size, including when offset is past EOF.
 	FileRange(ctx context.Context, name, path string, offset, limit int64) ([]byte, int64, error)
+	// InstanceBusy reports whether Incus has a pending operation for the instance.
+	InstanceBusy(ctx context.Context, name string) (bool, error)
 	// CLI runs `incus <args...>` in the project, with stdin (often ""), for
 	// what starting a queued job takes: launch, file push, config set, exec.
 	CLI(ctx context.Context, stdin string, args ...string) ([]byte, error)
@@ -122,6 +124,35 @@ func (s *Socket) Instances(ctx context.Context) ([]Instance, error) {
 	var ins []Instance
 	err := s.get(ctx, "/1.0/instances?recursion=2&project="+url.QueryEscape(s.Proj), &ins)
 	return ins, err
+}
+
+func (s *Socket) InstanceBusy(ctx context.Context, name string) (bool, error) {
+	var ops map[string][]struct {
+		Resources map[string][]string `json:"resources"`
+	}
+	if err := s.get(ctx, "/1.0/operations?recursion=1&project="+url.QueryEscape(s.Proj), &ops); err != nil {
+		return false, err
+	}
+	if ops == nil {
+		return false, errors.New("Incus did not return an operation list")
+	}
+	for status, group := range ops {
+		if status == "success" || status == "failure" || status == "cancelled" {
+			continue
+		}
+		for _, op := range group {
+			for _, resource := range op.Resources["instances"] {
+				u, err := url.Parse(resource)
+				if err != nil {
+					return false, err
+				}
+				if u.Path == "/1.0/instances/"+name {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 func (s *Socket) Project(ctx context.Context) (Project, error) {

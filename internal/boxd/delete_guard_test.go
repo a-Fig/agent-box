@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 func deleteBody(created time.Time, confirmed bool) string {
@@ -89,6 +90,25 @@ func TestDeleteGuardEmptyActiveRecentExpiredStale(t *testing.T) {
 		t.Fatalf("stale UI deleted the box: %v", last)
 	}
 	_ = box
+}
+
+func TestDashboardDeleteDefersToIdleStop(t *testing.T) {
+	for _, phase := range []string{"selected", "reserved"} {
+		t.Run(phase, func(t *testing.T) {
+			r := newQueueRig(t, nil)
+			in := idleFinished(t, r, "kept", t0.Add(-time.Minute), false)
+			r.poll()
+			if phase == "selected" {
+				r.w.idleStopping = in.Name
+			} else {
+				r.f.set(func() { r.f.ins[0].Config[jobrun.ThrowawayStopKey] = "stop token" })
+			}
+			code, body := r.post("/api/boxes/kept/delete", deleteBody(in.CreatedAt, true))
+			if code != 409 || !strings.Contains(string(body), dash.CodeStopping) || len(r.f.cli) != 0 {
+				t.Fatalf("dashboard delete during %s: HTTP %d %s, CLI %v", phase, code, body, r.f.cli)
+			}
+		})
+	}
 }
 
 // When the probe cannot establish the box's state — here the box is

@@ -56,8 +56,12 @@ func TestLoadConfigDefaults(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "boxd.json")
 	os.WriteFile(p, []byte(`{"owners":["a@b.c"]}`), 0o644)
 	c, err := LoadConfig(p)
-	if err != nil || c.Listen != DefaultListen || len(c.Owners) != 1 || c.HistoryDir == "" {
+	if err != nil || c.Listen != DefaultListen || len(c.Owners) != 1 || c.HistoryDir == "" || c.CoolIdleThrowaways {
 		t.Fatalf("%+v %v", c, err)
+	}
+	os.WriteFile(p, []byte(`{"coolIdleThrowaways":true}`), 0o644)
+	if c, err := LoadConfig(p); err != nil || !c.CoolIdleThrowaways || c.ReuseThrowaways {
+		t.Fatalf("cooling opt-in without pooling = %+v, %v", c, err)
 	}
 	os.WriteFile(p, []byte(`{`), 0o644)
 	if _, err := LoadConfig(p); err == nil {

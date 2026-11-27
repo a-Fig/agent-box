@@ -479,3 +479,21 @@ func TestQueue(t *testing.T) {
 		t.Errorf("front for a job that has started: %d %q", status, e.Code)
 	}
 }
+
+func TestUpdatesCheck(t *testing.T) {
+	s, ts := start(t, "busy")
+	if status, e, _ := call(t, ts, "POST", "/api/updates/check", `{}`, false); status != 403 || e.Code != dash.CodeForbidden {
+		t.Fatalf("without header: %d %q", status, e.Code)
+	}
+	status, _, body := call(t, ts, "POST", "/api/updates/check", `{}`, true)
+	var u dash.UpdateInfo
+	if status != 200 || json.Unmarshal(body, &u) != nil || u.Latest != "v0.3.1" || !u.CheckedAt.Equal(t0) {
+		t.Fatalf("updates check: %d %s", status, body)
+	}
+	s.mu.Lock()
+	s.fail = true
+	s.mu.Unlock()
+	if status, e, _ := call(t, ts, "POST", "/api/updates/check", `{}`, true); status != 502 || e.Code != dash.CodeUpdateCheck {
+		t.Fatalf("fail mode: %d %q", status, e.Code)
+	}
+}
