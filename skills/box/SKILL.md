@@ -8,7 +8,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
 **Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, and parallel builds.
 
 1. `box_status` with `dir` reports room per host.
-2. `box_run` takes `dir`, `command` and `reason` (the owner reads it). It syncs uncommitted and untracked files, excluding ignored files. With a host registry, it routes the run and returns the host and a qualified job ID. Set `timeout` if it might hang (exit 124). With `pipefail`, `| head` can exit 141.
+2. `box_run` takes `dir`, `command`, and `reason` (owner-visible). Syncs uncommitted and untracked files, excluding ignored files. Fleet results include host and qualified job ID. `timeout` exits 124.
 3. A run ending within 30 s returns its result; else `running`:
    - `push: true`: **don't wait or poll.** Expect "box: job …" (Claude Code: mid-turn). Notices retry on Box MCP restart in the same T3 profile. Details in `box_job`.
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
