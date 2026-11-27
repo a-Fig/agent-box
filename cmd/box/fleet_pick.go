@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -93,8 +92,8 @@ type fleetCandidate struct {
 	GPUHolders       []string // names of GPU boxes currently holding the GPU (running, frozen, or starting)
 	RepoBox          *RepoBox // this repo's (or explicit --box's) box on this host, if present
 	RepoBoxThrowaway bool     // true when RepoBox is a throwaway (not reusable)
-	WarmThrowaway    bool     // positive probe evidence of a claimable idle throwaway for this repo and size
-	BoxdAvailable    bool     // positively established boxd capability on this host
+	WarmThrowaway    bool     // positive probe evidence of an idle claimable throwaway + enabled pool for this repo and size
+	BoxdAvailable    bool     // positively established boxd queue capability on this host
 	Queued           *int     // optional boxd queue depth when BoxdAvailable is true; nil if depth unknown
 }
 
@@ -117,7 +116,11 @@ type fleetPick struct {
 //   - An explicit --box was given without --host (keeps the named box on
 //     defaultHost so it cannot silently select a same-name box on another host).
 //
-// A non-empty pinnedHost always selects only that host and errors if unknown.
+// Compatible aliases sharing the same (Remote, Project) tuple collapse to one
+// destination in registry order with the tuple's consistent DashboardURL. An
+// explicit --host pin selects that alias with the same tuple-resolved
+// DashboardURL. Conflicting tuples are rejected before launch, including when
+// pinned.
 func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHost, explicitBox string) (targets []fleetHost, bypassFleet bool, err error) {
 	if pinnedHost != "" && strings.TrimSpace(pinnedHost) == "" {
 		return nil, false, fmt.Errorf("host name cannot be empty")
@@ -140,16 +143,52 @@ func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHo
 		if explicitBox != "" {
 			return []fleetHost{defaultHost}, true, nil
 		}
-		return slices.Clone(configured), false, nil
+		seen := make(map[[2]string]bool, len(configured))
+		out := make([]fleetHost, 0, len(configured))
+		for _, host := range configured {
+			resolved, err := resolveConfiguredTuple(host, configured)
+			if err != nil {
+				return nil, false, err
+			}
+			key := [2]string{host.Remote, host.Project}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, fleetHost{
+				Name:         host.Name,
+				Remote:       host.Remote,
+				Project:      host.Project,
+				DashboardURL: resolved.DashboardURL,
+			})
+		}
+		return out, false, nil
 	}
 	names := make([]string, len(configured))
 	for i, host := range configured {
 		names[i] = host.Name
 		if host.Name == pin {
-			return []fleetHost{host}, false, nil
+			resolved, err := resolveConfiguredTuple(host, configured)
+			if err != nil {
+				return nil, false, err
+			}
+			return []fleetHost{{
+				Name:         host.Name,
+				Remote:       host.Remote,
+				Project:      host.Project,
+				DashboardURL: resolved.DashboardURL,
+			}}, false, nil
 		}
 	}
 	return nil, false, fmt.Errorf("host %q is not configured (available: %s)", pin, strings.Join(names, ", "))
+}
+
+func resolveConfiguredTuple(host fleetHost, configured []fleetHost) (fleetHost, error) {
+	tag, err := jobHostTag(host)
+	if err != nil {
+		return fleetHost{}, err
+	}
+	return resolveJobHost(tag, fleetHost{}, configured)
 }
 
 // pickFleetHost selects a target host from candidates (already filtered by
@@ -527,7 +566,7 @@ func repoBoxAffinity(rb *RepoBox) pickAffinity {
 }
 
 func hasRepoWarmThrowaway(c fleetCandidate, req pickRequest) bool {
-	return req.Repo != "" && c.WarmThrowaway && c.BoxdAvailable && c.Host.Project == mode.Project
+	return req.Repo != "" && c.WarmThrowaway && c.Host.Project == mode.Project
 }
 
 // repoHostAffinity returns affinityWarmHost only when there is concrete

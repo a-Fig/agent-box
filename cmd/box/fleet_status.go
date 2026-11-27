@@ -104,30 +104,36 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 	return current
 }
 
-func (a *App) fleetQueueLength(ctx context.Context, dashboardURL string) *int {
+func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool) {
 	var err error
 	if dashboardURL == "" {
 		dashboardURL, err = a.DashURL(ctx)
 		if err != nil {
-			return nil
+			return nil, false
 		}
 	}
 	code, body, err := a.boxdRequest(ctx, http.MethodGet, strings.TrimRight(dashboardURL, "/")+"/api/state", "", nil)
 	var state struct {
-		Jobs []struct {
+		Queue bool `json:"queue"`
+		Jobs  []struct {
 			State string `json:"state"`
 		} `json:"jobs"`
 	}
 	if err != nil || code != http.StatusOK || json.Unmarshal(body, &state) != nil || state.Jobs == nil {
-		return nil
+		return nil, false
 	}
-	queued := 0
+	n := 0
 	for _, job := range state.Jobs {
 		if job.State == dash.JobQueued {
-			queued++
+			n++
 		}
 	}
-	return &queued
+	return &n, state.Queue
+}
+
+func (a *App) fleetQueueLength(ctx context.Context, dashboardURL string) *int {
+	queued, _ := a.fleetBoxdState(ctx, dashboardURL)
+	return queued
 }
 
 func writeFleet(w io.Writer, hosts []fleetHostStatus) {

@@ -55,27 +55,61 @@ type RepoBox struct {
 	Running []JobInfo `json:"running"`
 }
 
+// hostStatusProbe holds the typed facts gathered from one Incus host so Status
+// and fleet target probing share a single inspection path without parsing
+// display strings.
+type hostStatusProbe struct {
+	report           StatusReport
+	insts            []instance
+	keptThrowaways   []instance // already verified idle via keptThrowawayConfig + hasEndedJob
+	hasGPU           bool
+	gpuHolders       []string // names of GPU boxes currently holding the GPU
+	repoBox          *instance
+	repoBoxThrowaway bool
+}
+
 // Status reports the PC's state and, when dir is in a git repo, the repo's
 // box and its running jobs. An unreachable PC is included in the report.
 func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
-	s = StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1}
-	defer func() { s.Update = behind(a.StateDir, version.Tag) }()
+	var repoName string
 	if dir != "" {
 		if rp, err := openRepo(ctx, a.R, dir); err == nil {
-			s.Repo = rp.Name
+			repoName = rp.Name
 		}
 	}
+	p := a.probeHostStatus(ctx, repoName)
+	s = p.report
+	s.Update = behind(a.StateDir, version.Tag)
+	if !s.Reachable {
+		return s
+	}
+	if p.hasGPU {
+		s.GPU = a.gpuStatus(ctx, s, p.insts)
+	} else {
+		s.GPU = gpuNone
+	}
+	s.Advice, s.Available = advice(s, p.repoBox)
+	return s
+}
+
+func (a *App) probeHostStatus(ctx context.Context, repoName string) hostStatusProbe {
+	s := StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1, Repo: repoName}
 	insts, err := a.list(ctx)
 	if err != nil {
 		s.Error = firstLine(err.Error())
 		s.Advice = fmt.Sprintf("unavailable: can't reach %s (%s)", a.Remote, s.Error)
-		return s
+		return hostStatusProbe{report: s}
 	}
 	s.Reachable = true
 	s.Boxes = len(insts)
 	s.Mode = a.mode(ctx)
-	kept := map[string]bool{}
-	for _, in := range a.spareBoxes(ctx, insts) { // kept throwaways and idle repo boxes
+	keptThrowaways := a.keptThrowaways(ctx, insts)
+	idleRepos := a.idleRepoBoxes(ctx, insts)
+	kept := make(map[string]bool, len(keptThrowaways)+len(idleRepos))
+	for _, in := range keptThrowaways {
+		kept[in.Name] = true
+	}
+	for _, in := range idleRepos {
 		kept[in.Name] = true
 	}
 	evictable := func(in instance) bool { return reclaimable(in, a.Now()) || kept[in.Name] } // the next launch deletes it first
@@ -94,17 +128,20 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 		now = mode.Shared
 	}
 	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
-	if a.hasGPU(ctx) {
-		s.GPU = a.gpuStatus(ctx, s, insts)
+	hasGPU := a.hasGPU(ctx)
+	var gpuHolders []string
+	if hasGPU {
+		gpuHolders = a.gpuHolders(insts)
 	} else {
-		s.GPU = gpuNone
 		s.Sizes = slices.DeleteFunc(s.Sizes, func(sz SizeRoom) bool { return sz.GPU })
 	}
 	var repoBox *instance
-	if s.Repo != "" {
-		repoBox = find(insts, s.Repo)
+	repoBoxThrowaway := false
+	if repoName != "" {
+		repoBox = find(insts, repoName)
 	}
 	if repoBox != nil {
+		repoBoxThrowaway = repoBox.Config[throwawayKey] == "true"
 		s.RepoBox = &RepoBox{Name: repoBox.Name, Size: mode.SizeOf(repoBox.Config).Name, Status: repoBox.Status, Expires: repoBox.Config[expiresKey], Running: []JobInfo{}}
 		if repoBox.Status == "Running" {
 			jobs, err := a.boxJobs(ctx, repoBox.Name)
@@ -118,8 +155,27 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 			}
 		}
 	}
-	s.Advice, s.Available = advice(s, repoBox)
-	return s
+	return hostStatusProbe{
+		report:           s,
+		insts:            insts,
+		keptThrowaways:   keptThrowaways,
+		hasGPU:           hasGPU,
+		gpuHolders:       gpuHolders,
+		repoBox:          repoBox,
+		repoBoxThrowaway: repoBoxThrowaway,
+	}
+}
+
+// gpuHolders returns the names of GPU instances currently holding the host's
+// GPU (non-stopped GPU boxes or stopped ones still within startup grace).
+func (a *App) gpuHolders(insts []instance) []string {
+	var holders []string
+	for _, in := range insts {
+		if mode.IsGPU(in.Config) && (in.Status != "Stopped" || a.beingCreated(in)) {
+			holders = append(holders, in.Name)
+		}
+	}
+	return holders
 }
 
 // gpuNone is the GPU status of a host that can't run a GPU box (hasGPU).

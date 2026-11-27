@@ -728,7 +728,7 @@ func (w *Watcher) State() dash.State {
 
 func (w *Watcher) state() dash.State {
 	w.init()
-	s := dash.State{Machines: []dash.Machine{w.machine}, Boxes: []dash.Box{}, Jobs: []dash.Job{}, Now: w.Now().UTC()}
+	s := dash.State{Machines: []dash.Machine{w.machine}, Boxes: []dash.Box{}, Jobs: []dash.Job{}, Queue: w.Queue != nil, Now: w.Now().UTC()}
 	for _, b := range w.boxes {
 		s.Boxes = append(s.Boxes, b)
 	}
