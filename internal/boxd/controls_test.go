@@ -91,11 +91,14 @@ func TestControls(t *testing.T) {
 		t.Fatalf("cancel again: %d %s", code, b)
 	}
 
-	// Delete: only the box the page saw.
+	// Delete: only the box the page saw, and a running job needs the warning first (#247).
 	if code, _ := r.post("/api/boxes/w/delete", `{"createdAt":"2026-11-24T10:00:00Z"}`); code != 409 {
 		t.Fatalf("delete another: %d", code)
 	}
-	if code, b := r.post("/api/boxes/w/delete", `{"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 204 {
+	if code, b := r.post("/api/boxes/w/delete", `{"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 409 || !strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("delete unconfirmed with a running job: %d %s", code, b)
+	}
+	if code, b := r.post("/api/boxes/w/delete", `{"createdAt":"`+created.Format(time.RFC3339)+`","confirmed":true}`); code != 204 {
 		t.Fatalf("delete: %d %s", code, b)
 	}
 	if last := r.f.cli[len(r.f.cli)-1]; last != "delete w --force" {
@@ -151,24 +154,137 @@ func TestModeRequestRetriesETagRace(t *testing.T) {
 func TestExtendRetryReadsTheNewExpiry(t *testing.T) {
 	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full"})
 	created := t0.Add(-time.Hour)
-	lost := false
 	r.f.set(func() {
 		r.f.ins = []Instance{inst("w", "Running", "small", created)} // expires 2026-11-25T00:00:00Z
-		r.f.cliErr = func(args []string) error {
-			if args[0] == "config" && !lost {
-				lost = true
-				r.f.ins[0].Config["user.expires"] = "2026-11-26T00:00:00Z" // the job's write got in first
-				return errors.New("incus config: exit status 1: Error: ETag doesn't match: 1 vs 2")
-			}
-			return nil
+		r.f.between = func(cfg map[string]string) {
+			cfg["user.expires"] = "2026-11-26T00:00:00Z"
 		}
 	})
 	r.poll()
 	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 200 {
 		t.Fatalf("extend: %d %s", code, b)
 	}
-	if last := r.f.cli[len(r.f.cli)-1]; last != "config set w user.expires=2026-11-26T04:00:00Z user.box.hold-until=2026-11-26T04:00:00Z" {
-		t.Errorf("written after the lost race: %s", last)
+	in, _ := r.f.instance("w")
+	if in.Config["user.expires"] != "2026-11-26T04:00:00Z" || in.Config["user.box.hold-until"] != in.Config["user.expires"] {
+		t.Errorf("config after the lost race: %v", in.Config)
+	}
+}
+
+func TestExtendRetriesAfterConcurrentExtend(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() {
+		r.f.ins = []Instance{inst("w", "Running", "small", created)}
+		r.f.between = func(cfg map[string]string) {
+			cfg["user.expires"] = "2026-11-25T01:00:00Z"
+			cfg["user.box.hold-until"] = cfg["user.expires"]
+		}
+	})
+	r.poll()
+	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 200 {
+		t.Fatalf("extend: %d %s", code, b)
+	}
+	in, _ := r.f.instance("w")
+	if in.Config["user.expires"] != "2026-11-25T05:00:00Z" || in.Config["user.box.hold-until"] != in.Config["user.expires"] {
+		t.Fatalf("config after both extends: %v", in.Config)
+	}
+}
+
+func TestExtendReplacesLegacySentinelHold(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() {
+		in := inst("w", "Running", "small", created)
+		in.Config["user.expires"] = "9999-01-01T01:00:00Z"
+		in.Config["user.box.hold-until"] = in.Config["user.expires"]
+		r.f.ins = []Instance{in}
+	})
+	r.poll()
+	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 200 {
+		t.Fatalf("extend: %d %s", code, b)
+	}
+	in, _ := r.f.instance("w")
+	if in.Config["user.expires"] != "9999-01-01T01:00:00Z" ||
+		in.Config["user.box.hold-until"] != r.c.now().Add(4*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("config after extend: %v", in.Config)
+	}
+}
+
+func TestExtendRejectsReplacementOnRetry(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() {
+		r.f.ins = []Instance{inst("w", "Running", "small", created)}
+		r.f.between = func(cfg map[string]string) {
+			r.f.ins[0].CreatedAt = t0
+		}
+	})
+	r.poll()
+	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 409 {
+		t.Fatalf("extend replacement: %d %s", code, b)
+	}
+	in, _ := r.f.instance("w")
+	if in.Config["user.box.hold-until"] != "" {
+		t.Fatalf("replacement received a hold: %v", in.Config)
+	}
+}
+
+type extendBeforeReturn struct {
+	Incus
+	afterWrite func()
+}
+
+func TestExtendReplacesStaleCachedJobDeadline(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() {
+		in := inst("w", "Running", "small", created)
+		in.Config["user.expires"] = t0.Add(24 * time.Hour).Format(time.RFC3339)
+		r.f.ins = []Instance{in}
+	})
+	r.poll()
+	r.f.set(func() {
+		r.f.ins[0].Config["user.expires"] = t0.Add(2 * time.Hour).Format(time.RFC3339)
+	})
+	got, err := r.w.ExtendBox(context.Background(), "w", created, 4, "owner")
+	want := t0.Add(6 * time.Hour)
+	if err != nil || got.ExpiresAt == nil || !got.ExpiresAt.Equal(want) {
+		t.Fatalf("extend after cleanup: %+v, %v", got, err)
+	}
+	cached, err := r.w.boxFor("w", created)
+	if err != nil || cached.ExpiresAt == nil || !cached.ExpiresAt.Equal(want) {
+		t.Fatalf("cached box: %+v, %v", cached, err)
+	}
+}
+
+func (f *extendBeforeReturn) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
+	wrote, err := f.Incus.SetConfigIf(ctx, name, decide)
+	if wrote && f.afterWrite != nil {
+		run := f.afterWrite
+		f.afterWrite = nil
+		run()
+	}
+	return wrote, err
+}
+
+func TestExtendOlderCompletionKeepsNewerCachedDeadline(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() { r.f.ins = []Instance{inst("w", "Running", "small", created)} })
+	r.poll()
+	ctx := context.Background()
+	r.w.Incus = &extendBeforeReturn{Incus: r.f, afterWrite: func() {
+		if _, err := r.w.ExtendBox(ctx, "w", created, 4, "second"); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	got, err := r.w.ExtendBox(ctx, "w", created, 1, "first")
+	if err != nil || got.ExpiresAt == nil || got.ExpiresAt.Format(time.RFC3339) != "2026-11-25T05:00:00Z" {
+		t.Fatalf("older completion: %+v, %v", got, err)
+	}
+	cached, err := r.w.boxFor("w", created)
+	if err != nil || cached.ExpiresAt == nil || !cached.ExpiresAt.Equal(*got.ExpiresAt) {
+		t.Fatalf("cached box: %+v, %v", cached, err)
 	}
 }
 

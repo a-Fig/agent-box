@@ -41,6 +41,7 @@ func newest(a, b dash.Job) int {
 }
 
 func newServer(sc fixture.Scenario, now func() time.Time) *server {
+	sc.State.Updates = &dash.UpdateInfo{}
 	done := slices.Clone(sc.Jobs.Jobs)
 	slices.SortStableFunc(done, newest)
 	s := &server{
@@ -409,8 +410,15 @@ func (s *server) handleDelete(r *http.Request, body []byte) (int, any, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.thisBox(name, b.CreatedAt); err != nil {
+	i, err := s.thisBox(name, b.CreatedAt)
+	if err != nil {
 		return 0, nil, err
+	}
+	if !b.Confirmed {
+		jobs := append(slices.Clone(s.sc.State.Jobs), s.done...)
+		if warn := dash.DeleteRisk(jobs, s.sc.State.Boxes[i], s.now().UTC()); warn.Any() {
+			return http.StatusConflict, dash.DeleteConflictBody{Error: warn.Message(name), Code: dash.CodeNeedsConfirm, Warning: warn}, nil
+		}
 	}
 	s.removeBox(name)
 	return http.StatusNoContent, nil, nil
@@ -491,6 +499,18 @@ func (s *server) handleRefusal(r *http.Request, body []byte) (int, any, error) {
 		}
 	}
 	return http.StatusNoContent, nil, nil
+}
+
+func (s *server) handleUpdatesCheck(_ *http.Request, _ []byte) (int, any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail {
+		return 0, nil, fail(http.StatusBadGateway, dash.CodeUpdateCheck, dash.UpdateCheckFailed)
+	}
+	u := dash.UpdateInfo{Latest: "v0.3.1", CheckedAt: s.now().UTC()}
+	s.sc.State.Updates = &u
+	s.publish(dash.EventUpdates, u)
+	return http.StatusOK, u, nil
 }
 
 // end finishes a running job with an exit code, moving it to the finished jobs.

@@ -127,7 +127,12 @@ func TestControls(t *testing.T) {
 func TestDeleteLosesItsJobs(t *testing.T) {
 	s, ts := start(t, "busy")
 	made := s.sc.State.Boxes[s.findBox("lantern")].CreatedAt.Format(time.RFC3339)
-	if status, _, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`"}`, true); status != 204 {
+	// Unconfirmed, the running job refuses; confirmed, it deletes as before (#247).
+	status, e, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`"}`, true)
+	if status != 409 || e.Code != dash.CodeNeedsConfirm {
+		t.Fatalf("unconfirmed delete: %d %q", status, e.Code)
+	}
+	if status, _, _ := call(t, ts, "POST", "/api/boxes/lantern/delete", `{"createdAt":"`+made+`","confirmed":true}`, true); status != 204 {
 		t.Fatalf("delete: %d", status)
 	}
 	if s.findBox("lantern") >= 0 {
@@ -472,5 +477,23 @@ func TestQueue(t *testing.T) {
 	}
 	if status, e, _ := call(t, ts, "POST", "/api/queue/"+front.Box+"."+front.ID+"/front", `{}`, true); status != 409 || e.Code != dash.CodeNotRunning {
 		t.Errorf("front for a job that has started: %d %q", status, e.Code)
+	}
+}
+
+func TestUpdatesCheck(t *testing.T) {
+	s, ts := start(t, "busy")
+	if status, e, _ := call(t, ts, "POST", "/api/updates/check", `{}`, false); status != 403 || e.Code != dash.CodeForbidden {
+		t.Fatalf("without header: %d %q", status, e.Code)
+	}
+	status, _, body := call(t, ts, "POST", "/api/updates/check", `{}`, true)
+	var u dash.UpdateInfo
+	if status != 200 || json.Unmarshal(body, &u) != nil || u.Latest != "v0.3.1" || !u.CheckedAt.Equal(t0) {
+		t.Fatalf("updates check: %d %s", status, body)
+	}
+	s.mu.Lock()
+	s.fail = true
+	s.mu.Unlock()
+	if status, e, _ := call(t, ts, "POST", "/api/updates/check", `{}`, true); status != 502 || e.Code != dash.CodeUpdateCheck {
+		t.Fatalf("fail mode: %d %q", status, e.Code)
 	}
 }

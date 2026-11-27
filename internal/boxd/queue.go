@@ -342,6 +342,18 @@ func (q *Queue) isStarting(it *queued) bool {
 	return it.starting
 }
 
+// StartingFor returns the queued jobs for box that a start has begun for:
+// the ones deleting the box would interrupt (#247).
+func (q *Queue) StartingFor(box string) []dash.Job {
+	var out []dash.Job
+	for _, it := range q.list() {
+		if it.Box == box && (q.startMark(it) != nil || q.isStarting(it)) {
+			out = append(out, viewOf(it))
+		}
+	}
+	return out
+}
+
 // viewOf is the job as the page sees it while it waits.
 func viewOf(it *queued) dash.Job {
 	at := it.QueuedAt

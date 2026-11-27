@@ -19,26 +19,25 @@ import (
 const dropCachesScript = `sync && echo 1 > /proc/sys/vm/drop_caches && echo 1 > /proc/sys/vm/compact_memory`
 
 // cacheDrop drops the page cache exactly once after a Release memory,
-// when the first tick sees the distro running again. It is armed only by
-// a release whose terminate ran; a distro that comes up on its own (a
-// boot, a box starting it) drops nothing. The drop runs in the
-// background so a slow `sync` cannot hold up the mode loop, and a
-// failure is logged, not retried: the cache costs memory until reclaim,
-// not correctness.
+// when a tick sees the distro running again. A successful termination
+// arms it. The drop runs in the background so a slow `sync` cannot hold
+// up the mode loop. A failed drop is logged once and left to WSL reclaim.
 //
 // The drop calls wsl.exe, so it coordinates with Release memory like the
 // background reclaim work does: observe starts nothing while a release
 // runs (busy), and stop cancels an in-flight drop and waits for it, so
 // its call cannot start the distro again during the next termination.
 type cacheDrop struct {
-	run  func(context.Context) error
-	logf func(format string, args ...any)
-	busy func() bool // a Release memory is in progress; nil is never
+	hostUp func(context.Context) bool
+	run    func(context.Context) error
+	logf   func(format string, args ...any)
+	busy   func() bool // a Release memory is in progress; nil is never
 
 	mu     sync.Mutex
 	armed  bool
+	paused bool
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	done   chan struct{}
 }
 
 // arm records that a Release memory terminated the distro: the next
@@ -49,46 +48,64 @@ func (d *cacheDrop) arm() {
 	d.mu.Unlock()
 }
 
-// observe is the tray's per-tick report hook: on the first tick with the
-// distro up after arm (and no release running), it spends the arm and
-// starts the one drop.
+// observe schedules the drop from a tick that reports an up distro.
 func (d *cacheDrop) observe(st mode.Status) {
 	d.mu.Lock()
-	if !d.armed || st.Down || (d.busy != nil && d.busy()) {
+	if !d.armed || d.paused || d.done != nil || st.Down || (d.busy != nil && d.busy()) {
 		d.mu.Unlock()
 		return
 	}
-	d.armed = false
 	ctx, cancel := context.WithCancel(context.Background())
-	d.cancel = cancel
-	d.wg.Add(1)
+	done := make(chan struct{})
+	d.cancel, d.done = cancel, done
 	d.mu.Unlock()
 	go func() {
-		defer d.wg.Done()
 		defer func() {
+			cancel()
 			d.mu.Lock()
-			d.cancel = nil
+			d.cancel, d.done = nil, nil
+			close(done)
 			d.mu.Unlock()
 		}()
+		// The report can come from a tick that finished before termination.
+		// Check again without starting WSL or spending the arm on a down distro.
+		if !d.hostUp(ctx) {
+			return
+		}
+		d.mu.Lock()
+		if ctx.Err() != nil || d.paused || (d.busy != nil && d.busy()) {
+			d.mu.Unlock()
+			return
+		}
+		d.armed = false
+		d.mu.Unlock()
 		if err := d.run(ctx); err != nil {
 			d.logf("release memory: dropping the page cache: %v", err)
 			return
 		}
-		if ctx.Err() == nil {
-			d.logf("release memory: dropped the distro page cache")
-		}
+		d.logf("release memory: dropped the distro page cache")
 	}()
 }
 
 // stop cancels an in-flight drop and waits for its wsl.exe call to end.
-// The tray calls it after BeginRelease, before `wsl --terminate`, like
-// BeginRelease itself waits for the background reclaims.
+// The caller blocks new drops during Release memory or a tray handoff.
 func (d *cacheDrop) stop() {
 	d.mu.Lock()
-	cancel := d.cancel
+	cancel, done := d.cancel, d.done
 	d.mu.Unlock()
 	if cancel != nil {
 		cancel()
+		<-done
 	}
-	d.wg.Wait()
+}
+
+// setPaused keeps the drop out of Quit and self-update. A failed update
+// clears the pause so the current tray can resume.
+func (d *cacheDrop) setPaused(paused bool) {
+	d.mu.Lock()
+	d.paused = paused
+	d.mu.Unlock()
+	if paused {
+		d.stop()
+	}
 }

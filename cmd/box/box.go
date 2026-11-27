@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,6 +79,11 @@ type App struct {
 	// HTTP sends requests to boxd for the queue (queue.go); nil is
 	// http.DefaultClient. Tests replace it.
 	HTTP func(*http.Request) (*http.Response, error)
+	// dashboardURL overrides the derived boxd address for a configured job host.
+	dashboardURL string
+	jobHostName  string // display name for a qualified job destination
+	// boxdDisabled keeps a qualified lookup outside boxd's fixed project on Incus.
+	boxdDisabled bool
 	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
 	// into a thread, Spawn starts a detached `box watch`, StateDir holds the
 	// per-job files. Any of them nil or empty means no push.
@@ -136,6 +142,7 @@ type jobNotice struct {
 	Event string `json:"event"`
 	Box   string `json:"box"`
 	Job   string `json:"job,omitempty"`
+	Host  string `json:"host,omitempty"`
 }
 
 func (a *App) notify(notice jobNotice) {
@@ -295,12 +302,11 @@ func lookupSize(name string) (mode.Size, error) {
 // errNoRoom is a launch that Incus refused for the project's limits. Callers
 // treat it like a paused PC: nothing starts (exit 75).
 type errNoRoom struct {
-	size   string
-	reason string
+	size, resource, reason string
 }
 
 func (e *errNoRoom) Error() string {
-	return fmt.Sprintf("no room on the PC for a %s box (%s); nothing started, and a smaller size may fit", e.size, e.reason)
+	return fmt.Sprintf("no room on the PC for a %s box (%s)", e.size, e.reason)
 }
 
 func isNoRoom(err error) bool {
@@ -313,7 +319,11 @@ func isNoRoom(err error) bool {
 type errGPUBusy struct{ holder string }
 
 func (e *errGPUBusy) Error() string {
-	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
+	return fmt.Sprintf("the GPU box is in use (%s)", e.holder)
+}
+
+func invalidGPUBox(box string) error {
+	return fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
 }
 
 // errNoGPU is a GPU box asked for on a host without one (hasGPU). Callers
@@ -321,7 +331,7 @@ func (e *errGPUBusy) Error() string {
 type errNoGPU struct{}
 
 func (errNoGPU) Error() string {
-	return "this host has no GPU for boxes; nothing started, run on CPU"
+	return "this host has no GPU for boxes"
 }
 
 // gpuKey is the project key that tells a GPU host from one without:
@@ -392,6 +402,37 @@ func (a *App) beingCreated(in instance) bool {
 	return in.Status == "Stopped" && in.Config[mode.StoppedKey] == "" && a.starting(in)
 }
 
+type gpuBoxState int
+
+const (
+	gpuBoxFree gpuBoxState = iota
+	gpuBoxReclaimable
+	gpuBoxBusy
+)
+
+// inspectGPUBox classifies one GPU instance using the same read-only rules
+// claimGPU applies: unheld throwaways that are stopped past startup (or
+// tray-stopped) or running idle past startup are reclaimable; held, starting,
+// paused, busy, non-throwaway, or unverified boxes still hold the GPU.
+func (a *App) inspectGPUBox(ctx context.Context, in instance) (gpuBoxState, string) {
+	throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
+	if in.Status == "Stopped" {
+		switch {
+		case a.beingCreated(in):
+			return gpuBoxBusy, "box " + in.Name + ", starting"
+		case throwaway:
+			return gpuBoxReclaimable, ""
+		default:
+			return gpuBoxFree, ""
+		}
+	}
+	holder, idle := a.gpuHolder(ctx, in)
+	if idle && throwaway && !a.starting(in) {
+		return gpuBoxReclaimable, ""
+	}
+	return gpuBoxBusy, holder
+}
+
 // claimGPU checks that no box but except holds the GPU, so only one GPU box
 // runs at a time. Throwaway GPU boxes that are done are deleted on the way,
 // since they hold 8GiB of the project's memory and would block the next one:
@@ -404,22 +445,12 @@ func (a *App) claimGPU(ctx context.Context, insts []instance, except string) err
 		if in.Name == except || !mode.IsGPU(in.Config) {
 			continue
 		}
-		throwaway := in.Config[throwawayKey] == "true" && !mode.Held(in.Config, a.Now()).After(a.Now())
-		if in.Status == "Stopped" {
-			switch {
-			case a.beingCreated(in):
-				return &errGPUBusy{holder: "box " + in.Name + ", starting"}
-			case throwaway:
-				a.removeQuietly(ctx, in.Name)
-			}
-			continue
-		}
-		holder, idle := a.gpuHolder(ctx, in)
-		if idle && throwaway && !a.starting(in) {
+		switch state, holder := a.inspectGPUBox(ctx, in); state {
+		case gpuBoxReclaimable:
 			a.removeQuietly(ctx, in.Name)
-			continue
+		case gpuBoxBusy:
+			return &errGPUBusy{holder: holder}
 		}
-		return &errGPUBusy{holder: holder}
 	}
 	return nil
 }
@@ -521,48 +552,48 @@ func (a *App) reclaim(ctx context.Context) bool {
 	return any
 }
 
-// keptScript prints "kept" when a box runs no job and a job has ended there.
-func keptScript() string {
-	return "# kept jobs\n" + aliveFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 0
-ended=
-for p in *.pid; do
-  [ -e "$p" ] || continue
-  j=${p%%.pid}
-  if [ -e "$j.exit" ]; then ended=1; continue; fi
-  alive "$(cat "$p" 2>/dev/null)" "$j" && exit 0
-done
-[ -n "$ended" ] && echo kept
-exit 0
-`, workRoot)
-}
-
 // keptThrowaways lists the throwaway boxes kept after their job ended
 // (endedKeep: box run and boxd move a throwaway's expiry to then, for box
 // pull and the full log), the first to expire first. Their ends stay in
 // boxd's history, which box job reads once they're gone (#90). They hold their room
 // until the reaper deletes them, so a launch short of room deletes them, as
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
-// kept box is a running throwaway whose expiry is within the keep window,
-// with no job running and one that ended; a throwaway still being set up
-// for its job has none ended. A held one (mode.Held) isn't kept: a person
-// extended it.
+// kept box is a throwaway whose expiry is within the keep window and whose
+// last job ended. Running boxes must pass a guest check, and stopped CPU
+// boxes must carry boxd's finished-stop marker. Holds and claims exclude it.
 func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 	var out []instance
 	for _, in := range insts {
-		exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
-		if in.Config[throwawayKey] != "true" || in.Status != "Running" || err != nil ||
-			exp.After(a.Now().Add(endedKeep+time.Minute)) || mode.Held(in.Config, a.Now()).After(a.Now()) {
-			continue
-		}
-		look, cancel := a.probeCtx(ctx) // a box frozen since the list would hold the exec
-		res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
-		cancel()
-		if err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept" {
+		now := a.Now()
+		if stoppedIdleThrowaway(in, now) || (keptThrowawayConfig(in, now) && a.hasEndedJob(ctx, in.Name)) {
 			out = append(out, in)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Config[expiresKey] < out[j].Config[expiresKey] })
 	return out
+}
+
+func keptThrowawayConfig(in instance, now time.Time) bool {
+	return in.Status == "Running" && keptThrowawayWindow(in, now)
+}
+
+func stoppedIdleThrowaway(in instance, now time.Time) bool {
+	return in.Status == "Stopped" && !mode.IsGPU(in.Config) &&
+		in.Config[jobrun.ThrowawayStopKey] == jobrun.ThrowawayStopped && keptThrowawayWindow(in, now)
+}
+
+func keptThrowawayWindow(in instance, now time.Time) bool {
+	exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
+	return in.Config[throwawayKey] == "true" && err == nil &&
+		!exp.After(now.Add(endedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
+		!jobrun.ThrowawayClaimed(in.Config, now)
+}
+
+func (a *App) hasEndedJob(ctx context.Context, box string) bool {
+	look, cancel := a.probeCtx(ctx)
+	defer cancel()
+	res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", jobrun.KeptScript(workRoot)}})
+	return err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept"
 }
 
 // idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
@@ -576,7 +607,7 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 func (a *App) idleRepoBoxes(ctx context.Context, insts []instance) []instance {
 	var out []instance
 	for _, in := range insts {
-		if a.idleRepo(ctx, in) {
+		if idleRepoConfig(in, a.Now()) && a.hasEndedJob(ctx, in.Name) {
 			out = append(out, in)
 		}
 	}
@@ -585,30 +616,45 @@ func (a *App) idleRepoBoxes(ctx context.Context, insts []instance) []instance {
 	return out
 }
 
-// idleRepo says whether in is an idle repo box, as idleRepoBoxes counts it.
-func (a *App) idleRepo(ctx context.Context, in instance) bool {
+// idleRepoConfig checks whether the config allows pressure eviction.
+func idleRepoConfig(in instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
-	if in.Config[throwawayKey] == "true" || in.Status != "Running" || err != nil ||
-		exp.After(a.Now().Add(idleTTL+time.Minute)) || mode.Held(in.Config, a.Now()).After(a.Now()) {
-		return false
-	}
-	look, cancel := a.probeCtx(ctx)
-	defer cancel()
-	res, err := a.incus(look, Cmd{Args: []string{"exec", a.target(in.Name), "--", "bash", "-c", keptScript()}})
-	return err == nil && res.Code == 0 && strings.TrimSpace(res.Stdout) == "kept"
+	_, setup := jobrun.SetupOwner(in.Config)
+	return in.Config[throwawayKey] != "true" && in.Status == "Running" && err == nil &&
+		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
+		!setup.After(now) && !jobrun.DeleteReserved(in.Config, now)
 }
 
-// stillIdle reads repo box name again and says whether it is still idle: box
-// run may have started a job there, or a person extended it, since
-// idleRepoBoxes looked, and the room check and other launches came between.
-func (a *App) stillIdle(ctx context.Context, name string) bool {
+// stillIdle reads the config after checking the guest, so a setup that
+// reserves the box during the probe is visible before the delete.
+func (a *App) stillIdle(ctx context.Context, selected instance, lease string) bool {
+	throwaway := selected.Config[throwawayKey] == "true"
+	if selected.Status != "Stopped" && !a.hasEndedJob(ctx, selected.Name) {
+		return false
+	}
 	insts, err := a.list(ctx)
 	if err != nil {
 		return false
 	}
 	for _, in := range insts {
-		if in.Name == name {
-			return a.idleRepo(ctx, in)
+		if in.Name == selected.Name {
+			if in.Config["volatile.uuid"] != selected.Config["volatile.uuid"] || !in.CreatedAt.Equal(selected.CreatedAt) {
+				return false
+			}
+			if throwaway {
+				if lease != "" {
+					if in.Config[jobrun.DirectEvictKey] != lease || in.Config[jobrun.ThrowawayRepoKey] != "" ||
+						in.Config[jobrun.ThrowawayStopKey] != "" {
+						return false
+					}
+					delete(in.Config, jobrun.DirectEvictKey) // ignore this request's own reservation
+				}
+				if selected.Status == "Stopped" {
+					return stoppedIdleThrowaway(in, a.Now())
+				}
+				return keptThrowawayConfig(in, a.Now())
+			}
+			return idleRepoConfig(in, a.Now())
 		}
 	}
 	return false
@@ -623,7 +669,7 @@ func (a *App) spareBoxes(ctx context.Context, insts []instance) []instance {
 // launch creates box name. Refused for the project's caps, it deletes
 // reclaimable boxes and tries once more, then deletes kept throwaways and
 // then idle repo boxes (spareBoxes) one at a time, trying again after each.
-// Each repo box is read again just before its delete (stillIdle).
+// Each candidate is read again just before its delete (stillIdle).
 // extra are more launch flags, like box new's reason.
 func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra ...string) error {
 	err := a.launchOnce(ctx, name, ttl, throwaway, sz, extra)
@@ -633,12 +679,13 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 	// Each pass looks again, since other launches may be taking the same room
 	// (#87): it deletes the first spare box only if deleting them all would
 	// fit this box, so none is deleted for a launch that fails anyway.
+	rejected := map[string]bool{}
 	for isNoRoom(err) {
 		insts, lerr := a.list(ctx)
 		if lerr != nil {
 			break
 		}
-		spare := a.spareBoxes(ctx, insts)
+		spare := slices.DeleteFunc(a.spareBoxes(ctx, insts), func(in instance) bool { return rejected[in.Name] })
 		if len(spare) == 0 {
 			break
 		}
@@ -647,21 +694,32 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 			break
 		}
 		gone := spare[0]
+		// A claim or hold may have landed since the selection or the last try.
 		var rerr error
-		if gone.Config[throwawayKey] == "true" {
-			rerr = a.Rm(context.WithoutCancel(ctx), gone.Name)
-		} else {
-			// Read again before each try: a refused delete may have met an extend's write.
+		pooled := gone.Config[jobrun.ThrowawayRepoKey] != ""
+		useBoxd := !pooled && gone.Config[throwawayKey] == "true" && !mode.IsGPU(gone.Config) && a.Project == mode.Project
+		if pooled {
+			rerr = a.evictPooled(ctx, gone)
+		} else if useBoxd {
+			rerr = a.evictKept(ctx, gone)
+			if errors.Is(rerr, errDirectEviction) {
+				rerr = a.evictKeptDirect(context.WithoutCancel(ctx), gone)
+			}
+		}
+		if !pooled && !useBoxd {
 			rerr = jobrun.RetryETag(context.WithoutCancel(ctx), func() error {
-				if !a.stillIdle(ctx, gone.Name) {
+				if !a.stillIdle(ctx, gone, "") {
 					return errNotIdle
 				}
 				_, err := a.incusOK(context.WithoutCancel(ctx), "delete", a.target(gone.Name), "--force")
 				return err
 			})
-			if errors.Is(rerr, errNotIdle) {
-				continue // the next pass looks again, without it
+		}
+		if errors.Is(rerr, errNotIdle) {
+			if pooled || useBoxd {
+				rejected[gone.Name] = true
 			}
+			continue // the next pass looks again, without it
 		}
 		if rerr != nil && !isGone(rerr) {
 			a.warn(fmt.Sprintf("box: warning: removing %s: %v", gone.Name, rerr))
@@ -711,6 +769,9 @@ func isGone(err error) bool {
 	return strings.Contains(s, "Instance not found") || strings.Contains(s, "instance is already stopped")
 }
 
+// Incus looks up the image before submitting the instance create request.
+var imageLookupEOF = regexp.MustCompile(`^Error: Get "https?://[^/"]+/1[.]0/images/[^/?"]+(\?[^"]*)?": EOF$`)
+
 func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, throwaway bool, sz mode.Size, extra []string) error {
 	if !validBox.MatchString(name) {
 		return fmt.Errorf("bad box name %q: use lowercase letters, digits and hyphens", name)
@@ -721,16 +782,37 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	// Unqualified, the image would be looked up on the local (laptop) remote.
 	flags, devices := jobrun.LaunchFlags(sz, a.Now().Add(ttl), throwaway, extra...)
 	args := append([]string{"launch", a.target(a.Image), a.target(name)}, flags...)
-	var stdin io.Reader
-	if devices != "" {
-		stdin = strings.NewReader(devices)
+	run := func() (Result, error) {
+		var stdin io.Reader
+		if devices != "" {
+			stdin = strings.NewReader(devices)
+		}
+		return a.incus(ctx, Cmd{Args: args, Stdin: stdin})
 	}
-	res, err := a.incus(ctx, Cmd{Args: args, Stdin: stdin})
+	res, err := run()
+	if err == nil && res.Code != 0 && ctx.Err() == nil && imageLookupEOF.MatchString(strings.TrimSpace(res.Stderr)) {
+		res, err = run()
+	}
 	if err == nil && res.Code != 0 {
 		err = fmt.Errorf("incus launch: %s", strings.TrimSpace(res.Stderr))
 	}
-	if err != nil && projectLimitRefusal.MatchString(err.Error()) {
-		return &errNoRoom{size: sz.Name, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
+	if err != nil {
+		if match := projectLimitRefusal.FindStringSubmatch(err.Error()); match != nil {
+			resource := match[1]
+			if resource == "" {
+				switch strings.ToLower(match[2]) {
+				case "":
+					resource = "instances"
+				case "container":
+					resource = "containers"
+				case "virtual-machine":
+					resource = "virtual-machines"
+				default:
+					resource = "unknown"
+				}
+			}
+			return &errNoRoom{size: sz.Name, resource: resource, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
+		}
 	}
 	return err
 }
@@ -742,11 +824,93 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 // Full, just when box sets the job's expiry, or on any mode change.
 func (a *App) setExpiry(ctx context.Context, box string, ttl time.Duration) error {
 	return jobrun.RetryETag(ctx, func() error {
-		hold, _ := a.incusOK(ctx, "config", "get", a.target(box), mode.HoldKey)
-		until := mode.Held(map[string]string{mode.HoldKey: strings.TrimSpace(hold)}, a.Now().Add(ttl))
-		_, err := a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+until.UTC().Format(time.RFC3339))
+		until := a.heldExpiry(ctx, box, a.Now().Add(ttl))
+		_, err := a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+until)
 		return err
 	})
+}
+
+func (a *App) heldExpiry(ctx context.Context, box string, until time.Time) string {
+	hold, _ := a.incusOK(ctx, "config", "get", a.target(box), mode.HoldKey)
+	return mode.Held(map[string]string{mode.HoldKey: strings.TrimSpace(hold)}, until).UTC().Format(time.RFC3339)
+}
+
+// Publish the setup owner before pushing files. The second reservation read
+// also catches a cleanup that reserved the box while config set was starting.
+func (a *App) reserveSetup(ctx context.Context, box, job string, pooled bool) error {
+	check := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		raw, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.DirectEvictKey)
+		if err != nil {
+			return err
+		}
+		if jobrun.DeleteReserved(map[string]string{jobrun.DirectEvictKey: strings.TrimSpace(raw)}, a.Now()) {
+			return fmt.Errorf("box %s is being deleted", box)
+		}
+		return nil
+	}
+	err := jobrun.RetryETag(ctx, func() error {
+		if err := check(); err != nil {
+			return err
+		}
+		now := a.Now()
+		expiry := jobrun.ProtectedExpiry
+		if a.Project != mode.Project {
+			expiry = a.heldExpiry(ctx, box, now.Add(jobTTL))
+		}
+		args := []string{"config", "set", a.target(box), expiresKey + "=" + expiry,
+			jobrun.SetupKey + "=" + jobrun.SetupValue(job, now)}
+		if pooled {
+			args = append(args, jobrun.ThrowawayClaimKey+"=")
+		}
+		_, err := a.incusOK(ctx, args...)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return check()
+}
+
+// A legacy client can shorten the deadline while the bundle is still being
+// uploaded. Once the wrapper is visible, check the write and repair it if
+// this job is still running.
+func (a *App) confirmProtection(ctx context.Context, box, job string) error {
+	ctx, cancel := a.probeCtx(ctx)
+	defer cancel()
+	if a.Project != mode.Project {
+		return a.setExpiry(ctx, box, jobTTL)
+	}
+	return jobrun.RetryETag(ctx, func() error {
+		raw, err := a.incusOK(ctx, "config", "get", a.target(box), expiresKey)
+		if err != nil || mode.ProtectedDeadline(strings.TrimSpace(raw)) {
+			return err
+		}
+		out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
+		if err != nil || !slices.Contains(strings.Fields(out), job) {
+			return err
+		}
+		_, err = a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+jobrun.ProtectedExpiry)
+		return err
+	})
+}
+
+func (a *App) launchSetup(job string) []string {
+	if a.Project != mode.Project {
+		return nil
+	}
+	return []string{"-c", jobrun.SetupKey + "=" + jobrun.SetupValue(job, a.Now())}
+}
+
+// Only agents has a host reaper to reconcile a protected deadline.
+func (a *App) hostManagesExpiry(ctx context.Context, box string) (bool, error) {
+	if a.Project != mode.Project {
+		return false, nil
+	}
+	owner, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.SetupKey)
+	return strings.TrimSpace(owner) != "", err
 }
 
 // isConflict says whether a launch failed because the name is taken.
@@ -758,7 +922,14 @@ func isConflict(err error) bool {
 // such as the tray's limit write (#71).
 func (a *App) Rm(ctx context.Context, name string) error {
 	return jobrun.RetryETag(ctx, func() error {
-		_, err := a.incusOK(ctx, "delete", a.target(name), "--force")
+		stop, err := a.incusOK(ctx, "config", "get", a.target(name), jobrun.ThrowawayStopKey)
+		if err != nil {
+			return err
+		}
+		if stop = strings.TrimSpace(stop); stop != "" && stop != jobrun.ThrowawayStopped {
+			return fmt.Errorf("box %s is being stopped; try again", name)
+		}
+		_, err = a.incusOK(ctx, "delete", a.target(name), "--force")
 		return err
 	})
 }
@@ -773,7 +944,9 @@ func (a *App) Ls(ctx context.Context) error {
 	fmt.Fprintln(w, "NAME\tSTATUS\tEXPIRES")
 	for _, in := range insts {
 		exp := in.Config[expiresKey]
-		if exp == "" {
+		if mode.ProtectedDeadline(exp) {
+			exp = "job protected"
+		} else if exp == "" {
 			exp = "-"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", in.Name, in.Status, exp)
@@ -783,10 +956,12 @@ func (a *App) Ls(ctx context.Context) error {
 
 // RunOpts says what box run does.
 type RunOpts struct {
-	Dir string   // local git worktree
-	Cmd []string // one shell string, or argv to quote
-	Box string   // box to use; "" is the repo's own box
-	New bool     // use a throwaway box, kept KeepEnded after the job, else deleted
+	Dir   string   // local git worktree
+	Cmd   []string // one shell string, or argv to quote
+	Box   string   // box to use; "" is the repo's own box
+	Host  string   // CLI --host pin (debugging override); empty lets fleet pick
+	New   bool     // use a throwaway box, kept KeepEnded after the job, else deleted
+	Fresh bool     // launch a new throwaway even when a pooled box is idle
 	// Size of a box launched for this run: "" is medium for a new box and
 	// any size for an existing one.
 	Size string
@@ -849,25 +1024,29 @@ const (
 type JobResult struct {
 	Job   string `json:"job,omitempty"`
 	Box   string `json:"box,omitempty"`
+	Host  string `json:"host,omitempty"`
 	State string `json:"state,omitempty"`
 	Code  int    `json:"exitCode"`
 	// Push is set on a box_run that returned a running or queued job:
 	// whether its result will arrive as a turn in the agent's T3 thread.
 	Push *bool `json:"push,omitempty"`
 	// A queued job's place in line, from 1, and what it waits for.
-	Position int    `json:"position,omitempty"`
-	Why      string `json:"why,omitempty"`
+	Position int             `json:"position,omitempty"`
+	Why      string          `json:"why,omitempty"`
+	Capacity *capacityDetail `json:"capacity,omitempty"`
 	// Digest leads a finished Go test or vitest run's result: the failed
 	// tests with file:line and first message, then the counts
 	// (internal/digest). "" for other runs.
 	Digest string `json:"digest,omitempty"`
 
-	throwaway bool // a queued job's box is a throwaway, kept after the job
+	throwaway bool       // a queued job's box is a throwaway, kept after the job
+	fleetHost *fleetHost // exact fleet destination when dispatched via fleet routing
 }
 
 // Run syncs the worktree to a box, runs the command there and follows its
 // output.
 func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
+	o.New = o.New || o.Fresh
 	if len(o.Cmd) == 0 {
 		return JobResult{Code: 2}, errors.New("no command given")
 	}
@@ -887,34 +1066,68 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if o.Timeout < 0 {
 		return JobResult{Code: 2}, errors.New("timeout must be positive")
 	}
+	return a.runDispatch(ctx, o, sz)
+}
+
+func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost *fleetHost, prepared *fleetRun) (JobResult, *turnAwayInfo, error) {
 	if sz.GPU && !a.hasGPU(ctx) { // refused, not queued: waiting won't bring a GPU
-		fmt.Fprintln(a.Err, "box:", errNoGPU{})
-		return JobResult{State: statePaused, Code: exitPaused}, nil
+		limits := []string{"gpu"}
+		if targetHost != nil {
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{msg: errNoGPU{}.Error(), queue: queueRun{limits: limits}}, nil
+		}
+		fmt.Fprintln(a.Err, "box: refused:", errNoGPU{}.Error()+"; nothing started")
+		detail := &capacityDetail{Limits: limits}
+		a.printCapacity(detail)
+		return JobResult{State: statePaused, Code: exitPaused, Capacity: detail}, nil, nil
 	}
-	rp, err := openRepo(ctx, a.R, o.Dir)
-	if err != nil {
-		return JobResult{Code: 1}, err
+	var rp repo
+	var info jobMeta
+	var id, bundle string
+	if prepared != nil {
+		rp, info, id, bundle = prepared.repo, prepared.info, prepared.ref, prepared.bundle
+	} else {
+		var err error
+		rp, err = openRepo(ctx, a.R, o.Dir)
+		if err != nil {
+			return JobResult{Code: 1}, nil, err
+		}
+		a.warnSubmodules(ctx, rp.Top)
+		info = a.runInfo(ctx, rp, o, sz)
 	}
 	box := o.Box
 	if box == "" {
 		box = rp.Name
 	}
 	if !validBox.MatchString(box) {
-		return JobResult{Code: 2}, fmt.Errorf("bad box name %q", box)
+		return JobResult{Code: 2}, nil, fmt.Errorf("bad box name %q", box)
 	}
-	a.warnSubmodules(ctx, rp.Top)
-	info := a.runInfo(ctx, rp, o, sz)
-	var id, bundle string
 	// qr is the run as the queue takes it, from where Run has got to. A run
 	// turned away by a pause gets a throwaway: the checks below on the repo's
 	// box (its size, that it isn't a throwaway) haven't run, and the tray may
 	// stop a frozen box, which the queue doesn't start again.
 	qr := func(paused bool) queueRun {
-		q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: info, bundle: bundle, ref: id}
+		q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: info, bundle: bundle, ref: id, host: targetHost}
 		if o.New || sz.GPU || paused {
 			q.box, q.new = rp.Name, true
 		}
 		return q
+	}
+	handleTurnAway := func(paused bool, err error) (JobResult, *turnAwayInfo, error) {
+		q := qr(paused)
+		msg, cause := err.Error(), errCause(err)
+		if paused {
+			cause = a.pausedCause(msg)
+			msg += "; nothing started"
+		} else {
+			q.limits = launchLimits(err)
+		}
+		if targetHost != nil {
+			cctx, cancel := context.WithTimeout(ctx, refusalTimeout)
+			why := cause(cctx)
+			cancel()
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{why: why, msg: msg, queue: q}, nil
+		}
+		return a.turnAway(ctx, q, msg, cause), nil, nil
 	}
 
 	insts, paused := a.reach(ctx)
@@ -925,14 +1138,14 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		if o.Box == "" {
 			o.New = true
 		} else if inst = find(insts, box); inst == nil || !mode.IsGPU(inst.Config) {
-			return JobResult{Box: box, Code: 2}, fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
+			return JobResult{Box: box, Code: 2}, nil, invalidGPUBox(box)
 		}
 		except := ""
 		if !o.New {
 			except = box
 		}
 		if err := a.claimGPU(ctx, insts, except); err != nil {
-			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
+			return handleTurnAway(false, err)
 		}
 	}
 	if paused == "" && !o.New {
@@ -946,35 +1159,48 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 					paused = box + " is paused"
 				}
 			default:
-				return JobResult{Box: box, Code: 1}, err
+				return JobResult{Box: box, Code: 1}, nil, err
 			}
 		}
 	}
 	if paused != "" {
-		return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+		return handleTurnAway(true, errors.New(paused))
 	}
 
-	id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
-	bundle, err = snapshot(ctx, a.R, rp.Top, id)
-	if err != nil {
-		return JobResult{Code: 1}, err
+	if bundle == "" {
+		id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
+		var err error
+		bundle, err = snapshot(ctx, a.R, rp.Top, id)
+		if err != nil {
+			return JobResult{Code: 1}, nil, err
+		}
+		defer os.RemoveAll(filepath.Dir(bundle))
 	}
-	defer os.RemoveAll(filepath.Dir(bundle))
 
+	setupFailed := func(r JobResult, err error) (JobResult, *turnAwayInfo, error) {
+		if targetHost != nil && ctx.Err() == nil {
+			return r, &turnAwayInfo{msg: err.Error()}, err
+		}
+		return r, nil, err
+	}
 	started := false // from here on the remote job may be running
+	setupCtx, cancelSetup := context.WithTimeout(ctx, jobrun.SetupTTL)
+	defer cancelSetup()
+	reused := false
+	repoKey := ""
 	if !o.New {
-		actual, paused, err := a.ensureBox(ctx, box, inst, sz, o.Size)
+		actual, paused, err := a.ensureBox(setupCtx, box, box+"."+id, inst, sz, o.Size)
 		var have existingBoxSize
 		switch {
 		case errors.As(err, &have):
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
 		case isTempFail(err):
-			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
+			return handleTurnAway(false, err)
 		case err != nil:
-			return JobResult{Code: 1}, err
+			return setupFailed(JobResult{Code: 1}, err)
 		case paused != "":
-			return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+			return handleTurnAway(true, errors.New(paused))
 		default:
 			sz = actual
 			info.Size, info.GPU = sz.Name, sz.GPU
@@ -985,40 +1211,65 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		if ttl == 0 {
 			ttl = idleTTL
 		}
-		if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz); err != nil {
-			if isTempFail(err) {
-				return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
+		if ttl == idleTTL && !o.Fresh {
+			repoKey = throwawayRepoKey(info.Repo, sz)
+			if repoKey != "" && !a.poolEnabled(ctx) {
+				repoKey = ""
 			}
-			return JobResult{Box: box, Code: 1}, err
 		}
-		// Until its job starts, a failed run takes its own box with it.
-		defer func() {
-			if !started {
-				a.removeQuietly(ctx, box)
+		claimCtx, cancel := context.WithTimeout(ctx, jobrun.ThrowawayClaimTTL)
+		defer cancel()
+		if idle := a.claimIdleThrowaway(claimCtx, insts, repoKey, id, sz); idle != "" {
+			box, setupCtx, reused = idle, claimCtx, true
+			fmt.Fprintf(a.Err, "box: reusing idle throwaway %s\n", box)
+		} else {
+			var err error
+			if box, err = a.launchThrowaway(setupCtx, rp.Name, insts, ttl, sz, repoKey, id); err != nil {
+				if isTempFail(err) {
+					return handleTurnAway(false, err)
+				}
+				return JobResult{Box: box, Code: 1}, nil, err
 			}
-		}()
+			// A failed setup takes only the box it launched.
+			defer func() {
+				if !started {
+					a.removeQuietly(ctx, box)
+				}
+			}()
+		}
 	}
 
 	job := box + "." + id
-	r := JobResult{Job: job, Box: box, Code: 1}
-	remote := workRoot + "/.box/" + job
-	if _, err := a.incusOK(ctx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
-		return r, err
+	pubID, err := runJobID(targetHost, job, box)
+	if err != nil {
+		return JobResult{Box: box, Code: 1}, nil, err
 	}
-	if err := a.pushMeta(ctx, box, remote, filepath.Dir(bundle), info); err != nil {
+	hostName := a.jobHostName
+	r := JobResult{Job: pubID.ID, Box: box, Host: hostName, Code: 1, throwaway: o.New, fleetHost: targetHost}
+	if err := a.reserveSetup(setupCtx, box, job, reused); err != nil {
+		return setupFailed(r, fmt.Errorf("reserve job setup: %w", err))
+	}
+	remote := workRoot + "/.box/" + job
+	if _, err := a.incusOK(setupCtx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
+		return setupFailed(r, err)
+	}
+	if err := a.pushMeta(setupCtx, box, remote, filepath.Dir(bundle), info); err != nil {
 		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
 	}
-	if err := a.setExpiry(ctx, box, jobTTL); err != nil {
-		return r, fmt.Errorf("set job expiry: %w", err)
+	if err := setupCtx.Err(); err != nil {
+		return setupFailed(r, err)
 	}
 	// Say the job ID before starting it, so a dropped connection can't lose it.
-	fmt.Fprintf(a.Err, "box: job %s on %s\n", job, box)
-	a.notify(jobNotice{Event: "starting_job", Box: box, Job: job})
-	if err := ctx.Err(); err != nil {
-		return r, err
-	}
+	fmt.Fprintf(a.Err, "box: job %s on %s%s\n", pubID.ID, box, onHost(hostName))
+	a.notify(jobNotice{Event: "starting_job", Box: box, Job: pubID.ID, Host: hostName})
 	started = true
-	if _, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
+	_, err = a.incusOK(setupCtx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o)))
+	if err == nil || a.Project == mode.Project {
+		if protectErr := a.confirmProtection(ctx, box, job); protectErr != nil && err == nil {
+			a.warn(fmt.Sprintf("box: warning: checking job protection on %s: %v", box, protectErr))
+		}
+	}
+	if err != nil {
 		// The tray stops GPU boxes in My PC, and another run may then
 		// delete one. Only then does the job surely not run: a frozen box's
 		// job may resume, so it keeps its job ID below.
@@ -1034,48 +1285,55 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 					}
 					// No job started, so a throwaway has nothing to keep
 					// it for: let the launch defer remove it, rather than
-					// leaving it holding a slot and its 24h job expiry.
+					// leaving it holding a slot until cleanup checks it.
 					started = false
-					return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+					return handleTurnAway(true, errors.New(paused))
 				}
 				// Any other failure may have happened after the script
 				// started the job, so keep the job ID: it may resume.
 				if sz.GPU {
-					fmt.Fprintln(a.Err, pausedGPU(job))
+					fmt.Fprintln(a.Err, pausedGPU(pubID.ID))
 				} else {
-					fmt.Fprintln(a.Err, pausedMidRun(job))
+					fmt.Fprintln(a.Err, pausedMidRun(pubID.ID))
 				}
 				r.State, r.Code = statePaused, exitPaused
-				return r, nil
+				return r, nil, nil
 			} else if sz.GPU && (in == nil || in.Status == "Stopped") {
 				fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
 				r.State, r.Code = statePaused, exitPaused
-				return r, nil
+				return r, nil, nil
 			}
 		}
 		if o.New {
-			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
+			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, pubID.ID)
 		}
-		return r, err
+		return r, nil, err
 	}
-	// Again now that the job runs: another job finishing in between may have
-	// shortened the expiry before this one was visible to its running check,
-	// from box's markIdle or boxd's reapEnded.
-	if err := a.setExpiry(context.WithoutCancel(ctx), box, jobTTL); err != nil {
-		a.warn(fmt.Sprintf("box: warning: setting job expiry on %s: %v", box, err))
-	}
+	cancelSetup()
 
-	r.State, r.Code, r.Digest, err = a.attach(ctx, job, o.Wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, pubID, o.Wait)
+	recoveredEnd := false
+	if err != nil && ctx.Err() == nil && o.New && !sz.GPU && a.Project == mode.Project {
+		look, cancel := context.WithTimeout(ctx, refusalTimeout)
+		end, ok := a.endedElsewhere(look, pubID)
+		cancel()
+		if ok {
+			fmt.Fprintln(a.Err, "box: using the recorded result after the log stream ended")
+			r.State, r.Code, r.Digest, err = stateDone, end.Code, end.Digest, nil
+			recoveredEnd = true
+		}
+	}
 	switch {
 	case !o.New:
+	case recoveredEnd:
 	case err == nil && r.State == stateDone:
-		a.cleanup(ctx, box, true)
+		a.cleanup(ctx, box, true, repoKey != "")
 	case sz.GPU && r.State == statePaused && a.gpuStopped(ctx, box) != "":
 		// attach said the GPU box was stopped: there is nothing to reattach (#118).
 	default:
-		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
+		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, pubID.ID)
 	}
-	return r, err
+	return r, nil, err
 }
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
@@ -1083,7 +1341,7 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 // retries once under a fresh suffix on Incus's btrfs first-launch metadata
 // error (jobrun.IsDisallowedMetadata), which warms the image cache on the
 // failed try but leaves the old name's empty container dir poisoned on disk.
-func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size) (string, error) {
+func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance, ttl time.Duration, sz mode.Size, repoKey, ref string) (string, error) {
 	retriedMeta := false
 	// Unnamed: if there's no room, boxd's queue names a box of its own (#143).
 	fmt.Fprintln(a.Err, "box: launching a throwaway box")
@@ -1092,8 +1350,13 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		if find(insts, name) != nil {
 			continue
 		}
-		a.notify(jobNotice{Event: "launching_box", Box: name})
-		err := a.launch(ctx, name, ttl, true, sz)
+		a.notify(jobNotice{Event: "launching_box", Box: name, Host: a.jobHostName})
+		job := name + "." + ref
+		config := a.launchSetup(job)
+		if repoKey != "" {
+			config = append(config, "-c", jobrun.ThrowawayRepoKey+"="+repoKey, "-c", jobrun.ThrowawayOwnerKey+"="+job)
+		}
+		err := a.launch(ctx, name, ttl, true, sz, config...)
 		if err == nil {
 			return name, a.confirmGPU(ctx, name, sz)
 		}
@@ -1120,14 +1383,17 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 // ensureBox launches or starts a reused box and returns the size of the box it
 // actually used. When a concurrent run launches or starts it first, it carries
 // on with that one.
-func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode.Size, requestedSize string) (actual mode.Size, paused string, err error) {
+func (a *App) ensureBox(ctx context.Context, box, job string, inst *instance, sz mode.Size, requestedSize string) (actual mode.Size, paused string, err error) {
 	if inst != nil && inst.Status == "Running" {
 		return mode.SizeOf(inst.Config), "", nil
 	}
 	if inst == nil {
 		fmt.Fprintf(a.Err, "box: launching %s\n", box)
-		err = a.launch(ctx, box, idleTTL, false, sz)
+		err = a.launch(ctx, box, idleTTL, false, sz, a.launchSetup(job)...)
 	} else {
+		if err := a.reserveSetup(ctx, box, job, false); err != nil {
+			return mode.Size{}, "", err
+		}
 		_, err = a.incusOK(ctx, "start", a.target(box))
 	}
 	if err == nil {
@@ -1153,6 +1419,9 @@ func (a *App) ensureBox(ctx context.Context, box string, inst *instance, sz mode
 	case now.Status == "Running":
 		return mode.SizeOf(now.Config), "", nil
 	case inst == nil: // someone else launched it but it isn't running yet
+		if err := a.reserveSetup(ctx, box, job, false); err != nil {
+			return mode.Size{}, "", err
+		}
 		if _, err := a.incusOK(ctx, "start", a.target(box)); err != nil {
 			if now, paused := a.check(ctx, box); paused != "" {
 				return mode.Size{}, paused, nil
@@ -1175,7 +1444,7 @@ func (a *App) removeQuietly(ctx context.Context, box string) {
 
 // cleanup deletes a throwaway box once no job is running in it. ours says
 // the caller created it; otherwise the box's throwaway mark decides.
-func (a *App) cleanup(ctx context.Context, box string, ours bool) {
+func (a *App) cleanup(ctx context.Context, box string, ours, pooled bool) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
 	if !ours {
@@ -1183,6 +1452,14 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 		if err != nil || strings.TrimSpace(v) != "true" {
 			return
 		}
+		key, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.ThrowawayRepoKey)
+		if err != nil {
+			return
+		}
+		pooled = strings.TrimSpace(key) != ""
+	}
+	if pooled {
+		return
 	}
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil {
@@ -1194,9 +1471,15 @@ func (a *App) cleanup(ctx context.Context, box string, ours bool) {
 		return
 	}
 	if a.KeepEnded > 0 {
-		if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
-			a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+		managed, err := a.hostManagesExpiry(ctx, box)
+		if err != nil {
 			return
+		}
+		if !managed {
+			if err := a.setExpiry(ctx, box, a.KeepEnded); err != nil {
+				a.warn(fmt.Sprintf("box: warning: setting expiry on %s: %v", box, err))
+				return
+			}
 		}
 		fmt.Fprintf(a.Err, "box: kept %s for box pull for up to %d minutes, unless a queued job or another launch needs the room; box rm %s deletes it now\n", box, int(a.KeepEnded.Minutes()), box)
 		return
@@ -1231,11 +1514,11 @@ var validJob = regexp.MustCompile(`^[a-z][a-z0-9-]*\.[0-9]{8}-[0-9]{6}-[0-9a-f]+
 // here when box read its exit, else boxd's record, which holds every job's
 // end, including one nobody here read (a run that exited on a pause, a push
 // that never came) whose box a launch then took (#90).
-func (a *App) endedElsewhere(ctx context.Context, job string) (jobEnd, bool) {
-	if end, ok := a.recordedEnd(job); ok {
+func (a *App) endedElsewhere(ctx context.Context, id jobID) (jobEnd, bool) {
+	if end, ok := a.recordedEnd(id.ID); ok {
 		return end, true
 	}
-	j, found, err := a.queuedJob(ctx, job)
+	j, found, err := a.queuedJob(ctx, id.Bare)
 	if err != nil || !found || j.State != dash.JobDone || j.Exit == nil {
 		return jobEnd{}, false
 	}
@@ -1263,19 +1546,24 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 	if !validJob.MatchString(job) {
 		return JobResult{Code: 2}, fmt.Errorf("bad job id %q", job)
 	}
+	box, _, _ := strings.Cut(job, ".")
+	return a.job(ctx, jobID{ID: job, Bare: job, Box: box}, wait)
+}
+
+func (a *App) job(ctx context.Context, id jobID, wait time.Duration) (JobResult, error) {
 	if wait < 0 {
 		return JobResult{Code: 2}, errors.New("wait can't be negative")
 	}
-	box, _, _ := strings.Cut(job, ".")
+	job, box := id.ID, id.Box
 	r := JobResult{Job: job, Box: box}
 	var err error
-	r.State, r.Code, r.Digest, err = a.attach(ctx, job, wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, id, wait)
 	if err != nil {
 		// A job whose exit was read once has ended: when its box has gone
 		// since (a throwaway's 30 minutes ran out, or a launch short of room
 		// took it), its recorded end is the result, not "lost".
-		if end, ok := a.endedElsewhere(ctx, job); ok {
-			if by := a.evictedFor(ctx, job); by != "" {
+		if end, ok := a.endedElsewhere(ctx, id); ok {
+			if by := a.evictedFor(ctx, id.Bare); by != "" {
 				fmt.Fprintf(a.Err, "box: %s; this is the result recorded when it ended\n", evictedText(box, by))
 			} else {
 				fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
@@ -1285,7 +1573,7 @@ func (a *App) Job(ctx context.Context, job string, wait time.Duration) (JobResul
 		}
 	}
 	if err == nil && r.State == stateDone {
-		a.cleanup(ctx, box, false)
+		a.cleanup(ctx, box, false, false)
 	}
 	return r, err
 }
@@ -1314,7 +1602,9 @@ while :; do
     off=$size
   fi
   if [ $fin = 1 ]; then
-    printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
+    completion=%[6]s
+    [ -f %[1]s.cancelled ] && completion=%[7]s
+    printf '%%s%%s %%s\n' %[3]s "$(cat %[1]s.exit)" "$completion" >&2
     d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0)
     [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     exit 0
@@ -1326,7 +1616,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker))
+`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker), completionExited, completionCancelled)
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
@@ -1339,8 +1629,8 @@ const (
 )
 
 // exitMarker starts the line followScript prints on stderr when the job has
-// ended, followed by its exit code. attach reads it from that exec, so it
-// needs no second exec that a freeze could cut off.
+// ended, followed by its exit code and completion kind. attach reads these
+// from one exec so a freeze cannot interrupt a separate cancellation check.
 const exitMarker = "\x01box-exit "
 
 // digestMarker starts the line followScript prints on stderr after the exit
@@ -1494,8 +1784,8 @@ func (a *App) watchPause(ctx context.Context, box string, stop context.CancelFun
 // If the box is frozen meanwhile it returns statePaused promptly. The
 // follow itself reports the job's exit code, and a code it reported wins
 // over any cancellation after it.
-func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state string, code int, dg string, err error) {
-	box, _, _ := strings.Cut(job, ".")
+func (a *App) attach(ctx context.Context, id jobID, wait time.Duration) (state string, code int, dg string, err error) {
+	job, box := id.ID, id.Box
 	follow := ctx
 	if wait > 0 {
 		var cancel context.CancelFunc
@@ -1517,22 +1807,23 @@ func (a *App) attach(ctx context.Context, job string, wait time.Duration) (state
 	kept := &lineTail{}
 	tail := &tailWriter{w: &lockedWriter{&wmu, io.MultiWriter(a.Out, kept)}}
 	res, err := a.incus(run, Cmd{
-		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(job)},
+		Args:   []string{"exec", a.target(box), "--", "bash", "-c", followScript(id.Bare)},
 		Stdout: tail, Stderr: ef,
 	})
 	stop()
 	<-watched
 	ef.flush()
 	if text, ok := ef.exit(); ok {
-		code, cerr := strconv.Atoi(text)
-		if cerr != nil {
+		codeText, completion, hasCompletion := strings.Cut(text, " ")
+		code, cerr := strconv.Atoi(codeText)
+		if cerr != nil || (hasCompletion && completion != completionExited && completion != completionCancelled) {
 			return "", 1, "", fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
 		ended := a.Now()
-		a.markIdle(ctx, box)
-		a.reportEnded(ctx, job, code, ended, tail.String())
+		a.markIdle(ctx, box, id.Bare)
+		a.reportEnded(ctx, id.Bare, code, ended, tail.String())
 		dg = ef.digest()
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(job)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
+		a.recordEnd(job, jobEnd{Host: a.jobHostName, Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg, Completion: completion})
 		return stateDone, code, dg, nil
 	}
 	if hit.Load() && ctx.Err() == nil {
@@ -1593,15 +1884,45 @@ func (a *App) probeCtx(ctx context.Context) (context.Context, context.CancelFunc
 
 // markIdle shortens the box's expiry to idleTTL once a job has ended, unless
 // another job is still running there (it would lose its jobTTL window).
-func (a *App) markIdle(ctx context.Context, box string) {
+func (a *App) markIdle(ctx context.Context, box, job string) {
 	ctx, cancel := a.probeCtx(ctx)
 	defer cancel()
+	managed, err := a.hostManagesExpiry(ctx, box)
+	if err != nil || managed {
+		return // the host reconciles managed deadlines from the job files
+	}
+	repoKey, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.ThrowawayRepoKey)
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(repoKey) != "" {
+		a.poolExpiry(ctx, box, job, true)
+		return
+	}
+	throwaway, err := a.incusOK(ctx, "config", "get", a.target(box), throwawayKey)
+	if err != nil {
+		return
+	}
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil || len(strings.Fields(out)) > 0 {
 		return
 	}
-	if err := a.setExpiry(ctx, box, idleTTL); err != nil {
+	unpooled := strings.TrimSpace(throwaway) == "true"
+	ttl := idleTTL
+	if unpooled {
+		stop, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.ThrowawayStopKey)
+		if err != nil || strings.TrimSpace(stop) != "" {
+			return
+		}
+		ttl = endedKeep
+	}
+	if err := a.setExpiry(ctx, box, ttl); err != nil {
 		a.warn(fmt.Sprintf("box: warning: setting idle expiry on %s: %v", box, err))
+		return
+	}
+	// An unpooled throwaway cannot take another job. A failed probe during
+	// cooling must never replace its retrieval deadline with a job deadline.
+	if unpooled {
 		return
 	}
 	// A job can publish its PID and refresh the deadline after the first

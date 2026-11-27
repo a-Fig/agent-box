@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -20,7 +21,8 @@ type dropHarness struct {
 func newDropHarness(err error) *dropHarness {
 	h := &dropHarness{ran: make(chan struct{}, 4), lines: make(chan string, 8)}
 	h.d = &cacheDrop{
-		run: func(context.Context) error { h.ran <- struct{}{}; return err },
+		hostUp: func(context.Context) bool { return true },
+		run:    func(context.Context) error { h.ran <- struct{}{}; return err },
 		logf: func(f string, a ...any) {
 			h.lines <- fmt.Sprintf(f, a...)
 		},
@@ -104,7 +106,10 @@ func TestCacheDropWaitsOutAnOverlappingRelease(t *testing.T) {
 
 func TestCacheDropStopsForTheNextRelease(t *testing.T) {
 	started := make(chan struct{}, 1)
+	mgr := mode.New(&noIncus{}, mode.MyPC)
 	d := &cacheDrop{
+		hostUp: func(context.Context) bool { return true },
+		busy:   mgr.Releasing,
 		run: func(ctx context.Context) error {
 			started <- struct{}{}
 			<-ctx.Done() // the wsl.exe call, killed by its context
@@ -122,12 +127,77 @@ func TestCacheDropStopsForTheNextRelease(t *testing.T) {
 	// The next Release memory cancels the in-flight drop and waits for
 	// it, so the drop cannot restart the distro during its terminate.
 	done := make(chan struct{})
-	go func() { d.stop(); close(done) }()
+	go func() {
+		releaseMemory(mgr, d, func() error {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if d.done != nil {
+				t.Error("terminate ran before the previous drop exited")
+			}
+			return nil
+		}, func() {}, t.Logf)
+		close(done)
+	}()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("stop did not end the in-flight drop")
 	}
+}
+
+func TestReleaseMemoryDropsCacheAfterAutomaticRestart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &fakeSensors{up: true}
+		mgr := mode.New(&noIncus{}, mode.MyPC)
+		h := newDropHarness(nil)
+		h.d.busy, h.d.hostUp = mgr.Releasing, s.HostUp
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		wake := make(chan struct{}, 1)
+		poke := func() { wake <- struct{}{} }
+		go run(ctx, loopCfg{Manager: func() *mode.Manager { return mgr }}, s, time.Hour, wake, h.d.observe)
+		synctest.Wait()
+		h.wantNoRun(t)
+
+		releaseMemory(mgr, h.d, func() error { return errors.New("terminate failed") }, poke, t.Logf)
+		synctest.Wait()
+		h.wantNoRun(t)
+		if len(h.lines) != 0 {
+			t.Fatal("failed terminate triggered a cache drop")
+		}
+		releaseMemory(mgr, h.d, func() error {
+			s.mu.Lock()
+			s.up = false
+			s.mu.Unlock()
+			return nil
+		}, func() {
+			if mgr.Releasing() {
+				t.Error("release still active at wake")
+			}
+			// A delayed pre-release report must not start the distro itself.
+			h.d.observe(mode.Status{Chosen: mode.MyPC})
+			synctest.Wait()
+			h.wantNoRun(t)
+			poke()
+		}, t.Logf)
+		synctest.Wait()
+		if n := s.started(); n != 1 {
+			t.Fatalf("distro start attempts = %d, want 1", n)
+		}
+		h.wantNoRun(t)
+		s.mu.Lock()
+		s.up = true
+		s.mu.Unlock()
+		poke()
+		h.wantRun(t)
+		h.wantLine(t, "dropped")
+		poke()
+		synctest.Wait()
+		h.wantNoRun(t)
+		if len(h.lines) != 0 {
+			t.Fatal("cache drop logged more than once")
+		}
+	})
 }
 
 func TestCacheDropFailureIsLoggedAndNotRetried(t *testing.T) {

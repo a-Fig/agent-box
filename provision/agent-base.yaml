@@ -1,0 +1,281 @@
+# Build-only cloud-init config for the `agent-base` image.
+# Passed on stdin to `incus launch` only during `setup-host.sh --build-base` (or `--rebuild-base`):
+#   incus launch images:ubuntu/24.04/cloud agent-base-build --project agents < agent-base.yaml
+#
+# Keeping this out of `default-profile.yaml` ensures boxes launched from `agent-base` never re-run
+# package installs, apt-get, or cloud-init on first boot (#194). `setup-host.sh` also touches
+# `/etc/cloud/cloud-init.disabled` and unsets `cloud-init.user-data` before publishing `agent-base`.
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    write_files:
+      - path: /etc/profile.d/agent-box.sh
+        permissions: "0644"
+        content: |
+          # Managed by agent-box image build. Caches live on the shared /cache volume.
+          export PATH="$PATH:/usr/local/go/bin:/cache/android-sdk/cmdline-tools/latest/bin:/cache/android-sdk/platform-tools"
+          export GOCACHE=/cache/go-build
+          export GOMODCACHE=/cache/go-mod
+          export npm_config_cache=/cache/npm
+          export GRADLE_USER_HOME=/cache/gradle
+          export UV_CACHE_DIR=/cache/uv
+          # Browser downloads. Tools that hardcode ~/.cache/puppeteer or ~/.cache/ms-playwright
+          # reach the same folders through root's symlinks (agent-box-provision.sh).
+          export PUPPETEER_CACHE_DIR=/cache/puppeteer
+          export PLAYWRIGHT_BROWSERS_PATH=/cache/ms-playwright
+          # ANDROID_HOME only (not deprecated ANDROID_SDK_ROOT), so a per-job ANDROID_HOME override
+          # does not collide with AGP's duplicate-SDK-var check.
+          export ANDROID_HOME=/cache/android-sdk
+
+          # /cache can be wiped at any time; restore cache dirs and Gradle's static init.d
+          # delegating stub here so the next run rebuilds caches cleanly without cloud-init.
+          if [ -d /cache ]; then
+            mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle/init.d /cache/robolectric-m2 \
+              /cache/uv /cache/puppeteer /cache/ms-playwright 2>/dev/null || true
+            if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
+              _ab_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX 2>/dev/null || true)
+              if [ -n "$_ab_tmp" ]; then
+                if printf '%s\n' \
+                  "// Managed by agent-box. Delegates to each box's own init script so mixed profile versions coexist." \
+                  "def f = new File('/etc/agent-box/android-sdk.init.gradle')" \
+                  "if (f.isFile()) apply from: f" > "$_ab_tmp" 2>/dev/null &&
+                  chmod 0644 "$_ab_tmp" 2>/dev/null &&
+                  mv -n "$_ab_tmp" /cache/gradle/init.d/agent-box-android.gradle 2>/dev/null; then
+                  rm -f "$_ab_tmp" 2>/dev/null || true
+                else
+                  rm -f "$_ab_tmp" 2>/dev/null || true
+                fi
+              fi
+              unset _ab_tmp
+            fi
+          fi
+      - path: /etc/agent-box/android-sdk.init.gradle
+        permissions: "0644"
+        content: |
+          // Managed by agent-box image build. Lazily installs the Android SDK into /cache/android-sdk
+          // on the first Android Gradle build (or after /cache is wiped), and points Robolectric's
+          // android-all jar cache at /cache/robolectric-m2 without sharing mavenLocal() across boxes.
+          def sdkStampName = "v1-16111833-34-35"
+
+          gradle.projectsLoaded { g ->
+              g.rootProject.allprojects { proj ->
+                  proj.tasks.withType(org.gradle.api.tasks.testing.Test).configureEach { t ->
+                      if (!System.getProperty("maven.repo.local") && !t.systemProperties.containsKey("maven.repo.local")) {
+                          t.systemProperty("maven.repo.local", "/cache/robolectric-m2")
+                      }
+                  }
+              }
+
+              def envHome = g.rootProject.providers.environmentVariable("ANDROID_HOME").orNull
+              def sdkDir = (envHome ?: "/cache/android-sdk").replaceAll('/+$', '')
+              if (sdkDir != "/cache/android-sdk") return
+              def helper = new File("/usr/local/bin/agent-box-ensure-android-sdk")
+              if (!helper.canExecute()) return
+              if (new File(sdkDir, ".agent-box-stamps/${sdkStampName}").isFile() &&
+                  new File(sdkDir, "cmdline-tools/latest/bin/sdkmanager").canExecute()) {
+                  return
+              }
+
+              // Only install the SDK for builds that actually use the Android Gradle Plugin.
+              def candidates = []
+              ["settings.gradle", "settings.gradle.kts", "gradle/libs.versions.toml",
+               "buildSrc/build.gradle", "buildSrc/build.gradle.kts"].each { rel ->
+                  def f = new File(g.rootProject.projectDir, rel)
+                  if (f.isFile()) candidates << f
+              }
+              g.rootProject.allprojects.each { p ->
+                  if (p.buildFile?.isFile()) candidates << p.buildFile
+              }
+              def isAndroid = candidates.any { f ->
+                  def text = f.getText("UTF-8")
+                  text.contains("com.android.") || text.contains("android-application") || text.contains("android-library")
+              }
+              if (!isAndroid) return
+
+              def execOut = g.rootProject.providers.exec {
+                  commandLine(helper.absolutePath)
+                  ignoreExitValue = true
+              }
+              def rc = execOut.result.get().exitValue
+              def out = execOut.standardOutput.asText.get()
+              def err = execOut.standardError.asText.get()
+              if (out) g.rootProject.logger.lifecycle(out.trim())
+              if (err) g.rootProject.logger.lifecycle(err.trim())
+              if (rc != 0) {
+                  throw new GradleException("agent-box-ensure-android-sdk failed with exit code ${rc}")
+              }
+          }
+      - path: /usr/local/bin/agent-box-ensure-android-sdk
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          # Lazily installs the Android SDK into /cache/android-sdk on first Android use.
+          # Safe under concurrent boxes (flock), mixed profile versions (per-spec stamps), and /cache wipes.
+          set -euo pipefail
+
+          SDK_DIR=${ANDROID_HOME:-/cache/android-sdk}
+          SDK_DIR=${SDK_DIR%/}
+          CMDLINE_BUILD=16111833
+          CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_BUILD}_latest.zip"
+          CMDLINE_SHA256="0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8"
+          PACKAGES=(
+            "platform-tools"
+            "platforms;android-34"
+            "platforms;android-35"
+            "build-tools;34.0.0"
+            "build-tools;35.0.0"
+          )
+          STAMP_NAME="v1-${CMDLINE_BUILD}-34-35"
+          STAMP_DIR="${SDK_DIR}/.agent-box-stamps"
+          STAMP="${STAMP_DIR}/${STAMP_NAME}"
+          SDKMANAGER="${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager"
+
+          ready() {
+            [ -x "$SDKMANAGER" ] && [ -f "$STAMP" ]
+          }
+
+          # Under pipefail, `yes` exits 141 (SIGPIPE) once sdkmanager closes stdin; check sdkmanager's exit status.
+          # Convert CR progress bars to LF so logs stay readable.
+          run_yes() {
+            local rc=0
+            yes 2>/dev/null | "$@" 2>&1 | tr '\r' '\n' || rc=${PIPESTATUS[1]}
+            return "$rc"
+          }
+
+          if ready; then
+            exit 0
+          fi
+
+          mkdir -p "$(dirname "$SDK_DIR")"
+          exec 9>"$(dirname "$SDK_DIR")/.android-sdk.lock"
+          if ! flock -n 9; then
+            echo "agent-box: waiting for another box to finish installing Android SDK into ${SDK_DIR}..." >&2
+            flock -w 1800 9 || { echo "agent-box: timed out waiting for Android SDK install lock" >&2; exit 1; }
+          fi
+
+          if ready; then
+            exit 0
+          fi
+
+          echo "agent-box: installing Android SDK into ${SDK_DIR} (one-time, cached in /cache)..." >&2
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+
+          have_build=$(cat "${SDK_DIR}/.agent-box-cmdline-build" 2>/dev/null || true)
+          case "$have_build" in
+            ''|*[!0-9]*) have_build=0 ;;
+          esac
+          # Only install or upgrade cmdline-tools monotonically so an older box never downgrades a newer build.
+          if [ ! -x "$SDKMANAGER" ] || [ "$have_build" -lt "$CMDLINE_BUILD" ]; then
+            curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 --retry 3 --retry-delay 2 \
+              "$CMDLINE_URL" -o "$tmp/cmdline-tools.zip"
+            echo "${CMDLINE_SHA256}  $tmp/cmdline-tools.zip" | sha256sum -c - >/dev/null
+            unzip -q "$tmp/cmdline-tools.zip" -d "$tmp/unpack"
+            mkdir -p "${SDK_DIR}/cmdline-tools"
+            rm -rf "${SDK_DIR}/cmdline-tools/latest"
+            mv "$tmp/unpack/cmdline-tools" "${SDK_DIR}/cmdline-tools/latest"
+            printf '%s\n' "$CMDLINE_BUILD" > "${SDK_DIR}/.agent-box-cmdline-build"
+          fi
+
+          # Accept licenses before and after install so sdkmanager never blocks and AGP can
+          # auto-download additional SDK levels if another repo needs them.
+          run_yes "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null
+          run_yes "$SDKMANAGER" --sdk_root="$SDK_DIR" --install "${PACKAGES[@]}" >&2
+          run_yes "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null
+
+          mkdir -p "$STAMP_DIR"
+          chmod -R a+rwX "$SDK_DIR" || true
+          printf 'cmdline-tools=%s %s\n' "$CMDLINE_BUILD" "${PACKAGES[*]}" > "${STAMP}.tmp"
+          mv -f "${STAMP}.tmp" "$STAMP"
+          echo "agent-box: Android SDK ready in ${SDK_DIR}." >&2
+      - path: /usr/local/bin/sdkmanager
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          sdk_dir=${ANDROID_HOME:-/cache/android-sdk}
+          sdk_dir=${sdk_dir%/}
+          if [ "$sdk_dir" = "/cache/android-sdk" ]; then
+            /usr/local/bin/agent-box-ensure-android-sdk >&2
+          fi
+          exec "${sdk_dir}/cmdline-tools/latest/bin/sdkmanager" "$@"
+      - path: /usr/local/sbin/agent-box-provision.sh
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          # One-time toolchain install run during `setup-host.sh --build-base`. Bump GO_VERSION here to update Go.
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          GO_VERSION=1.27.3
+          arch=$(dpkg --print-architecture)
+
+          mkdir -p /cache/go-build /cache/go-mod /cache/npm /cache/gradle/init.d /cache/robolectric-m2 /cache/uv \
+            /cache/puppeteer /cache/ms-playwright /work
+          if [ ! -f /cache/gradle/init.d/agent-box-android.gradle ]; then
+            init_tmp=$(mktemp /cache/gradle/init.d/.agent-box-android.XXXXXX)
+            printf '%s\n' \
+              "// Managed by agent-box. Delegates to each box's own init script so mixed profile versions coexist." \
+              "def f = new File('/etc/agent-box/android-sdk.init.gradle')" \
+              "if (f.isFile()) apply from: f" > "$init_tmp"
+            chmod 0644 "$init_tmp"
+            mv -n "$init_tmp" /cache/gradle/init.d/agent-box-android.gradle || true
+            rm -f "$init_tmp"
+          fi
+          chmod a+rwX /cache /cache/go-build /cache/go-mod /cache/npm /cache/gradle /cache/gradle/init.d /cache/robolectric-m2 /cache/uv \
+            /cache/puppeteer /cache/ms-playwright || true
+          # Puppeteer scripts often pass ~/.cache/puppeteer themselves (pi-vi's smoke does), so
+          # root's browser caches point into /cache too and a download outlives the box.
+          mkdir -p /root/.cache
+          for d in puppeteer ms-playwright; do
+            [ -e "/root/.cache/$d" ] || [ -L "/root/.cache/$d" ] || ln -s "/cache/$d" "/root/.cache/$d"
+          done
+
+          apt_pkgs="git build-essential curl ca-certificates unzip jq openjdk-17-jdk-headless"
+          # shellcheck disable=SC2086
+          if ! dpkg -s $apt_pkgs >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq $apt_pkgs
+          fi
+
+          # Chromium's runtime libraries, for Puppeteer and Playwright suites (#38). An explicit list,
+          # not `playwright install-deps chromium`: that needs a Playwright download at image build,
+          # its list moves with Playwright's version, and it leaves out GTK 3, which full Chromium
+          # builds such as pi-vi's Chromium 91 need. Tried in a box on 2026-11-25: pi-vi's smoke passes.
+          browser_pkgs="libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libnss3 libnspr4
+            libxshmfence1 libgtk-3-0t64 fonts-liberation"
+          # shellcheck disable=SC2086
+          if ! dpkg -s $browser_pkgs >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends $browser_pkgs
+          fi
+
+          if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go${GO_VERSION} "; then
+            tmp=$(mktemp -d)
+            curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${arch}.tar.gz" -o "$tmp/go.tgz"
+            want=$(curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${arch}.tar.gz.sha256")
+            echo "${want}  $tmp/go.tgz" | sha256sum -c -
+            rm -rf /usr/local/go
+            tar -C /usr/local -xzf "$tmp/go.tgz"
+            rm -rf "$tmp"
+          fi
+
+          if ! command -v node >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+            apt-get install -y -qq nodejs
+          fi
+
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+          fi
+
+          if ! command -v gh >/dev/null 2>&1; then
+            install -d -m 0755 /etc/apt/keyrings
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg
+            echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+              > /etc/apt/sources.list.d/github-cli.list
+            apt-get update -qq
+            apt-get install -y -qq gh
+          fi
+    runcmd:
+      - [bash, -c, "/usr/local/sbin/agent-box-provision.sh >> /var/log/agent-box-provision.log 2>&1"]

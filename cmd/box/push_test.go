@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
 type sentMsg struct{ thread, msg string }
@@ -209,7 +211,7 @@ func TestRunWatcherInJobPushesWithNotice(t *testing.T) {
 	e := newPushEnv(t, &fakePC{t: t, block: true}, "thread-1")
 	e.a.Spawn = func(dir, job string) error { return errWatcherInJob }
 	text, st := e.run(t, "sleep 600")
-	if st["push"] != true || !strings.Contains(text, "this push lasts only as long as box's MCP server") || !e.a.exists(st["job"].(string), ".json") {
+	if st["push"] != true || !strings.Contains(text, "this watcher stops with Box MCP") || !e.a.exists(st["job"].(string), ".json") {
 		t.Errorf("structured = %v\n%s", st, text)
 	}
 }
@@ -535,7 +537,7 @@ func TestSendingLeaseKeepsRestartsFromSendingAlongside(t *testing.T) {
 	_, st := e.run(t, "make")
 	job := st["job"].(string)
 	f.finish("0", "")
-	if _, err := e.a.acquireLease(job, ".sending", sendLease); err != nil { // another watcher is mid-send
+	if _, err := e.a.acquireLease(context.Background(), job, ".sending", sendLease); err != nil { // another watcher is mid-send
 		t.Fatal(err)
 	}
 	if err := e.a.Watch(context.Background(), job); err != nil || e.push.count() != 0 {
@@ -562,7 +564,7 @@ func TestSafetyNetRestartsLostWatchers(t *testing.T) {
 		t.Fatalf("spawns after a box_* call = %v", *e.spawns)
 	}
 	// A live lease means it lives.
-	token, err := e.a.acquireLease(job, ".watch", watchLease)
+	token, err := e.a.acquireLease(context.Background(), job, ".watch", watchLease)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,11 +613,11 @@ func TestWatcherLeaseIsExclusive(t *testing.T) {
 	e := newPushEnv(t, f, "thread-1")
 	_, st := e.run(t, "make")
 	job := st["job"].(string)
-	token, err := e.a.acquireLease(job, ".watch", watchLease)
+	token, err := e.a.acquireLease(context.Background(), job, ".watch", watchLease)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.a.acquireLease(job, ".watch", watchLease); !errors.Is(err, errLeaseHeld) {
+	if _, err := e.a.acquireLease(context.Background(), job, ".watch", watchLease); !errors.Is(err, errLeaseHeld) {
 		t.Fatalf("second acquire = %v", err)
 	}
 	f.finish("0", "")
@@ -718,7 +720,7 @@ func TestThrowawayKeptAfterItsPushedJob(t *testing.T) {
 	if !strings.Contains(f.names(), box) {
 		t.Fatalf("the throwaway %s was deleted before the agent could pull from it", box)
 	}
-	want := e.a.Now().Add(endedKeep).UTC().Format(time.RFC3339)
+	want := jobrun.ProtectedExpiry // the host, not the watcher, sets retention
 	if got := f.inst(box).Config[expiresKey]; got != want {
 		t.Errorf("expiry = %q, want %q", got, want)
 	}

@@ -1,4 +1,4 @@
-# Every pull request and every push to dev or main runs the checks each change must pass, so
+# Every pull request and every push to main runs the checks each change must pass, so
 # verification doesn't wait on the laptop, which can run only one Go test at a time and never -race.
 # Linux runs the race detector; Windows runs the tests natively, builds the tray, parses the
 # provisioning PowerShell.
@@ -7,7 +7,7 @@ name: test
 on:
   pull_request:
   push:
-    branches: [main, dev]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +19,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test site/test/files.test.mjs
+
   test-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -41,7 +53,7 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: provisioning scripts
         run: |
-          for f in provision/setup-host.sh provision/install-boxd.sh provision/update-boxd.sh; do
+          for f in provision/setup-host.sh provision/install-boxd.sh provision/update-boxd.sh provision/deploy-boxd.sh provision/package-boxd-install.sh provision/reaper.sh; do
             bash -n "$f"
             shellcheck -S warning "$f"
           done
@@ -65,6 +77,10 @@ jobs:
                       tf.flush()
                       subprocess.run([shell, '-n', tf.name], check=True)
                       subprocess.run(['shellcheck', '-S', 'warning', '-s', shell, tf.name], check=True)
+          dp = yaml.safe_load(open('provision/default-profile.yaml'))
+          assert not (dp.get('config') or {}).get('cloud-init.user-data'), 'default-profile.yaml must not run cloud-init on every box launch (#194)'
+          ab = yaml.safe_load(open('provision/agent-base.yaml'))
+          assert (ab.get('config') or {}).get('cloud-init.user-data'), 'agent-base.yaml must carry the image build cloud-init (#194)'
           PY
 
   # gofmt runs on Linux only: a Windows checkout of LF files can confuse it.

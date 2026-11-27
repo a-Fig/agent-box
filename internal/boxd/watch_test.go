@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -23,16 +24,19 @@ import (
 
 // fakeIncus is a project whose boxes and job files a test sets.
 type fakeIncus struct {
-	mu     sync.Mutex
-	ins    []Instance
-	cfg    map[string]string
-	jobs   map[string][]fakeJob // box -> its job files
-	err    error
-	execs  int
-	cli    []string
-	cliErr func(args []string) error
-	cancel string // the last cancel script
-	// SetExpiryIf: each write made, as "<box> <expiry>", and a write that
+	busyOperation bool
+	mu            sync.Mutex
+	ins           []Instance
+	cfg           map[string]string
+	jobs          map[string][]fakeJob // box -> its job files
+	err           error
+	execs         int
+	fileReads     int
+	cli           []string
+	cliErr        func(args []string) error
+	files         map[string]string
+	cancel        string // the last cancel script
+	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
 	expirySets []string
 	between    func(cfg map[string]string)
@@ -40,6 +44,31 @@ type fakeIncus struct {
 	runChecks  int                 // running-jobs scripts run
 	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
 	onScan     func(box string)    // runs, under the lock, as a scan of box starts
+}
+
+func (f *fakeIncus) InstanceBusy(ctx context.Context, name string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.busyOperation, ctx.Err()
+}
+
+func (f *fakeIncus) FileRange(ctx context.Context, box, path string, offset, limit int64) ([]byte, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileReads++
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	for _, j := range f.jobs[box] {
+		if path == jobDir+"/"+j.name+".log" {
+			size := int64(len(j.log))
+			if offset >= size {
+				return nil, size, nil
+			}
+			return []byte(j.log[offset:min(offset+limit, size)]), size, nil
+		}
+	}
+	return nil, 0, fs.ErrNotExist
 }
 
 type fakeJob struct {
@@ -50,17 +79,17 @@ type fakeJob struct {
 	endedAt     int64
 }
 
-// SetExpiryIf decides on a copy, without the lock (decide runs Exec), as
+// SetConfigIf decides on a copy, without the lock (decide runs Exec), as
 // the real one decides between its GET and its PATCH. Writes replace the
 // config map, so a Poll reading an earlier copy never races them.
-func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+func (f *fakeIncus) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
 	for try := 0; try < 5; try++ {
 		read, ok := f.instance(name)
 		if !ok {
 			return false, nil
 		}
-		until, ok := decide(read)
-		if !ok {
+		config := decide(read)
+		if len(config) == 0 {
 			return false, nil
 		}
 		f.mu.Lock()
@@ -75,11 +104,16 @@ func (f *fakeIncus) SetExpiryIf(ctx context.Context, name string, decide func(In
 			f.ins[i].Config, f.between = c, nil
 			f.mu.Unlock()
 			continue
+		case !maps.Equal(f.ins[i].Config, read.Config):
+			f.mu.Unlock()
+			continue
 		}
 		c := maps.Clone(f.ins[i].Config)
-		c[jobrun.ExpiresKey] = until.UTC().Format(time.RFC3339)
+		maps.Copy(c, config)
 		f.ins[i].Config = c
-		f.expirySets = append(f.expirySets, name+" "+c[jobrun.ExpiresKey])
+		if exp, ok := config[jobrun.ExpiresKey]; ok {
+			f.expirySets = append(f.expirySets, name+" "+exp)
+		}
 		f.mu.Unlock()
 		return true, nil
 	}
@@ -165,6 +199,32 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if script == expiryScan {
+		var b strings.Builder
+		for _, j := range f.jobs[box] {
+			switch j.state {
+			case "running", "starting":
+				fmt.Fprintf(&b, "busy %s\n", j.name)
+			case "done":
+				fmt.Fprintf(&b, "done %s %d\n", j.name, j.endedAt)
+			}
+		}
+		b.WriteString("checked\n")
+		return []byte(b.String()), nil
+	}
+	if strings.HasPrefix(script, "# kept jobs") {
+		ended := false
+		for _, j := range f.jobs[box] {
+			if j.state == "running" || j.state == "starting" {
+				return nil, nil
+			}
+			ended = ended || j.state == "done"
+		}
+		if ended {
+			return []byte("kept\n"), nil
+		}
+		return nil, nil
+	}
 	if strings.HasPrefix(script, "# running jobs") {
 		f.runChecks++
 		for _, in := range f.ins {
@@ -185,6 +245,19 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 			f.afterRun(box)
 		}
 		return []byte(b.String()), nil
+	}
+	if strings.HasPrefix(script, "# idle stop") {
+		found := false
+		for _, j := range f.jobs[box] {
+			if j.state != "done" {
+				return nil, &ExitError{Code: 4}
+			}
+			found = found || strings.Contains(script, j.name+".log")
+		}
+		if !found {
+			return nil, &ExitError{Code: 3}
+		}
+		return nil, nil
 	}
 	if strings.HasPrefix(script, "test -e ") { // startedInBox, and startJob's own check
 		for _, j := range f.jobs[box] {
@@ -212,9 +285,18 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 	defer f.mu.Unlock()
 	f.cli = append(f.cli, strings.Join(args, " "))
 	if f.cliErr != nil {
-		return nil, f.cliErr(args)
+		if err := f.cliErr(args); err != nil {
+			return nil, err
+		}
 	}
 	switch args[0] {
+	case "file":
+		if args[1] == "pull" {
+			if data, ok := f.files[args[2]]; ok {
+				return []byte(data), nil
+			}
+			return nil, &ExitError{Code: 1, Stderr: "file does not exist"}
+		}
 	case "launch":
 		size := "medium"
 		for i, a := range args {
@@ -229,6 +311,13 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 		for i, in := range f.ins {
 			if in.Name == args[1] {
 				f.ins = append(f.ins[:i], f.ins[i+1:]...)
+				break
+			}
+		}
+	case "stop":
+		for i, in := range f.ins {
+			if in.Name == args[1] {
+				f.ins[i].Status = "Stopped"
 				break
 			}
 		}
@@ -560,9 +649,18 @@ func TestAPI(t *testing.T) {
 		return resp.StatusCode
 	}
 	var st dash.State
-	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 {
-		t.Fatalf("state %+v", st)
+	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 || st.Queue {
+		t.Fatalf("state %+v (want Queue=false when W.Queue is nil)", st)
 	}
+	q, err := OpenQueue(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Queue = q
+	if get("/api/state", &st) != 200 || !st.Queue {
+		t.Fatalf("state with queue = %+v, want Queue=true", st)
+	}
+	w.Queue = nil
 	key := url.PathEscape(st.Jobs[0].Key)
 	var chunk dash.LogChunk
 	if code := get("/api/jobs/"+key+"/log?offset=0", &chunk); code != 200 || chunk.EOF || len(chunk.Data) > dash.MaxLogChunk ||

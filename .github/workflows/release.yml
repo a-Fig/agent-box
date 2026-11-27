@@ -68,7 +68,7 @@ jobs:
           build linux amd64 boxd-linux-amd64 ./cmd/boxd
           # As LF, whatever the checkout did, since they run in the distro.
           tr -d '\r' < provision/systemd/agent-box-boxd.service > dist/agent-box-boxd.service
-          tr -d '\r' < provision/install-boxd.sh > dist/install-boxd.sh
+          sh provision/package-boxd-install.sh > dist/install-boxd.sh
           # The updaters' probe: the binaries this runner can run must say the tag as their second
           # word, or -X missed its variable.
           for probe in "dist/box-linux-amd64 --version" "dist/boxd-linux-amd64 -version"; do

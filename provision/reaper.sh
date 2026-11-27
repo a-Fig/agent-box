@@ -1,31 +1,94 @@
 #!/bin/sh
-# Deletes boxes in the agents project whose user.expires (RFC3339 UTC, set by `box`) has passed,
-# and whose user.box.hold-until (a person's extend, if any) has passed too.
-# A systemd timer runs it every minute inside the distro, so expired boxes go even when nobody is
-# logged in to Windows to run the tray (the tray reaps too; deleting twice is harmless).
+# Use the host policy when the installed boxd supports it. The timestamp
+# policy keeps ordinary idle boxes expiring during installation and rollback.
 set -eu
-PROJECT=${AGENTS_PROJECT:-agents}
-now=$(date -u +%s)
-# Incus's csv wraps a field holding a comma or quote in double quotes; the values here are plain
-# RFC3339 UTC, so strip them. Anything that isn't exactly that form is refused, as the Go side
-# does (mode.Held), so a malformed hold never counts as a future time.
-unq() { printf '%s' "$1" | sed 's/^"//; s/"$//'; }
-PAT='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'
-epoch() { printf '%s' "$1" | grep -Eq "$PAT" && date -u -d "$1" +%s 2>/dev/null; }
-incus list --project "$PROJECT" -f csv -c n,user.expires,user.box.hold-until </dev/null |
-while IFS=, read -r name expires hold; do
-  expires=$(unq "$expires"); hold=$(unq "$hold")
-  [ -n "$expires" ] || continue                        # no expiry: leave it
-  t=$(epoch "$expires") || { echo "skip $name: bad user.expires '$expires'"; continue; }
-  if [ -n "$hold" ]; then
-    if h=$(epoch "$hold"); then
-      [ "$h" -gt "$t" ] && t=$h                        # held: the later of the two
-    else
-      echo "ignoring $name: bad user.box.hold-until '$hold'"
-    fi
-  fi
-  if [ "$t" -lt "$now" ]; then
-    echo "deleting $name (expired $expires${hold:+, hold $hold})"
-    incus delete --force --project "$PROJECT" "$name" </dev/null || echo "delete $name failed; next run retries"
-  fi
-done
+boxd=${AGENT_BOX_BOXD:-/opt/agent-box/bin/boxd}
+if [ -x "$boxd" ] && "$boxd" -help 2>&1 | grep -q '^  -reap$'; then
+    exec "$boxd" -reap -project "${AGENTS_PROJECT:-agents}" "$@"
+fi
+
+exec python3 - "${AGENTS_PROJECT:-agents}" "$@" <<'PY'
+import argparse
+from datetime import datetime, timezone
+import json
+import re
+import subprocess
+import sys
+from urllib.parse import quote, urlencode
+
+parser = argparse.ArgumentParser()
+parser.add_argument("project")
+parser.add_argument("--dry-run", action="store_true")
+args = parser.parse_args()
+
+utc_format = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
+
+
+def deadline(value):
+    if isinstance(value, str) and utc_format.fullmatch(value):
+        try:
+            return datetime.fromisoformat(value[:-1] + "+00:00")
+        except ValueError:
+            pass
+    return None
+
+
+def read_json(*command):
+    return json.loads(subprocess.check_output(["incus", *command], stdin=subprocess.DEVNULL))
+
+
+try:
+    boxes = read_json("list", "--project", args.project, "-f", "json")
+    if not isinstance(boxes, list) or any(
+        not isinstance(box, dict)
+        or not isinstance(box.get("name"), str)
+        or not box["name"]
+        or not isinstance(box.get("config"), dict)
+        for box in boxes
+    ):
+        raise ValueError("expected instance records with name and config")
+except (OSError, subprocess.CalledProcessError, ValueError) as err:
+    sys.exit(f"reaper: could not read Incus instances: {err}")
+
+now = datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def expired(name, config):
+    expires = config.get("user.expires", "")
+    if expires == "":
+        return False
+    expiry = deadline(expires)
+    if expiry is None:
+        print(f"skip {name}: bad user.expires {expires!r}")
+        return False
+    hold = config.get("user.box.hold-until", "")
+    held_until = deadline(hold)
+    if hold != "" and held_until is None:
+        print(f"ignoring {name}: bad user.box.hold-until {hold!r}")
+    return max(expiry, held_until or expiry) < now
+
+
+project = urlencode({"project": args.project})
+for box in boxes:
+    name = box["name"]
+    if not expired(name, box["config"]):
+        continue
+    # A setup or hold can land after the list. Fetch both fields together
+    # before the name-bound delete.
+    try:
+        config = read_json("query", f"/1.0/instances/{quote(name, safe='')}?{project}")["config"]
+        if not isinstance(config, dict):
+            raise ValueError("expected instance config")
+    except (OSError, subprocess.CalledProcessError, ValueError, TypeError, KeyError) as err:
+        print(f"skip {name}: could not recheck expiry: {err}")
+        continue
+    if not expired(name, config):
+        continue
+    action = "would delete" if args.dry_run else "deleting"
+    print(f"{action} {name} (expired {config['user.expires']})", flush=True)
+    if not args.dry_run and subprocess.call(
+        ["incus", "delete", "--force", "--project", args.project, "--", name],
+        stdin=subprocess.DEVNULL,
+    ):
+        print(f"delete {name} failed; next run retries")
+PY

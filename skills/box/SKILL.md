@@ -5,20 +5,21 @@ description: Run heavy test suites and builds from your worktree on a disposable
 
 # box: offload heavy runs
 
-**Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, or several heavy runs at once; quick tests gain little.
+**Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, and parallel builds.
 
-1. `box_status` with your worktree as `dir` says whether it fits now.
-2. `box_run` with `dir`, `command` and `reason` (the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` if it might hang (exit 124). With `pipefail`, `| head` can exit 141.
+1. `box_status` with `dir` reports room per host.
+2. `box_run` takes `dir`, `command`, and `reason` (owner-visible). Syncs uncommitted and untracked files, excluding ignored files. Fleet results include host and qualified job ID. `timeout` limits runtime (124). With `pipefail`, `| head` can exit 141.
 3. A run ending within 30 s returns its result; else `running`:
-   - `push: true`: **don't wait or poll.** Do other work or end your turn; the result arrives starting "box: job …" (Claude Code: mid-turn); `box_job` has the rest.
+   - `push: true`: **don't wait or poll.** Expect "box: job …" (Claude Code: mid-turn). Notices retry on Box MCP restart in the same T3 profile. Details in `box_job`.
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
    - **Subagents pass `push: false`** (it would wake the parent).
-4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; a snapshot waits, its result is pushed; `box_cancel` drops it.
-5. **`state: refused` (exit 75)**: nothing started (PC busy, paused or unreachable). Retry later, or smaller `size` if no room. A pushed "lost" job didn't finish; a "paused" one may resume (its end is pushed). `done` with exit 75 is the command's own.
-6. `go test`/vitest results lead with failures (file:line); `box_job` pages logs (`offset`/`limit`) or lists jobs (no `id`).
-7. `box_pull` fetches reports and builds before a later run replaces them. Parallel runs: `new: true`.
+4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; snapshot waits for the host; `box_cancel` drops it.
+5. **`state: refused` (exit 75)**: nothing started. Capacity results name the limit and may suggest a smaller size. Paused jobs may resume. Lost jobs never finished. `done` with exit 75 is the command's own.
+6. `go test`/vitest show failures first (file:line). `box_job` pages logs (`offset`/`limit`) or lists fleet jobs (no `id`).
+7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel: `new: true`.
 
-Boxes are throwaway; `/cache` survives.
+CPU throwaways can be reused. `fresh: true` launches clean.
+An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).
 

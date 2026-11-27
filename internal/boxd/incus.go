@@ -26,15 +26,18 @@ type Incus interface {
 	// Exec runs a bash script in a running instance and returns its stdout.
 	// A non-zero exit is an *ExitError.
 	Exec(ctx context.Context, name, script string, args ...string) ([]byte, error)
+	// FileRange reads a bounded byte range without starting the instance.
+	// It returns the full file size, including when offset is past EOF.
+	FileRange(ctx context.Context, name, path string, offset, limit int64) ([]byte, int64, error)
+	// InstanceBusy reports whether Incus has a pending operation for the instance.
+	InstanceBusy(ctx context.Context, name string) (bool, error)
 	// CLI runs `incus <args...>` in the project, with stdin (often ""), for
 	// what starting a queued job takes: launch, file push, config set, exec.
 	CLI(ctx context.Context, stdin string, args ...string) ([]byte, error)
-	// SetExpiryIf reads the instance and, if decide says so, sets its
-	// user.expires to the time decide returns, in a write Incus refuses if
-	// anything changed the instance since that read. After a refusal it
-	// reads and decides again. It reports whether it wrote; an instance
-	// that is gone is no error.
-	SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error)
+	// SetConfigIf merges the chosen config keys while the instance's ETag
+	// matches the read. It reads and decides again on a conflict. A nil map
+	// or a missing instance skips the write.
+	SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error)
 }
 
 // Instance is the part of GET /1.0/instances?recursion=2 boxd reads.
@@ -123,6 +126,35 @@ func (s *Socket) Instances(ctx context.Context) ([]Instance, error) {
 	return ins, err
 }
 
+func (s *Socket) InstanceBusy(ctx context.Context, name string) (bool, error) {
+	var ops map[string][]struct {
+		Resources map[string][]string `json:"resources"`
+	}
+	if err := s.get(ctx, "/1.0/operations?recursion=1&project="+url.QueryEscape(s.Proj), &ops); err != nil {
+		return false, err
+	}
+	if ops == nil {
+		return false, errors.New("Incus did not return an operation list")
+	}
+	for status, group := range ops {
+		if status == "success" || status == "failure" || status == "cancelled" {
+			continue
+		}
+		for _, op := range group {
+			for _, resource := range op.Resources["instances"] {
+				u, err := url.Parse(resource)
+				if err != nil {
+					return false, err
+				}
+				if u.Path == "/1.0/instances/"+name {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
 func (s *Socket) Project(ctx context.Context) (Project, error) {
 	var p Project
 	var cfg struct {
@@ -164,11 +196,7 @@ func (s *Socket) Exec(ctx context.Context, name, script string, args ...string) 
 // was read.
 var errStale = errors.New("ETag doesn't match")
 
-// SetExpiryIf is a GET of the instance, for its config and ETag, then a
-// PATCH of user.expires with If-Match: a write that comes between, such as a
-// job's start setting its 24h, makes the PATCH fail with 412, and the next
-// try sees it. PATCH merges config keys, so nothing else is touched.
-func (s *Socket) SetExpiryIf(ctx context.Context, name string, decide func(Instance) (time.Time, bool)) (bool, error) {
+func (s *Socket) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
 	path := "/1.0/instances/" + url.PathEscape(name) + "?project=" + url.QueryEscape(s.Proj)
 	var wrote bool
 	err := jobrun.RetryETag(ctx, func() error {
@@ -195,17 +223,21 @@ func (s *Socket) SetExpiryIf(ctx context.Context, name string, decide func(Insta
 		case derr != nil:
 			return fmt.Errorf("incus GET %s: %w", name, derr)
 		}
-		until, ok := decide(env.Metadata)
-		if !ok {
+		config := decide(env.Metadata)
+		if len(config) == 0 {
 			return nil
 		}
-		body, _ := json.Marshal(map[string]any{"config": map[string]string{jobrun.ExpiresKey: until.UTC().Format(time.RFC3339)}})
+		etag := resp.Header.Get("ETag")
+		if etag == "" {
+			return fmt.Errorf("incus GET %s: missing ETag", name)
+		}
+		body, _ := json.Marshal(map[string]any{"config": config})
 		patch, err := http.NewRequestWithContext(ctx, "PATCH", "http://incus"+path, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
 		patch.Header.Set("Content-Type", "application/json")
-		patch.Header.Set("If-Match", resp.Header.Get("ETag"))
+		patch.Header.Set("If-Match", etag)
 		presp, err := s.client.Do(patch)
 		if err != nil {
 			return err

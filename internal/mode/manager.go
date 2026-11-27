@@ -16,26 +16,34 @@ import (
 // which the instance is deleted.
 const ExpiresKey = "user.expires"
 
+// ProtectedExpiry keeps managed jobs safe with timestamp-only reapers.
+const ProtectedExpiry = "9999-01-01T00:00:00Z"
+
+// ProtectedDeadline also recognizes a deadline an older dashboard extended
+// from ProtectedExpiry. Year 9999 is reserved for job protection.
+func ProtectedDeadline(raw string) bool {
+	t, err := time.Parse(time.RFC3339, raw)
+	return err == nil && t.Year() == 9999
+}
+
 // HoldKey is the RFC3339 UTC time a person asked a box to live until: an
 // extend from the dashboard, or box new --ttl. Only those write it. Whatever
-// sets ExpiresKey writes Held of its own deadline, the reapers delete a box
+// sets ExpiresKey writes Held of its own deadline, the reaper deletes a box
 // only once both times have passed, and nothing takes a held box for room.
 // Kept apart from ExpiresKey so a job's end can't mistake an extend for the
 // job's own deadline (#198), as Kubernetes keeps a finalizer apart from the
 // scheduler's state.
 const HoldKey = "user.box.hold-until"
 
-// holdFormat is the only hold Held and provision/reaper.sh accept: RFC3339 in
-// UTC, a dot before any fraction, nothing after the Z. Anything else is ignored
-// by both, so the two reapers agree.
+// Holds use RFC3339 in UTC, as in the timestamp-only reaper.
 var holdFormat = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$`)
 
 // Held is the later of t and the hold in an instance's config. A box is held
 // at now when Held(cfg, now).After(now).
 func Held(cfg map[string]string, t time.Time) time.Time {
-	// UTC only, as the shell reaper reads it: a malformed hold is ignored.
+	// UTC only, so older reapers interpret the hold the same way.
 	v := cfg[HoldKey]
-	if h, err := time.Parse(time.RFC3339, v); err == nil && holdFormat.MatchString(v) && h.After(t) {
+	if h, err := time.Parse(time.RFC3339, v); err == nil && h.Year() != 9999 && holdFormat.MatchString(v) && h.After(t) {
 		return h
 	}
 	return t
@@ -90,7 +98,7 @@ type Manager struct {
 	// Persist, if set, is called with a mode adopted from the project or a
 	// request, so the tray can save it to boxtray.json like a menu click.
 	Persist func(Mode)
-	// Logf, if set, records adopted and dropped requests, and each box reaped.
+	// Logf, if set, records adopted and dropped requests.
 	Logf func(format string, args ...any)
 
 	mu          sync.Mutex // guards chosen, choiceAt, chosenDirty
@@ -109,12 +117,11 @@ type Manager struct {
 	rc          reclaims
 	swapSet     map[string]int64  // box -> init PID whose memory.swap.max was confirmed last tick
 	ended       map[string]string // box -> state it ended the last applyInstances in
-	badExpires  map[string]string // instance -> unparseable user.expires already reported
 	last        Status
 
 	// Release memory (BeginRelease) holds this while `wsl --terminate`
-	// runs; no tick, reclaim or swap call starts then. cancelMu guards
-	// tickCancel, which cancels the tick in progress.
+	// runs; no tick, reclaim, swap call or StartHost starts then. cancelMu
+	// guards tickCancel, which cancels the tick or StartHost in progress.
 	releasing  atomic.Bool
 	cancelMu   sync.Mutex
 	tickCancel context.CancelFunc
@@ -190,7 +197,6 @@ func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 		errs = append(errs, err)
 		st.Running = m.last.Running
 	} else {
-		ins, errs = m.reap(ctx, now, ins, errs)
 		if m.Reclaim != nil {
 			var rerrs []error
 			st.Reclaimed, rerrs = m.rc.harvest(now)
@@ -213,56 +219,7 @@ func (m *Manager) Tick(ctx context.Context, now time.Time) Status {
 	return st
 }
 
-// reap deletes every instance whose user.expires and hold (Held) are in the past and returns
-// the rest. It runs in every mode, My PC included, because deleting frees RAM
-// and disk. An instance with no user.expires is left alone; one with a value
-// that isn't RFC3339 is left alone and reported once. A failed delete is
-// reported and retried next tick, since the instance is still listed.
-func (m *Manager) reap(ctx context.Context, now time.Time, ins []Instance, errs []error) ([]Instance, []error) {
-	if m.badExpires == nil {
-		m.badExpires = map[string]string{}
-	}
-	live := make(map[string]bool, len(ins))
-	keep := ins[:0:0]
-	for _, in := range ins {
-		live[in.Name] = true
-		val, ok := in.Config[ExpiresKey]
-		if !ok {
-			delete(m.badExpires, in.Name)
-			keep = append(keep, in)
-			continue
-		}
-		exp, err := time.Parse(time.RFC3339, val)
-		if err != nil {
-			if m.badExpires[in.Name] != val {
-				m.badExpires[in.Name] = val
-				errs = append(errs, fmt.Errorf("%s: ignoring unparseable %s %q: %w", in.Name, ExpiresKey, val, err))
-			}
-			keep = append(keep, in)
-			continue
-		}
-		delete(m.badExpires, in.Name)
-		if !Held(in.Config, exp).Before(now) {
-			keep = append(keep, in)
-			continue
-		}
-		if err := m.Incus.Delete(ctx, in.Name); err != nil {
-			errs = append(errs, err)
-			keep = append(keep, in) // still there; counted and retried next tick
-			continue
-		}
-		m.logf("reaped %s (expired %s)", in.Name, val) // so a box that vanished can be explained (#156)
-		delete(m.frozenSince, in.Name)
-	}
-	for name := range m.badExpires {
-		if !live[name] {
-			delete(m.badExpires, name)
-		}
-	}
-	return keep, errs
-}
-
-// applyProject records the mode for `box`. It never touches project limits.
+// applyProject records the mode for box. It leaves project limits to applyMemoryCap.
 func (m *Manager) applyProject(ctx context.Context, eff Mode) error {
 	return m.Incus.SetProjectConfig(ctx, ProjectModeKey, string(eff))
 }
@@ -487,11 +444,17 @@ func (m *Manager) thaw(ctx context.Context, eff Mode, in Instance, state string)
 
 // BeginRelease is called before the tray's "Release memory" runs `wsl
 // --terminate`. It returns false, doing nothing, if a release is already
-// running: one termination at a time. Otherwise it cancels the tick in
-// progress and waits for it, drops queued and running reclaims and waits
-// for their wsl.exe calls to end, and keeps any new tick from calling out
-// until EndRelease.
-func (m *Manager) BeginRelease() bool {
+// running: one termination at a time. Otherwise it cancels the tick or
+// StartHost in progress and waits for it, drops queued and running reclaims
+// and waits for their wsl.exe calls to end, and keeps any new tick or start
+// from calling out until EndRelease.
+//
+// With Handshake set it then stores the latest pick that no tick has stored
+// yet (a click the cancelled tick never wrote, or one made during that
+// write), bounded by ctx: once the distro is
+// down, an enforcer that takes over (the headless one, after Quit) reads the
+// pick from the project, and would otherwise apply an older one (#204).
+func (m *Manager) BeginRelease(ctx context.Context) bool {
 	if !m.releasing.CompareAndSwap(false, true) {
 		return false
 	}
@@ -502,6 +465,11 @@ func (m *Manager) BeginRelease() bool {
 	m.cancelMu.Unlock()
 	m.tickMu.Lock()
 	m.rc.forgetAll()
+	if m.Handshake {
+		if err := m.storeChosen(ctx); err != nil {
+			m.logf("release memory: %v", err)
+		}
+	}
 	m.tickMu.Unlock()
 	m.rc.wait()
 	return true
@@ -510,7 +478,30 @@ func (m *Manager) BeginRelease() bool {
 // EndRelease lets ticks and reclaims call out again.
 func (m *Manager) EndRelease() { m.releasing.Store(false) }
 
-// Releasing says whether a Release memory is in progress, so tray work
-// that calls wsl.exe (the post-release page-cache drop) can stay out of
-// its way: any wsl.exe call would start the distro again.
+// Releasing lets the tray's background page-cache drop avoid calling
+// wsl.exe during Release memory.
 func (m *Manager) Releasing() bool { return m.releasing.Load() }
+
+// StartHost calls start, which brings the Incus host up, unless a release is
+// running. It holds the tick lock, so a release that begins meanwhile cancels
+// start's context and waits for it to return before it terminates anything.
+// It reports whether start ran to the end with no release in the way; one
+// that didn't hasn't tried, so the caller can try again soon.
+func (m *Manager) StartHost(ctx context.Context, start func(context.Context) error) (bool, error) {
+	m.tickMu.Lock()
+	defer m.tickMu.Unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m.cancelMu.Lock()
+	m.tickCancel = cancel
+	m.cancelMu.Unlock()
+	defer func() { m.cancelMu.Lock(); m.tickCancel = nil; m.cancelMu.Unlock() }()
+	if m.releasing.Load() {
+		return false, nil
+	}
+	err := start(ctx)
+	if m.releasing.Load() {
+		return false, err
+	}
+	return true, err
+}

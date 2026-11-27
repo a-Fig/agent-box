@@ -27,7 +27,7 @@ const (
 	workRoot  = "/work"
 	idleTTL   = 2 * time.Hour  // a box launched for a job, as box new gives it
 	jobTTL    = 24 * time.Hour // while a job runs, as box run sets it
-	startTime = 10 * time.Minute
+	startTime = jobrun.SetupTTL
 )
 
 var errNoRoom = errors.New("no room")
@@ -107,7 +107,7 @@ func withoutDisk(proj Project, gone []Instance) Project {
 func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	var out []Instance
 	for _, in := range ins {
-		if !w.boxBusy(in.Name, "") && keptThrowaway(in, now) && w.Hist != nil && w.Hist.EndedHere(in) {
+		if in.Name != w.idleStopping && !w.boxBusy(in.Name, "") && keptThrowaway(in, now) && w.Hist != nil && w.Hist.EndedHere(in) {
 			out = append(out, in)
 		}
 	}
@@ -120,9 +120,162 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 }
 
 func keptThrowaway(in Instance, now time.Time) bool {
+	return keptThrowawayWindow(in, now) && !jobrun.ThrowawayClaimed(in.Config, now)
+}
+
+func keptThrowawayWindow(in Instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 	return in.Config[jobrun.ThrowawayKey] == "true" && in.Status != "Frozen" && err == nil &&
 		!exp.After(now.Add(jobrun.EndedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now)
+}
+
+// claimThrowaway reserves an idle CPU throwaway for client-side job setup.
+// The same conditional write that takes it out of the pool protects its
+// expiry. A client that disappears leaves a claim that expires on its own.
+func (w *Watcher) claimThrowaway(ctx context.Context, box, repoKey, size, job string) (bool, error) {
+	return w.reserveThrowaway(ctx, box, job, func(in Instance) bool {
+		return warmClaimable(in, w.Now()) && in.Config[jobrun.ThrowawayRepoKey] == repoKey &&
+			mode.SizeOf(in.Config).Name == size
+	})
+}
+
+func warmClaimable(in Instance, now time.Time) bool {
+	expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	return in.Status == "Running" && in.Config[jobrun.ThrowawayRepoKey] != "" && expires.After(now.Add(controlTimeout))
+}
+
+// A run and an eviction compete for the same Incus reservation. The empty
+// owner on an eviction fences expiry writes from the previous job.
+func (w *Watcher) reserveThrowaway(ctx context.Context, box, job string, matches func(Instance) bool) (bool, error) {
+	return w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		now := w.Now().UTC()
+		if !keptThrowaway(in, now) || !matches(in) {
+			return nil
+		}
+		switch in.Status {
+		case "Running":
+			out, err := w.Incus.Exec(ctx, box, jobrun.KeptScript(workRoot))
+			if err != nil || strings.TrimSpace(string(out)) != "kept" {
+				return nil
+			}
+		case "Stopped":
+			if w.Hist == nil || !w.Hist.EndedHere(in) {
+				return nil
+			}
+		default:
+			return nil
+		}
+		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+		until := now.Add(jobrun.ThrowawayClaimTTL)
+		if job == "" {
+			until = now.Add(jobrun.EvictTTL)
+		}
+		if expires.Before(until) && (job != "" || in.Config[jobrun.ThrowawayRepoKey] != "") {
+			expires = until
+		}
+		changes := map[string]string{
+			jobrun.ExpiresKey:        expires.Format(time.RFC3339),
+			jobrun.ThrowawayClaimKey: until.Format(time.RFC3339),
+			jobrun.ThrowawayOwnerKey: job,
+		}
+		if job != "" && in.Config[jobrun.ThrowawayStopKey] == jobrun.ThrowawayStopped {
+			changes[jobrun.ThrowawayStopKey] = ""
+		}
+		return changes
+	})
+}
+
+func (w *Watcher) evictPooled(ctx context.Context, box, uid string) (bool, error) {
+	return w.evictThrowaway(ctx, box, uid, true)
+}
+
+func (w *Watcher) evictThrowaway(ctx context.Context, box, uid string, pooled bool) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
+	defer cancel()
+	reserved, err := w.reserveThrowaway(ctx, box, "", func(in Instance) bool {
+		w.mu.Lock()
+		busy := w.idleStopping == box || w.boxBusy(box, "")
+		w.mu.Unlock()
+		return !busy && boxUID(in) == uid && (in.Config[jobrun.ThrowawayRepoKey] != "") == pooled
+	})
+	if err != nil || !reserved {
+		return false, err
+	}
+	err = jobrun.RetryETag(ctx, func() error {
+		ins, err := w.Incus.Instances(ctx)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for _, in := range ins {
+			if in.Name == box {
+				now := w.Now()
+				until, _ := time.Parse(time.RFC3339, in.Config[jobrun.ThrowawayClaimKey])
+				if boxUID(in) != uid || in.Status == "Frozen" || mode.Held(in.Config, now).After(now) ||
+					in.Config[jobrun.ThrowawayOwnerKey] != "" || jobrun.IdleStopReserved(in.Config) || !until.After(now) {
+					return errNotIdle
+				}
+				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errNotIdle) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// setPoolExpiry changes only the owner's deadline. A fast job may finish
+// before the client confirms its start, so promotion also needs a live job.
+func (w *Watcher) setPoolExpiry(ctx context.Context, box, job string, ended bool) (bool, error) {
+	return w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		return w.poolExpiryConfig(ctx, in, job, ended)
+	})
+}
+
+func (w *Watcher) poolExpiryConfig(ctx context.Context, in Instance, job string, ended bool) map[string]string {
+	if mode.ProtectedDeadline(in.Config[jobrun.ExpiresKey]) ||
+		in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job {
+		return nil
+	}
+	if in.Status != "Running" && (in.Status != "Frozen" || ended) {
+		return nil
+	}
+	now := w.Now().UTC()
+	cur, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	lease := in.Config[jobrun.ThrowawayClaimKey] != ""
+	ttl := jobTTL
+	if ended {
+		ttl = jobrun.EndedKeep
+		if err == nil && !lease && !cur.After(now.Add(ttl)) {
+			return nil
+		}
+	} else if !lease {
+		return nil
+	}
+	if in.Status == "Frozen" {
+		// StartScript writes the job's .repo before spawning its wrapper.
+		// That file is readable while exec is blocked by the freeze.
+		p := in.Name + workRoot + "/.box/" + job + ".repo"
+		out, err := w.Incus.CLI(ctx, "", "file", "pull", p, "-")
+		if err != nil || !validBoxName.MatchString(strings.TrimSpace(string(out))) {
+			return nil
+		}
+	} else {
+		out, err := w.Incus.Exec(ctx, in.Name, jobrun.RunningScript(workRoot))
+		running := strings.Fields(string(out))
+		if err != nil || (ended && len(running) != 0) || (!ended && !slices.Contains(running, job)) {
+			return nil
+		}
+	}
+	return map[string]string{
+		jobrun.ExpiresKey:        mode.Held(in.Config, now.Add(ttl)).Format(time.RFC3339),
+		jobrun.ThrowawayClaimKey: "",
+	}
 }
 
 // idleRepoBoxes lists the repo boxes (not throwaways) idle since their last
@@ -153,8 +306,10 @@ func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
 // throwaway, its expiry still the idle one and not held.
 func idleRepo(in Instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	_, setup := jobrun.SetupOwner(in.Config)
 	return in.Config[jobrun.ThrowawayKey] != "true" && in.Status == "Running" && err == nil &&
-		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now)
+		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
+		!setup.After(now) && !jobrun.DeleteReserved(in.Config, now)
 }
 
 // spareBoxes is what a queued job short of room may delete, in the order it
@@ -171,6 +326,9 @@ func (w *Watcher) roomFor(it *queued, byName map[string]Instance, room dash.Room
 	// A box of a job whose start was cut short is the job's own, even a
 	// throwaway: startQueued looks in it before starting again.
 	if in, ok := byName[it.Box]; ok && (!it.New || w.Queue.startMark(it) != nil) {
+		if in.Name == w.idleStopping || jobrun.IdleStopReserved(in.Config) {
+			return dash.RefusedFull
+		}
 		switch in.Status {
 		case "Running":
 			return ""
@@ -431,13 +589,21 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Inst
 		if in.Config[jobrun.ThrowawayKey] != "true" {
 			what = "idle box"
 		}
-		err = jobrun.RetryETag(ctx, func() error {
-			if !w.stillIdle(ctx, in) {
-				return errNotIdle
+		if in.Config[jobrun.ThrowawayKey] == "true" {
+			var evicted bool
+			evicted, err = w.evictThrowaway(ctx, box, boxUID(in), in.Config[jobrun.ThrowawayRepoKey] != "")
+			if err == nil && !evicted {
+				err = errNotIdle
 			}
-			_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
-			return err
-		})
+		} else {
+			err = jobrun.RetryETag(ctx, func() error {
+				if !w.stillIdle(ctx, in) {
+					return errNotIdle
+				}
+				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
+				return err
+			})
+		}
 		if errors.Is(err, errNotIdle) {
 			err = fmt.Errorf("%w: %s is no longer idle", errNoRoom, box)
 			break
@@ -510,11 +676,13 @@ func (w *Watcher) startedInBox(ctx context.Context, it *queued) bool {
 }
 
 // startJob does what box run does once it has a box: launch one if needed,
-// push the snapshot and the .meta, set the job's expiry and start it.
+// reserve setup, push the snapshot and metadata, and start it.
 func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.Size, now time.Time) (err error) {
 	box := it.Box
+	dispatched := false
 	if !reuse {
-		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New)
+		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New,
+			"-c", jobrun.SetupKey+"="+jobrun.SetupValue(it.Job, w.Now()))
 		args := append([]string{"launch", "agent-base", box}, flags...)
 		if _, err := w.Incus.CLI(ctx, devices, args...); err != nil {
 			if jobrun.LimitRefusal.MatchString(err.Error()) {
@@ -524,11 +692,27 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 		}
 		if it.New {
 			defer func() {
-				if err != nil {
+				if err != nil && !dispatched {
 					w.delete(context.WithoutCancel(ctx), box)
 				}
 			}()
 		}
+	}
+	reserved, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		if in.Status != "Running" || jobrun.ThrowawayClaimed(in.Config, w.Now()) {
+			return nil
+		}
+		return map[string]string{
+			jobrun.ExpiresKey: jobrun.ProtectedExpiry,
+			jobrun.SetupKey:   jobrun.SetupValue(it.Job, w.Now()),
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("reserve job setup: %w", err)
+	}
+	if !reserved {
+		dispatched = true // any competing reservation owns the box now
+		return errNoRoom
 	}
 	remote := workRoot + "/.box/" + it.Job
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", w.Queue.BundlePath(it.Job), box+remote+".bundle"); err != nil {
@@ -549,24 +733,31 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", tmp, box+remote+".meta"); err != nil {
 		return fmt.Errorf("push the .meta: %w", err)
 	}
-	// The job's 24h, or the box's hold if later. SetExpiryIf retries the ETag
-	// race with the tray, which sets a new box's CPU limits within a tick of
-	// its launch, just now.
-	if _, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-		return mode.Held(in.Config, now.Add(jobTTL)), true
-	}); err != nil {
-		return fmt.Errorf("set the expiry: %w", err)
-	}
 	payload := jobrun.Payload(it.Env, it.Command, time.Duration(it.Timeout)*time.Second)
+	dispatched = true
 	if _, err := w.Incus.CLI(ctx, "", "exec", box, "--", "bash", "-lc", jobrun.StartScript(workRoot, it.Job, it.Ref, it.Checkout, payload)); err != nil {
 		// The job may have started and only the wait for its PID or the
 		// stream failed, as box run allows for: then it runs, and is ours.
 		check, cancel := context.WithTimeout(context.WithoutCancel(ctx), execTimeout)
 		defer cancel()
-		if _, perr := w.Incus.Exec(check, box, "test -e "+remote+".pid -o -e "+remote+".exit"); perr == nil {
+		if _, perr := w.Incus.Exec(check, box, "test -e "+remote+".pid -o -e "+remote+".exit"); perr != nil {
+			return fmt.Errorf("start: %w", err)
+		}
+	}
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), execTimeout)
+	defer cancel()
+	if _, err := w.Incus.SetConfigIf(check, box, func(in Instance) map[string]string {
+		owner, _ := jobrun.SetupOwner(in.Config)
+		if owner != it.Job || mode.ProtectedDeadline(in.Config[jobrun.ExpiresKey]) {
 			return nil
 		}
-		return fmt.Errorf("start: %w", err)
+		out, err := w.Incus.Exec(check, box, jobrun.RunningScript(workRoot))
+		if err != nil || !slices.Contains(strings.Fields(string(out)), it.Job) {
+			return nil
+		}
+		return map[string]string{jobrun.ExpiresKey: jobrun.ProtectedExpiry}
+	}); err != nil {
+		w.logf("boxd: check protection for %s: %v", it.Job, err)
 	}
 	return nil
 }
@@ -581,7 +772,7 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 // (#90). A repo box gets idleTTL.
 // With w.mu held.
 //
-// Each try of the write (SetExpiryIf) reads the box, then checks, as
+// Each try of the write (SetConfigIf) reads the box, then checks, as
 // markIdle does, that no other job runs or is being started there, then
 // writes with the box's ETag. A job that starts there sets its 24h after its
 // PID file exists: before the check, the check sees it; after it, the write
@@ -595,27 +786,34 @@ func (w *Watcher) reapEnded(j *dash.Job) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		_, err := w.Incus.SetExpiryIf(ctx, box, func(in Instance) (time.Time, bool) {
-			until, ok := endedExpiry(in, job, w.Now().UTC())
-			if !ok || in.Status != "Running" {
-				return time.Time{}, false // a frozen box can't run the check: leave it
+		_, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+			now := w.Now().UTC()
+			if in.Config[jobrun.ThrowawayRepoKey] != "" {
+				if ranOnInstance(job, in) {
+					return w.poolExpiryConfig(ctx, in, own, true)
+				}
+				return nil
+			}
+			until, ok := endedExpiry(in, job, now)
+			if !ok || in.Status != "Running" || jobrun.ThrowawayClaimed(in.Config, now) {
+				return nil
 			}
 			w.mu.Lock()
 			busy := w.boxBusy(box, own)
 			w.mu.Unlock()
 			if busy {
-				return time.Time{}, false
+				return nil
 			}
 			out, err := w.Incus.Exec(ctx, box, jobrun.RunningScript(workRoot))
 			if err != nil {
-				return time.Time{}, false
+				return nil
 			}
 			for _, name := range strings.Fields(string(out)) {
 				if name != own {
-					return time.Time{}, false // another job runs there
+					return nil // another job runs there
 				}
 			}
-			return until, true
+			return map[string]string{jobrun.ExpiresKey: until.Format(time.RFC3339)}
 		})
 		if err != nil {
 			w.logf("boxd: after %s's job: %v", box, err)
@@ -676,6 +874,13 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 // boxBusy says whether a job other than own runs, or is being started, in
 // box, as far as boxd knows. With w.mu held.
 func (w *Watcher) boxBusy(box, own string) bool {
+	if w.Queue != nil {
+		for _, j := range w.Queue.StartingFor(box) {
+			if j.Box+"."+j.ID != own {
+				return true
+			}
+		}
+	}
 	for _, o := range w.live {
 		if o.Box == box && o.Box+"."+o.ID != own {
 			return true

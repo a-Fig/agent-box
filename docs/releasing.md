@@ -1,7 +1,12 @@
-# Releasing and updating (plan, 2026-11-25)
+# Releasing and updating
 
-Status: decided, being built. Tyler asked for a release process "clean and auto-updating, like
-Murmur's" (2026-11-25). Murmur's is in a-Fig/murmur `docs/releasing.md` and `internal/update`.
+Cut a stable release by tagging `main`; every shipped part then checks for a newer stable
+release and updates itself.
+Use [Cutting a release](#cutting-a-release) for the steps, and [Safety](#safety) before changing
+the process.
+
+_History: planned 2026-11-25. Tyler asked for a release process "clean and auto-updating, like
+Murmur's" (2026-11-25). Murmur's is in a-Fig/murmur `docs/releasing.md` and `internal/update`._
 
 ## Why
 
@@ -33,8 +38,9 @@ The `agent-base` image changes rarely and takes minutes to rebuild. It stays man
 
 A release is a pushed tag `vX.Y.Z` on `main`, as in Murmur.
 
-1. Merge the dev→main PR, as today: CI green, and every PR in it reviewed.
-2. Tag it. `.github/workflows/release.yml` builds the parts below, runs `govulncheck`, and
+1. Merge reviewed feature and fix PRs directly into `main`, with CI green.
+2. Choose the commit on `main` that passed CI and was published as a nightly, then push a stable
+   tag at that commit. `.github/workflows/release.yml` builds the parts below, runs `govulncheck`, and
    publishes a GitHub release with `SHA256SUMS`:
    - `box-windows-amd64.exe`, `box-linux-amd64`, `box-linux-arm64`, `box-darwin-arm64`,
      `box-darwin-amd64` (`install.sh` and `install.ps1` download these)
@@ -58,7 +64,7 @@ A release is a pushed tag `vX.Y.Z` on `main`, as in Murmur.
 
 **Channels.** Every part follows **stable** (Tyler, 2026-11-25): it takes GitHub's latest
 release, which is never a prerelease. A nightly installs only by hand, through
-`box update --version <tag>`. The guards are the dev→main PR and the hand-tagged stable release.
+`box update --version <tag>`. Stable installations update after the hand-tagged release is published.
 
 ## How each part updates
 
