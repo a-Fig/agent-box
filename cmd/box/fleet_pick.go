@@ -95,6 +95,9 @@ type fleetCandidate struct {
 	WarmThrowaway    bool     // positive probe evidence of an idle claimable throwaway + enabled pool for this repo and size
 	BoxdAvailable    bool     // positively established boxd queue capability on this host
 	Queued           *int     // optional boxd queue depth when BoxdAvailable is true; nil if depth unknown
+
+	startRefusal *turnAwayInfo // pre-start refusal from a live attempt
+	queueError   string        // queue rejection after probing
 }
 
 // fleetPick is the pure picker's decision. Host is populated for pickStart and
@@ -293,6 +296,10 @@ func evaluateCandidate(index int, c fleetCandidate, req pickRequest, sz mode.Siz
 		ev.markUnavailable("", "capacity unknown: "+c.Error, req, sz)
 		return ev
 	}
+	if c.startRefusal != nil {
+		ev.markUnavailable(c.startRefusal.why, c.startRefusal.msg, req, sz)
+		return ev
+	}
 	if c.Mode == string(mode.MyPC) {
 		ev.markUnavailable(refusedMyPC, "in My PC mode", req, sz)
 		return ev
@@ -436,6 +443,9 @@ func canQueueOnHost(c fleetCandidate, why string, sz mode.Size) (bool, string) {
 	}
 	if c.Host.Project != mode.Project {
 		return false, fmt.Sprintf("project %q has no boxd queue; boxd handles project %q only", c.Host.Project, mode.Project)
+	}
+	if c.queueError != "" {
+		return false, c.queueError
 	}
 	if !c.BoxdAvailable {
 		return false, "boxd queue capability not established"

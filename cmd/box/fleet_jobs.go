@@ -34,11 +34,11 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 	defaultKey := [2]string{a.Remote, a.Project}
 	seen := make(map[[2]string]bool, len(hosts)+1)
 	lists := make([]listing, 0, len(hosts)+1)
-	for _, host := range append(hosts, defaultHost) {
+	for i, host := range append(hosts, defaultHost) {
 		key := [2]string{host.Remote, host.Project}
 		if !seen[key] {
 			seen[key] = true
-			lists = append(lists, listing{host: host, bare: key == defaultKey})
+			lists = append(lists, listing{host: host, bare: i == len(hosts)})
 		}
 	}
 
@@ -84,8 +84,10 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 			a.warn(fmt.Sprintf("box: %s: %s", label, strings.TrimPrefix(msg, "box: ")))
 		}
 		for _, job := range result.jobs {
-			// Existing default-host jobs still use bare IDs in local state.
-			if !result.bare {
+			// Keep IDs that already have bare records on the default host.
+			legacy := [2]string{host.Remote, host.Project} == defaultKey && a.StateDir != "" &&
+				(a.exists(job.Job, ".json") || a.exists(job.Job, ".result"))
+			if !result.bare && !legacy {
 				id, err := qualifyJobID(host, job.Job)
 				if err != nil {
 					a.warn(fmt.Sprintf("box: listing jobs on %s: %v", label, err))
