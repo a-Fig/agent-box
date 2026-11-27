@@ -143,10 +143,7 @@ func TestPickFleetHostStartEligibility(t *testing.T) {
 		okHost := readyHost("ok", "r6", mode.Project)
 		okHost.Mode = "" // no tray (Linux server) is startable
 
-		pick, err := pickFleetHost([]fleetCandidate{down, timedOut, paused, weirdMode, noLarge, okHost}, pickRequest{Size: large, ExplicitSize: true})
-		if err != nil {
-			t.Fatal(err)
-		}
+		pick := pickFleetHost([]fleetCandidate{down, timedOut, paused, weirdMode, noLarge, okHost}, pickRequest{Size: large, ExplicitSize: true})
 		if pick.Action != pickStart || pick.Host.Name != "ok" {
 			t.Fatalf("pick = %+v, want start on ok", pick)
 		}
@@ -159,10 +156,7 @@ func TestPickFleetHostStartEligibility(t *testing.T) {
 		unlimited := readyHost("unlimited", "r2", mode.Project)
 		unlimited.Sizes = testCPUSizes(-1, -1, -1)
 
-		pick, err := pickFleetHost([]fleetCandidate{missing, unlimited}, pickRequest{Size: medium, ExplicitSize: true})
-		if err != nil {
-			t.Fatal(err)
-		}
+		pick := pickFleetHost([]fleetCandidate{missing, unlimited}, pickRequest{Size: medium, ExplicitSize: true})
 		if pick.Action != pickStart || pick.Host.Name != "unlimited" {
 			t.Fatalf("pick = %+v, want start on unlimited", pick)
 		}
@@ -175,10 +169,7 @@ func TestPickFleetHostStartEligibility(t *testing.T) {
 		customProject := readyHost("work-host", "r2", "work")
 		customProject.Sizes = testCPUSizes(2, 1, 0)
 
-		pick, err := pickFleetHost([]fleetCandidate{fullAgents, customProject}, pickRequest{Size: medium, ExplicitSize: true, Queue: true})
-		if err != nil {
-			t.Fatal(err)
-		}
+		pick := pickFleetHost([]fleetCandidate{fullAgents, customProject}, pickRequest{Size: medium, ExplicitSize: true, Queue: true})
 		if pick.Action != pickStart || pick.Host.Name != "work-host" {
 			t.Fatalf("pick = %+v, want start on work-host", pick)
 		}
@@ -193,17 +184,14 @@ func TestPickFleetHostGPUSelection(t *testing.T) {
 	noGPU.Sizes = testCPUSizes(4, 2, 1)
 
 	busyGPU := readyHost("busy-gpu", "r2", mode.Project)
-	busyGPU.GPUBusy = true
+	busyGPU.GPUHolders = []string{"other-gpu"}
 
 	fullGPU := readyHost("full-gpu", "r3", mode.Project)
 	fullGPU.Sizes = testSizes(2, 1, 0, 0)
 
 	freeGPU := readyHost("free-gpu", "r4", mode.Project)
 
-	pick, err := pickFleetHost([]fleetCandidate{noGPU, busyGPU, fullGPU, freeGPU}, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	pick := pickFleetHost([]fleetCandidate{noGPU, busyGPU, fullGPU, freeGPU}, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
 	if pick.Action != pickStart || pick.Host.Name != "free-gpu" {
 		t.Fatalf("pick = %+v, want start on free-gpu", pick)
 	}
@@ -213,10 +201,7 @@ func TestPickFleetHostGPUSelection(t *testing.T) {
 		warmGPU := readyHost("warm-gpu", "r2", mode.Project)
 		warmGPU.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
-		pick, err := pickFleetHost([]fleetCandidate{coldGPU, warmGPU}, pickRequest{Size: gpu, ExplicitSize: true, Repo: "repo"})
-		if err != nil {
-			t.Fatal(err)
-		}
+		pick := pickFleetHost([]fleetCandidate{coldGPU, warmGPU}, pickRequest{Size: gpu, ExplicitSize: true, Repo: "repo"})
 		if pick.Action != pickStart || pick.Host.Name != "warm-gpu" || pick.Affinity != affinityWarmHost {
 			t.Fatalf("pick = %+v, want start on warm-gpu with warm-host affinity", pick)
 		}
@@ -226,10 +211,7 @@ func TestPickFleetHostGPUSelection(t *testing.T) {
 		mypcGPU := readyHost("mypc-gpu", "r1", mode.Project)
 		mypcGPU.Mode = string(mode.MyPC)
 
-		pick, err := pickFleetHost([]fleetCandidate{noGPU, mypcGPU}, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
-		if err != nil {
-			t.Fatal(err)
-		}
+		pick := pickFleetHost([]fleetCandidate{noGPU, mypcGPU}, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
 		if pick.Action != pickRefuse || pick.Host != (fleetHost{}) {
 			t.Fatalf("pick = %+v, want refuse", pick)
 		}
@@ -238,31 +220,42 @@ func TestPickFleetHostGPUSelection(t *testing.T) {
 		}
 	})
 
-	t.Run("GPU with --box requires pinned host and checks room for stopped GPU box", func(t *testing.T) {
-		stoppedGPUFull := readyHost("gpu-full", "r1", mode.Project)
-		stoppedGPUFull.Sizes = testSizes(2, 1, 0, 0)
-		stoppedGPUFull.RepoBox = &RepoBox{Name: "mygpu", Size: mode.GPUSize, Status: "Stopped"}
+	t.Run("reusable GPU --box runs when it is the only GPU holder, even at allocation cap", func(t *testing.T) {
+		runningSelf := readyHost("gpu-self", "r1", mode.Project)
+		runningSelf.Sizes = testSizes(0, 0, 0, 0) // at allocation cap; existing box already counted
+		runningSelf.GPUHolders = []string{"mygpu"}
+		runningSelf.RepoBox = &RepoBox{Name: "mygpu", Size: mode.GPUSize, Status: "Running"}
 
-		pick, err := pickFleetHost([]fleetCandidate{stoppedGPUFull}, pickRequest{Size: gpu, ExplicitSize: true, Box: "mygpu", Host: "gpu-full", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "gpu-full" || pick.Why != refusedFull {
-			t.Fatalf("stopped GPU full pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{runningSelf}, pickRequest{Size: gpu, ExplicitSize: true, Box: "mygpu"})
+		if pick.Action != pickStart || pick.Host.Name != "gpu-self" || pick.Affinity != affinityDirectWarm {
+			t.Fatalf("running self-holder pick = %+v, want start", pick)
 		}
 
-		runningGPUFull := readyHost("gpu-running", "r2", mode.Project)
-		runningGPUFull.Sizes = testSizes(2, 1, 0, 0)
-		runningGPUFull.RepoBox = &RepoBox{Name: "mygpu", Size: mode.GPUSize, Status: "Running"}
+		// Stopped named GPU box at the allocation cap can also start (ensureBox starts it).
+		stoppedSelf := readyHost("gpu-stopped", "r2", mode.Project)
+		stoppedSelf.Sizes = testSizes(0, 0, 0, 0)
+		stoppedSelf.RepoBox = &RepoBox{Name: "mygpu", Size: mode.GPUSize, Status: "Stopped"}
 
-		pick, err = pickFleetHost([]fleetCandidate{runningGPUFull}, pickRequest{Size: gpu, ExplicitSize: true, Box: "mygpu", Host: "gpu-running"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "gpu-running" || pick.Affinity != affinityDirectWarm {
-			t.Fatalf("running GPU pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{stoppedSelf}, pickRequest{Size: gpu, ExplicitSize: true, Box: "mygpu", Queue: true})
+		if pick.Action != pickStart || pick.Host.Name != "gpu-stopped" || pick.Affinity != affinityRepoStopped {
+			t.Fatalf("stopped GPU box at cap pick = %+v, want start", pick)
+		}
+
+		// Another GPU box holding the GPU still blocks the named GPU box.
+		otherHolder := runningSelf
+		otherHolder.GPUHolders = []string{"mygpu", "other-gpu"}
+
+		pick = pickFleetHost([]fleetCandidate{otherHolder}, pickRequest{Size: gpu, ExplicitSize: true, Box: "mygpu", Queue: true})
+		if pick.Action != pickQueue || pick.Host.Name != "gpu-self" || pick.Why != refusedGPUBusy {
+			t.Fatalf("other-holder pick = %+v, want queue gpu-busy", pick)
 		}
 	})
 }
 
-func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
+func TestPickFleetHostAffinityStoppedAtCapAndStableOrder(t *testing.T) {
 	large := pickTestSize(t, "large")
 
-	t.Run("prefers idle running repo box over stopped-with-room, busy, repo-warm-host, and cold", func(t *testing.T) {
+	t.Run("prefers idle running repo box over stopped, busy, repo-warm-host, and cold", func(t *testing.T) {
 		cold := readyHost("cold", "r1", mode.Project)
 		repoWarm := readyHost("repo-warm", "r2", mode.Project)
 		repoWarm.WarmThrowaway = true
@@ -273,64 +266,59 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 		idle := readyHost("idle", "r5", mode.Project)
 		idle.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
-		pick, err := pickFleetHost([]fleetCandidate{cold, repoWarm, busy, stopped, idle}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Host.Name != "idle" || pick.Affinity != affinityDirectWarm {
-			t.Fatalf("tier 1 pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{cold, repoWarm, busy, stopped, idle}, pickRequest{Repo: "repo"})
+		if pick.Host.Name != "idle" || pick.Affinity != affinityDirectWarm {
+			t.Fatalf("tier 1 pick = %+v", pick)
 		}
-		pick, err = pickFleetHost([]fleetCandidate{cold, repoWarm, busy, stopped}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Host.Name != "stopped" || pick.Affinity != affinityRepoStopped {
-			t.Fatalf("tier 2 pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{cold, repoWarm, busy, stopped}, pickRequest{Repo: "repo"})
+		if pick.Host.Name != "stopped" || pick.Affinity != affinityRepoStopped {
+			t.Fatalf("tier 2 pick = %+v", pick)
 		}
-		pick, err = pickFleetHost([]fleetCandidate{cold, repoWarm, busy}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Host.Name != "busy" || pick.Affinity != affinityRepoBusy {
-			t.Fatalf("tier 3 pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{cold, repoWarm, busy}, pickRequest{Repo: "repo"})
+		if pick.Host.Name != "busy" || pick.Affinity != affinityRepoBusy {
+			t.Fatalf("tier 3 pick = %+v", pick)
 		}
-		pick, err = pickFleetHost([]fleetCandidate{cold, repoWarm}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Host.Name != "repo-warm" || pick.Affinity != affinityWarmHost {
-			t.Fatalf("tier 4 pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{cold, repoWarm}, pickRequest{Repo: "repo"})
+		if pick.Host.Name != "repo-warm" || pick.Affinity != affinityWarmHost {
+			t.Fatalf("tier 4 pick = %+v", pick)
 		}
 	})
 
-	t.Run("running matching repo box starts without new room; stopped matching repo box requires capacity", func(t *testing.T) {
+	t.Run("stopped repo box or named box at allocation cap is startable and not queued", func(t *testing.T) {
 		coldRoom := readyHost("cold-room", "r1", mode.Project)
 
-		stoppedFull := readyHost("stopped-full", "r2", mode.Project)
-		stoppedFull.Sizes = testCPUSizes(0, 0, 0)
-		stoppedFull.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Stopped"}
+		stoppedAtCap := readyHost("stopped-at-cap", "r2", mode.Project)
+		stoppedAtCap.Sizes = testCPUSizes(0, 0, 0) // already counts stoppedAtCap.RepoBox
+		stoppedAtCap.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Stopped"}
 
-		// Stopped box without capacity is NOT startable, so cold-room wins.
-		pick, err := pickFleetHost([]fleetCandidate{stoppedFull, coldRoom}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "cold-room" {
-			t.Fatalf("stopped-without-room pick = %+v, %v", pick, err)
+		// Stopped existing repo box beats cold host even when Fits == 0 for additional boxes.
+		pick := pickFleetHost([]fleetCandidate{coldRoom, stoppedAtCap}, pickRequest{Repo: "repo", Queue: true})
+		if pick.Action != pickStart || pick.Host.Name != "stopped-at-cap" || pick.Affinity != affinityRepoStopped {
+			t.Fatalf("stopped-at-cap fleet pick = %+v, want start on stopped-at-cap", pick)
 		}
 
-		// Stopped box alone without capacity queues (when boxd capable) instead of starting.
-		pick, err = pickFleetHost([]fleetCandidate{stoppedFull}, pickRequest{Repo: "repo", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "stopped-full" || pick.Why != refusedFull {
-			t.Fatalf("stopped-without-room queue = %+v, %v", pick, err)
+		// Alone at cap with Queue=true, it starts rather than queueing indefinitely.
+		pick = pickFleetHost([]fleetCandidate{stoppedAtCap}, pickRequest{Repo: "repo", Queue: true})
+		if pick.Action != pickStart || pick.Host.Name != "stopped-at-cap" {
+			t.Fatalf("stopped-at-cap single pick = %+v, want start", pick)
 		}
 
-		// Already-running matching repo box starts even with 0 remaining room.
-		runningFull := readyHost("running-full", "r3", mode.Project)
-		runningFull.Sizes = testCPUSizes(0, 0, 0)
-		runningFull.RepoBox = &RepoBox{Name: "repo", Size: "small", Status: "Running"}
-
-		pick, err = pickFleetHost([]fleetCandidate{coldRoom, runningFull}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "running-full" || pick.Affinity != affinityDirectWarm {
-			t.Fatalf("running-without-room pick = %+v, %v", pick, err)
+		// Named --box stopped at allocation cap on its single resolved host also starts.
+		namedAtCap := readyHost("named-at-cap", "r3", mode.Project)
+		namedAtCap.Sizes = testCPUSizes(0, 0, 0)
+		namedAtCap.RepoBox = &RepoBox{Name: "custom-box", Size: "large", Status: "Stopped"}
+		pick = pickFleetHost([]fleetCandidate{namedAtCap}, pickRequest{Box: "custom-box", Queue: true})
+		if pick.Action != pickStart || pick.Host.Name != "named-at-cap" || pick.Affinity != affinityRepoStopped {
+			t.Fatalf("stopped named-box at cap pick = %+v, want start", pick)
 		}
-	})
 
-	t.Run("stopped repo box checks capacity for its own size when Size is unspecified", func(t *testing.T) {
-		stoppedLarge := readyHost("stopped-large", "r1", mode.Project)
-		stoppedLarge.Sizes = testCPUSizes(2, 1, 0) // medium fits, large does not
-		stoppedLarge.RepoBox = &RepoBox{Name: "repo", Size: "large", Status: "Stopped"}
-
-		coldRoom := readyHost("cold-room", "r2", mode.Project)
-
-		pick, err := pickFleetHost([]fleetCandidate{stoppedLarge, coldRoom}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "cold-room" {
-			t.Fatalf("stopped-large pick = %+v, %v", pick, err)
+		// Already-running matching repo box at cap also starts with highest affinity.
+		runningAtCap := readyHost("running-at-cap", "r4", mode.Project)
+		runningAtCap.Sizes = testCPUSizes(0, 0, 0)
+		runningAtCap.RepoBox = &RepoBox{Name: "repo", Size: "small", Status: "Running"}
+		pick = pickFleetHost([]fleetCandidate{stoppedAtCap, runningAtCap}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "running-at-cap" || pick.Affinity != affinityDirectWarm {
+			t.Fatalf("running-at-cap pick = %+v, want start on running-at-cap", pick)
 		}
 	})
 
@@ -341,9 +329,9 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 		second.RepoBox = &RepoBox{Name: "other-repo", Size: "medium", Status: "Running"}
 
 		// Without req.Repo, neither host has repo-scoped evidence; config order wins.
-		pick, err := pickFleetHost([]fleetCandidate{first, second}, pickRequest{New: true})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "first" || pick.Affinity != affinityCold {
-			t.Fatalf("no-repo pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{first, second}, pickRequest{New: true})
+		if pick.Action != pickStart || pick.Host.Name != "first" || pick.Affinity != affinityCold {
+			t.Fatalf("no-repo pick = %+v", pick)
 		}
 
 		// Unnamed or different-repo RepoBox does not match req.Repo.
@@ -351,9 +339,9 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 		unnamed.RepoBox = &RepoBox{Size: "medium", Status: "Running"}
 		other := readyHost("other", "r4", mode.Project)
 		other.RepoBox = &RepoBox{Name: "other-repo", Size: "medium", Status: "Running"}
-		pick, err = pickFleetHost([]fleetCandidate{first, unnamed, other}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "first" || pick.Affinity != affinityCold {
-			t.Fatalf("mismatched RepoBox pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{first, unnamed, other}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "first" || pick.Affinity != affinityCold {
+			t.Fatalf("mismatched RepoBox pick = %+v", pick)
 		}
 	})
 
@@ -364,9 +352,9 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 
 		roomHost := readyHost("has-large", "r2", mode.Project)
 
-		pick, err := pickFleetHost([]fleetCandidate{fullMismatch, roomHost}, pickRequest{Repo: "repo", Size: large, ExplicitSize: true})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "has-large" {
-			t.Fatalf("pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{fullMismatch, roomHost}, pickRequest{Repo: "repo", Size: large, ExplicitSize: true})
+		if pick.Action != pickStart || pick.Host.Name != "has-large" {
+			t.Fatalf("pick = %+v", pick)
 		}
 	})
 
@@ -387,18 +375,18 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 		agentsWarm.Sizes = testCPUSizes(0, 0, 0)
 		agentsWarm.WarmThrowaway = true
 
-		pick, err := pickFleetHost([]fleetCandidate{cold, nonAgentsWarm, noBoxdWarm, agentsWarm}, pickRequest{Repo: "repo", New: true})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "agents-warm" || pick.Affinity != affinityDirectWarm {
-			t.Fatalf("pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{cold, nonAgentsWarm, noBoxdWarm, agentsWarm}, pickRequest{Repo: "repo", New: true})
+		if pick.Action != pickStart || pick.Host.Name != "agents-warm" || pick.Affinity != affinityDirectWarm {
+			t.Fatalf("pick = %+v", pick)
 		}
 
 		// With --fresh, warm throwaway cannot be claimed so full host is skipped;
 		// a host with room + warm repo evidence still beats a cold host.
 		agentsWarmWithRoom := readyHost("agents-warm-room", "r5", mode.Project)
 		agentsWarmWithRoom.WarmThrowaway = true
-		pick, err = pickFleetHost([]fleetCandidate{cold, agentsWarm, agentsWarmWithRoom}, pickRequest{Repo: "repo", New: true, Fresh: true})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "agents-warm-room" || pick.Affinity != affinityWarmHost {
-			t.Fatalf("fresh pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{cold, agentsWarm, agentsWarmWithRoom}, pickRequest{Repo: "repo", New: true, Fresh: true})
+		if pick.Action != pickStart || pick.Host.Name != "agents-warm-room" || pick.Affinity != affinityWarmHost {
+			t.Fatalf("fresh pick = %+v", pick)
 		}
 	})
 
@@ -412,9 +400,9 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 
 		clean := readyHost("clean", "r3", mode.Project)
 
-		pick, err := pickFleetHost([]fleetCandidate{frozen, badThrowaway, clean}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "clean" {
-			t.Fatalf("pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{frozen, badThrowaway, clean}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "clean" {
+			t.Fatalf("pick = %+v", pick)
 		}
 	})
 
@@ -423,13 +411,13 @@ func TestPickFleetHostAffinityStoppedCapacityAndStableOrder(t *testing.T) {
 		second := readyHost("second", "r2", mode.Project)
 		third := readyHost("third", "r3", mode.Project)
 
-		pick, err := pickFleetHost([]fleetCandidate{first, second, third}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "first" {
-			t.Fatalf("pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{first, second, third}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "first" {
+			t.Fatalf("pick = %+v", pick)
 		}
-		pick, err = pickFleetHost([]fleetCandidate{third, second, first}, pickRequest{Repo: "repo"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "third" {
-			t.Fatalf("reversed pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{third, second, first}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "third" {
+			t.Fatalf("reversed pick = %+v", pick)
 		}
 	})
 }
@@ -440,13 +428,14 @@ func TestPickFleetHostQueueDestinationAndBoxdGuards(t *testing.T) {
 	t.Run("start-now always beats queueing on a warm host", func(t *testing.T) {
 		warmFull := readyHost("warm-full", "r1", mode.Project)
 		warmFull.Sizes = testCPUSizes(0, 0, 0)
-		warmFull.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Stopped"}
+		warmFull.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
 		coldFree := readyHost("cold-free", "r2", mode.Project)
 
-		pick, err := pickFleetHost([]fleetCandidate{warmFull, coldFree}, pickRequest{Repo: "repo", Queue: true})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "cold-free" {
-			t.Fatalf("pick = %+v, %v", pick, err)
+		// New throwaway run needs room, so warmFull cannot start and coldFree wins over queueing.
+		pick := pickFleetHost([]fleetCandidate{warmFull, coldFree}, pickRequest{Repo: "repo", New: true, Queue: true})
+		if pick.Action != pickStart || pick.Host.Name != "cold-free" {
+			t.Fatalf("pick = %+v", pick)
 		}
 	})
 
@@ -462,11 +451,11 @@ func TestPickFleetHostQueueDestinationAndBoxdGuards(t *testing.T) {
 		noBoxdFull.Queued = nil
 
 		// Neither non-agents nor unverified boxd can accept queued jobs.
-		pick, err := pickFleetHost([]fleetCandidate{customFull, noBoxdFull}, pickRequest{Queue: true})
-		if err != nil || pick.Action != pickRefuse ||
+		pick := pickFleetHost([]fleetCandidate{customFull, noBoxdFull}, pickRequest{Queue: true})
+		if pick.Action != pickRefuse ||
 			!strings.Contains(pick.Reason, `boxd handles project "agents" only`) ||
 			!strings.Contains(pick.Reason, "boxd queue capability not established") {
-			t.Fatalf("refuse pick = %+v, %v", pick, err)
+			t.Fatalf("refuse pick = %+v", pick)
 		}
 
 		// Unknown depth IS allowed when BoxdAvailable was positively established on agents.
@@ -475,9 +464,9 @@ func TestPickFleetHostQueueDestinationAndBoxdGuards(t *testing.T) {
 		capableUnknownDepth.BoxdAvailable = true
 		capableUnknownDepth.Queued = nil
 
-		pick, err = pickFleetHost([]fleetCandidate{customFull, noBoxdFull, capableUnknownDepth}, pickRequest{Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "capable-unknown" || pick.Why != refusedFull {
-			t.Fatalf("capable-unknown pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{customFull, noBoxdFull, capableUnknownDepth}, pickRequest{Queue: true})
+		if pick.Action != pickQueue || pick.Host.Name != "capable-unknown" || pick.Why != refusedFull {
+			t.Fatalf("capable-unknown pick = %+v", pick)
 		}
 	})
 
@@ -502,30 +491,31 @@ func TestPickFleetHostQueueDestinationAndBoxdGuards(t *testing.T) {
 		fullShortWarm := readyHost("full-short-warm", "r5", mode.Project)
 		fullShortWarm.Sizes = testCPUSizes(0, 0, 0)
 		fullShortWarm.Queued = intPtr(1)
-		fullShortWarm.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Stopped"}
+		fullShortWarm.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
-		// Active + known + shorter + repo affinity beats all others.
-		pick, err := pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth, fullLong, fullShortCold, fullShortWarm}, pickRequest{Repo: "repo", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "full-short-warm" || pick.Why != refusedFull {
-			t.Fatalf("best queue pick = %+v, %v", pick, err)
+		// Active + known + shorter + repo affinity beats all others (throwaway run needs room).
+		req := pickRequest{Repo: "repo", New: true, Queue: true}
+		pick := pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth, fullLong, fullShortCold, fullShortWarm}, req)
+		if pick.Action != pickQueue || pick.Host.Name != "full-short-warm" || pick.Why != refusedFull {
+			t.Fatalf("best queue pick = %+v", pick)
 		}
 
 		// Shorter queue beats longer queue even if longer is earlier in config.
-		pick, err = pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth, fullLong, fullShortCold}, pickRequest{Repo: "repo", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "full-short-cold" {
-			t.Fatalf("shorter queue pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth, fullLong, fullShortCold}, req)
+		if pick.Action != pickQueue || pick.Host.Name != "full-short-cold" {
+			t.Fatalf("shorter queue pick = %+v", pick)
 		}
 
 		// Known depth beats unknown depth among active hosts.
-		pick, err = pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth, fullLong}, pickRequest{Repo: "repo", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "full-long" {
-			t.Fatalf("known-depth pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth, fullLong}, req)
+		if pick.Action != pickQueue || pick.Host.Name != "full-long" {
+			t.Fatalf("known-depth pick = %+v", pick)
 		}
 
 		// Active host with positively established boxd capability beats mypc even with unknown depth.
-		pick, err = pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth}, pickRequest{Repo: "repo", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "full-unknown-depth" {
-			t.Fatalf("active-over-mypc pick = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{mypcShort, fullUnknownDepth}, req)
+		if pick.Action != pickQueue || pick.Host.Name != "full-unknown-depth" {
+			t.Fatalf("active-over-mypc pick = %+v", pick)
 		}
 	})
 
@@ -535,20 +525,20 @@ func TestPickFleetHostQueueDestinationAndBoxdGuards(t *testing.T) {
 		noGPU.Sizes = testCPUSizes(4, 2, 1)
 
 		busyOtherProject := readyHost("busy-work", "r2", "work")
-		busyOtherProject.GPUBusy = true
+		busyOtherProject.GPUHolders = []string{"other"}
 		busyOtherProject.BoxdAvailable = true
 
 		busyNoBoxd := readyHost("busy-noboxd", "r3", mode.Project)
-		busyNoBoxd.GPUBusy = true
+		busyNoBoxd.GPUHolders = []string{"other"}
 		busyNoBoxd.BoxdAvailable = false
 
 		busyAgents := readyHost("busy-agents", "r4", mode.Project)
-		busyAgents.GPUBusy = true
+		busyAgents.GPUHolders = []string{"other"}
 		busyAgents.Queued = intPtr(1)
 
-		pick, err := pickFleetHost([]fleetCandidate{noGPU, busyOtherProject, busyNoBoxd, busyAgents}, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "busy-agents" || pick.Why != refusedGPUBusy {
-			t.Fatalf("gpu queue pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{noGPU, busyOtherProject, busyNoBoxd, busyAgents}, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
+		if pick.Action != pickQueue || pick.Host.Name != "busy-agents" || pick.Why != refusedGPUBusy {
+			t.Fatalf("gpu queue pick = %+v", pick)
 		}
 	})
 
@@ -556,75 +546,61 @@ func TestPickFleetHostQueueDestinationAndBoxdGuards(t *testing.T) {
 		full := readyHost("full", "r1", mode.Project)
 		full.Sizes = testCPUSizes(0, 0, 0)
 
-		pick, err := pickFleetHost([]fleetCandidate{full}, pickRequest{Queue: false})
-		if err != nil || pick.Action != pickRefuse || pick.Why != refusedFull || pick.Host != (fleetHost{}) {
-			t.Fatalf("no-queue pick = %+v, %v", pick, err)
+		pick := pickFleetHost([]fleetCandidate{full}, pickRequest{Queue: false})
+		if pick.Action != pickRefuse || pick.Why != refusedFull || pick.Host != (fleetHost{}) {
+			t.Fatalf("no-queue pick = %+v", pick)
 		}
 	})
 }
 
-func TestPickFleetHostPinnedAndExplicitBoxGuards(t *testing.T) {
-	first := readyHost("first", "r1", mode.Project)
+func TestPickFleetHostResolvedSingleAndExplicitBoxGuard(t *testing.T) {
 	pinned := readyHost("pinned", "r2", mode.Project)
 
-	t.Run("pin selects pinned host even when another host has higher affinity", func(t *testing.T) {
-		firstWarm := first
-		firstWarm.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
-
-		pick, err := pickFleetHost([]fleetCandidate{firstWarm, pinned}, pickRequest{Repo: "repo", Host: "pinned"})
-		if err != nil || pick.Action != pickStart || pick.Host.Name != "pinned" {
-			t.Fatalf("pinned start = %+v, %v", pick, err)
+	t.Run("single resolved host starts, queues, or refuses without spilling over", func(t *testing.T) {
+		pick := pickFleetHost([]fleetCandidate{pinned}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "pinned" {
+			t.Fatalf("single start = %+v", pick)
 		}
-	})
 
-	t.Run("pin queues on pinned host instead of spilling over to another startable host", func(t *testing.T) {
 		pinnedFull := pinned
 		pinnedFull.Sizes = testCPUSizes(0, 0, 0)
-
-		pick, err := pickFleetHost([]fleetCandidate{first, pinnedFull}, pickRequest{Host: "pinned", Queue: true})
-		if err != nil || pick.Action != pickQueue || pick.Host.Name != "pinned" || pick.Why != refusedFull {
-			t.Fatalf("pinned queue = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{pinnedFull}, pickRequest{Queue: true})
+		if pick.Action != pickQueue || pick.Host.Name != "pinned" || pick.Why != refusedFull {
+			t.Fatalf("single queue = %+v", pick)
 		}
-	})
 
-	t.Run("pin refuses when pinned host cannot start or queue, never falls back", func(t *testing.T) {
 		pinnedDown := pinned
 		pinnedDown.Reachable = false
 		pinnedDown.Error = "timeout"
-
-		pick, err := pickFleetHost([]fleetCandidate{first, pinnedDown}, pickRequest{Host: "pinned", Queue: true})
-		if err != nil || pick.Action != pickRefuse || pick.Host != (fleetHost{}) || !strings.Contains(pick.Reason, "host pinned: unreachable") {
-			t.Fatalf("pinned refuse = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{pinnedDown}, pickRequest{Queue: true})
+		if pick.Action != pickRefuse || pick.Host != (fleetHost{}) || !strings.Contains(pick.Reason, "pinned: unreachable") {
+			t.Fatalf("single refuse = %+v", pick)
 		}
-	})
 
-	t.Run("pin on non-agents full host refuses instead of queueing elsewhere", func(t *testing.T) {
 		pinnedWork := readyHost("pinned-work", "r2", "work")
 		pinnedWork.Sizes = testCPUSizes(0, 0, 0)
-
-		pick, err := pickFleetHost([]fleetCandidate{first, pinnedWork}, pickRequest{Host: "pinned-work", Queue: true})
-		if err != nil || pick.Action != pickRefuse || !strings.Contains(pick.Reason, `boxd handles project "agents" only`) {
-			t.Fatalf("pinned work refuse = %+v, %v", pick, err)
+		pick = pickFleetHost([]fleetCandidate{pinnedWork}, pickRequest{Queue: true})
+		if pick.Action != pickRefuse || !strings.Contains(pick.Reason, `boxd handles project "agents" only`) {
+			t.Fatalf("single work refuse = %+v", pick)
 		}
 	})
 
-	t.Run("explicit --box without --host rejects multi-host pool", func(t *testing.T) {
-		firstBox := first
-		firstBox.RepoBox = &RepoBox{Name: "shared-name", Size: "medium", Status: "Running"}
-		secondBox := pinned
-		secondBox.RepoBox = &RepoBox{Name: "shared-name", Size: "medium", Status: "Running"}
+	t.Run("explicit --box refuses multi-host candidate list", func(t *testing.T) {
+		first := readyHost("first", "r1", mode.Project)
+		first.RepoBox = &RepoBox{Name: "shared-name", Size: "medium", Status: "Running"}
+		second := pinned
+		second.RepoBox = &RepoBox{Name: "shared-name", Size: "medium", Status: "Running"}
 
-		if _, err := pickFleetHost([]fleetCandidate{firstBox, secondBox}, pickRequest{Box: "shared-name"}); err == nil || !strings.Contains(err.Error(), "requires --host") {
-			t.Fatalf("err = %v, want requires --host error", err)
+		pick := pickFleetHost([]fleetCandidate{first, second}, pickRequest{Box: "shared-name"})
+		if pick.Action != pickRefuse || pick.Host != (fleetHost{}) || !strings.Contains(pick.Reason, "single target host") {
+			t.Fatalf("multi-host --box pick = %+v, want refuse", pick)
 		}
 	})
 
-	t.Run("unknown or blank pin errors", func(t *testing.T) {
-		if _, err := pickFleetHost([]fleetCandidate{first, pinned}, pickRequest{Host: "missing"}); err == nil || !strings.Contains(err.Error(), `host "missing" is not configured`) {
-			t.Fatalf("err = %v, want unknown host error", err)
-		}
-		if _, err := pickFleetHost([]fleetCandidate{first, pinned}, pickRequest{Host: "   "}); err == nil || !strings.Contains(err.Error(), "cannot be empty") {
-			t.Fatalf("err = %v, want empty host name error", err)
+	t.Run("empty candidate list refuses cleanly", func(t *testing.T) {
+		pick := pickFleetHost(nil, pickRequest{})
+		if pick.Action != pickRefuse || !strings.Contains(pick.Reason, "no configured hosts") {
+			t.Fatalf("empty pick = %+v", pick)
 		}
 	})
 }

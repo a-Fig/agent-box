@@ -11,11 +11,15 @@ import (
 // Fleet target selection (#163).
 //
 // Following Borg and Kubernetes (docs/prior-art.md), picking runs in two steps:
-// filter hosts that can start the run now (reachability, mode, room for the
-// requested size, and GPU capability/availability), then rank eligible hosts by
-// repo affinity and warm state where concrete repo evidence exists, breaking
-// ties by stable configuration order. Configurable per-host priority (#171) is
-// a separate issue and is not modeled here.
+// filter hosts that can start the run now (reachability, mode, room for new
+// allocations, and GPU capability/occupancy), then rank eligible hosts by
+// repo-scoped affinity where concrete evidence exists, breaking ties by stable
+// configuration order. Configurable per-host priority (#171) is a separate
+// issue and is not modeled here.
+//
+// Target filtering (--host pinning, single-host no-registry bypass, and keeping
+// explicit --box on defaultHost unless --host pins elsewhere) lives in
+// resolveFleetTargets; pickFleetHost consumes the resolved candidate list.
 //
 // Queueing and throwaway pool claims go through boxd, which serves only
 // mode.Project ("agents"), so both require Host.Project == mode.Project and
@@ -57,7 +61,7 @@ func (a pickAffinity) String() string {
 }
 
 // pickRequest carries an already-normalized run request for target selection.
-// CLI/MCP flag and size validation stays in callers.
+// CLI/MCP flag validation and --host filtering happen before pickFleetHost.
 type pickRequest struct {
 	// Size is the normalized requested box size. Zero defaults to DefaultSize.
 	Size mode.Size
@@ -68,13 +72,11 @@ type pickRequest struct {
 	New bool
 	// Fresh requests a fresh throwaway box, bypassing pooled throwaway reuse.
 	Fresh bool
-	// Box names an explicit box (--box). Without Host, resolveFleetTargets keeps
-	// it on the current default host so a named box cannot silently match another host.
+	// Box names an explicit box (--box). resolveFleetTargets keeps it on a
+	// single target host (defaultHost unless --host pinned elsewhere).
 	Box string
 	// Repo is the repo's box name (openRepo().Name), used for repo affinity.
 	Repo string
-	// Host is an explicit CLI --host pin matching fleetHost.Name.
-	Host string
 	// Queue allows choosing a queue destination when no host can start now.
 	Queue bool
 }
@@ -88,7 +90,7 @@ type fleetCandidate struct {
 	Mode             string // "full", "shared", "mypc", or "" (no tray)
 	Sizes            []SizeRoom
 	HasGPU           bool     // typed host GPU capability from project config
-	GPUBusy          bool     // typed GPU occupancy from host instance inspection
+	GPUHolders       []string // names of GPU boxes currently holding the GPU (running, frozen, or starting)
 	RepoBox          *RepoBox // this repo's (or explicit --box's) box on this host, if present
 	RepoBoxThrowaway bool     // true when RepoBox is a throwaway (not reusable)
 	WarmThrowaway    bool     // positive probe evidence of a claimable idle throwaway for this repo and size
@@ -150,50 +152,24 @@ func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHo
 	return nil, false, fmt.Errorf("host %q is not configured (available: %s)", pin, strings.Join(names, ", "))
 }
 
-// pickFleetHost selects a target host to start or queue a run on, or refuses
-// when no host is eligible. It consumes an already-normalized pickRequest, does
-// no I/O, and never mutates candidates.
-func pickFleetHost(candidates []fleetCandidate, req pickRequest) (fleetPick, error) {
+// pickFleetHost selects a target host from candidates (already filtered by
+// resolveFleetTargets) to start or queue a run on, or refuses when no host is
+// eligible. It does no I/O and never mutates candidates.
+func pickFleetHost(candidates []fleetCandidate, req pickRequest) fleetPick {
 	sz := req.Size
 	if sz.Name == "" {
 		sz, _ = lookupSize("")
 	}
-	if req.Host != "" && strings.TrimSpace(req.Host) == "" {
-		return fleetPick{}, fmt.Errorf("host name cannot be empty")
+	if len(candidates) == 0 {
+		return fleetPick{Action: pickRefuse, Reason: "no configured hosts"}
 	}
-	pin := strings.TrimSpace(req.Host)
-
-	pool := candidates
-	if pin != "" {
-		matched := false
-		names := make([]string, 0, len(candidates))
-		for _, c := range candidates {
-			if c.Host.Name != "" {
-				names = append(names, c.Host.Name)
-			}
-			if c.Host.Name == pin {
-				pool = []fleetCandidate{c}
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			if len(names) > 0 {
-				return fleetPick{}, fmt.Errorf("host %q is not configured (available: %s)", pin, strings.Join(names, ", "))
-			}
-			return fleetPick{}, fmt.Errorf("host %q is not configured", pin)
-		}
-	}
-	if req.Box != "" && pin == "" && len(pool) > 1 {
-		return fleetPick{}, fmt.Errorf("--box %q requires --host when choosing across multiple hosts", req.Box)
-	}
-	if len(pool) == 0 {
-		return fleetPick{Action: pickRefuse, Reason: "no configured hosts"}, nil
+	if req.Box != "" && len(candidates) > 1 {
+		return fleetPick{Action: pickRefuse, Reason: fmt.Sprintf("--box %q requires a single target host", req.Box)}
 	}
 
-	evals := make([]hostEval, len(pool))
+	evals := make([]hostEval, len(candidates))
 	bestStart := -1
-	for i, c := range pool {
+	for i, c := range candidates {
 		ev := evaluateCandidate(i, c, req, sz)
 		evals[i] = ev
 		if ev.canStart && (bestStart < 0 || betterStart(ev, evals[bestStart])) {
@@ -207,7 +183,7 @@ func pickFleetHost(candidates []fleetCandidate, req pickRequest) (fleetPick, err
 			Host:     ev.candidate.Host,
 			Affinity: ev.startAff,
 			Reason:   ev.startReason,
-		}, nil
+		}
 	}
 
 	if req.Queue {
@@ -225,11 +201,11 @@ func pickFleetHost(candidates []fleetCandidate, req pickRequest) (fleetPick, err
 				Affinity: ev.queueAff,
 				Why:      ev.queueWhy,
 				Reason:   fmt.Sprintf("queue on %s: %s", hostLabel(ev.candidate.Host), waitText(ev.queueWhy)),
-			}, nil
+			}
 		}
 	}
 
-	return buildRefusal(evals, pin != ""), nil
+	return buildRefusal(evals)
 }
 
 type hostEval struct {
@@ -245,41 +221,47 @@ type hostEval struct {
 	refuseReason string
 }
 
+// markUnavailable records why a host cannot start now and centralizes queue
+// eligibility and refusal wording for queueable causes.
+func (ev *hostEval) markUnavailable(why, reason string, req pickRequest, sz mode.Size) {
+	ev.refuseWhy = why
+	if why == "" {
+		ev.refuseReason = reason
+		return
+	}
+	if ok, block := canQueueOnHost(ev.candidate, why, sz); ok {
+		ev.refuseReason = reason
+		ev.canQueue = true
+		ev.queueWhy = why
+		ev.queueAff = candidateQueueAffinity(ev.candidate, req, sz)
+		return
+	} else {
+		ev.refuseReason = fmt.Sprintf("%s (%s)", reason, block)
+	}
+}
+
 func evaluateCandidate(index int, c fleetCandidate, req pickRequest, sz mode.Size) hostEval {
 	ev := hostEval{index: index, candidate: c}
 	if !c.Reachable {
-		ev.refuseReason = "unreachable"
+		reason := "unreachable"
 		if c.Error != "" {
-			ev.refuseReason += ": " + c.Error
+			reason += ": " + c.Error
 		}
+		ev.markUnavailable("", reason, req, sz)
 		return ev
 	}
 	if c.Error != "" {
-		ev.refuseReason = "capacity unknown: " + c.Error
+		ev.markUnavailable("", "capacity unknown: "+c.Error, req, sz)
 		return ev
 	}
-
 	if c.Mode == string(mode.MyPC) {
-		ev.refuseWhy = refusedMyPC
-		if !queueable(refusedMyPC, sz) {
-			ev.refuseReason = "in My PC mode (a GPU run doesn't wait)"
-			return ev
-		}
-		if ok, reason := canQueueOnHost(c, refusedMyPC, sz); !ok {
-			ev.refuseReason = "in My PC mode (" + reason + ")"
-			return ev
-		}
-		ev.refuseReason = "in My PC mode"
-		ev.canQueue = true
-		ev.queueWhy = refusedMyPC
-		ev.queueAff = candidateQueueAffinity(c, req, sz)
+		ev.markUnavailable(refusedMyPC, "in My PC mode", req, sz)
 		return ev
 	}
 	if !startableMode(c.Mode) {
-		ev.refuseReason = fmt.Sprintf("unrecognized mode %q", c.Mode)
+		ev.markUnavailable("", fmt.Sprintf("unrecognized mode %q", c.Mode), req, sz)
 		return ev
 	}
-
 	if sz.GPU {
 		return evaluateGPUCandidate(ev, req, sz)
 	}
@@ -289,62 +271,49 @@ func evaluateCandidate(index int, c fleetCandidate, req pickRequest, sz mode.Siz
 func evaluateGPUCandidate(ev hostEval, req pickRequest, sz mode.Size) hostEval {
 	c := ev.candidate
 	if !c.HasGPU {
-		ev.refuseReason = "no GPU on this host"
+		ev.markUnavailable("", "no GPU on this host", req, sz)
 		return ev
 	}
 	if req.Box != "" {
 		if c.RepoBox == nil || !boxMatches(c.RepoBox, req.Box) || c.RepoBox.Size != mode.GPUSize || c.RepoBoxThrowaway {
-			ev.refuseReason = fmt.Sprintf("box %s is not a reusable GPU box on this host", req.Box)
+			ev.markUnavailable("", fmt.Sprintf("box %s is not a reusable GPU box on this host", req.Box), req, sz)
 			return ev
 		}
 		switch c.RepoBox.Status {
 		case "Running", "Stopped":
 		case "Frozen":
-			ev.refuseReason = fmt.Sprintf("box %s is paused", boxLabel(c.RepoBox, req.Box))
+			ev.markUnavailable("", fmt.Sprintf("box %s is paused", boxLabel(c.RepoBox, req.Box)), req, sz)
 			return ev
 		default:
-			ev.refuseReason = fmt.Sprintf("box %s has unrecognized status %q", boxLabel(c.RepoBox, req.Box), c.RepoBox.Status)
+			ev.markUnavailable("", fmt.Sprintf("box %s has unrecognized status %q", boxLabel(c.RepoBox, req.Box), c.RepoBox.Status), req, sz)
 			return ev
 		}
 	}
-	if c.GPUBusy {
-		ev.refuseWhy = refusedGPUBusy
-		if ok, reason := canQueueOnHost(c, refusedGPUBusy, sz); !ok {
-			ev.refuseReason = "GPU is in use (" + reason + ")"
-			return ev
-		}
-		ev.refuseReason = "GPU is in use"
-		ev.canQueue = true
-		ev.queueWhy = refusedGPUBusy
-		ev.queueAff = repoHostAffinity(c, req)
+	// Matches claimGPU(ctx, insts, except): a named reusable GPU box does not
+	// block itself from running; only another GPU holder makes the GPU busy.
+	if gpuBusyFor(c.GPUHolders, req.Box) {
+		ev.markUnavailable(refusedGPUBusy, "GPU is in use", req, sz)
 		return ev
 	}
-	if req.Box != "" && c.RepoBox.Status == "Running" {
+	if req.Box != "" {
+		// An existing running or stopped GPU box is already counted in Incus
+		// project caps, so ensureBox starts/reuses it without needing new-box Fits.
 		ev.canStart = true
 		ev.startAff = repoBoxAffinity(c.RepoBox)
-		ev.startReason = "reusing running GPU box"
+		if c.RepoBox.Status == "Stopped" {
+			ev.startReason = "starting stopped GPU box"
+		} else {
+			ev.startReason = "reusing running GPU box"
+		}
 		return ev
 	}
 	if sizeFits(c.Sizes, mode.GPUSize) {
 		ev.canStart = true
-		if req.Box != "" {
-			ev.startAff = affinityRepoStopped
-			ev.startReason = "starting stopped GPU box"
-		} else {
-			ev.startAff = repoHostAffinity(c, req)
-			ev.startReason = "GPU free with room"
-		}
+		ev.startAff = repoHostAffinity(c, req)
+		ev.startReason = "GPU free with room"
 		return ev
 	}
-	ev.refuseWhy = refusedFull
-	if ok, reason := canQueueOnHost(c, refusedFull, sz); !ok {
-		ev.refuseReason = "no room for a gpu box (" + reason + ")"
-		return ev
-	}
-	ev.refuseReason = "no room for a gpu box"
-	ev.canQueue = true
-	ev.queueWhy = refusedFull
-	ev.queueAff = repoHostAffinity(c, req)
+	ev.markUnavailable(refusedFull, "no room for a gpu box", req, sz)
 	return ev
 }
 
@@ -360,7 +329,7 @@ func evaluateCPUCandidate(ev hostEval, req pickRequest, sz mode.Size) hostEval {
 
 	if !isNew && hasMatchingBox {
 		if c.RepoBoxThrowaway {
-			ev.refuseReason = fmt.Sprintf("box %s is a throwaway and cannot be reused", boxLabel(c.RepoBox, targetBox))
+			ev.markUnavailable("", fmt.Sprintf("box %s is a throwaway and cannot be reused", boxLabel(c.RepoBox, targetBox)), req, sz)
 			return ev
 		}
 		if req.ExplicitSize && c.RepoBox.Size != sz.Name {
@@ -379,34 +348,18 @@ func evaluateCPUCandidate(ev hostEval, req pickRequest, sz mode.Size) hostEval {
 				}
 				return ev
 			case "Stopped":
-				// A stopped box still needs capacity before it counts as startable;
-				// boxd reports it needs room and Run revalidates on start.
-				needSize := c.RepoBox.Size
-				if needSize == "" {
-					needSize = sz.Name
-				}
-				if sizeFits(c.Sizes, needSize) {
-					ev.canStart = true
-					ev.startAff = affinityRepoStopped
-					ev.startReason = "starting stopped repo box"
-					return ev
-				}
-				ev.refuseWhy = refusedFull
-				msg := fmt.Sprintf("no room to start stopped %s box", needSize)
-				if ok, reason := canQueueOnHost(c, refusedFull, sz); !ok {
-					ev.refuseReason = msg + " (" + reason + ")"
-					return ev
-				}
-				ev.refuseReason = msg
-				ev.canQueue = true
-				ev.queueWhy = refusedFull
-				ev.queueAff = candidateQueueAffinity(c, req, sz)
+				// SizeRoom.Fits measures room for an additional allocation and
+				// already counts stopped boxes; ensureBox starts an existing
+				// stopped box without allocating a new one, and Run revalidates.
+				ev.canStart = true
+				ev.startAff = affinityRepoStopped
+				ev.startReason = "starting stopped repo box"
 				return ev
 			case "Frozen":
-				ev.refuseReason = fmt.Sprintf("box %s is paused", boxLabel(c.RepoBox, targetBox))
+				ev.markUnavailable("", fmt.Sprintf("box %s is paused", boxLabel(c.RepoBox, targetBox)), req, sz)
 				return ev
 			default:
-				ev.refuseReason = fmt.Sprintf("box %s has unrecognized status %q", boxLabel(c.RepoBox, targetBox), c.RepoBox.Status)
+				ev.markUnavailable("", fmt.Sprintf("box %s has unrecognized status %q", boxLabel(c.RepoBox, targetBox), c.RepoBox.Status), req, sz)
 				return ev
 			}
 		}
@@ -428,24 +381,19 @@ func evaluateCPUCandidate(ev hostEval, req pickRequest, sz mode.Size) hostEval {
 		return ev
 	}
 
-	ev.refuseWhy = refusedFull
-	msg := fmt.Sprintf("no room for a %s box", sz.Name)
-	if ok, reason := canQueueOnHost(c, refusedFull, sz); !ok {
-		ev.refuseReason = msg + " (" + reason + ")"
-		return ev
-	}
-	ev.refuseReason = msg
-	ev.canQueue = true
-	ev.queueWhy = refusedFull
-	ev.queueAff = candidateQueueAffinity(c, req, sz)
+	ev.markUnavailable(refusedFull, fmt.Sprintf("no room for a %s box", sz.Name), req, sz)
 	return ev
 }
 
-// canQueueOnHost enforces that queueing happens only where boxd capability was
-// positively established on mode.Project ("agents") and the cause is queueable.
+// canQueueOnHost enforces that queueing happens only where the cause is
+// queueable, the host targets mode.Project ("agents"), and boxd capability was
+// positively established.
 func canQueueOnHost(c fleetCandidate, why string, sz mode.Size) (bool, string) {
 	if !queueable(why, sz) {
-		return false, "cause is not queueable"
+		if why == refusedMyPC && sz.GPU {
+			return false, "a GPU run doesn't wait"
+		}
+		return false, "not queueable"
 	}
 	if c.Host.Project != mode.Project {
 		return false, fmt.Sprintf("project %q has no boxd queue; boxd handles project %q only", c.Host.Project, mode.Project)
@@ -463,8 +411,8 @@ func betterStart(a, b hostEval) bool {
 	return a.index < b.index
 }
 
-// betterQueue orders queue-eligible hosts (all already verified as BoxdAvailable
-// on mode.Project):
+// betterQueue orders queue-eligible hosts (all verified as BoxdAvailable on
+// mode.Project):
 //  1. active wait (room or GPU) before My PC (owner-paused wait)
 //  2. known queue depth before unknown depth
 //  3. shorter queue depth when both hosts reported one
@@ -497,17 +445,13 @@ func queueDepth(q *int) (bool, int) {
 	return true, *q
 }
 
-func buildRefusal(evals []hostEval, pinned bool) fleetPick {
+func buildRefusal(evals []hostEval) fleetPick {
 	if len(evals) == 1 {
 		ev := evals[0]
-		prefix := hostLabel(ev.candidate.Host)
-		if pinned {
-			prefix = "host " + prefix
-		}
 		return fleetPick{
 			Action: pickRefuse,
 			Why:    ev.refuseWhy,
-			Reason: fmt.Sprintf("%s: %s", prefix, ev.refuseReason),
+			Reason: fmt.Sprintf("%s: %s", hostLabel(ev.candidate.Host), ev.refuseReason),
 		}
 	}
 	parts := make([]string, len(evals))
@@ -529,8 +473,19 @@ func startableMode(m string) bool {
 	return m == "" || m == string(mode.Shared) || m == string(mode.Full)
 }
 
-// sizeFits reports whether sizes indicates room for at least one box of name.
-// Fits < 0 means no cap limits the size; missing size entries fail closed.
+// gpuBusyFor reports whether any GPU holder other than except currently holds
+// the host's GPU, matching claimGPU(ctx, insts, except).
+func gpuBusyFor(holders []string, except string) bool {
+	for _, name := range holders {
+		if except == "" || name != except {
+			return true
+		}
+	}
+	return false
+}
+
+// sizeFits reports whether sizes indicates room for at least one additional box
+// of name. Fits < 0 means no cap limits the size; missing size entries fail closed.
 func sizeFits(sizes []SizeRoom, name string) bool {
 	for _, sz := range sizes {
 		if sz.Name == name {
