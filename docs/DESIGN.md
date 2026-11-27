@@ -110,6 +110,23 @@ Pooling is off until the host advertises it. Upgrade the clients that can mutate
 and let their older commands finish before setting `"reuseThrowaways": true` in `boxd.json`.
 For a rollback, turn pooling off and wait for existing pooled boxes to expire before downgrading.
 
+Enable `"coolIdleThrowaways": true` in `boxd.json` after upgrading every client that can launch
+boxes on the host to a version with reserved eviction and stopped-log paging. Older clients skip
+stopped CPU throwaways when looking for capacity. Cooling defaults to off and can be enabled
+with or without pooling.
+
+Boxd stops eligible finished CPU throwaways to release RAM. When reuse is enabled it keeps the
+newest reusable throwaway warm, with a limit of one per host. Without reuse it stops all eligible
+finished throwaways. A stopped box keeps its existing expiry, logs and checkout. It still counts
+against project limits and can give way to a run that needs its room.
+
+Boxd checks the original instance, finished history, guest exits, log readability and holds. Its
+conditional reservation excludes Box claims, pressure eviction and dashboard extends while the
+stop is outstanding. After a timeout or restart, boxd checks name-bound Incus operations before
+releasing a stale reservation on an instance that remains running. It keeps the reservation if
+an operation is still pending or Incus cannot confirm its state. Incus stops by name without a UID condition, so direct
+Incus activity can race the last check.
+
 `box app` is a window around the page `box ui` opens, as `mur app` is in Murmur: the system's web view (WebView2 on Windows) through [glaze](https://github.com/crgimenes/glaze), which loads it at run time with purego, so there is no cgo and `box` still cross-compiles. glaze (and purego under it) is box's one dependency beyond `golang.org/x/sys`. The reason is the same as Murmur's app: a native window needs the platform's web view, and glaze is the cgo-free way to it that Murmur already runs on Windows; it raised `go.mod` to Go 1.27.1. Linux builds get the window only with `-tags desktop`, because purego makes the binary link glibc dynamically; macOS has none yet. When the PC doesn't answer, the window shows the page's "PC unreachable" screen from the copy of `internal/dash/static` built into `box`, served on loopback, whose `/api/state` checks the PC each time the page retries (every 10s) and sends the window there once it answers. Every 10s the window asks its document where it is; one that doesn't answer (an error page has no bindings), a 5xx, or another site sends the window back to the loopback page. In another site's document the init script cuts the bridge to the window before that page's own scripts run.
 
 #### Failure digest

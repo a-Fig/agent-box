@@ -303,6 +303,11 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 		}}
 	f.refuseOnce = true
 	a, out := testApp(f)
+	a.dashboardURL = "https://fixture.example.com"
+	a.HTTP = func(*http.Request) (*http.Response, error) {
+		body := io.NopCloser(strings.NewReader(`{"code":"not-found","error":"no such endpoint"}`))
+		return &http.Response{StatusCode: http.StatusNotFound, Body: body}, nil
+	}
 	if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "small")); err != nil {
 		t.Fatalf("launch: %v\n%s", err, out)
 	}

@@ -40,12 +40,20 @@ const (
 	ThrowawayOwnerKey = "user.box.pool-job"
 	ThrowawayClaimKey = "user.box.claim-until"
 	ThrowawayClaimTTL = 10 * time.Minute
+	// ThrowawayStopKey holds an instance-bound stop reservation until the
+	// stop is confirmed, then ThrowawayStopped identifies the kept disk.
+	ThrowawayStopKey = "user.box.idle-stop"
+	ThrowawayStopped = "stopped"
 )
 
-// ThrowawayClaimed reports whether a client is setting up a run in the box.
+// ThrowawayClaimed reports whether a client or an idle stop reserved the box.
 func ThrowawayClaimed(cfg map[string]string, now time.Time) bool {
 	until, _ := time.Parse(time.RFC3339, cfg[ThrowawayClaimKey])
-	return until.After(now)
+	return until.After(now) || IdleStopReserved(cfg)
+}
+
+func IdleStopReserved(cfg map[string]string) bool {
+	return cfg[ThrowawayStopKey] != "" && cfg[ThrowawayStopKey] != ThrowawayStopped
 }
 
 // LaunchFlags are the -c and -d flags of `incus launch` for a box of size sz

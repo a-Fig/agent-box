@@ -553,14 +553,14 @@ func (a *App) reclaim(ctx context.Context) bool {
 // boxd's history, which box job reads once they're gone (#90). They hold their room
 // until the reaper deletes them, so a launch short of room deletes them, as
 // claimGPU deletes an idle GPU throwaway and boxd's queue does the same. A
-// kept box is a running throwaway whose expiry is within the keep window,
-// with no job running and one that ended; a throwaway still being set up
-// for its job has none ended. A held one (mode.Held) isn't kept: a person
-// extended it.
+// kept box is a throwaway whose expiry is within the keep window and whose
+// last job ended. Running boxes must pass a guest check, and stopped CPU
+// boxes must carry boxd's finished-stop marker. Holds and claims exclude it.
 func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 	var out []instance
 	for _, in := range insts {
-		if keptThrowawayConfig(in, a.Now()) && a.hasEndedJob(ctx, in.Name) {
+		now := a.Now()
+		if stoppedIdleThrowaway(in, now) || (keptThrowawayConfig(in, now) && a.hasEndedJob(ctx, in.Name)) {
 			out = append(out, in)
 		}
 	}
@@ -569,8 +569,17 @@ func (a *App) keptThrowaways(ctx context.Context, insts []instance) []instance {
 }
 
 func keptThrowawayConfig(in instance, now time.Time) bool {
+	return in.Status == "Running" && keptThrowawayWindow(in, now)
+}
+
+func stoppedIdleThrowaway(in instance, now time.Time) bool {
+	return in.Status == "Stopped" && !mode.IsGPU(in.Config) &&
+		in.Config[jobrun.ThrowawayStopKey] == jobrun.ThrowawayStopped && keptThrowawayWindow(in, now)
+}
+
+func keptThrowawayWindow(in instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
-	return in.Config[throwawayKey] == "true" && in.Status == "Running" && err == nil &&
+	return in.Config[throwawayKey] == "true" && err == nil &&
 		!exp.After(now.Add(endedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
 		!jobrun.ThrowawayClaimed(in.Config, now)
 }
@@ -616,7 +625,7 @@ func (a *App) idleRepo(ctx context.Context, in instance) bool {
 // throwaways, read the config last to catch a claim still in setup.
 func (a *App) stillIdle(ctx context.Context, selected instance) bool {
 	throwaway := selected.Config[throwawayKey] == "true"
-	if throwaway && !a.hasEndedJob(ctx, selected.Name) {
+	if throwaway && selected.Status != "Stopped" && !a.hasEndedJob(ctx, selected.Name) {
 		return false
 	}
 	insts, err := a.list(ctx)
@@ -629,6 +638,9 @@ func (a *App) stillIdle(ctx context.Context, selected instance) bool {
 				return false
 			}
 			if throwaway {
+				if selected.Status == "Stopped" {
+					return stoppedIdleThrowaway(in, a.Now())
+				}
 				return keptThrowawayConfig(in, a.Now())
 			}
 			return a.idleRepo(ctx, in)
@@ -674,9 +686,13 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 		// A claim or hold may have landed since the selection or the last try.
 		var rerr error
 		pooled := gone.Config[jobrun.ThrowawayRepoKey] != ""
+		useBoxd := !pooled && gone.Config[throwawayKey] == "true" && !mode.IsGPU(gone.Config) && a.Project == mode.Project
 		if pooled {
 			rerr = a.evictPooled(ctx, gone)
-		} else {
+		} else if useBoxd {
+			rerr = a.evictKept(ctx, gone)
+		}
+		if !pooled && (!useBoxd || errors.Is(rerr, errLegacyEviction)) {
 			rerr = jobrun.RetryETag(context.WithoutCancel(ctx), func() error {
 				if !a.stillIdle(ctx, gone) {
 					return errNotIdle
@@ -686,7 +702,7 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 			})
 		}
 		if errors.Is(rerr, errNotIdle) {
-			if pooled {
+			if pooled || useBoxd {
 				rejected[gone.Name] = true
 			}
 			continue // the next pass looks again, without it
@@ -1127,9 +1143,22 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 
-	r.State, r.Code, r.Digest, err = a.attach(ctx, jobID{ID: job, Bare: job, Box: box}, o.Wait)
+	jobIdentity := jobID{ID: job, Bare: job, Box: box}
+	r.State, r.Code, r.Digest, err = a.attach(ctx, jobIdentity, o.Wait)
+	recoveredEnd := false
+	if err != nil && ctx.Err() == nil && o.New && !sz.GPU && a.Project == mode.Project {
+		look, cancel := context.WithTimeout(ctx, refusalTimeout)
+		end, ok := a.endedElsewhere(look, jobIdentity)
+		cancel()
+		if ok {
+			fmt.Fprintln(a.Err, "box: using the recorded result after the log stream ended")
+			r.State, r.Code, r.Digest, err = stateDone, end.Code, end.Digest, nil
+			recoveredEnd = true
+		}
+	}
 	switch {
 	case !o.New:
+	case recoveredEnd:
 	case err == nil && r.State == stateDone:
 		a.cleanup(ctx, box, true, repoKey != "")
 	case sz.GPU && r.State == statePaused && a.gpuStopped(ctx, box) != "":

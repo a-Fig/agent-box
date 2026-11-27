@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -62,22 +63,36 @@ func (a *App) poolEnabled(ctx context.Context) bool {
 }
 
 func (a *App) poolPost(ctx context.Context, box, action string, req any) (int, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return 0, err
-	}
-	probe, cancel := context.WithTimeout(ctx, refusalTimeout)
-	defer cancel()
-	status, _, err := a.boxdDo(probe, http.MethodPost, "/api/boxes/"+box+"/"+action, "application/json", bytes.NewReader(body))
+	status, _, err := a.poolRequest(ctx, box, action, req)
 	return status, err
 }
 
+func (a *App) poolRequest(ctx context.Context, box, action string, req any) (int, []byte, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	probe, cancel := context.WithTimeout(ctx, refusalTimeout)
+	defer cancel()
+	return a.boxdDo(probe, http.MethodPost, "/api/boxes/"+box+"/"+action, "application/json", bytes.NewReader(body))
+}
+
 func (a *App) evictPooled(ctx context.Context, in instance) error {
+	return a.evictThroughBoxd(ctx, in, "evict-idle")
+}
+
+var errLegacyEviction = errors.New("boxd does not require a reservation for kept boxes")
+
+func (a *App) evictKept(ctx context.Context, in instance) error {
+	return a.evictThroughBoxd(ctx, in, "evict-kept")
+}
+
+func (a *App) evictThroughBoxd(ctx context.Context, in instance, action string) error {
 	uid := in.Config["volatile.uuid"]
 	if uid == "" {
 		uid = in.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	status, err := a.poolPost(ctx, in.Name, "evict-idle", struct{ UID string }{uid})
+	status, body, err := a.poolRequest(ctx, in.Name, action, struct{ UID string }{uid})
 	if err != nil {
 		return err
 	}
@@ -85,6 +100,13 @@ func (a *App) evictPooled(ctx context.Context, in instance) error {
 	case http.StatusNoContent:
 		return nil
 	case http.StatusConflict:
+		return errNotIdle
+	case http.StatusNotFound:
+		var legacy dash.ErrorBody
+		if action == "evict-kept" && in.Config[jobrun.ThrowawayStopKey] == "" &&
+			json.Unmarshal(body, &legacy) == nil && legacy.Code == dash.CodeNotFound && legacy.Error == "no such endpoint" {
+			return errLegacyEviction
+		}
 		return errNotIdle
 	default:
 		return fmt.Errorf("boxd eviction returned HTTP %d", status)

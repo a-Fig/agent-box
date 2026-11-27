@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,6 +13,129 @@ import (
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
+
+func TestStoppedCPUThrowawayGivesWayToARequestThatFits(t *testing.T) {
+	for _, pooled := range []bool{false, true} {
+		name := "unpooled"
+		if pooled {
+			name = "pooled"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg := map[string]string{
+				jobrun.ThrowawayKey:     "true",
+				jobrun.ThrowawayStopKey: jobrun.ThrowawayStopped,
+				jobrun.ExpiresKey:       "2026-11-23T12:20:00Z",
+				mode.SizeKey:            "small",
+				"volatile.uuid":         "original",
+			}
+			if pooled {
+				cfg[jobrun.ThrowawayRepoKey] = strings.Repeat("a", 64)
+			}
+			stopped := instance{Name: "finished", Status: "Stopped", Config: cfg}
+			f := &fakePC{t: t, refuse: memoryRefusal, refuseOnce: true, kept: map[string]bool{"repo": true}, insts: []instance{
+				stopped,
+				{Name: "repo", Status: "Running", Config: map[string]string{jobrun.ExpiresKey: "2026-11-23T13:00:00Z"}},
+				{Name: "starting", Status: "Stopped", Config: map[string]string{jobrun.ThrowawayKey: "true", jobrun.ExpiresKey: cfg[jobrun.ExpiresKey]}},
+			}}
+			a, out := testApp(f)
+			a.dashboardURL = "https://fixture.example.com"
+			evictions := 0
+			action := "evict-kept"
+			if pooled {
+				action = "evict-idle"
+			}
+			a.HTTP = func(req *http.Request) (*http.Response, error) {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/boxes/finished/"+action {
+					t.Fatalf("unexpected boxd reclaim: %s %s", req.Method, req.URL)
+				}
+				var b struct{ UID string }
+				if err := json.NewDecoder(req.Body).Decode(&b); err != nil || b.UID != "original" {
+					t.Fatalf("wrong pooled eviction identity: %+v, %v", b, err)
+				}
+				evictions++
+				f.mu.Lock()
+				f.insts = f.insts[1:]
+				f.mu.Unlock()
+				return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+			}
+			ctx := context.Background()
+			if err := a.launch(ctx, "new", time.Hour, true, mustSize(t, "small")); err != nil {
+				t.Fatalf("launch: %v\n%s", err, out)
+			}
+			if got := f.names(); strings.Contains(got, "finished") || !strings.Contains(got, "repo") || !strings.Contains(got, "starting") {
+				t.Fatalf("pressure evicted the wrong box: %s", got)
+			}
+			if evictions != 1 || strings.Contains(f.callList(), "delete") {
+				t.Fatalf("wrong eviction path for %s: HTTP %d, Incus %s", name, evictions, f.callList())
+			}
+		})
+	}
+}
+
+func TestStoppedCPUThrowawayRechecksIdentityAndHold(t *testing.T) {
+	for _, change := range []string{"hold", "replacement"} {
+		t.Run(change, func(t *testing.T) {
+			const expiry = "2026-11-23T12:20:00Z"
+			selected := instance{Name: "finished", Status: "Stopped", Config: map[string]string{
+				jobrun.ThrowawayKey: "true", jobrun.ThrowawayStopKey: jobrun.ThrowawayStopped, jobrun.ExpiresKey: expiry, "volatile.uuid": "original",
+			}}
+			current := selected
+			current.Config = map[string]string{
+				jobrun.ThrowawayKey: "true", jobrun.ThrowawayStopKey: jobrun.ThrowawayStopped, jobrun.ExpiresKey: expiry, "volatile.uuid": "original",
+			}
+			if change == "hold" {
+				current.Config[mode.HoldKey] = expiry
+			} else {
+				current.Config["volatile.uuid"] = "replacement"
+			}
+			a, _ := testApp(&fakePC{t: t, insts: []instance{current}})
+			if a.stillIdle(context.Background(), selected) {
+				t.Fatalf("pressure recheck accepted %s: %+v", change, current)
+			}
+		})
+	}
+}
+
+func TestKeptEvictionRefusesUnverifiedLegacyFallback(t *testing.T) {
+	a, _ := testApp(&fakePC{t: t})
+	a.dashboardURL = "https://fixture.example.com"
+	a.HTTP = func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+	}
+	if err := a.evictKept(context.Background(), instance{Name: "kept"}); err != errNotIdle {
+		t.Fatalf("generic 404 permitted unreserved eviction: %v", err)
+	}
+}
+
+func TestRunRecoversExitWhenCoolingInterruptsFollow(t *testing.T) {
+	f := &fakePC{t: t}
+	a, out := testApp(f)
+	a.dashboardURL = "https://fixture.example.com"
+	followStopped := false
+	a.R = lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
+		if isScript(cmd, "# follow") {
+			// Boxd has already read the exit file. The guest stops before
+			// the stream can report the terminal marker.
+			followStopped = true
+			return Result{}, nil
+		}
+		return f.Run(ctx, cmd)
+	})
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/api/throwaway-pool" {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+		}
+		if !followStopped || !strings.HasPrefix(req.URL.Path, "/api/queue/") {
+			t.Fatalf("unexpected result lookup: %s", req.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{"state":"done","exit":0}`))}, nil
+	}
+	result, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, New: true})
+	if err != nil || !followStopped || result.State != stateDone || result.Code != 0 || strings.Contains(f.callList(), "delete") {
+		t.Fatalf("interrupted follow returned %+v, %v\n%s", result, err, out)
+	}
+}
 
 func TestRunClaimsMatchingThrowawayOrLaunches(t *testing.T) {
 	const origin = "https://example.test/team/my-repo.git"

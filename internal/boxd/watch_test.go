@@ -24,17 +24,18 @@ import (
 
 // fakeIncus is a project whose boxes and job files a test sets.
 type fakeIncus struct {
-	mu        sync.Mutex
-	ins       []Instance
-	cfg       map[string]string
-	jobs      map[string][]fakeJob // box -> its job files
-	err       error
-	execs     int
-	fileReads int
-	cli       []string
-	cliErr    func(args []string) error
-	files     map[string]string
-	cancel    string // the last cancel script
+	busyOperation bool
+	mu            sync.Mutex
+	ins           []Instance
+	cfg           map[string]string
+	jobs          map[string][]fakeJob // box -> its job files
+	err           error
+	execs         int
+	fileReads     int
+	cli           []string
+	cliErr        func(args []string) error
+	files         map[string]string
+	cancel        string // the last cancel script
 	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
 	expirySets []string
@@ -43,6 +44,12 @@ type fakeIncus struct {
 	runChecks  int                 // running-jobs scripts run
 	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
 	onScan     func(box string)    // runs, under the lock, as a scan of box starts
+}
+
+func (f *fakeIncus) InstanceBusy(ctx context.Context, name string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.busyOperation, ctx.Err()
 }
 
 func (f *fakeIncus) FileRange(ctx context.Context, box, path string, offset, limit int64) ([]byte, int64, error) {
@@ -226,6 +233,19 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if strings.HasPrefix(script, "# idle stop") {
+		found := false
+		for _, j := range f.jobs[box] {
+			if j.state != "done" {
+				return nil, &ExitError{Code: 4}
+			}
+			found = found || strings.Contains(script, j.name+".log")
+		}
+		if !found {
+			return nil, &ExitError{Code: 3}
+		}
+		return nil, nil
+	}
 	if strings.HasPrefix(script, "test -e ") { // startedInBox, and startJob's own check
 		for _, j := range f.jobs[box] {
 			if strings.Contains(script, "/"+j.name+".log") {
@@ -276,6 +296,13 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 		for i, in := range f.ins {
 			if in.Name == args[1] {
 				f.ins = append(f.ins[:i], f.ins[i+1:]...)
+				break
+			}
+		}
+	case "stop":
+		for i, in := range f.ins {
+			if in.Name == args[1] {
+				f.ins[i].Status = "Stopped"
 				break
 			}
 		}

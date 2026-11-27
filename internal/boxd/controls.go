@@ -31,6 +31,7 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/throwaway-pool", s.throwawayPool)
 	mux.Handle("POST /api/boxes/{name}/claim", control(http.HandlerFunc(s.claimThrowaway)))
 	mux.Handle("POST /api/boxes/{name}/evict-idle", control(http.HandlerFunc(s.evictThrowaway)))
+	mux.Handle("POST /api/boxes/{name}/evict-kept", control(http.HandlerFunc(s.evictKeptThrowaway)))
 	mux.Handle("POST /api/boxes/{name}/pool-expiry", control(http.HandlerFunc(s.poolExpiry)))
 }
 
@@ -65,6 +66,14 @@ func (s *Server) claimThrowaway(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) evictThrowaway(w http.ResponseWriter, r *http.Request) {
+	s.evictThrowawayKind(w, r, true)
+}
+
+func (s *Server) evictKeptThrowaway(w http.ResponseWriter, r *http.Request) {
+	s.evictThrowawayKind(w, r, false)
+}
+
+func (s *Server) evictThrowawayKind(w http.ResponseWriter, r *http.Request, pooled bool) {
 	var req struct{ UID string }
 	if !decode(w, r, &req) {
 		return
@@ -76,7 +85,7 @@ func (s *Server) evictThrowaway(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)
 	defer cancel()
-	evicted, err := s.W.evictPooled(ctx, box, req.UID)
+	evicted, err := s.W.evictThrowaway(ctx, box, req.UID, pooled)
 	poolReply(w, evicted, err)
 }
 
@@ -582,10 +591,11 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	// the expiry (a job starting there, or another extend), and the new
 	// expiry is counted from the one Incus holds now.
 	var until time.Time
-	var replaced bool
+	var replaced, stopping bool
 	wrote, err := w.Incus.SetConfigIf(ctx, name, func(in Instance) map[string]string {
 		replaced = !in.CreatedAt.Equal(createdAt)
-		if replaced {
+		stopping = jobrun.IdleStopReserved(in.Config)
+		if replaced || stopping {
 			return nil
 		}
 		from := w.Now().UTC()
@@ -601,6 +611,9 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 	}
 	if replaced {
 		return b, errNameNew
+	}
+	if stopping {
+		return b, &controlError{http.StatusConflict, dash.CodeStopping, "the box is being stopped and its files are kept until its expiry"}
 	}
 	if !wrote {
 		return b, errBoxGone
