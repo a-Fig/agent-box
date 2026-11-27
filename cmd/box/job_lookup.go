@@ -31,10 +31,14 @@ func (a *App) lookupJob(raw string) (jobLookup, error) {
 	if err != nil {
 		return jobLookup{}, err
 	}
+	return jobLookup{app: a.jobHostApp(host), id: id, host: host.Name}, nil
+}
+
+func (a *App) jobHostApp(host fleetHost) *App {
 	scoped := *a
 	scoped.Remote, scoped.Project, scoped.dashboardURL = host.Remote, host.Project, host.DashboardURL
 	scoped.boxdDisabled = host.Project != mode.Project
-	return jobLookup{app: &scoped, id: id, host: host.Name}, nil
+	return &scoped
 }
 
 // A qualified ID can come from another client, with no local queue marker.

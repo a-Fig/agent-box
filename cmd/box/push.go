@@ -31,7 +31,7 @@ import (
 //
 // The laptop keeps a few small files per job in App.StateDir:
 //
-//	<job>.json       the record: thread, reason, command, worktree
+//	<job>.json       the record: thread, reason, command, worktree, qualified host locator
 //	<job>.watch      the watcher's lease: "<token> <expiry>", renewed while it lives
 //	<job>.ended      the job's end (exit code or lost, took, tail), written
 //	                 before anything is sent
@@ -168,8 +168,9 @@ func startDetached(start func(breakaway bool) error) error {
 
 // jobRecord is <job>.json.
 type jobRecord struct {
-	Job    string `json:"job"`
-	Thread string `json:"thread"` // the session the result is for
+	Job    string      `json:"job"`
+	Thread string      `json:"thread"` // the session the result is for
+	Host   *jobLocator `json:"host,omitempty"`
 	// Session is Claude Code's session ID, when box_run ran under Claude
 	// Code: box hook tells only that session, not a claude started inside it.
 	Session  string `json:"session,omitempty"`
@@ -181,6 +182,41 @@ type jobRecord struct {
 	// Queued is a job box_run handed to boxd's queue: the watcher follows it
 	// through the queue first (waitQueued).
 	Queued bool `json:"queued,omitempty"`
+}
+
+type jobLocator struct {
+	Remote       string `json:"remote"`
+	Project      string `json:"project"`
+	DashboardURL string `json:"dashboard_url,omitempty"`
+}
+
+func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
+	if rec.Host == nil {
+		return fleetHost{}, fmt.Errorf("no saved host for qualified job %s", id.ID)
+	}
+	host := fleetHost{Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
+	tag, err := jobHostTag(host)
+	if err != nil || tag != id.hostTag {
+		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)
+	}
+	if host.DashboardURL != "" && !validDashboardURL(host.DashboardURL) {
+		return fleetHost{}, fmt.Errorf("invalid saved dashboard URL for job %s", id.ID)
+	}
+	if rec.Queued && host.Project != mode.Project {
+		return fleetHost{}, fmt.Errorf("boxd cannot follow queued job %s in project %q", id.ID, host.Project)
+	}
+	return host, nil
+}
+
+func (a *App) readWatchRecord(job string) (jobRecord, error) {
+	var rec jobRecord
+	if err := readJSON(a.statePath(job, ".json"), &rec); err != nil {
+		return jobRecord{}, fmt.Errorf("no record of %s: %w", job, err)
+	}
+	if rec.Job != job {
+		return jobRecord{}, fmt.Errorf("record does not match job %s", job)
+	}
+	return rec, nil
 }
 
 // jobEnd is <job>.ended: everything needed to send the end again.
@@ -364,19 +400,36 @@ func (a *App) releaseLease(job, ext, token string) {
 // startWatch records a running or queued job and starts its watcher. It
 // says whether the result will be pushed.
 func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) bool {
+	return a.startWatchRecord(info, job, nil, gpu, throwaway, queued)
+}
+
+func (a *App) startWatchOnHost(info jobMeta, job string, host fleetHost, gpu, throwaway, queued bool) bool {
+	locator := &jobLocator{Remote: host.Remote, Project: host.Project, DashboardURL: host.DashboardURL}
+	return a.startWatchRecord(info, job, locator, gpu, throwaway, queued)
+}
+
+func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, throwaway, queued bool) bool {
 	if !a.canPush() {
+		return false
+	}
+	rec := jobRecord{Job: job, Host: host, Thread: a.thread(), Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
+	id, err := parseJobID(job)
+	if err == nil && (id.hostTag != "" || host != nil) {
+		_, err = rec.watchHost(id)
+	}
+	if err != nil {
+		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
 	if err := os.MkdirAll(a.StateDir, 0o755); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	rec := jobRecord{Job: job, Thread: a.thread(), Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	err := a.Spawn(a.StateDir, job)
+	err = a.Spawn(a.StateDir, job)
 	if errors.Is(err, errWatcherInJob) {
 		a.warn("box: notice: this push lasts only as long as box's MCP server, which can't outlive your client here; if your session restarts before it arrives, call box_job " + job + ".")
 		err = nil
@@ -425,8 +478,12 @@ func (a *App) safetyNet(skip string) string {
 		if !ok {
 			continue
 		}
-		var rec jobRecord
-		if readJSON(a.statePath(job, ".json"), &rec) != nil {
+		id, err := parseJobID(job)
+		if err != nil {
+			continue
+		}
+		rec, err := a.readWatchRecord(job)
+		if err != nil {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
@@ -450,6 +507,11 @@ func (a *App) safetyNet(skip string) string {
 			}
 		} else if a.leaseHeld(job, ".watch") {
 			continue
+		} else if id.hostTag != "" {
+			if _, err := rec.watchHost(id); err != nil {
+				a.warn("box: warning: cannot restart the watcher: " + err.Error())
+				continue
+			}
 		}
 		// Running with no watcher, or ended with nobody sending it: start one.
 		if a.Spawn != nil {
@@ -729,15 +791,16 @@ func (a *App) sleep(ctx context.Context, d time.Duration) bool {
 // It is `box watch`, started detached by box_run. It holds the job's watch
 // lease, so a second watcher exits at once.
 func (a *App) Watch(ctx context.Context, job string) error {
-	if !validJob.MatchString(job) {
-		return fmt.Errorf("bad job id %q", job)
+	id, err := parseJobID(job)
+	if err != nil {
+		return err
 	}
 	if a.StateDir == "" || a.Push == nil {
 		return errors.New("no state directory or T3 CLI to push with")
 	}
-	var rec jobRecord
-	if err := readJSON(a.statePath(job, ".json"), &rec); err != nil {
-		return fmt.Errorf("no record of %s: %w", job, err)
+	rec, err := a.readWatchRecord(job)
+	if err != nil {
+		return err
 	}
 	if a.exists(job, ".notified") {
 		return nil
@@ -768,8 +831,16 @@ func (a *App) Watch(ctx context.Context, job string) error {
 
 	var end jobEnd
 	if readJSON(a.statePath(job, ".ended"), &end) != nil {
+		target := a
+		if id.hostTag != "" {
+			host, err := rec.watchHost(id)
+			if err != nil {
+				return err
+			}
+			target = a.jobHostApp(host)
+		}
 		var ended bool
-		end, ended = a.follow(ctx, rec)
+		end, ended = target.follow(ctx, rec, id)
 		if !ended {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -786,7 +857,7 @@ func (a *App) Watch(ctx context.Context, job string) error {
 // follow follows the job to its end. It retries transport errors, and says
 // the job is lost only when that is confirmed. ended is false when ctx ended
 // or the agent cancelled the job.
-func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool) {
+func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, ended bool) {
 	job := rec.Job
 	w := *a
 	tail := &lineTail{}
@@ -795,13 +866,19 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 	w.Notify = nil
 	w.Thread = rec.Thread
 	w.KeepEnded = endedKeep
-	start := jobStart(job)
+	start := jobStart(id.Bare)
 	took := func() int64 { return int64(a.Now().Sub(start) / time.Second) }
 	lost := func() (jobEnd, bool) {
 		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines)}, true
 	}
 	if rec.Queued {
-		out, ok := w.waitQueued(ctx, rec)
+		var out queueOutcome
+		var ok bool
+		if id.hostTag == "" {
+			out, ok = w.waitQueued(ctx, rec)
+		} else {
+			out, ok = w.waitQueuedJob(ctx, rec, id.Bare, false)
+		}
 		switch {
 		case !ok:
 			return jobEnd{}, false
@@ -817,13 +894,13 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 		// Each follow prints the whole log from its start, so a follow after
 		// a pause or a broken connection mustn't add to the last one's.
 		tail.reset()
-		res, err := w.Job(ctx, job, 0)
+		res, err := w.job(ctx, id, 0)
 		if ctx.Err() != nil {
 			return jobEnd{}, false
 		}
 		switch {
 		case err == nil && res.State == stateDone:
-			if w.wasCancelled(ctx, job) {
+			if w.wasCancelled(ctx, id.Bare) {
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
@@ -837,14 +914,14 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 			if pauseDeadline.IsZero() {
 				pauseDeadline = a.Now().Add(mode.FrozenSwappedStop + 10*time.Minute)
 			}
-			if a.Now().After(pauseDeadline) && w.probe(ctx, rec) == probeLost {
+			if a.Now().After(pauseDeadline) && w.probe(ctx, id) == probeLost {
 				return lost()
 			}
 			a.sleep(ctx, 30*time.Second)
 			continue
 		}
 		// An error: the follow broke. Look before calling it lost.
-		switch w.probe(ctx, rec) {
+		switch w.probe(ctx, id) {
 		case probeLost:
 			return lost()
 		case probeRunning, probeDone:
@@ -866,22 +943,21 @@ const (
 	probeLost // confirmed: the box is gone or stopped, or the job's process is dead with no exit code
 )
 
-func (a *App) probe(ctx context.Context, rec jobRecord) probeResult {
+func (a *App) probe(ctx context.Context, id jobID) probeResult {
 	look, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	box, _, _ := strings.Cut(rec.Job, ".")
 	insts, err := a.list(look)
 	if err != nil {
 		return probeUnknown
 	}
-	in := find(insts, box)
+	in := find(insts, id.Box)
 	switch {
 	case in == nil, in.Status == "Stopped":
 		return probeLost
 	case in.Status != "Running":
 		return probeUnknown // frozen: the pause path owns it
 	}
-	pg, err := a.LogPage(look, rec.Job, 0, 1)
+	pg, err := a.LogPage(look, id.Bare, 0, 1)
 	switch {
 	case err != nil && strings.HasPrefix(err.Error(), "no job "):
 		return probeLost

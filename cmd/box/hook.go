@@ -100,9 +100,9 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		if !ok || have[job+".notified"] || !have[job+".json"] {
 			continue
 		}
-		var rec jobRecord
+		rec, err := a.readWatchRecord(job)
 		var end jobEnd
-		if readJSON(a.statePath(job, ".json"), &rec) != nil || rec.Thread != thread || readJSON(a.statePath(job, ".ended"), &end) != nil ||
+		if err != nil || rec.Thread != thread || readJSON(a.statePath(job, ".ended"), &end) != nil ||
 			rec.Session != "" && ev.SessionID != "" && rec.Session != ev.SessionID {
 			continue
 		}
