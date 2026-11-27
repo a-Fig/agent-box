@@ -338,7 +338,7 @@ func (t *tailWriter) String() string {
 // goes right after its exit code is read, usually before boxd's next look,
 // so without this its job would be recorded as lost. Errors are dropped.
 func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.Time, tail string) {
-	if a.Post == nil {
+	if a.Post == nil || a.Project != mode.Project {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refusalTimeout)

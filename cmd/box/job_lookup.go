@@ -53,11 +53,11 @@ func (a *App) jobHostApp(host fleetHost) *App {
 
 // A job from another client can be queued without a local marker.
 func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
-	if l.app.boxdDisabled {
+	if l.app.Project != mode.Project || l.app.boxdDisabled {
 		return dash.Job{}, false, nil
 	}
 	local := l.app.wasQueued(l.id.ID)
-	if l.id.hostTag == "" && !local && (l.app.Project != mode.Project || l.app.jobInBox(ctx, l.id.Bare)) {
+	if l.id.hostTag == "" && !local && l.app.jobInBox(ctx, l.id.Bare) {
 		return dash.Job{}, false, nil
 	}
 	j, found, err := l.app.queuedJob(ctx, l.id.Bare)
@@ -86,8 +86,7 @@ func (l jobLookup) page(ctx context.Context, offset, limit int64) (Page, *jobEnd
 		return Page{}, nil, err
 	}
 	if l.app.Project != mode.Project || l.app.boxdDisabled {
-		// Boxd reads the agents project. Keep the existing tail lookup for
-		// other projects without trying its new full-log path.
+		// Boxd reads the agents project. Use the locally retained tail.
 		if end, ok := l.app.endedElsewhere(ctx, l.id); ok {
 			return Page{}, &end, err
 		}

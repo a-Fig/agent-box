@@ -879,7 +879,8 @@ func TestSafetyNetRecoversAWatcherKilledMidSend(t *testing.T) {
 	now := e.a.Now()
 	e.a.Now = func() time.Time { return now }
 	// Killed while sending: its .ended written, its leases left behind.
-	if err := writeJSON(e.a.statePath(job, ".ended"), jobEnd{Code: 1, Tail: "FAIL x"}); err != nil {
+	end := jobEnd{Code: 1, Tail: "FAIL x", Locator: &jobLocator{Remote: e.a.Remote, Project: e.a.Project}}
+	if err := writeJSON(e.a.statePath(job, ".ended"), end); err != nil {
 		t.Fatal(err)
 	}
 	for ext, ttl := range map[string]time.Duration{".sending": sendLease, ".watch": watchLease} {

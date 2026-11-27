@@ -253,6 +253,9 @@ func waitText(why string) string {
 // queuedJob asks boxd about a job by name: queued, started or ended. found
 // is false for a job boxd doesn't know (404); err is a failure to ask.
 func (a *App) queuedJob(ctx context.Context, job string) (j dash.Job, found bool, err error) {
+	if a.Project != mode.Project {
+		return j, false, nil // boxd only records jobs in the agents project
+	}
 	ctx, cancel := context.WithTimeout(ctx, queueTimeout)
 	defer cancel()
 	code, b, err := a.boxdDo(ctx, http.MethodGet, "/api/queue/"+url.PathEscape(job), "", nil)

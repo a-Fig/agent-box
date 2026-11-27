@@ -187,8 +187,8 @@ func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
 	}
 }
 
-func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
-	a, _, west, _ := lookupTestApp(t, "work")
+func TestJobLookupDoesNotCrossProjectsForSameBareID(t *testing.T) {
+	a, out, west, _ := lookupTestApp(t, "work")
 	a.Remote, a.dashboardURL = west.Remote, west.DashboardURL
 	exit := 3
 	box, suffix, _ := strings.Cut(testBareJobID, ".")
@@ -198,15 +198,21 @@ func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
 	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
 		if len(cmd.Args) != 8 || cmd.Args[1] != a.Project || cmd.Args[3] != west.Remote+":"+box {
-			t.Fatalf("local page used the wrong Incus project or remote: %q", cmd.Args)
+			t.Fatalf("lookup used the wrong Incus project or remote: %q", cmd.Args)
+		}
+		if isScript(cmd, "# follow") {
+			return Result{Code: 3}, nil
 		}
 		return Result{Code: 1, Stderr: notRunning}, nil
 	})
-	var fullReads int
+	var boxdReads int
 	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		boxdReads++
+		if a.Project != "agents" {
+			t.Fatal("custom-project lookup contacted boxd")
+		}
 		var payload any = j
 		if strings.HasSuffix(req.URL.Path, "/log") {
-			fullReads++
 			payload = dash.LogChunk{Stopped: true, Offset: 5, EOF: true, LogBytes: 5, Data: "there"}
 		}
 		raw, err := json.Marshal(payload)
@@ -222,16 +228,42 @@ func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || fullReads != 1 || !reflect.DeepEqual(p.Source, j.Source) {
-		t.Fatalf("agents page = %+v, %v, full reads %d", p, err, fullReads)
+	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || boxdReads != 2 || !reflect.DeepEqual(p.Source, j.Source) {
+		t.Fatalf("agents page = %+v, %v, boxd reads %d", p, err, boxdReads)
 	}
-	a.Project = "work"
+	a.Project = west.Project
 	lookup, err = a.lookupJob(testBareJobID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end == nil || end.Tail != j.Tail || fullReads != 1 || end.Source != nil {
-		t.Fatalf("work project page = %+v, end %+v, %v, full reads %d", p, end, err, fullReads)
+	source := &dash.SourceRevision{Commit: strings.Repeat("c", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("d", 40)}
+	local := &jobLocator{Remote: west.Remote, Project: west.Project}
+	if err := writeJSON(a.statePath(testBareJobID, ".json"), jobRecord{Job: testBareJobID, Host: local, Source: source}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(a.statePath(testBareJobID, ".result"), jobEnd{Code: exit, Tail: j.Tail}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := jobEnd{Code: exit, Tail: j.Tail, Source: j.Source, Locator: &jobLocator{Remote: west.Remote, Project: "agents"}}
+	if err := writeJSON(a.statePath(testBareJobID, ".ended"), foreign); err != nil {
+		t.Fatal(err)
+	}
+	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end != nil {
+		t.Fatalf("custom project page = %+v, end %+v, %v", p, end, err)
+	}
+	if r, err := lookup.job(ctx, 0); err == nil || r.State == stateDone || r.Code == exit || out.Len() != 0 {
+		t.Fatalf("custom project full result = %+v, log %q, %v", r, out, err)
+	}
+	kept := jobEnd{Code: 7, Tail: "custom project tail", Source: source, Locator: local}
+	if err := writeJSON(a.statePath(testBareJobID, ".result"), kept); err != nil {
+		t.Fatal(err)
+	}
+	if _, end, err := lookup.page(ctx, 0, 0); err == nil || end == nil || !reflect.DeepEqual(*end, kept) {
+		t.Fatalf("custom project paged fallback = %+v, %v", end, err)
+	}
+	if r, err := lookup.job(ctx, 0); err != nil || r.State != stateDone || r.Code != kept.Code ||
+		out.String() != kept.Tail || !reflect.DeepEqual(r.Source, source) {
+		t.Fatalf("custom project full fallback = %+v, log %q, %v", r, out, err)
 	}
 }
 

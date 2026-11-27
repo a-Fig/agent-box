@@ -1532,11 +1532,6 @@ func (a *App) endedElsewhere(ctx context.Context, id jobID) (jobEnd, bool) {
 	if err != nil || !found || j.State != dash.JobDone || j.Exit == nil {
 		return jobEnd{}, false
 	}
-	// Legacy custom-project lookups can still get a tail from boxd's agents
-	// project. That record cannot identify the custom-project snapshot.
-	if a.Project != mode.Project {
-		return jobEnd{Code: *j.Exit, Tail: j.Tail}, true
-	}
 	source := j.Source
 	if source == nil {
 		source = a.savedJobSource(id)

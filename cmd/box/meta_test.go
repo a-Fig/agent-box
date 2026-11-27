@@ -409,6 +409,15 @@ func TestRunReportsItsEnd(t *testing.T) {
 	if len(p.urls) != 1 || !strings.Contains(calls, "delete") || strings.Index(calls, "remote") > strings.LastIndex(calls, "delete") {
 		t.Errorf("posted %q; calls %s", p.urls, calls)
 	}
+
+	// Boxd tracks agents only. A custom project can reuse the same bare ID.
+	a.Project = "work"
+	a.dashboardURL = "https://agent-box.example.ts.net"
+	p = posted{}
+	a.reportEnded(context.Background(), "my-repo.20261123-120000-0001", 3, a.Now(), "custom project tail")
+	if len(p.urls) != 0 {
+		t.Fatalf("custom project result posted to %q", p.urls)
+	}
 }
 
 func TestTailWriterKeepsTheEnd(t *testing.T) {

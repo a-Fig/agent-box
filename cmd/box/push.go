@@ -231,6 +231,17 @@ func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 	return host, nil
 }
 
+func (a *App) watchTarget(rec jobRecord, id jobID) (*App, error) {
+	if id.hostTag == "" && rec.Host == nil {
+		return a, nil
+	}
+	host, err := rec.watchHost(id)
+	if err != nil {
+		return nil, err
+	}
+	return a.jobHostApp(host), nil
+}
+
 func (a *App) readWatchRecord(job string) (jobRecord, error) {
 	var rec jobRecord
 	if err := readJSON(a.statePath(job, ".json"), &rec); err != nil {
@@ -491,7 +502,7 @@ func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, 
 		err = fmt.Errorf("saved fleet host requires a qualified job ID")
 	}
 	baseDir := a.t3BaseDir()
-	if err == nil && id.hostTag == "" && (baseDir != "" || info.Source != nil) {
+	if err == nil && id.hostTag == "" {
 		host = &jobLocator{Remote: a.Remote, Project: a.Project, DashboardURL: a.dashboardURL}
 	}
 	rec := jobRecord{Job: job, Host: host, Source: info.Source, Thread: a.thread(), T3BaseDir: baseDir, Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
@@ -580,8 +591,12 @@ func (a *App) safetyNet(skip string) string {
 		if rec.Thread != thread || job == skip || notified {
 			continue
 		}
-		var end jobEnd
-		if readJSON(a.statePath(job, ".ended"), &end) == nil {
+		target, err := a.watchTarget(rec, id)
+		if err != nil {
+			a.warn("box: warning: cannot restart the watcher: " + err.Error())
+			continue
+		}
+		if end, ok := target.readJobEnd(id, ".ended", rec.Host != nil); ok {
 			if end.Lost {
 				lines = append(lines, fmt.Sprintf("%s lost (exit 75)", job))
 			} else {
@@ -592,11 +607,6 @@ func (a *App) safetyNet(skip string) string {
 			}
 		} else if a.leaseHeld(job, ".watch") {
 			continue
-		} else if id.hostTag != "" || (rec.T3BaseDir != "" && rec.Host != nil) {
-			if _, err := rec.watchHost(id); err != nil {
-				a.warn("box: warning: cannot restart the watcher: " + err.Error())
-				continue
-			}
 		}
 		// Running with no watcher, or ended with nobody sending it: start one.
 		if a.Spawn != nil {
@@ -676,13 +686,23 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 		return jobEnd{}, false
 	}
 	for _, ext := range []string{".result", ".ended"} {
-		var end jobEnd
-		if readJSON(a.statePath(job, ext), &end) == nil && !end.Lost && !end.Dropped &&
-			(end.Locator == nil || a.jobSourceMatchesHost(id, end.Locator)) {
+		if end, ok := a.readJobEnd(id, ext, false); ok && !end.Lost && !end.Dropped {
 			return end, true
 		}
 	}
 	return jobEnd{}, false
+}
+
+func (a *App) readJobEnd(id jobID, ext string, scopedWatch bool) (end jobEnd, ok bool) {
+	if readJSON(a.statePath(id.ID, ext), &end) != nil {
+		return jobEnd{}, false
+	}
+	if end.Locator != nil || id.hostTag != "" || a.Project != mode.Project || scopedWatch {
+		return end, a.jobSourceMatchesHost(id, end.Locator)
+	}
+	// Only a legacy bare job in agents can use a record without a locator.
+	rec, err := a.readWatchRecord(id.ID)
+	return end, err != nil || rec.Host == nil
 }
 
 func (a *App) jobSourceMatchesHost(id jobID, host *jobLocator) bool {
@@ -948,6 +968,10 @@ func (a *App) Watch(ctx context.Context, job string) error {
 			a = &scoped
 		}
 	}
+	target, err := a.watchTarget(rec, id)
+	if err != nil {
+		return err
+	}
 	if a.exists(job, ".notified") {
 		return nil
 	}
@@ -979,19 +1003,8 @@ func (a *App) Watch(ctx context.Context, job string) error {
 		}
 	}()
 
-	var end jobEnd
-	if readJSON(a.statePath(job, ".ended"), &end) != nil {
-		target := a
-		if id.hostTag != "" || (rec.T3BaseDir != "" && rec.Host != nil) {
-			host, err := rec.watchHost(id)
-			if err != nil {
-				return err
-			}
-			target = a.jobHostApp(host)
-			if id.hostTag == "" {
-				target.boxdDisabled = a.boxdDisabled
-			}
-		}
+	end, ok := target.readJobEnd(id, ".ended", rec.Host != nil)
+	if !ok {
 		if !target.jobSourceMatchesHost(id, rec.Host) {
 			rec.Source = nil
 		}
@@ -1020,9 +1033,7 @@ func (a *App) Watch(ctx context.Context, job string) error {
 // or the agent cancelled the job.
 func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, ended bool) {
 	job := rec.Job
-	var saved jobEnd
-	if readJSON(a.statePath(job, ".result"), &saved) == nil && !saved.Lost && !saved.Dropped &&
-		(saved.Locator == nil || a.jobSourceMatchesHost(id, saved.Locator)) {
+	if saved, ok := a.readJobEnd(id, ".result", rec.Host != nil); ok && !saved.Lost && !saved.Dropped {
 		switch saved.Completion {
 		case completionExited:
 			return saved, true
