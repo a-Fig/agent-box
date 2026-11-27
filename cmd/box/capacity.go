@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -28,20 +29,41 @@ func launchLimits(err error) []string {
 }
 
 // capacityHint refreshes the selected host's capacity after the refusal.
-// GPU has one size, and a named box would change if the retry resized it.
+// GPU has one size. Changing the size for an existing named box could
+// send the job to a throwaway instead.
 func (a *App) capacityHint(ctx context.Context, size mode.Size, box string, limits []string) *capacityDetail {
 	if len(limits) == 0 {
 		return nil
 	}
 	detail := &capacityDetail{Limits: limits}
-	if size.GPU || box != "" || size.Name == mode.Sizes[0].Name {
+	if size.GPU || size.Name == mode.Sizes[0].Name {
 		return detail
 	}
 	ctx, cancel := context.WithTimeout(ctx, refusalTimeout)
 	defer cancel()
-	s := a.probeHostStatus(ctx, hostProbeOpts{strictCaps: true}).report
-	if ctx.Err() != nil || !s.Reachable || s.Error != "" || !startableMode(s.Mode) {
+	probe := a.probeHostStatus(ctx, hostProbeOpts{strictCaps: true})
+	s := probe.report
+	if ctx.Err() != nil || !s.Reachable || s.Error != "" || !startableMode(s.Mode) ||
+		(box != "" && find(probe.insts, box) != nil) {
 		return detail
+	}
+	for _, limit := range limits {
+		switch limit {
+		case "instances", "cpu", "memory":
+			// The strict probe read these keys directly.
+		case "disk", "containers":
+			resource := probe.resources[limit]
+			if resource.Limit != nil && *resource.Limit == -1 {
+				continue
+			}
+			if _, known := resource.remaining(); !known {
+				return detail
+			}
+		default:
+			// The room estimate does not account for this quota. In
+			// particular, aggregate disk room does not verify a pool cap.
+			return detail
+		}
 	}
 	for _, smaller := range mode.Sizes {
 		if smaller.Name == size.Name {
@@ -58,8 +80,13 @@ func (a *App) printCapacity(detail *capacityDetail) {
 	if detail == nil {
 		return
 	}
-	facts := strings.NewReplacer("cpu", "CPU", "gpu", "GPU").Replace(strings.Join(detail.Limits, ", "))
-	fmt.Fprintf(a.Err, "box: capacity limit%s: %s.", onHost(a.jobHostName), facts)
+	labels := slices.Clone(detail.Limits)
+	for i, name := range labels {
+		if name == "cpu" || name == "gpu" {
+			labels[i] = strings.ToUpper(name)
+		}
+	}
+	fmt.Fprintf(a.Err, "box: capacity limit%s: %s.", onHost(a.jobHostName), strings.Join(labels, ", "))
 	if detail.SmallerSize != "" {
 		fmt.Fprintf(a.Err, " A %s box appears to fit now if it meets the job's needs.", detail.SmallerSize)
 	}

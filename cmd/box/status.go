@@ -73,7 +73,8 @@ type hostProbeOpts struct {
 type hostStatusProbe struct {
 	report           StatusReport
 	insts            []instance
-	keptThrowaways   []instance // already verified idle via keptThrowawayConfig + hasEndedJob
+	resources        map[string]projectResource // Incus allocation counters from a strict probe
+	keptThrowaways   []instance                 // already verified idle via keptThrowawayConfig + hasEndedJob
 	hasGPU           bool
 	gpuHolders       []string // names of GPU boxes currently holding the GPU
 	repoBox          *instance
@@ -120,6 +121,7 @@ func (a *App) probeHostStatus(ctx context.Context, opts hostProbeOpts) hostStatu
 			MaxBoxes: -1, SlotsFree: -1, Error: firstLine(err.Error()),
 		}}
 	}
+	var resources map[string]projectResource
 	if opts.strictCaps {
 		m, err := a.projectKeyStrict(ctx, mode.ProjectModeKey)
 		if err != nil {
@@ -235,7 +237,7 @@ func (a *App) probeHostStatus(ctx context.Context, opts hostProbeOpts) hostStatu
 			}
 			memCap, memKnown = m, true
 		}
-		resources, err := a.projectResourcesStrict(ctx)
+		resources, err = a.projectResourcesStrict(ctx)
 		if err != nil {
 			return failCap(err)
 		}
@@ -270,6 +272,7 @@ func (a *App) probeHostStatus(ctx context.Context, opts hostProbeOpts) hostStatu
 	return hostStatusProbe{
 		report:           s,
 		insts:            insts,
+		resources:        resources,
 		keptThrowaways:   keptThrowaways,
 		hasGPU:           hasGPU,
 		gpuHolders:       gpuHolders,

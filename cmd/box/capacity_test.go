@@ -119,6 +119,83 @@ func TestCapacityPreservesGPURequirement(t *testing.T) {
 	}
 }
 
+func TestCapacityOmitsEstimateForUnverifiedDiskQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name, resource, info, smaller string
+	}{
+		{"pool cap", "disk.pool.default", `{"resources":{"disk":{"limit":214748364800,"usage":0},"disk.pool.default":{"limit":107374182400,"usage":96636764160}}}`, ""},
+		{"missing aggregate usage", "disk", `{}`, ""},
+		{"verified aggregate usage", "disk", `{"resources":{"disk":{"limit":107374182400,"usage":85899345920}}}`, "small"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hostsTestPath(t)
+			f := &fakePC{t: t, mode: "full", project: map[string]string{"info": tc.info},
+				refuse: fmt.Sprintf(`Error: Reached maximum aggregate value "100GiB" for "limits.%s" in project "agents"`, tc.resource)}
+			e := newPushEnv(t, f, "thread-test")
+			text := checkMCPRunCapacity(t, e.a, e.runArgs(map[string]any{"new": true, "size": "large", "queue": false}, "true"),
+				"", stateRefused, tc.resource, tc.smaller)
+			if strings.Contains(text, "appears to fit") != (tc.smaller != "") {
+				t.Fatalf("unexpected disk estimate: %q", text)
+			}
+		})
+	}
+}
+
+func TestCapacityEstimateForNamedBoxDependsOnWhetherItExists(t *testing.T) {
+	for _, exists := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exists=%t", exists), func(t *testing.T) {
+			hostsTestPath(t)
+			f := &fakePC{t: t, refuse: memoryRefusal, mode: "full",
+				project: map[string]string{"limits.memory": "3GiB", "info": "{}"}}
+			if exists {
+				f.insts = []instance{{Name: "named", Status: "Running", Config: map[string]string{mode.SizeKey: "large"}}}
+				f.project["limits.memory"] = "10GiB" // still room for a small box
+			}
+			a, out := testApp(f)
+			t.Chdir(newRepo(t))
+			args := []string{"run", "--box", "named", "--size", "medium", "--no-queue", "--reason", testReason, "true"}
+			code := run(context.Background(), a, args, nil)
+			if code != exitPaused || strings.Contains(out.String(), "A small box appears to fit") == exists {
+				t.Fatalf("named box run = %d, %q", code, out)
+			}
+			if !exists && (len(f.launches) != 1 || f.launches[0][2] != "pc:named") {
+				t.Fatalf("launch did not use the requested name: %v", f.launches)
+			}
+		})
+	}
+}
+
+func TestCapacityDistinguishesContainerAndInstanceLimits(t *testing.T) {
+	for _, tc := range []struct{ resource, message string }{
+		{"containers", `Error: Reached maximum number of instances of type "container" in project "agents"`},
+		{"instances", `Error: Reached maximum number of instances in project "agents"`},
+	} {
+		t.Run(tc.resource, func(t *testing.T) {
+			hostsTestPath(t)
+			e := newPushEnv(t, &fakePC{t: t, refuse: tc.message}, "thread-test")
+			checkMCPRunCapacity(t, e.a, e.runArgs(map[string]any{"new": true, "queue": false}, "true"),
+				"", stateRefused, tc.resource, "")
+		})
+	}
+
+	// Fleet preflight sees the same container quota before a launch.
+	host := fleetHost{Name: "worker", Remote: "worker", Project: mode.Project}
+	worker := &fakeFleetHost{remote: host.Remote, project: host.Project, mode: "full"}
+	ff := newFakeFleet(t, worker)
+	a, _, dir := fleetDispatchTestApp(t, ff, []fleetHost{host})
+	a.R = lookupRunner(func(ctx context.Context, c Cmd) (Result, error) {
+		if c.Name == "incus" && len(c.Args) > 3 && c.Args[2] == "project" && c.Args[3] == "info" {
+			return Result{Stdout: `{"resources":{"containers":{"limit":1,"usage":1}}}`}, nil
+		}
+		if c.Name == "incus" && len(c.Args) > 2 && c.Args[2] == "launch" {
+			t.Fatal("fleet attempted a launch despite the container cap")
+		}
+		return ff.Run(ctx, c)
+	})
+	checkMCPRunCapacity(t, a, map[string]any{"dir": dir, "new": true, "queue": false, "command": "true", "reason": testReason},
+		host.Name, stateRefused, "containers", "")
+}
+
 func checkMCPRunCapacity(t *testing.T, a *App, args map[string]any, host, state, resource, smaller string) string {
 	t.Helper()
 	params, _ := json.Marshal(map[string]any{"name": "box_run", "arguments": args})

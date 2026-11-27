@@ -773,9 +773,18 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	}
 	if err != nil {
 		if match := projectLimitRefusal.FindStringSubmatch(err.Error()); match != nil {
-			resource := strings.ToLower(match[1])
+			resource := match[1]
 			if resource == "" {
-				resource = "instances"
+				switch strings.ToLower(match[2]) {
+				case "":
+					resource = "instances"
+				case "container":
+					resource = "containers"
+				case "virtual-machine":
+					resource = "virtual-machines"
+				default:
+					resource = "unknown"
+				}
 			}
 			return &errNoRoom{size: sz.Name, resource: resource, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
 		}
