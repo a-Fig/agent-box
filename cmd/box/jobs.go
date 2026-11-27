@@ -72,11 +72,11 @@ test -f %[2]s.log || exit 3
 printf '%%s %%s' "$(jobstate %[2]s)" "$(( $(wc -c < %[2]s.log) ))"
 if [ -f %[2]s.meta ]; then
   printf '\t'
-  timeout -k 1 1 head -c 16384 %[2]s.meta 2>/dev/null | base64 -w0
+  timeout -k 1 1 head -c %[5]d %[2]s.meta 2>/dev/null | base64 -w0
 fi
 printf '\n'
 tail -c +%[3]d %[2]s.log | head -c %[4]d
-`, workRoot, job, offset+1, limit)
+`, workRoot, job, offset+1, limit, dash.MaxJobMetaBytes)
 }
 
 // cancelScript stops a job's session and writes 130 to its .exit if the

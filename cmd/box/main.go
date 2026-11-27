@@ -232,7 +232,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			var r JobResult
 			var err error
 			if _, queued, queueErr := lookup.queued(ctx); queued {
-				seen := lookup.id.hostTag != "" && queueErr == nil
+				seen := queueErr == nil
 				r, err = lookup.app.followQueuedJob(ctx, lookup.id, seen)
 			} else {
 				r, err = lookup.job(ctx, 0)

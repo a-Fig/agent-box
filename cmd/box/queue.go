@@ -263,7 +263,9 @@ func (a *App) wasQueued(job string) bool {
 		return false
 	}
 	var rec jobRecord
-	return readJSON(a.statePath(job, ".json"), &rec) == nil && rec.Queued
+	id, err := parseJobID(job)
+	return err == nil && readJSON(a.statePath(job, ".json"), &rec) == nil && rec.Queued &&
+		(rec.Host == nil || a.jobSourceMatchesHost(id, rec.Host))
 }
 
 // nudgeMessage is the one push a job gets once it has waited dash.QueueNudge.
@@ -290,7 +292,7 @@ type queueOutcome struct {
 
 // jobInBox says whether the job's log exists in its box: it started there.
 func (a *App) jobInBox(ctx context.Context, job string) bool {
-	look, cancel := a.probeCtx(ctx)
+	look, cancel := context.WithTimeout(ctx, pollTimeout)
 	defer cancel()
 	_, err := a.LogPage(look, job, 0, 1)
 	return err == nil

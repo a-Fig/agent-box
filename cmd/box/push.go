@@ -634,12 +634,14 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 	if a.StateDir == "" {
 		return jobEnd{}, false
 	}
-	if _, err := parseJobID(job); err != nil {
+	id, err := parseJobID(job)
+	if err != nil {
 		return jobEnd{}, false
 	}
 	for _, ext := range []string{".result", ".ended"} {
 		var end jobEnd
-		if readJSON(a.statePath(job, ext), &end) == nil && !end.Lost && !end.Dropped {
+		if readJSON(a.statePath(job, ext), &end) == nil && !end.Lost && !end.Dropped &&
+			(end.Host == nil || a.jobSourceMatchesHost(id, end.Host)) {
 			return end, true
 		}
 	}
@@ -647,8 +649,14 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 }
 
 func (a *App) jobSourceMatchesHost(id jobID, host *jobLocator) bool {
-	// A qualified ID already identifies the resolved remote and project.
-	return id.hostTag != "" || (host != nil && host.Remote == a.Remote && host.Project == a.Project)
+	if host == nil {
+		return id.hostTag != ""
+	}
+	if id.hostTag != "" {
+		tag, err := jobHostTag(fleetHost{Remote: host.Remote, Project: host.Project})
+		return err == nil && tag == id.hostTag
+	}
+	return host.Remote == a.Remote && host.Project == a.Project
 }
 
 func (a *App) savedJobSource(id jobID) *dash.SourceRevision {

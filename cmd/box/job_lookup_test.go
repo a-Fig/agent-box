@@ -320,6 +320,9 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 				code = 7
 				src = eastSource
 			}
+			if isScript(cmd, "# page") {
+				return Result{Stdout: fmt.Sprintf("done %d 4\nt", code)}, nil
+			}
 			fmt.Fprint(cmd.Stdout, cmd.Args[3]+" tail")
 			meta, err := json.Marshal(jobMeta{Source: src})
 			if err != nil {
@@ -402,6 +405,90 @@ func TestQualifiedJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 	}
 	if code := run(context.Background(), a, []string{"job", id}, strings.NewReader("")); code != 7 {
 		t.Fatalf("CLI follow returned %d, want queued job's exit code 7", code)
+	}
+}
+
+func TestBareJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
+	a, out, _, east := lookupTestApp(t, "agents")
+	a.dashboardURL, a.Err = east.DashboardURL, out
+	const job = testBareJobID
+	dirty, exit := true, 7
+	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	requests := 0
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.String() != east.DashboardURL+"/api/queue/"+job {
+			t.Fatalf("queue request = %s %s", req.Method, req.URL)
+		}
+		requests++
+		j := dash.Job{Box: "repo", State: dash.JobQueued, Position: 2, Source: source}
+		if requests > 2 {
+			j.State, j.Exit, j.Tail = dash.JobDone, &exit, "queued tail"
+		}
+		raw, _ := json.Marshal(j)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	}
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" || (requests < 3 && !isScript(cmd, "# page")) {
+			t.Fatalf("unexpected Incus call: %q", cmd.Args)
+		}
+		return Result{Code: 3}, nil // a waiting job has no guest log
+	})
+	res, data := lookupTool(t, a, job, false)
+	got, _ := data["source"].(map[string]any)
+	if res["isError"] != false || data["job"] != job || data["state"] != stateQueued || data["position"] != 2.0 ||
+		got["commit"] != source.Commit || !strings.Contains(fmt.Sprint(res["content"]), sourceLine(source)) {
+		t.Fatalf("queued MCP result = %v", res)
+	}
+	if code := run(context.Background(), a, []string{"job", job}, nil); code != exit ||
+		!strings.Contains(out.String(), "queued tail") || !strings.Contains(out.String(), sourceLine(source)) {
+		t.Fatalf("CLI follow = %d, %q", code, out)
+	}
+}
+
+func TestBareJobRejectsRetainedResultFromAnotherHost(t *testing.T) {
+	a, _, west, east := lookupTestApp(t, "agents")
+	a.dashboardURL = east.DashboardURL
+	const job = testBareJobID
+	if err := writeJSON(a.statePath(job, ".result"), jobEnd{Code: 4, Tail: "west tail", Host: &jobLocator{Remote: west.Remote, Project: west.Project}}); err != nil {
+		t.Fatal(err)
+	}
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" {
+			t.Fatalf("lookup used the wrong host: %q", cmd.Args)
+		}
+		return Result{Code: 3}, nil
+	})
+	exit, dirty := 7, false
+	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	_, id, _ := strings.Cut(job, ".")
+	started := jobStart(job)
+	found := true
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "east.example.com" {
+			t.Fatalf("lookup contacted the wrong boxd: %s", req.URL)
+		}
+		if found && strings.HasSuffix(req.URL.Path, "/api/queue/"+job) {
+			j := dash.Job{Box: "repo", ID: id, BoxUID: "east-uid", Key: dash.JobKey("repo", id, started), StartedAt: started,
+				State: dash.JobDone, Exit: &exit, Tail: "east tail", Source: source}
+			raw, _ := json.Marshal(j)
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+	}
+	for _, paged := range []bool{true, false} {
+		found = true
+		res, data := lookupTool(t, a, job, paged)
+		got, _ := data["source"].(map[string]any)
+		tail, _ := data["tail"].(string)
+		if res["isError"] != false || data["exitCode"] != 7.0 || !strings.HasSuffix(tail, "east tail") ||
+			strings.Contains(tail, "west tail") || got["commit"] != source.Commit {
+			t.Fatalf("lookup (paged %t) = %v", paged, res)
+		}
+		found = false
+		res, _ = lookupTool(t, a, job, paged)
+		if res["isError"] != true || strings.Contains(fmt.Sprint(res["content"]), "west tail") {
+			t.Fatalf("missing job (paged %t) returned foreign record: %v", paged, res)
+		}
 	}
 }
 

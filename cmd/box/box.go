@@ -1399,7 +1399,7 @@ func followScript(job string) string {
 	f := workRoot + "/.box/" + job
 	return "# follow\n" + aliveFn + jobPIDFn + fmt.Sprintf(`test -f %[1]s.log || { echo "box: no job %[2]s" >&2; exit 3; }
 if [ -f %[1]s.meta ]; then
-  m=$(timeout -k 1 1 head -c 16384 %[1]s.meta 2>/dev/null | base64 -w0)
+  m=$(timeout -k 1 1 head -c %[9]d %[1]s.meta 2>/dev/null | base64 -w0)
   [ -n "$m" ] && printf '%%s%%s\n' %[8]s "$m" >&2
 fi
 pid=$(jobpid %[1]s)
@@ -1426,7 +1426,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker), completionExited, completionCancelled, shq(metaMarker))
+`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker), completionExited, completionCancelled, shq(metaMarker), dash.MaxJobMetaBytes)
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout

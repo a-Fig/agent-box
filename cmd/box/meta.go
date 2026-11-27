@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/mask"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -183,20 +184,36 @@ func stripCredentials(remote string) string {
 
 var plainWord = regexp.MustCompile(`^[A-Za-z0-9_./=:@%+,-]+$`)
 
-// displayCommand is the command as a person would type it: one argument as
-// is, several joined with only the words that need it quoted.
+// displayCommand quotes argv for display and bounds the copy stored in .meta.
+// The job still receives the full command.
 func displayCommand(args []string) string {
+	var command string
 	if len(args) == 1 {
-		return args[0]
-	}
-	w := make([]string, len(args))
-	for i, s := range args {
-		w[i] = s
-		if !plainWord.MatchString(s) {
-			w[i] = shq(s)
+		command = args[0]
+	} else {
+		w := make([]string, len(args))
+		for i, s := range args {
+			w[i] = s
+			if !plainWord.MatchString(s) {
+				w[i] = shq(s)
+			}
 		}
+		command = strings.Join(w, " ")
 	}
-	return strings.Join(w, " ")
+	// Leave room in the metadata budget for JSON escaping and other fields.
+	const maxDisplayCommand = 1 << 10
+	if len(command) <= maxDisplayCommand {
+		return command
+	}
+	command = mask.Mask(command)
+	if len(command) <= maxDisplayCommand {
+		return command
+	}
+	end := maxDisplayCommand - len("...")
+	for end > 0 && !utf8.RuneStart(command[end]) {
+		end--
+	}
+	return command[:end] + "..."
 }
 
 // pushMeta writes the job's .meta in the box, next to its log.

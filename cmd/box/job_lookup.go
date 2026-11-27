@@ -50,13 +50,13 @@ func (a *App) jobHostApp(host fleetHost) *App {
 	return &scoped
 }
 
-// A qualified ID can come from another client, with no local queue marker.
+// A job from another client can be queued without a local marker.
 func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
 	if l.app.boxdDisabled {
 		return dash.Job{}, false, nil
 	}
 	local := l.app.wasQueued(l.id.ID)
-	if l.id.hostTag == "" && !local {
+	if l.id.hostTag == "" && !local && (l.app.Project != mode.Project || l.app.jobInBox(ctx, l.id.Bare)) {
 		return dash.Job{}, false, nil
 	}
 	j, found, err := l.app.queuedJob(ctx, l.id.Bare)

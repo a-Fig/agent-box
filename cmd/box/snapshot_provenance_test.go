@@ -58,6 +58,33 @@ func TestSnapshotIncludesUntrackedChangesInDirtyState(t *testing.T) {
 	}
 }
 
+func TestSnapshotReportsUnknownHeadDuringCheckout(t *testing.T) {
+	dir := newRepo(t)
+	head := gitT(t, dir, "rev-parse", "HEAD")
+	gitT(t, dir, "add", "-A")
+	gitT(t, dir, "commit", "-qm", "fix")
+	fixed := gitT(t, dir, "rev-parse", "HEAD")
+	gitT(t, dir, "checkout", "-q", "--detach", head)
+	runner := lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
+		if cmd.Name == "git" && len(cmd.Args) > 1 && cmd.Args[0] == "add" && cmd.Args[1] == "-A" {
+			gitT(t, dir, "checkout", "-q", "--detach", fixed)
+		}
+		return (execRunner{}).Run(ctx, cmd)
+	})
+	const ref = "concurrent-checkout"
+	snap, err := snapshot(context.Background(), runner, dir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+	clone := fetchSnapshot(t, snap.bundle, ref)
+	if src := snap.source; !src.Valid() || src.Commit != "" || src.Dirty != nil ||
+		src.SnapshotCommit != gitT(t, clone, "rev-parse", "FETCH_HEAD") ||
+		gitT(t, clone, "rev-parse", "FETCH_HEAD^{tree}") != gitT(t, dir, "rev-parse", fixed+"^{tree}") {
+		t.Fatalf("snapshot source during checkout = %+v", src)
+	}
+}
+
 func TestFollowMetadataRequiresFullGitObjectIDs(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	snap := strings.Repeat("b", 40)

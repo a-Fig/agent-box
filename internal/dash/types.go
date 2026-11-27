@@ -281,6 +281,12 @@ type Job struct {
 // TailBytes is how much of a job's log its Tail keeps.
 const TailBytes = 2 << 10
 
+// MaxJobMetaBytes is the metadata read budget for job logs and dashboard scans.
+const MaxJobMetaBytes = 16 << 10
+
+// MaxQueueMetaBytes leaves room for the daemon's fields when the job starts.
+const MaxQueueMetaBytes = MaxJobMetaBytes - (1 << 10)
+
 // JobBoxGrace is how much later than a job's start its box may have been made. box run --new
 // makes the job's ID, and its start, before it launches the box, so a throwaway's createdAt is a
 // few seconds after its job's startedAt. A job's box is the box of its name made no later than

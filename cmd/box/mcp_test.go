@@ -123,7 +123,7 @@ func TestMCPJobIDSurvivesLongLog(t *testing.T) {
 }
 
 func TestMCPCancelDetaches(t *testing.T) {
-	f := &fakePC{t: t, insts: []instance{{Name: "agent-box", Status: "Running"}}, block: true}
+	f := &fakePC{t: t, insts: []instance{{Name: "agent-box", Status: "Running"}}, script: "running - 0\n", block: true}
 	a, _ := testApp(f)
 	pr, pw := io.Pipe()
 	var out bytes.Buffer
@@ -143,8 +143,8 @@ func TestMCPCancelDetaches(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("replied to a cancelled request: %s", out.String())
 	}
-	if c := f.callList(); c != "exec" {
-		t.Errorf("incus calls = %q, want only the follow (no delete, no kill)", c)
+	if c := f.callList(); c != "exec exec" {
+		t.Errorf("incus calls = %q, want only the log probe and follow", c)
 	}
 }
 

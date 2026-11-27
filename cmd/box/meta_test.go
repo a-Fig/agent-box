@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -146,6 +147,31 @@ func metaOf(t *testing.T, f *fakePC) (jobMeta, string) {
 		return m, target + "\n" + body
 	}
 	return jobMeta{}, ""
+}
+
+func TestLongInlineCommandPreservesReadableJobMetadata(t *testing.T) {
+	dir := newRepo(t)
+	cmd := "true # " + strings.Repeat("🙂<>&\t", dash.MaxJobMetaBytes/5) + "full-command-end"
+	f := &fakePC{t: t, exit: "0"}
+	a, _ := testApp(f)
+	started := false
+	a.R = lookupRunner(func(ctx context.Context, command Cmd) (Result, error) {
+		if command.Name == "incus" && len(command.Args) > 7 && command.Args[2] == "exec" && command.Args[6] == "-lc" {
+			started = strings.Contains(command.Args[7], "full-command-end")
+		}
+		return f.Run(ctx, command)
+	})
+	r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{cmd}, Reason: testReason})
+	if err != nil || r.Code != 0 || !started {
+		t.Fatalf("long command lost before dispatch: %+v, %v", r, err)
+	}
+	meta, wire := metaOf(t, f)
+	_, data, _ := strings.Cut(wire, "\n")
+	if len(data) > dash.MaxQueueMetaBytes || !utf8.ValidString(meta.Command) || !strings.HasSuffix(meta.Command, "...") {
+		t.Fatalf("long command metadata was not bounded: %d bytes, command %q", len(data), meta.Command)
+	}
+	read := decodeSource(base64.StdEncoding.EncodeToString([]byte(data)))
+	requireSourceRevision(t, read, r.Source.Commit, true, r.Source.SnapshotCommit)
 }
 
 func TestRunWritesMeta(t *testing.T) {

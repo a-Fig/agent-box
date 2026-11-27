@@ -109,6 +109,10 @@ func snapshot(ctx context.Context, r Runner, top, id string) (_ worktreeSnapshot
 	if err != nil {
 		return worktreeSnapshot{}, err
 	}
+	sourceHead := head
+	if current, _ := git(ctx, r, top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}"); current != head {
+		sourceHead = "" // a concurrent checkout makes the comparison ambiguous
+	}
 	args := []string{"commit-tree", tree, "-m", "box snapshot " + id}
 	// A shallow clone lacks the history below its cut, so a bundle of it
 	// can't be fetched elsewhere: snapshot it without history.
@@ -119,9 +123,9 @@ func snapshot(ctx context.Context, r Runner, top, id string) (_ worktreeSnapshot
 	if err != nil {
 		return worktreeSnapshot{}, err
 	}
-	source := &dash.SourceRevision{Commit: head, SnapshotCommit: commit}
-	if head != "" {
-		if headTree, err := git(ctx, r, top, nil, "rev-parse", "--verify", head+"^{tree}"); err == nil {
+	source := &dash.SourceRevision{Commit: sourceHead, SnapshotCommit: commit}
+	if sourceHead != "" {
+		if headTree, err := git(ctx, r, top, nil, "rev-parse", "--verify", sourceHead+"^{tree}"); err == nil {
 			dirty := tree != headTree
 			source.Dirty = &dirty
 		}
