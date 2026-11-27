@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -89,7 +90,7 @@ func TestStoppedCPUThrowawayRechecksIdentityAndHold(t *testing.T) {
 				current.Config["volatile.uuid"] = "replacement"
 			}
 			a, _ := testApp(&fakePC{t: t, insts: []instance{current}})
-			if a.stillIdle(context.Background(), selected) {
+			if a.stillIdle(context.Background(), selected, "") {
 				t.Fatalf("pressure recheck accepted %s: %+v", change, current)
 			}
 		})
@@ -102,8 +103,101 @@ func TestKeptEvictionRefusesUnverifiedLegacyFallback(t *testing.T) {
 	a.HTTP = func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
 	}
-	if err := a.evictKept(context.Background(), instance{Name: "kept"}); err != errNotIdle {
+	if err := a.evictKept(context.Background(), instance{Name: "kept", Status: "Running"}); err != errNotIdle {
 		t.Fatalf("generic 404 permitted unreserved eviction: %v", err)
+	}
+}
+
+func TestLaunchReclaimsUnpooledThrowawayWhenBoxdIsUnavailable(t *testing.T) {
+	for _, scenario := range []string{"offline", "forbidden", "stop reserved during fallback"} {
+		t.Run(scenario, func(t *testing.T) {
+			const name = "kept"
+			cfg := map[string]string{
+				jobrun.ThrowawayKey: "true",
+				jobrun.ExpiresKey:   "2026-11-23T12:20:00Z",
+				mode.SizeKey:        "small",
+			}
+			f := &fakePC{t: t, refuse: memoryRefusal, kept: map[string]bool{name: true},
+				insts: []instance{{Name: name, Status: "Running", Config: cfg}}}
+			a, out := testApp(f)
+			a.dashboardURL = "https://fixture.example.com"
+			a.HTTP = func(*http.Request) (*http.Response, error) {
+				if scenario == "forbidden" {
+					return &http.Response{StatusCode: http.StatusForbidden, Body: http.NoBody}, nil
+				}
+				return nil, errors.New("boxd unavailable")
+			}
+			a.R = lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
+				args := strings.Join(cmd.Args, " ")
+				if strings.Contains(args, "config set pc:"+name+" "+jobrun.DirectEvictKey+"=") && scenario == "stop reserved during fallback" {
+					cfg[jobrun.ThrowawayStopKey] = "stop token"
+				}
+				if strings.Contains(args, "delete pc:"+name+" ") {
+					if cfg[jobrun.DirectEvictKey] == "" {
+						t.Fatal("direct delete ran without a reservation")
+					}
+					f.refuse = ""
+				}
+				return f.Run(ctx, cmd)
+			})
+			err := a.launch(context.Background(), "new", time.Hour, true, mustSize(t, "small"))
+			if scenario == "stop reserved during fallback" {
+				if !isNoRoom(err) || f.names() != name || strings.Contains(f.callList(), "delete") {
+					t.Fatalf("evicted while cooling: %v, %s\n%s", err, f.names(), out)
+				}
+			} else if err != nil || f.names() != "new" {
+				t.Fatalf("launch did not reclaim %s: %v, %s\n%s", name, err, f.names(), out)
+			}
+		})
+	}
+}
+
+func TestRmRefusesActiveIdleStop(t *testing.T) {
+	cfg := map[string]string{jobrun.ThrowawayStopKey: "stop token"}
+	f := &fakePC{t: t, insts: []instance{{Name: "kept", Status: "Running", Config: cfg}}}
+	a, _ := testApp(f)
+	if err := a.Rm(context.Background(), "kept"); err == nil || strings.Contains(f.callList(), "delete") {
+		t.Fatalf("rm dispatched during cooling: %v, %s", err, f.callList())
+	}
+	cfg[jobrun.ThrowawayStopKey] = jobrun.ThrowawayStopped
+	if err := a.Rm(context.Background(), "kept"); err != nil || f.names() != "" {
+		t.Fatalf("rm of a cooled box: %v, boxes %s", err, f.names())
+	}
+}
+
+func TestMarkIdleKeepsThrowawayExpiryDuringCooling(t *testing.T) {
+	for _, when := range []string{"before write", "after write"} {
+		t.Run(when, func(t *testing.T) {
+			const box = "kept"
+			f := &fakePC{t: t}
+			a, _ := testApp(f)
+			cfg := map[string]string{
+				jobrun.ThrowawayKey: "true",
+				jobrun.ExpiresKey:   a.Now().Add(endedKeep).Format(time.RFC3339),
+			}
+			f.insts = []instance{{Name: box, Status: "Running", Config: cfg}}
+			wrote := false
+			a.R = lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
+				args := strings.Join(cmd.Args, " ")
+				if when == "before write" && strings.Contains(args, "config get pc:"+box+" "+jobrun.ThrowawayStopKey) {
+					cfg[jobrun.ThrowawayStopKey] = "stop token"
+				}
+				res, err := f.Run(ctx, cmd)
+				if strings.Contains(args, "config set pc:"+box+" "+jobrun.ExpiresKey+"=") {
+					wrote = true
+					f.insts[0].Status = "Stopped"
+					cfg[jobrun.ThrowawayStopKey] = jobrun.ThrowawayStopped
+				}
+				return res, err
+			})
+			a.markIdle(context.Background(), box, box+".20261123-120000-0001")
+			if cfg[jobrun.ExpiresKey] != a.Now().Add(endedKeep).Format(time.RFC3339) {
+				t.Fatalf("markIdle extended the retrieval window: %v", cfg)
+			}
+			if wrote != (when == "after write") {
+				t.Fatalf("unexpected expiry write: %s", f.callList())
+			}
+		})
 	}
 }
 

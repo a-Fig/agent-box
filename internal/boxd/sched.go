@@ -167,6 +167,9 @@ func (w *Watcher) reserveThrowaway(ctx context.Context, box, job string, matches
 		}
 		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		until := now.Add(jobrun.ThrowawayClaimTTL)
+		if job == "" {
+			until = now.Add(jobrun.EvictTTL)
+		}
 		if expires.Before(until) && (job != "" || in.Config[jobrun.ThrowawayRepoKey] != "") {
 			expires = until
 		}
@@ -187,6 +190,8 @@ func (w *Watcher) evictPooled(ctx context.Context, box, uid string) (bool, error
 }
 
 func (w *Watcher) evictThrowaway(ctx context.Context, box, uid string, pooled bool) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
+	defer cancel()
 	reserved, err := w.reserveThrowaway(ctx, box, "", func(in Instance) bool {
 		w.mu.Lock()
 		busy := w.idleStopping == box || w.boxBusy(box, "")
@@ -201,11 +206,15 @@ func (w *Watcher) evictThrowaway(ctx context.Context, box, uid string, pooled bo
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		for _, in := range ins {
 			if in.Name == box {
 				now := w.Now()
+				until, _ := time.Parse(time.RFC3339, in.Config[jobrun.ThrowawayClaimKey])
 				if boxUID(in) != uid || in.Status == "Frozen" || mode.Held(in.Config, now).After(now) ||
-					in.Config[jobrun.ThrowawayOwnerKey] != "" || jobrun.IdleStopReserved(in.Config) || !jobrun.ThrowawayClaimed(in.Config, now) {
+					in.Config[jobrun.ThrowawayOwnerKey] != "" || jobrun.IdleStopReserved(in.Config) || !until.After(now) {
 					return errNotIdle
 				}
 				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")

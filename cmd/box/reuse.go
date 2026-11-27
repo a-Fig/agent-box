@@ -81,7 +81,7 @@ func (a *App) evictPooled(ctx context.Context, in instance) error {
 	return a.evictThroughBoxd(ctx, in, "evict-idle")
 }
 
-var errLegacyEviction = errors.New("boxd does not require a reservation for kept boxes")
+var errDirectEviction = errors.New("kept box eviction can use Incus directly")
 
 func (a *App) evictKept(ctx context.Context, in instance) error {
 	return a.evictThroughBoxd(ctx, in, "evict-kept")
@@ -93,7 +93,11 @@ func (a *App) evictThroughBoxd(ctx context.Context, in instance, action string) 
 		uid = in.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	status, body, err := a.poolRequest(ctx, in.Name, action, struct{ UID string }{uid})
+	canUseIncus := action == "evict-kept" && in.Status == "Running" && in.Config[jobrun.ThrowawayStopKey] == ""
 	if err != nil {
+		if canUseIncus && ctx.Err() == nil {
+			return errDirectEviction
+		}
 		return err
 	}
 	switch status {
@@ -101,16 +105,45 @@ func (a *App) evictThroughBoxd(ctx context.Context, in instance, action string) 
 		return nil
 	case http.StatusConflict:
 		return errNotIdle
+	case http.StatusForbidden:
+		if canUseIncus {
+			return errDirectEviction
+		}
 	case http.StatusNotFound:
 		var legacy dash.ErrorBody
-		if action == "evict-kept" && in.Config[jobrun.ThrowawayStopKey] == "" &&
+		if canUseIncus &&
 			json.Unmarshal(body, &legacy) == nil && legacy.Code == dash.CodeNotFound && legacy.Error == "no such endpoint" {
-			return errLegacyEviction
+			return errDirectEviction
 		}
 		return errNotIdle
-	default:
-		return fmt.Errorf("boxd eviction returned HTTP %d", status)
 	}
+	return fmt.Errorf("boxd eviction returned HTTP %d", status)
+}
+
+// The CLI can use Incus even when boxd is unavailable. Its short reservation
+// keeps cooling out, and a fresh read catches a stop that reserved first.
+func (a *App) evictKeptDirect(ctx context.Context, in instance) error {
+	ctx, cancel := context.WithTimeout(ctx, jobrun.EvictTTL/2)
+	defer cancel()
+	until := a.Now().Add(jobrun.EvictTTL).UTC()
+	lease := until.Format(time.RFC3339Nano)
+	err := jobrun.RetryETag(ctx, func() error {
+		if !a.stillIdle(ctx, in, "") {
+			return errNotIdle
+		}
+		_, err := a.incusOK(ctx, "config", "set", a.target(in.Name), jobrun.DirectEvictKey+"="+lease)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return jobrun.RetryETag(ctx, func() error {
+		if ctx.Err() != nil || !until.After(a.Now()) || !a.stillIdle(ctx, in, lease) {
+			return errNotIdle
+		}
+		_, err := a.incusOK(ctx, "delete", a.target(in.Name), "--force")
+		return err
+	})
 }
 
 func (a *App) poolExpiry(ctx context.Context, box, job string, ended bool) {

@@ -103,7 +103,7 @@ func (w *Watcher) finishedIdleJob(in Instance) (dash.Job, bool) {
 func (w *Watcher) stopIdleThrowaway(ctx context.Context, c idleThrowaway) bool {
 	box := c.in.Name
 	w.mu.Lock()
-	if w.idleStopping != "" || w.boxBusy(box, "") {
+	if w.idleStopping != "" || w.deleting[box] || w.boxBusy(box, "") {
 		w.mu.Unlock()
 		return false
 	}
@@ -168,7 +168,7 @@ func (w *Watcher) stopIdleThrowaway(ctx context.Context, c idleThrowaway) bool {
 			return false
 		}
 		// Incus state changes are name-bound. The fresh read and reservation
-		// protect boxd and Box activity, but external Incus changes can race.
+		// fence boxd controls and reserved evictions. Raw deletes can race (#217).
 		dispatch = true
 		if _, err := w.Incus.CLI(ctx, "", "stop", box, "--force"); err != nil {
 			w.logf("boxd: stopping idle throwaway %s: %v", box, err)

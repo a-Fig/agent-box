@@ -623,7 +623,7 @@ func (a *App) idleRepo(ctx context.Context, in instance) bool {
 
 // stillIdle checks the selected instance just before a delete. For
 // throwaways, read the config last to catch a claim still in setup.
-func (a *App) stillIdle(ctx context.Context, selected instance) bool {
+func (a *App) stillIdle(ctx context.Context, selected instance, lease string) bool {
 	throwaway := selected.Config[throwawayKey] == "true"
 	if throwaway && selected.Status != "Stopped" && !a.hasEndedJob(ctx, selected.Name) {
 		return false
@@ -638,6 +638,13 @@ func (a *App) stillIdle(ctx context.Context, selected instance) bool {
 				return false
 			}
 			if throwaway {
+				if lease != "" {
+					if in.Config[jobrun.DirectEvictKey] != lease || in.Config[jobrun.ThrowawayRepoKey] != "" ||
+						in.Config[jobrun.ThrowawayStopKey] != "" {
+						return false
+					}
+					delete(in.Config, jobrun.DirectEvictKey) // ignore this request's own reservation
+				}
 				if selected.Status == "Stopped" {
 					return stoppedIdleThrowaway(in, a.Now())
 				}
@@ -691,10 +698,13 @@ func (a *App) launch(ctx context.Context, name string, ttl time.Duration, throwa
 			rerr = a.evictPooled(ctx, gone)
 		} else if useBoxd {
 			rerr = a.evictKept(ctx, gone)
+			if errors.Is(rerr, errDirectEviction) {
+				rerr = a.evictKeptDirect(context.WithoutCancel(ctx), gone)
+			}
 		}
-		if !pooled && (!useBoxd || errors.Is(rerr, errLegacyEviction)) {
+		if !pooled && !useBoxd {
 			rerr = jobrun.RetryETag(context.WithoutCancel(ctx), func() error {
-				if !a.stillIdle(ctx, gone) {
+				if !a.stillIdle(ctx, gone, "") {
 					return errNotIdle
 				}
 				_, err := a.incusOK(context.WithoutCancel(ctx), "delete", a.target(gone.Name), "--force")
@@ -811,7 +821,14 @@ func isConflict(err error) bool {
 // such as the tray's limit write (#71).
 func (a *App) Rm(ctx context.Context, name string) error {
 	return jobrun.RetryETag(ctx, func() error {
-		_, err := a.incusOK(ctx, "delete", a.target(name), "--force")
+		stop, err := a.incusOK(ctx, "config", "get", a.target(name), jobrun.ThrowawayStopKey)
+		if err != nil {
+			return err
+		}
+		if stop = strings.TrimSpace(stop); stop != "" && stop != jobrun.ThrowawayStopped {
+			return fmt.Errorf("box %s is being stopped; try again", name)
+		}
+		_, err = a.incusOK(ctx, "delete", a.target(name), "--force")
 		return err
 	})
 }
@@ -1715,12 +1732,30 @@ func (a *App) markIdle(ctx context.Context, box, job string) {
 		a.poolExpiry(ctx, box, job, true)
 		return
 	}
+	throwaway, err := a.incusOK(ctx, "config", "get", a.target(box), throwawayKey)
+	if err != nil {
+		return
+	}
 	out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
 	if err != nil || len(strings.Fields(out)) > 0 {
 		return
 	}
-	if err := a.setExpiry(ctx, box, idleTTL); err != nil {
+	unpooled := strings.TrimSpace(throwaway) == "true"
+	ttl := idleTTL
+	if unpooled {
+		stop, err := a.incusOK(ctx, "config", "get", a.target(box), jobrun.ThrowawayStopKey)
+		if err != nil || strings.TrimSpace(stop) != "" {
+			return
+		}
+		ttl = endedKeep
+	}
+	if err := a.setExpiry(ctx, box, ttl); err != nil {
 		a.warn(fmt.Sprintf("box: warning: setting idle expiry on %s: %v", box, err))
+		return
+	}
+	// An unpooled throwaway cannot take another job. A failed probe during
+	// cooling must never replace its retrieval deadline with a job deadline.
+	if unpooled {
 		return
 	}
 	// A job can publish its PID and refresh the deadline after the first

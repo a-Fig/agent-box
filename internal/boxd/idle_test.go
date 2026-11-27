@@ -297,27 +297,31 @@ func TestIdleStopProtectsAnUnresolvedQueueStart(t *testing.T) {
 }
 
 func TestIdleStopAndUnpooledEvictionShareReservation(t *testing.T) {
-	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full"})
-	in := idleFinished(t, r, "candidate", r.c.now().Add(-time.Second), false)
-	r.poll()
-	ctx := context.Background()
-	r.f.set(func() {
-		// Simulate a pressure reservation winning the conditional write.
-		r.f.between = func(cfg map[string]string) {
-			cfg[jobrun.ThrowawayClaimKey] = r.c.now().Add(jobrun.ThrowawayClaimTTL).Format(time.RFC3339)
-		}
-	})
-	r.w.coolIdleThrowaways(ctx, false)
-	got, _ := r.f.instance(in.Name)
-	if got.Status != "Running" || len(r.f.cli) != 0 {
-		t.Fatalf("stop raced an eviction: %+v", got)
-	}
-	r.f.set(func() {
-		delete(r.f.ins[0].Config, jobrun.ThrowawayClaimKey)
-		r.f.ins[0].Config[jobrun.ThrowawayStopKey] = boxUID(in) + " pending"
-	})
-	if evicted, err := r.w.evictThrowaway(ctx, in.Name, boxUID(in), false); evicted || err != nil || len(r.f.cli) != 0 {
-		t.Fatalf("unpooled eviction passed a stop reservation: %t, %v, %v", evicted, err, r.f.cli)
+	for _, key := range []string{jobrun.ThrowawayClaimKey, jobrun.DirectEvictKey} {
+		t.Run(key, func(t *testing.T) {
+			r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full"})
+			in := idleFinished(t, r, "candidate", r.c.now().Add(-time.Second), false)
+			r.poll()
+			ctx := context.Background()
+			r.f.set(func() {
+				// Simulate pressure eviction winning the conditional write.
+				r.f.between = func(cfg map[string]string) {
+					cfg[key] = r.c.now().Add(jobrun.EvictTTL).Format(time.RFC3339)
+				}
+			})
+			r.w.coolIdleThrowaways(ctx, false)
+			got, _ := r.f.instance(in.Name)
+			if got.Status != "Running" || len(r.f.cli) != 0 {
+				t.Fatalf("stop raced an eviction: %+v", got)
+			}
+			r.f.set(func() {
+				delete(r.f.ins[0].Config, key)
+				r.f.ins[0].Config[jobrun.ThrowawayStopKey] = boxUID(in) + " pending"
+			})
+			if evicted, err := r.w.evictThrowaway(ctx, in.Name, boxUID(in), false); evicted || err != nil || len(r.f.cli) != 0 {
+				t.Fatalf("unpooled eviction passed a stop reservation: %t, %v, %v", evicted, err, r.f.cli)
+			}
+		})
 	}
 }
 

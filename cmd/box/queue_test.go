@@ -314,7 +314,7 @@ func TestKeptThrowawaysGiveWayToALaunch(t *testing.T) {
 	if names := f.names(); strings.Contains(names, "old-0001") || !strings.Contains(names, "fresh-0002") || !strings.Contains(names, "far-0003") {
 		t.Errorf("boxes left: %s (calls %s)", names, f.callList())
 	}
-	if calls := f.callList(); calls != "launch list list exec exec project project project project project exec list delete launch" {
+	if calls := f.callList(); calls != "launch list list exec exec project project project project project exec list config exec list delete launch" {
 		t.Errorf("calls: %s", calls)
 	}
 	if !strings.Contains(out.String(), "box: deleted old-0001, kept after its job, to make room") {

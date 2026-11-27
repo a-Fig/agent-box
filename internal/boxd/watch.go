@@ -65,7 +65,8 @@ type Watcher struct {
 	lastMode     *modeRec
 	sampled      time.Time
 	subs         map[chan dash.Event]struct{}
-	idleStopping string // box selected by the idle stop worker
+	idleStopping string          // box selected by the idle stop worker
+	deleting     map[string]bool // dashboard deletes in flight
 }
 
 type cpuMark struct {

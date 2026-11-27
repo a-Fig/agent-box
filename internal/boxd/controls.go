@@ -528,11 +528,30 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
+	busy := &controlError{http.StatusConflict, dash.CodeStopping, "the box is being stopped or deleted; try again"}
+	w.mu.Lock()
+	if w.idleStopping == name || w.deleting[name] {
+		w.mu.Unlock()
+		return busy
+	}
+	if w.deleting == nil {
+		w.deleting = make(map[string]bool)
+	}
+	w.deleting[name] = true
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		delete(w.deleting, name)
+		w.mu.Unlock()
+	}()
 	// Incus has no compare-and-delete; check identity again just before, so
 	// the window for a reuse of the name is the length of one call.
 	in, err := w.checkCreated(ctx, name, createdAt)
 	if err != nil {
 		return err
+	}
+	if jobrun.IdleStopReserved(in.Config) {
+		return busy
 	}
 	if !confirmed {
 		probed, probeErr := w.probeDelete(ctx, in)
@@ -551,7 +570,17 @@ func (w *Watcher) DeleteBox(ctx context.Context, name string, createdAt time.Tim
 			return &controlError{http.StatusBadGateway, dash.CodeIncus, "couldn't check " + name + " for jobs, so nothing was deleted; try again"}
 		}
 	}
-	if err := w.delete(ctx, name); err != nil {
+	if err := jobrun.RetryETag(ctx, func() error {
+		in, err := w.checkCreated(ctx, name, createdAt)
+		if err != nil {
+			return err
+		}
+		if jobrun.IdleStopReserved(in.Config) {
+			return busy
+		}
+		_, err = w.Incus.CLI(ctx, "", "delete", name, "--force")
+		return err
+	}); err != nil {
 		return err
 	}
 	w.mu.Lock()

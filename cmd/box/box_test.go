@@ -475,7 +475,7 @@ func TestRunReusesRepoBox(t *testing.T) {
 	if err != nil || r.Code != 3 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project start file file config config exec config config exec config exec config config exec" {
+	if got := f.callList(); got != "list project start file file config config exec config config exec config config exec config config exec" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if got := f.inst("my-repo").Config[expiresKey]; got != "2026-11-23T14:00:00Z" {
@@ -513,7 +513,7 @@ func TestRunRetriesExpiryOnETagRace(t *testing.T) {
 	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := strings.Count(f.callList(), "config"); got != 11 { // pool lookup plus five hold/read and set attempts
+	if got := strings.Count(f.callList(), "config"); got != 12 { // pool and throwaway lookups plus five hold/read and set attempts
 		t.Errorf("config calls = %d: %s", got, f.callList())
 	}
 }
@@ -525,7 +525,7 @@ func TestRunNewBoxIsThrowaway(t *testing.T) {
 	if err != nil || r.Code != 0 {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := f.callList(); got != "list project launch file file config config exec config config exec config exec config config exec exec delete" {
+	if got := f.callList(); got != "list project launch file file config config exec config config exec config config exec config config config exec config delete" {
 		t.Errorf("incus calls = %s", got)
 	}
 	if len(f.insts) != 0 {

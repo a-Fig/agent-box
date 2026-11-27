@@ -44,12 +44,16 @@ const (
 	// stop is confirmed, then ThrowawayStopped identifies the kept disk.
 	ThrowawayStopKey = "user.box.idle-stop"
 	ThrowawayStopped = "stopped"
+	// A client can fence cooling through Incus while boxd is unavailable.
+	DirectEvictKey = "user.box.direct-evict-until"
+	EvictTTL       = 30 * time.Second
 )
 
 // ThrowawayClaimed reports whether a client or an idle stop reserved the box.
 func ThrowawayClaimed(cfg map[string]string, now time.Time) bool {
 	until, _ := time.Parse(time.RFC3339, cfg[ThrowawayClaimKey])
-	return until.After(now) || IdleStopReserved(cfg)
+	direct, _ := time.Parse(time.RFC3339Nano, cfg[DirectEvictKey])
+	return until.After(now) || direct.After(now) || IdleStopReserved(cfg)
 }
 
 func IdleStopReserved(cfg map[string]string) bool {
