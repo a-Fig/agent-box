@@ -342,7 +342,10 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if exe, err := os.Executable(); err == nil {
 			a.MCPExe = exe
 		}
-		if err := serveMCP(ctx, a, stdin, a.Out); err != nil {
+		mcpCtx, stop := context.WithCancel(ctx)
+		defer stop()
+		go a.reconcilePushes(mcpCtx, pushReconcileInterval)
+		if err := serveMCP(mcpCtx, a, stdin, a.Out); err != nil {
 			return fail(err)
 		}
 		return 0

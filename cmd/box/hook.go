@@ -95,6 +95,7 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		have[e.Name()] = true
 	}
 	var msgs, jobs []string
+	baseDir := a.t3BaseDir()
 	for _, e := range ents {
 		job, ok := strings.CutSuffix(e.Name(), ".ended")
 		if !ok || have[job+".notified"] || !have[job+".json"] {
@@ -102,7 +103,7 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 		}
 		rec, err := a.readWatchRecord(job)
 		var end jobEnd
-		if err != nil || rec.Thread != thread || readJSON(a.statePath(job, ".ended"), &end) != nil ||
+		if err != nil || rec.Thread != thread || !rec.inProfile(baseDir) || readJSON(a.statePath(job, ".ended"), &end) != nil ||
 			rec.Session != "" && ev.SessionID != "" && rec.Session != ev.SessionID {
 			continue
 		}

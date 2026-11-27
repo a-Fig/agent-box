@@ -72,13 +72,21 @@ type Pusher interface {
 	Send(ctx context.Context, thread, message string) error
 }
 
-// t3CLI sends with `t3 thread send <thread> -`, the message on stdin.
-type t3CLI struct{ path string }
+// t3CLI sends through the local T3 launcher with the message on stdin.
+type t3CLI struct{ path, baseDir string }
+
+func (c t3CLI) sendArgs(thread string) []string {
+	args := []string{"thread", "send"}
+	if c.baseDir != "" {
+		args = append(args, "--base-dir", c.baseDir)
+	}
+	return append(args, thread, "-")
+}
 
 func (c t3CLI) Send(ctx context.Context, thread, message string) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTry)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.path, "thread", "send", thread, "-")
+	cmd := exec.CommandContext(ctx, c.path, c.sendArgs(thread)...)
 	cmd.Stdin = strings.NewReader(message)
 	hideWindow(cmd)
 	var out bytes.Buffer
@@ -168,9 +176,10 @@ func startDetached(start func(breakaway bool) error) error {
 
 // jobRecord is <job>.json.
 type jobRecord struct {
-	Job    string      `json:"job"`
-	Thread string      `json:"thread"` // the session the result is for
-	Host   *jobLocator `json:"host,omitempty"`
+	Job       string      `json:"job"`
+	Thread    string      `json:"thread"` // the session the result is for
+	T3BaseDir string      `json:"t3BaseDir,omitempty"`
+	Host      *jobLocator `json:"host,omitempty"`
 	// Session is Claude Code's session ID, when box_run ran under Claude
 	// Code: box hook tells only that session, not a claude started inside it.
 	Session  string `json:"session,omitempty"`
@@ -196,13 +205,13 @@ func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 	}
 	host := fleetHost{Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
 	tag, err := jobHostTag(host)
-	if err != nil || tag != id.hostTag {
+	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
 		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)
 	}
 	if host.DashboardURL != "" && !validDashboardURL(host.DashboardURL) {
 		return fleetHost{}, fmt.Errorf("invalid saved dashboard URL for job %s", id.ID)
 	}
-	if rec.Queued && host.Project != mode.Project {
+	if rec.Queued && id.hostTag != "" && host.Project != mode.Project {
 		return fleetHost{}, fmt.Errorf("boxd cannot follow queued job %s in project %q", id.ID, host.Project)
 	}
 	return host, nil
@@ -224,11 +233,17 @@ type jobEnd struct {
 	Code int  `json:"code"`
 	Lost bool `json:"lost,omitempty"`
 	// Dropped is a queued job that left the queue without running.
-	Dropped bool   `json:"dropped,omitempty"`
-	Took    int64  `json:"tookSeconds"`
-	Tail    string `json:"tail,omitempty"`
-	Digest  string `json:"digest,omitempty"` // a test run's failure digest
+	Dropped    bool   `json:"dropped,omitempty"`
+	Took       int64  `json:"tookSeconds"`
+	Tail       string `json:"tail,omitempty"`
+	Digest     string `json:"digest,omitempty"`     // a test run's failure digest
+	Completion string `json:"completion,omitempty"` // observed along with the exit file
 }
+
+const (
+	completionExited    = "exited"
+	completionCancelled = "cancelled"
+)
 
 // thread is the T3 thread of this session, or "".
 func (a *App) thread() string {
@@ -322,8 +337,11 @@ func (a *App) exists(job, ext string) bool {
 // anywhere else (a person's terminal, another session), the push still goes.
 // If the watcher pushed it in the same moment, the agent gets it twice.
 func (a *App) markRead(job string, r JobResult, err error, who string) {
-	var rec jobRecord
-	if err == nil && r.State == stateDone && readJSON(a.statePath(job, ".json"), &rec) == nil && rec.Thread == a.thread() {
+	if err != nil || r.State != stateDone || a.StateDir == "" {
+		return
+	}
+	rec, err := a.readWatchRecord(job)
+	if err == nil && rec.Thread == a.thread() && rec.inProfile(a.t3BaseDir()) {
 		a.markNotified(job, who)
 	}
 }
@@ -365,26 +383,36 @@ func (a *App) leaseHeld(job, ext string) bool {
 	return ok && exp.After(a.Now())
 }
 
-func (a *App) acquireLease(job, ext string, ttl time.Duration) (string, error) {
-	token := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	for try := 0; try < 2; try++ {
-		won, err := a.claimBy(job, ext, a.leaseText(token, ttl))
-		if err != nil {
-			return "", err
-		}
-		if won {
-			return token, nil
-		}
-		if a.leaseHeld(job, ext) {
-			return "", errLeaseHeld
-		}
-		os.Remove(a.statePath(job, ext)) // expired: take it over
+func (a *App) acquireLease(ctx context.Context, job, ext string, ttl time.Duration) (string, error) {
+	lock, err := a.lockLeases(ctx)
+	if err != nil {
+		return "", err
 	}
-	return "", errLeaseHeld
+	defer lock.Close()
+	if a.leaseHeld(job, ext) {
+		return "", errLeaseHeld
+	}
+	if err := os.Remove(a.statePath(job, ext)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	token := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	won, err := a.claimBy(job, ext, a.leaseText(token, ttl))
+	if err != nil {
+		return "", err
+	}
+	if !won {
+		return "", errLeaseHeld
+	}
+	return token, nil
 }
 
 // renewLease extends a lease this token holds; false means it was lost.
 func (a *App) renewLease(job, ext, token string, ttl time.Duration) bool {
+	lock, err := a.lockLeasesBriefly()
+	if err != nil {
+		return false
+	}
+	defer lock.Close()
 	if t, _, ok := a.readLease(job, ext); !ok || t != token {
 		return false
 	}
@@ -392,6 +420,11 @@ func (a *App) renewLease(job, ext, token string, ttl time.Duration) bool {
 }
 
 func (a *App) releaseLease(job, ext, token string) {
+	lock, err := a.lockLeasesBriefly()
+	if err != nil {
+		return
+	}
+	defer lock.Close()
 	if t, _, ok := a.readLease(job, ext); ok && t == token {
 		os.Remove(a.statePath(job, ext))
 	}
@@ -412,9 +445,16 @@ func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, 
 	if !a.canPush() {
 		return false
 	}
-	rec := jobRecord{Job: job, Host: host, Thread: a.thread(), Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	id, err := parseJobID(job)
-	if err == nil && (id.hostTag != "" || host != nil) {
+	if err == nil && id.hostTag == "" && host != nil {
+		err = fmt.Errorf("saved fleet host requires a qualified job ID")
+	}
+	baseDir := a.t3BaseDir()
+	if err == nil && id.hostTag == "" && baseDir != "" {
+		host = &jobLocator{Remote: a.Remote, Project: a.Project, DashboardURL: a.dashboardURL}
+	}
+	rec := jobRecord{Job: job, Host: host, Thread: a.thread(), T3BaseDir: baseDir, Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
+	if err == nil && (id.hostTag != "" || rec.Host != nil) {
 		_, err = rec.watchHost(id)
 	}
 	if err != nil {
@@ -431,7 +471,11 @@ func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, 
 	}
 	err = a.Spawn(a.StateDir, job)
 	if errors.Is(err, errWatcherInJob) {
-		a.warn("box: notice: this push lasts only as long as box's MCP server, which can't outlive your client here; if your session restarts before it arrives, call box_job " + job + ".")
+		recovery := "Call box_job " + job + " to recover the result after a restart."
+		if rec.T3BaseDir != "" {
+			recovery = "Box retries when this T3 profile starts Box MCP again. You can also call box_job " + job + "."
+		}
+		a.warn("box: notice: this watcher stops with Box MCP. " + recovery)
 		err = nil
 	}
 	if err != nil {
@@ -456,6 +500,7 @@ func (a *App) safetyNet(skip string) string {
 	if err != nil {
 		return ""
 	}
+	baseDir := a.t3BaseDir()
 	var lines []string
 	for _, e := range ents {
 		name := e.Name()
@@ -483,16 +528,15 @@ func (a *App) safetyNet(skip string) string {
 			continue
 		}
 		rec, err := a.readWatchRecord(job)
-		if err != nil {
+		if err != nil || !rec.inProfile(baseDir) {
 			continue
 		}
-		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog", ".result"} {
-				os.Remove(a.statePath(job, ext))
-			}
+		notified := a.exists(job, ".notified")
+		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep && (rec.T3BaseDir == "" || notified) {
+			a.pruneWatchRecord(job)
 			continue
 		}
-		if rec.Thread != thread || job == skip || a.exists(job, ".notified") {
+		if rec.Thread != thread || job == skip || notified {
 			continue
 		}
 		var end jobEnd
@@ -507,7 +551,7 @@ func (a *App) safetyNet(skip string) string {
 			}
 		} else if a.leaseHeld(job, ".watch") {
 			continue
-		} else if id.hostTag != "" {
+		} else if id.hostTag != "" || (rec.T3BaseDir != "" && rec.Host != nil) {
 			if _, err := rec.watchHost(id); err != nil {
 				a.warn("box: warning: cannot restart the watcher: " + err.Error())
 				continue
@@ -524,6 +568,20 @@ func (a *App) safetyNet(skip string) string {
 		return ""
 	}
 	return "finished since you last looked: " + strings.Join(lines, ", ") + "\n"
+}
+
+func (a *App) pruneWatchRecord(job string) {
+	lock, err := a.lockLeasesBriefly()
+	if err != nil {
+		return
+	}
+	defer lock.Close()
+	if a.leaseHeld(job, ".watch") || a.leaseHeld(job, ".sending") {
+		return
+	}
+	for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog", ".result"} {
+		os.Remove(a.statePath(job, ext))
+	}
 }
 
 // keptTail is how much of a job's output its recorded end keeps: as much as
@@ -553,10 +611,14 @@ func (a *App) recordEnd(job string, end jobEnd) {
 	writeJSON(a.statePath(job, ".result"), end)
 	ents, _ := os.ReadDir(a.StateDir)
 	for _, e := range ents {
-		if !strings.HasSuffix(e.Name(), ".result") {
+		job, ok := strings.CutSuffix(e.Name(), ".result")
+		if !ok {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
+			if rec, err := a.readWatchRecord(job); err == nil && rec.T3BaseDir != "" && !a.exists(job, ".notified") {
+				continue
+			}
 			os.Remove(filepath.Join(a.StateDir, e.Name()))
 		}
 	}
@@ -791,6 +853,9 @@ func (a *App) sleep(ctx context.Context, d time.Duration) bool {
 // It is `box watch`, started detached by box_run. It holds the job's watch
 // lease, so a second watcher exits at once.
 func (a *App) Watch(ctx context.Context, job string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	id, err := parseJobID(job)
 	if err != nil {
 		return err
@@ -802,14 +867,29 @@ func (a *App) Watch(ctx context.Context, job string) error {
 	if err != nil {
 		return err
 	}
+	if rec.T3BaseDir != "" {
+		if !filepath.IsAbs(rec.T3BaseDir) {
+			return fmt.Errorf("invalid saved T3 base directory for job %s", job)
+		}
+		if pusher, ok := a.Push.(t3CLI); ok {
+			scoped := *a
+			pusher.baseDir = rec.T3BaseDir
+			scoped.Push = pusher
+			a = &scoped
+		}
+	}
 	if a.exists(job, ".notified") {
 		return nil
 	}
-	token, err := a.acquireLease(job, ".watch", watchLease)
+	token, err := a.acquireLease(ctx, job, ".watch", watchLease)
 	if err != nil {
 		if errors.Is(err, errLeaseHeld) {
 			return nil
 		}
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		a.releaseLease(job, ".watch", token)
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -832,12 +912,15 @@ func (a *App) Watch(ctx context.Context, job string) error {
 	var end jobEnd
 	if readJSON(a.statePath(job, ".ended"), &end) != nil {
 		target := a
-		if id.hostTag != "" {
+		if id.hostTag != "" || (rec.T3BaseDir != "" && rec.Host != nil) {
 			host, err := rec.watchHost(id)
 			if err != nil {
 				return err
 			}
 			target = a.jobHostApp(host)
+			if id.hostTag == "" {
+				target.boxdDisabled = a.boxdDisabled
+			}
 		}
 		var ended bool
 		end, ended = target.follow(ctx, rec, id)
@@ -859,6 +942,16 @@ func (a *App) Watch(ctx context.Context, job string) error {
 // or the agent cancelled the job.
 func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, ended bool) {
 	job := rec.Job
+	var saved jobEnd
+	if readJSON(a.statePath(job, ".result"), &saved) == nil && !saved.Lost && !saved.Dropped {
+		switch saved.Completion {
+		case completionExited:
+			return saved, true
+		case completionCancelled:
+			a.markNotified(job, "cancel")
+			return jobEnd{}, false
+		}
+	}
 	w := *a
 	tail := &lineTail{}
 	w.Out, w.Err = tail, io.Discard
@@ -900,7 +993,8 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 		}
 		switch {
 		case err == nil && res.State == stateDone:
-			if w.wasCancelled(ctx, id.Bare) {
+			saved, _ := w.recordedEnd(job)
+			if saved.Completion == completionCancelled || (saved.Completion != completionExited && w.wasCancelled(ctx, id.Bare)) {
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
@@ -978,7 +1072,7 @@ func (a *App) deliver(ctx context.Context, rec jobRecord, end jobEnd) error {
 	if a.exists(rec.Job, ".notified") {
 		return nil
 	}
-	token, err := a.acquireLease(rec.Job, ".sending", sendLease)
+	token, err := a.acquireLease(ctx, rec.Job, ".sending", sendLease)
 	if err != nil {
 		if errors.Is(err, errLeaseHeld) {
 			return nil
