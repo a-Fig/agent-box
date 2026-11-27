@@ -97,6 +97,7 @@ type queueRun struct {
 	bundle string // a snapshot made already, or "" to make one
 	ref    string
 	host   *fleetHost // non-nil for fleet dispatch (qualifies returned job ID)
+	limits []string   // why the host could not start the run immediately
 }
 
 type queueFailure uint8
@@ -186,7 +187,9 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string,
 		on = "on a new box, " + box + ","
 	}
 	fmt.Fprintf(a.Err, "box: queued job %s%s, %s (%s); it starts %s when it can\n", pubID.ID, onHost(hostName), place(rep.Position), waitText(rep.Why), on)
-	return JobResult{Job: pubID.ID, Box: box, Host: hostName, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new, fleetHost: q.host}, "", 0
+	detail := a.capacityHint(ctx, q.sz, q.o.Box, q.limits)
+	a.printCapacity(detail)
+	return JobResult{Job: pubID.ID, Box: box, Host: hostName, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, Capacity: detail, throwaway: q.new, fleetHost: q.host}, "", 0
 }
 
 // Boxd uses 400 for both request validation and failures

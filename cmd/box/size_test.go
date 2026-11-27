@@ -48,7 +48,8 @@ func TestNewWithoutRoomExits75(t *testing.T) {
 	if code := run(context.Background(), a, []string{"new", "--size", "large"}, nil); code != exitPaused {
 		t.Fatalf("box new = %d\n%s", code, out)
 	}
-	if !strings.Contains(out.String(), "no room on the PC for a large box (Error: Failed checking") || !strings.Contains(out.String(), "nothing started, and a smaller size may fit") {
+	if !strings.Contains(out.String(), "refused: no room on the PC for a large box (Error: Failed checking") ||
+		!strings.Contains(out.String(), "nothing started") || strings.Contains(out.String(), "appears to fit") {
 		t.Errorf("output = %s", out)
 	}
 	if code := run(context.Background(), &App{R: &fakePC{t: t, refuse: "Error: boom"}, Remote: "pc", Project: "agents", Out: out, Err: out, Now: a.Now, Rand: a.Rand}, []string{"new"}, nil); code != 1 {
@@ -90,7 +91,10 @@ func TestRunWithoutRoomExits75(t *testing.T) {
 			if err != nil || r.Code != exitPaused || r.State != statePaused {
 				t.Fatalf("Run = %+v, %v\n%s", r, err, out)
 			}
-			if !strings.Contains(out.String(), "box: no room on the PC for a") || f.pushed != 0 {
+			if r.Capacity == nil || strings.Join(r.Capacity.Limits, ",") != "memory" {
+				t.Fatalf("single-host capacity = %+v", r.Capacity)
+			}
+			if !strings.Contains(out.String(), "box: refused: no room on the PC for a") || f.pushed != 0 {
 				t.Errorf("output = %s", out)
 			}
 		})

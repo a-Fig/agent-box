@@ -42,8 +42,9 @@ type StatusReport struct {
 // fit in the project's caps.
 type SizeRoom struct {
 	mode.Size
-	CPUs int `json:"cpus"` // CPUs a box of this size gets now
-	Fits int `json:"fits"` // more boxes of this size that fit now; -1: no limit
+	CPUs   int      `json:"cpus"` // CPUs a box of this size gets now
+	Fits   int      `json:"fits"` // more boxes of this size that fit now; -1: no limit
+	limits []string // resources that prevent one more box of this size
 }
 
 // RepoBox is a repo's own box and the jobs running in it.
@@ -393,37 +394,39 @@ func computeRoom(insts []instance, now mode.Mode, maxBoxes int, cpuCap int64, cp
 		// fitsWith is how many fit once the boxes in gone are deleted, under
 		// memory cap mc; -1 when no cap limits. full collects the caps that
 		// still leave no room for one, each with what is held now.
-		var full []string
+		var full, limits []string
 		fitsWith := func(gone alloc, mc int64) int64 {
 			fits := int64(-1)
 			full = nil
-			limit := func(free, each int64, name string) {
+			limits = nil
+			limit := func(free, each int64, resource, name string) {
 				n := max(free, 0) / each
 				if fits < 0 || n < fits {
 					fits = n
 				}
 				if n == 0 {
 					full = append(full, name)
+					limits = append(limits, resource)
 				}
 			}
 			if instCap >= 0 {
-				limit(instCap-held.n+gone.n, 1, fmt.Sprintf("box slots: %d of %d", held.n, instCap))
+				limit(instCap-held.n+gone.n, 1, "instances", fmt.Sprintf("box slots: %d of %d", held.n, instCap))
 			}
 			if containersKnown {
-				limit(containersFree+gone.n, 1, "containers")
+				limit(containersFree+gone.n, 1, "containers", "containers")
 			}
 			if cpuKnown { // each box counts at its Full CPUs, which the tray may give it
-				limit(cpuCap-held.cpus+gone.cpus, int64(sz.FullCPUs), fmt.Sprintf("CPUs: %d of %d reserved", held.cpus, cpuCap))
+				limit(cpuCap-held.cpus+gone.cpus, int64(sz.FullCPUs), "cpu", fmt.Sprintf("CPUs: %d of %d reserved", held.cpus, cpuCap))
 			}
 			if memKnown {
-				limit(mc-held.mem+gone.mem, szMem, fmt.Sprintf("memory: %s of %s allocated", gib(held.mem), gib(memCap)))
+				limit(mc-held.mem+gone.mem, szMem, "memory", fmt.Sprintf("memory: %s of %s allocated", gib(held.mem), gib(memCap)))
 			}
 			if diskKnown {
 				d := resources["disk"]
-				limit(diskFree+gone.disk, szDisk, fmt.Sprintf("disk: %s of %s allocated", gib(*d.Usage), gib(*d.Limit)))
+				limit(diskFree+gone.disk, szDisk, "disk", fmt.Sprintf("disk: %s of %s allocated", gib(*d.Usage), gib(*d.Limit)))
 			}
 			if sz.GPU { // one at a time
-				limit(1-held.gpus+gone.gpus, 1, "the GPU")
+				limit(1-held.gpus+gone.gpus, 1, "gpu", "the GPU")
 			}
 			return fits
 		}
@@ -434,6 +437,9 @@ func computeRoom(insts []instance, now mode.Mode, maxBoxes int, cpuCap int64, cp
 			}
 		}
 		sizes[i] = SizeRoom{Size: sz, CPUs: sz.CPUs(now), Fits: int(fits)}
+		if fits == 0 {
+			sizes[i].limits = limits
+		}
 		limited = limited || (fits >= 0 && !sz.GPU)
 		if i == 0 { // the smallest size: what leaves no room at all (#92)
 			fullCaps = full

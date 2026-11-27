@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -109,6 +110,7 @@ type fleetPick struct {
 	Invalid  bool
 	Why      string // refusedFull, refusedGPUBusy, refusedMyPC, or ""
 	Reason   string
+	Limits   []string
 }
 
 // resolveFleetTargets determines which hosts to probe and whether fleet probing
@@ -244,6 +246,7 @@ func pickFleetHost(candidates []fleetCandidate, req pickRequest) fleetPick {
 				Affinity: ev.queueAff,
 				Why:      ev.queueWhy,
 				Reason:   fmt.Sprintf("queue on %s: %s", hostLabel(ev.candidate.Host), waitText(ev.queueWhy)),
+				Limits:   ev.refuseLimits,
 			}
 		}
 	}
@@ -263,12 +266,29 @@ type hostEval struct {
 	queueAff     pickAffinity
 	refuseWhy    string
 	refuseReason string
+	refuseLimits []string
 }
 
 // markUnavailable records why a host cannot start now and centralizes queue
 // eligibility and refusal wording for queueable causes.
 func (ev *hostEval) markUnavailable(why, reason string, req pickRequest, sz mode.Size) {
 	ev.refuseWhy = why
+	switch {
+	case ev.candidate.startRefusal != nil:
+		ev.refuseLimits = ev.candidate.startRefusal.queue.limits
+	case why == refusedGPUBusy:
+		ev.refuseLimits = []string{"gpu"}
+	case why == refusedFull:
+		for _, room := range ev.candidate.Sizes {
+			if room.Name == sz.Name {
+				ev.refuseLimits = room.limits
+				break
+			}
+		}
+		if len(ev.refuseLimits) == 0 {
+			ev.refuseLimits = []string{"unknown"}
+		}
+	}
 	if why == "" {
 		ev.refuseReason = reason
 		return
@@ -325,6 +345,7 @@ func evaluateGPUCandidate(ev hostEval, req pickRequest, sz mode.Size) hostEval {
 	}
 	if !c.HasGPU {
 		ev.markUnavailable("", "no GPU on this host", req, sz)
+		ev.refuseLimits = []string{"gpu"}
 		return ev
 	}
 	if req.Box != "" {
@@ -514,12 +535,19 @@ func buildRefusal(evals []hostEval) fleetPick {
 			Invalid: ev.invalid,
 			Why:     ev.refuseWhy,
 			Reason:  fmt.Sprintf("%s: %s", hostLabel(ev.candidate.Host), ev.refuseReason),
+			Limits:  ev.refuseLimits,
 		}
 	}
 	parts := make([]string, len(evals))
 	sharedWhy := evals[0].refuseWhy
+	var limits []string
 	for i, ev := range evals {
 		parts[i] = fmt.Sprintf("%s: %s", hostLabel(ev.candidate.Host), ev.refuseReason)
+		for _, resource := range ev.refuseLimits {
+			if !slices.Contains(limits, resource) {
+				limits = append(limits, resource)
+			}
+		}
 		if ev.refuseWhy != sharedWhy {
 			sharedWhy = ""
 		}
@@ -528,6 +556,7 @@ func buildRefusal(evals []hostEval) fleetPick {
 		Action: pickRefuse,
 		Why:    sharedWhy,
 		Reason: "no eligible host (" + strings.Join(parts, "; ") + ")",
+		Limits: limits,
 	}
 }
 

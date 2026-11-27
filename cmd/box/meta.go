@@ -253,8 +253,13 @@ func (a *App) turnAway(ctx context.Context, q queueRun, msg string, cause func(c
 		}
 		cause = func(context.Context) string { return why }
 	}
+	detail := a.capacityHint(ctx, q.sz, q.o.Box, q.limits)
+	if detail != nil {
+		msg = "refused: " + msg + "; nothing started"
+	}
 	a.refuse(ctx, msg, q.info, cause)
-	return JobResult{State: statePaused, Code: exitPaused}
+	a.printCapacity(detail)
+	return JobResult{State: statePaused, Code: exitPaused, Capacity: detail}
 }
 
 // refuse prints msg and tells boxd the cause, as a best effort: errors are

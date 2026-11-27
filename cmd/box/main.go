@@ -162,7 +162,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		name, err := a.New(ctx, fs.Arg(0), *ttl, *size, why)
 		if isTempFail(err) {
-			fmt.Fprintln(a.Err, "box:", err)
+			fmt.Fprintf(a.Err, "box: refused: %v; nothing started\n", err)
+			requested, _ := lookupSize(*size)
+			a.printCapacity(a.capacityHint(ctx, requested, "", launchLimits(err)))
 			return exitPaused
 		}
 		if err != nil {
