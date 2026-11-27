@@ -1372,7 +1372,9 @@ while :; do
     off=$size
   fi
   if [ $fin = 1 ]; then
-    printf '%%s%%s\n' %[3]s "$(cat %[1]s.exit)" >&2
+    completion=%[6]s
+    [ -f %[1]s.cancelled ] && completion=%[7]s
+    printf '%%s%%s %%s\n' %[3]s "$(cat %[1]s.exit)" "$completion" >&2
     d=$(timeout -k 2 10 bash -c %[4]s 2>/dev/null | base64 -w0)
     [ -n "$d" ] && printf '%%s%%s\n' %[5]s "$d" >&2
     exit 0
@@ -1384,7 +1386,7 @@ while :; do
   fi
   sleep 0.5
 done
-`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker))
+`, f, job, shq(exitMarker), shq(digest.Script(f)), shq(digestMarker), completionExited, completionCancelled)
 }
 
 // pausePoll is how often attach looks for a box frozen mid-run, pollTimeout
@@ -1397,8 +1399,8 @@ const (
 )
 
 // exitMarker starts the line followScript prints on stderr when the job has
-// ended, followed by its exit code. attach reads it from that exec, so it
-// needs no second exec that a freeze could cut off.
+// ended, followed by its exit code and completion kind. attach reads these
+// from one exec so a freeze cannot interrupt a separate cancellation check.
 const exitMarker = "\x01box-exit "
 
 // digestMarker starts the line followScript prints on stderr after the exit
@@ -1582,15 +1584,16 @@ func (a *App) attach(ctx context.Context, id jobID, wait time.Duration) (state s
 	<-watched
 	ef.flush()
 	if text, ok := ef.exit(); ok {
-		code, cerr := strconv.Atoi(text)
-		if cerr != nil {
+		codeText, completion, hasCompletion := strings.Cut(text, " ")
+		code, cerr := strconv.Atoi(codeText)
+		if cerr != nil || (hasCompletion && completion != completionExited && completion != completionCancelled) {
 			return "", 1, "", fmt.Errorf("job %s: bad exit code %q", job, text)
 		}
 		ended := a.Now()
 		a.markIdle(ctx, box, id.Bare)
 		a.reportEnded(ctx, id.Bare, code, ended, tail.String())
 		dg = ef.digest()
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg})
+		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg, Completion: completion})
 		return stateDone, code, dg, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

@@ -16,7 +16,7 @@ import (
 
 func TestQualifiedWatchRestartsOnSavedHosts(t *testing.T) {
 	a, _, west, east := lookupTestApp(t, "work")
-	a.Getenv = func(string) string { return "" }
+	t.Setenv("T3CODE_HOME", t.TempDir())
 	a.Thread = "thread-owner"
 	pusher := &fakePusher{}
 	a.Push = pusher
