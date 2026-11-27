@@ -74,6 +74,28 @@ Tyler's rules:
   what ran (`docs/testing.md` has the live smoke test).
 - UI follows Murmur's look (Tyler, 2026-11-23).
 
+## Issue labels
+
+An issue's labels say where it stands without opening it.
+
+- **One kind**: `bug`, `Feature`, `Task` (ops, docs, housekeeping) or `question`, which is an
+  open design question rather than a missing answer.
+- **One priority**, from whichever of two scales says more about it: when (`priority: now`,
+  `soon`, `future`, `maybe never`) or how much it matters (`priority: low`, `med`, `high`,
+  `xhigh`). A closed issue keeps the priority it had.
+- **`PR needed`** when a code change in this repo closes it; **`non-PR needed`** when it needs
+  something a PR can't do: a decision, an account, or a test in the world.
+- **`pending`** while it waits on something already moving: an open PR, a release, a decision.
+- **`from: <name>`** only when the issue is recognisably someone's own request or a model's own
+  finding, and the title or body says so: `(from Tyler)`, `(from Sol)`, "Idea (owner)". Don't
+  infer it from who typed the issue: when a dogfood report names only a harness, not a model,
+  it goes without one.
+- **`dogfood`** marks friction we hit using box ourselves, and sits beside a kind label, not
+  instead of one. **`needs-live-test`** belongs on tray and provisioning PRs until their live
+  check passes, never on issues.
+- Why an issue closed is its `state_reason` (`completed`, `not_planned`, `duplicate`), not a
+  label. Tyler's rule: no new label without a reason.
+
 ## Layout
 
 `cmd/box` CLI + MCP · `cmd/boxtray` tray · `internal/mode` mode logic · `internal/boxd` dashboard server and reaper ·
