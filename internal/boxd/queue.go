@@ -145,7 +145,7 @@ func check(r *dash.QueueRequest) error {
 		return errors.New("no command")
 	case r.Timeout < 0 || r.Timeout > 7*24*3600:
 		return errors.New("timeout is 0 to 7 days")
-	case len(r.Meta) > 15<<10: // boxd adds to it, and the scan reads 16KiB
+	case len(r.Meta) > dash.MaxQueueMetaBytes:
 		return errors.New("meta is over 15KiB")
 	case json.Unmarshal(r.Meta, &obj) != nil || obj == nil:
 		return errors.New("meta must be a JSON object")

@@ -51,13 +51,13 @@ func (a *App) jobHostApp(host fleetHost) *App {
 	return &scoped
 }
 
-// A qualified ID can come from another client, with no local queue marker.
+// A job from another client can be queued without a local marker.
 func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
-	if l.app.boxdDisabled {
+	if l.app.Project != mode.Project || l.app.boxdDisabled {
 		return dash.Job{}, false, nil
 	}
 	local := l.app.wasQueued(l.id.ID)
-	if l.id.hostTag == "" && !local {
+	if l.id.hostTag == "" && !local && l.app.jobInBox(ctx, l.id.Bare) {
 		return dash.Job{}, false, nil
 	}
 	j, found, err := l.app.queuedJob(ctx, l.id.Bare)
@@ -68,7 +68,7 @@ func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
 }
 
 func (l jobLookup) job(ctx context.Context, wait time.Duration) (JobResult, error) {
-	r, err := l.app.job(ctx, l.id, wait)
+	r, err := l.app.job(ctx, l.id, wait, nil)
 	r.Host = l.host
 	return r, err
 }
@@ -77,14 +77,16 @@ func (l jobLookup) page(ctx context.Context, offset, limit int64) (Page, *jobEnd
 	p, err := l.app.LogPage(ctx, l.id.Bare, offset, limit)
 	if err == nil {
 		p.Job, p.Host = l.id.ID, l.host
+		if p.Source == nil {
+			p.Source = l.app.savedJobSource(l.id)
+		}
 		return p, nil, nil
 	}
 	if offset < 0 || limit < 0 || offset > math.MaxInt64-maxPage {
 		return Page{}, nil, err
 	}
 	if l.app.Project != mode.Project || l.app.boxdDisabled {
-		// Boxd reads the agents project. Keep the existing tail lookup for
-		// other projects without trying its new full-log path.
+		// Boxd reads the agents project. Use the locally retained tail.
 		if end, ok := l.app.endedElsewhere(ctx, l.id); ok {
 			return Page{}, &end, err
 		}
@@ -105,10 +107,11 @@ func (l jobLookup) page(ctx context.Context, offset, limit int64) (Page, *jobEnd
 		}
 	}
 	if kept {
+		end.Source = l.app.savedJobSource(l.id)
 		return Page{}, &end, err
 	}
 	if ended {
-		return Page{}, &jobEnd{Code: *j.Exit, Tail: j.Tail}, err
+		return Page{}, &jobEnd{Code: *j.Exit, Tail: j.Tail, Source: j.Source}, err
 	}
 	return Page{}, nil, err
 }
@@ -143,5 +146,9 @@ func (l jobLookup) stoppedPage(ctx context.Context, j dash.Job, offset, limit in
 		return Page{}, false
 	}
 	info := JobInfo{Job: l.id.ID, Box: j.Box, Host: l.host, State: jobDone, Code: j.Exit, Started: j.StartedAt, LogBytes: chunk.LogBytes}
-	return Page{JobInfo: info, Offset: offset, NextOffset: chunk.Offset, More: !chunk.EOF, Text: data}, true
+	source := j.Source
+	if source == nil {
+		source = l.app.savedJobSource(l.id)
+	}
+	return Page{JobInfo: info, Source: source, Offset: offset, NextOffset: chunk.Offset, More: !chunk.EOF, Text: data}, true
 }

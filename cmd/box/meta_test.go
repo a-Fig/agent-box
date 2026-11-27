@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,6 +149,31 @@ func metaOf(t *testing.T, f *fakePC) (jobMeta, string) {
 	return jobMeta{}, ""
 }
 
+func TestLongInlineCommandPreservesReadableJobMetadata(t *testing.T) {
+	dir := newRepo(t)
+	cmd := "true # " + strings.Repeat("🙂<>&\t", dash.MaxJobMetaBytes/5) + "full-command-end"
+	f := &fakePC{t: t, exit: "0"}
+	a, _ := testApp(f)
+	started := false
+	a.R = lookupRunner(func(ctx context.Context, command Cmd) (Result, error) {
+		if command.Name == "incus" && len(command.Args) > 7 && command.Args[2] == "exec" && command.Args[6] == "-lc" {
+			started = strings.Contains(command.Args[7], "full-command-end")
+		}
+		return f.Run(ctx, command)
+	})
+	r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{cmd}, Reason: testReason})
+	if err != nil || r.Code != 0 || !started {
+		t.Fatalf("long command lost before dispatch: %+v, %v", r, err)
+	}
+	meta, wire := metaOf(t, f)
+	_, data, _ := strings.Cut(wire, "\n")
+	if len(data) > dash.MaxQueueMetaBytes || !utf8.ValidString(meta.Command) || !strings.HasSuffix(meta.Command, "...") {
+		t.Fatalf("long command metadata was not bounded: %d bytes, command %q", len(data), meta.Command)
+	}
+	read := decodeSource(base64.StdEncoding.EncodeToString([]byte(data)))
+	requireSourceRevision(t, read, r.Source.Commit, true, r.Source.SnapshotCommit)
+}
+
 func TestRunWritesMeta(t *testing.T) {
 	dir := newRepo(t)
 	gitT(t, dir, "checkout", "-q", "-b", "feat/x")
@@ -155,6 +181,7 @@ func TestRunWritesMeta(t *testing.T) {
 	head := gitT(t, dir, "rev-parse", "HEAD")
 	f := &fakePC{t: t, insts: []instance{{Name: "repo", Status: "Running"}}, exit: "0"}
 	a, out := testApp(f)
+	a.StateDir = t.TempDir()
 	a.Getenv = envMap(map[string]string{"T3CODE_THREAD_ID": "thread-1", "CLAUDE_CODE_SESSION_ID": "claude-1"})
 	r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"go", "test", "./..."}, Reason: testReason,
 		Env: map[string]string{"FOO": "hidden-value", "BAR": "x"}})
@@ -162,6 +189,15 @@ func TestRunWritesMeta(t *testing.T) {
 		t.Fatalf("Run = %+v, %v\n%s", r, err, out)
 	}
 	m, raw := metaOf(t, f)
+	if r.Source == nil || r.Source.SnapshotCommit == "" || r.Source.SnapshotCommit == head {
+		t.Fatalf("run source = %+v", r.Source)
+	}
+	requireSourceRevision(t, r.Source, head, true, r.Source.SnapshotCommit)
+	end, ok := a.recordedEnd(r.Job)
+	if !ok {
+		t.Fatalf("no retained result for %s", r.Job)
+	}
+	requireSourceRevision(t, end.Source, head, true, r.Source.SnapshotCommit)
 	if !strings.HasPrefix(raw, "pc:repo"+workRoot+"/.box/"+r.Job+".meta\n") {
 		t.Errorf("pushed to %q", strings.SplitN(raw, "\n", 2)[0])
 	}
@@ -170,7 +206,7 @@ func TestRunWritesMeta(t *testing.T) {
 	}
 	host, _ := os.Hostname()
 	want := jobMeta{V: 1, Reason: testReason, Command: "go test ./...", Repo: "https://github.com/owner/repo.git",
-		Branch: "feat/x", Commit: head, Size: "medium", EnvNames: []string{"BAR", "FOO"}, StartedAt: "2026-11-23T12:00:00Z",
+		Branch: "feat/x", Commit: head, Source: r.Source, Size: "medium", EnvNames: []string{"BAR", "FOO"}, StartedAt: "2026-11-23T12:00:00Z",
 		Agent: agentInfo{Client: "cli", Session: "thread-1", SessionSource: "t3", Host: host, Worktree: m.Agent.Worktree, Display: "My_Repo"}}
 	if got, _ := json.Marshal(m); string(got) != string(must(json.Marshal(want))) {
 		t.Errorf("meta =\n%s\nwant\n%s", got, must(json.Marshal(want)))
@@ -372,6 +408,15 @@ func TestRunReportsItsEnd(t *testing.T) {
 	calls := f.callList()
 	if len(p.urls) != 1 || !strings.Contains(calls, "delete") || strings.Index(calls, "remote") > strings.LastIndex(calls, "delete") {
 		t.Errorf("posted %q; calls %s", p.urls, calls)
+	}
+
+	// Boxd tracks agents only. A custom project can reuse the same bare ID.
+	a.Project = "work"
+	a.dashboardURL = "https://agent-box.example.ts.net"
+	p = posted{}
+	a.reportEnded(context.Background(), "my-repo.20261123-120000-0001", 3, a.Now(), "custom project tail")
+	if len(p.urls) != 0 {
+		t.Fatalf("custom project result posted to %q", p.urls)
 	}
 }
 

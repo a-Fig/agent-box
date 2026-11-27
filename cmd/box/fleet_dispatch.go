@@ -19,10 +19,10 @@ type turnAwayInfo struct {
 }
 
 type fleetRun struct {
-	repo   repo
-	info   jobMeta
-	bundle string
-	ref    string
+	repo repo
+	info jobMeta
+	snap worktreeSnapshot
+	ref  string
 }
 
 // runDispatch routes a validated RunOpts either directly to the default host
@@ -73,8 +73,8 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 
 	prepared := fleetRun{repo: rp, info: info}
 	defer func() {
-		if prepared.bundle != "" {
-			os.RemoveAll(filepath.Dir(prepared.bundle))
+		if prepared.snap.bundle != "" {
+			os.RemoveAll(filepath.Dir(prepared.snap.bundle))
 		}
 	}()
 
@@ -118,9 +118,9 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 			return r, nil
 		}
 
-		if prepared.bundle == "" {
+		if prepared.snap.bundle == "" {
 			prepared.ref = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
-			prepared.bundle, err = snapshot(ctx, a.R, rp.Top, prepared.ref)
+			prepared.snap, err = snapshot(ctx, a.R, rp.Top, prepared.ref)
 			if err != nil {
 				return JobResult{Code: 1}, err
 			}
@@ -174,7 +174,7 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 func fleetQueueRun(o RunOpts, prepared fleetRun, box string, sz mode.Size, host *fleetHost, cand fleetCandidate, why string) queueRun {
 	rp := prepared.repo
 	sizeMismatch := o.Size != "" && cand.RepoBox != nil && !cand.RepoBoxThrowaway && boxMatches(cand.RepoBox, box) && cand.RepoBox.Size != sz.Name
-	q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: prepared.info, bundle: prepared.bundle, ref: prepared.ref, host: host}
+	q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: prepared.info, snap: prepared.snap, ref: prepared.ref, host: host}
 	if o.New || sz.GPU || why == refusedMyPC || sizeMismatch {
 		q.box, q.new = rp.Name, true
 	}

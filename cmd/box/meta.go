@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/mask"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -71,17 +72,18 @@ type agentInfo struct {
 
 // jobMeta is /work/.box/<job>.meta, which boxd reads.
 type jobMeta struct {
-	V         int       `json:"v"`
-	Reason    string    `json:"reason"`
-	Command   string    `json:"command"`
-	Repo      string    `json:"repo"`
-	Branch    string    `json:"branch"`
-	Commit    string    `json:"commit"`
-	Agent     agentInfo `json:"agent"`
-	Size      string    `json:"size"`
-	GPU       bool      `json:"gpu"`
-	EnvNames  []string  `json:"envNames"`
-	StartedAt string    `json:"startedAt"`
+	V         int                  `json:"v"`
+	Reason    string               `json:"reason"`
+	Command   string               `json:"command"`
+	Repo      string               `json:"repo"`
+	Branch    string               `json:"branch"`
+	Commit    string               `json:"commit"`
+	Source    *dash.SourceRevision `json:"source,omitempty"`
+	Agent     agentInfo            `json:"agent"`
+	Size      string               `json:"size"`
+	GPU       bool                 `json:"gpu"`
+	EnvNames  []string             `json:"envNames"`
+	StartedAt string               `json:"startedAt"`
 }
 
 // The bodies box posts to boxd are the dashboard's contract, internal/dash.
@@ -142,14 +144,20 @@ func (a *App) agent(worktree string) agentInfo {
 func (a *App) runInfo(ctx context.Context, rp repo, o RunOpts, sz mode.Size) jobMeta {
 	origin, _ := git(ctx, a.R, rp.Top, nil, "remote", "get-url", "origin")
 	branch, _ := git(ctx, a.R, rp.Top, nil, "symbolic-ref", "-q", "--short", "HEAD")
-	commit, _ := git(ctx, a.R, rp.Top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}")
 	names := []string{}
 	for k := range o.Env {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	return jobMeta{V: 1, Reason: o.Reason, Command: displayCommand(o.Cmd), Repo: stripCredentials(origin),
-		Branch: branch, Commit: commit, Agent: a.agent(rp.Top), Size: sz.Name, GPU: sz.GPU, EnvNames: names}
+		Branch: branch, Agent: a.agent(rp.Top), Size: sz.Name, GPU: sz.GPU, EnvNames: names}
+}
+
+func (m *jobMeta) setSource(source *dash.SourceRevision) {
+	m.Source, m.Commit = source, ""
+	if source != nil {
+		m.Commit = source.Commit
+	}
 }
 
 // stripCredentials drops the userinfo from a remote URL, where tokens go
@@ -176,20 +184,36 @@ func stripCredentials(remote string) string {
 
 var plainWord = regexp.MustCompile(`^[A-Za-z0-9_./=:@%+,-]+$`)
 
-// displayCommand is the command as a person would type it: one argument as
-// is, several joined with only the words that need it quoted.
+// displayCommand quotes argv for display and bounds the copy stored in .meta.
+// The job still receives the full command.
 func displayCommand(args []string) string {
+	var command string
 	if len(args) == 1 {
-		return args[0]
-	}
-	w := make([]string, len(args))
-	for i, s := range args {
-		w[i] = s
-		if !plainWord.MatchString(s) {
-			w[i] = shq(s)
+		command = args[0]
+	} else {
+		w := make([]string, len(args))
+		for i, s := range args {
+			w[i] = s
+			if !plainWord.MatchString(s) {
+				w[i] = shq(s)
+			}
 		}
+		command = strings.Join(w, " ")
 	}
-	return strings.Join(w, " ")
+	// Leave room in the metadata budget for JSON escaping and other fields.
+	const maxDisplayCommand = 1 << 10
+	if len(command) <= maxDisplayCommand {
+		return command
+	}
+	command = mask.Mask(command)
+	if len(command) <= maxDisplayCommand {
+		return command
+	}
+	end := maxDisplayCommand - len("...")
+	for end > 0 && !utf8.RuneStart(command[end]) {
+		end--
+	}
+	return command[:end] + "..."
 }
 
 // pushMeta writes the job's .meta in the box, next to its log.
@@ -314,7 +338,7 @@ func (t *tailWriter) String() string {
 // goes right after its exit code is read, usually before boxd's next look,
 // so without this its job would be recorded as lost. Errors are dropped.
 func (a *App) reportEnded(ctx context.Context, job string, code int, ended time.Time, tail string) {
-	if a.Post == nil {
+	if a.Post == nil || a.Project != mode.Project {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refusalTimeout)

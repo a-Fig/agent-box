@@ -97,16 +97,24 @@ func small(box, session string) dash.QueueRequest {
 		Command: []string{"go test -race ./..."}, Meta: queueMeta(session)}
 }
 
+const queueSourceCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const queueSnapshotCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
 func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	// A 1GiB memory cap: no small box (2GiB) fits.
 	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "1GiB", "limits.instances": "10"})
-	code, rep, eb := r.enqueue(small("widget", "quiet-otter"), "BUNDLE")
+	req := small("widget", "quiet-otter")
+	req.Meta = json.RawMessage(strings.TrimSuffix(string(req.Meta), "}") + `,"source":{"commit":"` + queueSourceCommit + `","dirty":true,"snapshotCommit":"` + queueSnapshotCommit + `"}}`)
+	code, rep, eb := r.enqueue(req, "BUNDLE")
 	if code != 201 || rep.Position != 1 || rep.Why != dash.RefusedFull || !strings.HasPrefix(rep.Job, "widget-") {
 		t.Fatalf("enqueue: %d %+v %+v", code, rep, eb)
 	}
+	hasSource := func(j dash.Job) bool {
+		return j.Source != nil && j.Source.Commit == queueSourceCommit && j.Source.SnapshotCommit == queueSnapshotCommit && j.Source.Dirty != nil && *j.Source.Dirty
+	}
 	st := r.w.State()
 	if len(st.Jobs) != 1 || st.Jobs[0].State != dash.JobQueued || st.Jobs[0].Agent.Session != "quiet-otter" ||
-		st.Jobs[0].Reason == "" || st.Jobs[0].QueuedAt == nil {
+		st.Jobs[0].Reason == "" || st.Jobs[0].QueuedAt == nil || !hasSource(st.Jobs[0]) {
 		t.Fatalf("state: %+v", st.Jobs)
 	}
 	bundle := r.w.Queue.BundlePath(rep.Job)
@@ -142,7 +150,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	// its key is the start, so the box launched 30 minutes after the ID's time
 	// is still its box.
 	started := r.c.now().UTC().Format(time.RFC3339)
-	m := strings.TrimSuffix(string(queueMeta("quiet-otter")), "}") + `,"queuedAt":"2026-11-24T18:00:00Z","startedAt":"` + started + `"}`
+	m := strings.TrimSuffix(string(req.Meta), "}") + `,"queuedAt":"2026-11-24T18:00:00Z","startedAt":"` + started + `"}`
 	r.f.set(func() {
 		for i := range r.f.ins {
 			r.f.ins[i].CreatedAt = r.c.now()
@@ -154,7 +162,7 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	r.poll()
 	st = r.w.State()
 	if len(st.Jobs) != 1 || st.Jobs[0].State != dash.JobRunning || st.Jobs[0].QueuedAt == nil ||
-		st.Jobs[0].StartedAt.Format(time.RFC3339) != started {
+		st.Jobs[0].StartedAt.Format(time.RFC3339) != started || !hasSource(st.Jobs[0]) {
 		t.Fatalf("running: %+v", st.Jobs)
 	}
 
@@ -181,6 +189,14 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 	resp.Body.Close()
 	if b := h.Buckets[23]; b.Queued.Jobs != 1 || b.Queued.MedianWaitSeconds != 1800 {
 		t.Fatalf("history: %+v", b.Queued)
+	}
+	reloaded, err := OpenHistory(r.w.Hist.dir, r.c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id, _ := strings.Cut(rep.Job, ".")
+	if j, ok := reloaded.JobByID(box, id); !ok || j.State != dash.JobDone || !hasSource(j) {
+		t.Fatalf("reloaded history job = %+v, present %t", j, ok)
 	}
 }
 
@@ -794,7 +810,7 @@ func TestQueueReuseWritesActualBoxSizeInMeta(t *testing.T) {
 	spec := small("widget", "quiet-otter")
 	spec.New = false
 	spec.Size = "medium"
-	spec.Meta = json.RawMessage(`{"v":1,"reason":"Run tests","command":"go test ./...","size":"medium","gpu":true}`)
+	spec.Meta = json.RawMessage(`{"v":1,"reason":"Run tests","command":"go test ./...","size":"medium","gpu":true,"source":{"commit":"` + queueSourceCommit + `","dirty":false,"snapshotCommit":"` + queueSnapshotCommit + `"}}`)
 	_, rep, _ := r.enqueue(spec, "B")
 
 	var pushedMeta []byte
@@ -819,14 +835,18 @@ func TestQueueReuseWritesActualBoxSizeInMeta(t *testing.T) {
 		t.Fatal("queued job never started")
 	}
 	var got struct {
-		Size string `json:"size"`
-		GPU  bool   `json:"gpu"`
+		Size   string               `json:"size"`
+		GPU    bool                 `json:"gpu"`
+		Source *dash.SourceRevision `json:"source"`
 	}
 	if err := json.Unmarshal(pushedMeta, &got); err != nil {
 		t.Fatalf("pushed meta %q: %v", pushedMeta, err)
 	}
 	if got.Size != "small" || got.GPU {
 		t.Fatalf("pushed meta size=%q gpu=%v, want small/false", got.Size, got.GPU)
+	}
+	if got.Source == nil || got.Source.Commit != queueSourceCommit || got.Source.SnapshotCommit != queueSnapshotCommit || got.Source.Dirty == nil || *got.Source.Dirty {
+		t.Fatalf("scheduler changed the source metadata: %s", pushedMeta)
 	}
 	if j, ok := r.w.QueuedView(rep.Job); !ok || j.Size != "small" || j.GPU || j.Kind != dash.KindGoTest {
 		t.Fatalf("started view = %+v, ok=%v", j, ok)

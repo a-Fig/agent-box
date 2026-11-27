@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/dash"
 )
 
 type reconcilePusher func(context.Context, string, string) error
@@ -330,6 +332,57 @@ func TestProfiledBareWatchUsesSavedIncusTarget(t *testing.T) {
 	defer cancel()
 	if err := a.Watch(ctx, testBareJobID); err != nil || a.notifiedBy(testBareJobID) != "watcher" {
 		t.Fatalf("watching the saved target: %v", err)
+	}
+}
+
+func TestBareCompletionNoticeUsesSavedWatchTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		old  *jobLocator
+	}{
+		{name: "another remote", old: &jobLocator{Remote: "original", Project: "work"}},
+		{name: "another project", old: &jobLocator{Remote: "replacement", Project: "agents"}},
+		{name: "unscoped legacy end"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := reconciliationApp(t, t.TempDir())
+			pusher := &fakePusher{}
+			a.Thread, a.Push = "origin", pusher
+			a.Spawn = func(_, _ string) error { return nil }
+			a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+				t.Fatalf("watch with a matching saved result contacted Incus: %q", cmd.Args)
+				return Result{}, nil
+			})
+			job := testBareJobID
+			target := &jobLocator{Remote: "replacement", Project: "work"}
+			dirty := true
+			source := &dash.SourceRevision{Commit: strings.Repeat("c", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("d", 40)}
+			foreign := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+			rec := jobRecord{Job: job, Thread: a.Thread, T3BaseDir: a.t3BaseDir(), Host: target, Source: source}
+			if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSON(a.statePath(job, ".ended"), jobEnd{Code: 3, Tail: "foreign output", Source: foreign, Locator: tc.old}); err != nil {
+				t.Fatal(err)
+			}
+			a.recordEnd(job, jobEnd{Code: 7, Tail: "current output", Source: source, Locator: target, Completion: completionExited})
+
+			var out bytes.Buffer
+			a.Hook(nil, &out)
+			if out.Len() != 0 || a.exists(job, ".notified") || a.safetyNet("") != "" {
+				t.Fatalf("stale completion was offered: %q", out.String())
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := a.Watch(ctx, job); err != nil || pusher.count() != 1 {
+				t.Fatalf("Watch = %v, notices = %d", err, pusher.count())
+			}
+			msg := pusher.sent[0].msg
+			if !strings.Contains(msg, "exit 7") || !strings.Contains(msg, "current output") || !strings.Contains(msg, sourceLine(source)) ||
+				strings.Contains(msg, "foreign output") || strings.Contains(msg, sourceLine(foreign)) {
+				t.Fatalf("wrong completion notice: %q", msg)
+			}
+		})
 	}
 }
 

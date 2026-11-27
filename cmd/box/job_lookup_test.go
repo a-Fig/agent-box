@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -111,9 +112,11 @@ func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
 	a, out, west, _ := lookupTestApp(t, "agents")
 	id := requireQualifiedJobID(t, west, testBareJobID)
 	exit := 7
+	dirty := true
+	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
 	started := jobStart(id.Bare)
 	_, suffix, _ := strings.Cut(id.Bare, ".")
-	j := dash.Job{Box: id.Box, ID: suffix, BoxUID: "west-original", State: dash.JobDone, StartedAt: started, Exit: &exit}
+	j := dash.Job{Box: id.Box, ID: suffix, BoxUID: "west-original", State: dash.JobDone, StartedAt: started, Exit: &exit, Source: source}
 	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
 	const log = "aé\xffmore bytes"
 	want := log[1:3]
@@ -160,7 +163,8 @@ func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
 	result := callTool(ctx, a, params, nil)
 	page, ok := result["structuredContent"].(map[string]any)
 	if result["isError"] != false || !ok || page["job"] != id.ID || page["host"] != west.Name ||
-		page["log"] != want || page["nextOffset"] != int64(3) || page["logBytes"] != int64(len(log)) || page["more"] != true {
+		page["log"] != want || page["nextOffset"] != int64(3) || page["logBytes"] != int64(len(log)) || page["more"] != true ||
+		!reflect.DeepEqual(page["source"], source) {
 		t.Fatalf("stopped MCP page = %+v", result)
 	}
 	if len(calls) != 4 {
@@ -183,24 +187,32 @@ func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
 	}
 }
 
-func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
-	a, _, west, _ := lookupTestApp(t, "work")
+func TestJobLookupDoesNotCrossProjectsForSameBareID(t *testing.T) {
+	a, out, west, _ := lookupTestApp(t, "work")
 	a.Remote, a.dashboardURL = west.Remote, west.DashboardURL
 	exit := 3
 	box, suffix, _ := strings.Cut(testBareJobID, ".")
 	j := dash.Job{Box: box, ID: suffix, BoxUID: "agents-only", State: dash.JobDone, StartedAt: jobStart(testBareJobID), Exit: &exit, Tail: "legacy tail"}
+	dirty := true
+	j.Source = &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
 	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
 		if len(cmd.Args) != 8 || cmd.Args[1] != a.Project || cmd.Args[3] != west.Remote+":"+box {
-			t.Fatalf("local page used the wrong Incus project or remote: %q", cmd.Args)
+			t.Fatalf("lookup used the wrong Incus project or remote: %q", cmd.Args)
+		}
+		if isScript(cmd, "# follow") {
+			return Result{Code: 3}, nil
 		}
 		return Result{Code: 1, Stderr: notRunning}, nil
 	})
-	var fullReads int
+	var boxdReads int
 	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		boxdReads++
+		if a.Project != "agents" {
+			t.Fatal("custom-project lookup contacted boxd")
+		}
 		var payload any = j
 		if strings.HasSuffix(req.URL.Path, "/log") {
-			fullReads++
 			payload = dash.LogChunk{Stopped: true, Offset: 5, EOF: true, LogBytes: 5, Data: "there"}
 		}
 		raw, err := json.Marshal(payload)
@@ -216,16 +228,42 @@ func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || fullReads != 1 {
-		t.Fatalf("agents page = %+v, %v, full reads %d", p, err, fullReads)
+	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || boxdReads != 2 || !reflect.DeepEqual(p.Source, j.Source) {
+		t.Fatalf("agents page = %+v, %v, boxd reads %d", p, err, boxdReads)
 	}
-	a.Project = "work"
+	a.Project = west.Project
 	lookup, err = a.lookupJob(testBareJobID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end == nil || end.Tail != j.Tail || fullReads != 1 {
-		t.Fatalf("work project page = %+v, end %+v, %v, full reads %d", p, end, err, fullReads)
+	source := &dash.SourceRevision{Commit: strings.Repeat("c", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("d", 40)}
+	local := &jobLocator{Remote: west.Remote, Project: west.Project}
+	if err := writeJSON(a.statePath(testBareJobID, ".json"), jobRecord{Job: testBareJobID, Host: local, Source: source}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(a.statePath(testBareJobID, ".result"), jobEnd{Code: exit, Tail: j.Tail}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := jobEnd{Code: exit, Tail: j.Tail, Source: j.Source, Locator: &jobLocator{Remote: west.Remote, Project: "agents"}}
+	if err := writeJSON(a.statePath(testBareJobID, ".ended"), foreign); err != nil {
+		t.Fatal(err)
+	}
+	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end != nil {
+		t.Fatalf("custom project page = %+v, end %+v, %v", p, end, err)
+	}
+	if r, err := lookup.job(ctx, 0); err == nil || r.State == stateDone || r.Code == exit || out.Len() != 0 {
+		t.Fatalf("custom project full result = %+v, log %q, %v", r, out, err)
+	}
+	kept := jobEnd{Code: 7, Tail: "custom project tail", Source: source, Locator: local}
+	if err := writeJSON(a.statePath(testBareJobID, ".result"), kept); err != nil {
+		t.Fatal(err)
+	}
+	if _, end, err := lookup.page(ctx, 0, 0); err == nil || end == nil || !reflect.DeepEqual(*end, kept) {
+		t.Fatalf("custom project paged fallback = %+v, %v", end, err)
+	}
+	if r, err := lookup.job(ctx, 0); err != nil || r.State != stateDone || r.Code != kept.Code ||
+		out.String() != kept.Tail || !reflect.DeepEqual(r.Source, source) {
+		t.Fatalf("custom project full fallback = %+v, log %q, %v", r, out, err)
 	}
 }
 
@@ -283,6 +321,9 @@ func TestStoppedJobLogPageKeepsRawBytes(t *testing.T) {
 
 func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 	a, _, west, east := lookupTestApp(t, "work")
+	dirty := true
+	westSource := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	eastSource := &dash.SourceRevision{Commit: strings.Repeat("c", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("d", 40)}
 	posted := map[string]int{}
 	a.Post = func(_ context.Context, url string, body []byte) error {
 		var end dash.JobEndedBody
@@ -308,10 +349,20 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 				t.Fatalf("attach sent a qualified ID to Incus: %q", cmd.Args)
 			}
 			code := 4
+			src := westSource
 			if cmd.Args[3] == "east:repo" {
 				code = 7
+				src = eastSource
+			}
+			if isScript(cmd, "# page") {
+				return Result{Stdout: fmt.Sprintf("done %d 4\nt", code)}, nil
 			}
 			fmt.Fprint(cmd.Stdout, cmd.Args[3]+" tail")
+			meta, err := json.Marshal(jobMeta{Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintln(cmd.Stderr, metaMarker+base64.StdEncoding.EncodeToString(meta))
 			fmt.Fprintf(cmd.Stderr, "%s%d\n", exitMarker, code)
 			return Result{}, nil
 		}
@@ -332,6 +383,17 @@ func TestQualifiedJobRetainsResultsByFullID(t *testing.T) {
 		t.Fatalf("ended reports went to %v", posted)
 	}
 	gone = true
+	for id, want := range map[string]*dash.SourceRevision{westID: westSource, eastID: eastSource} {
+		lookup, err := a.lookupJob(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := lookup.job(context.Background(), 0)
+		if err != nil || r.State != stateDone {
+			t.Fatalf("offline lookup %s = %+v, %v", id, r, err)
+		}
+		requireSourceRevision(t, r.Source, want.Commit, *want.Dirty, want.SnapshotCommit)
+	}
 	for _, tc := range []struct {
 		id, tail string
 		code     float64
@@ -377,6 +439,160 @@ func TestQualifiedJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 	}
 	if code := run(context.Background(), a, []string{"job", id}, strings.NewReader("")); code != 7 {
 		t.Fatalf("CLI follow returned %d, want queued job's exit code 7", code)
+	}
+}
+
+func TestBareJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
+	a, out, west, east := lookupTestApp(t, "agents")
+	a.dashboardURL, a.Err = east.DashboardURL, out
+	a.WatchPoll = time.Millisecond
+	const job = testBareJobID
+	dirty, exit := true, 7
+	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	requests := 0
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.String() != east.DashboardURL+"/api/queue/"+job {
+			t.Fatalf("queue request = %s %s", req.Method, req.URL)
+		}
+		requests++
+		j := dash.Job{Box: "repo", State: dash.JobQueued, Position: 2, Source: source}
+		if requests > 3 {
+			j.State, j.Exit, j.Tail = dash.JobDone, &exit, "queued tail"
+		}
+		raw, _ := json.Marshal(j)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	}
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" || (requests < 4 && !isScript(cmd, "# page")) {
+			t.Fatalf("unexpected Incus call: %q", cmd.Args)
+		}
+		return Result{Code: 3}, nil // a waiting job has no guest log
+	})
+	res, data := lookupTool(t, a, job, false)
+	got, _ := data["source"].(map[string]any)
+	if res["isError"] != false || data["job"] != job || data["state"] != stateQueued || data["position"] != 2.0 ||
+		got["commit"] != source.Commit || !strings.Contains(fmt.Sprint(res["content"]), sourceLine(source)) {
+		t.Fatalf("queued MCP result = %v", res)
+	}
+	// Another host's job with this bare ID was cancelled locally.
+	rec := jobRecord{Job: job, Queued: true, Host: &jobLocator{Remote: west.Remote, Project: west.Project}}
+	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
+		t.Fatal(err)
+	}
+	a.jobHostApp(west).markNotified(job, "cancel")
+	if code := run(context.Background(), a, []string{"job", job}, nil); code != exit ||
+		!strings.Contains(out.String(), "queued tail") || !strings.Contains(out.String(), sourceLine(source)) ||
+		strings.Contains(out.String(), "taken off the queue") {
+		t.Fatalf("CLI follow = %d, %q", code, out)
+	}
+}
+
+func TestBareQueueFollowIgnoresForeignCancellationAfter404(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			a, out, west, east := lookupTestApp(t, "agents")
+			a.dashboardURL, a.Err = east.DashboardURL, out
+			a.WatchPoll = time.Millisecond
+			const job = testBareJobID
+			rec := jobRecord{Job: job, Queued: true, Host: &jobLocator{Remote: east.Remote, Project: east.Project}}
+			if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
+				t.Fatal(err)
+			}
+			a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+				return Result{Code: 3}, nil // no guest log
+			})
+			eastReads := 0
+			a.HTTP = func(req *http.Request) (*http.Response, error) {
+				if req.Method == http.MethodPost && req.URL.String() == west.DashboardURL+"api/queue/"+job+"/cancel" {
+					return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+				}
+				if req.Method != http.MethodGet || req.URL.String() != east.DashboardURL+"/api/queue/"+job {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL)
+				}
+				eastReads++
+				if eastReads == 2 {
+					return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+				}
+				exit := 7
+				j := dash.Job{Box: "repo", State: dash.JobQueued, Position: 1}
+				if eastReads >= 3 {
+					j.State, j.Exit, j.Tail = dash.JobDone, &exit, "east result"
+				}
+				raw, _ := json.Marshal(j)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+			}
+			ctx := context.Background()
+			if legacy {
+				write(t, a.statePath(job, ".notified"), "cancel")
+			} else {
+				target := a.jobHostApp(west)
+				removed, _, _, err := target.CancelAny(ctx, job)
+				if err != nil || !removed {
+					t.Fatalf("west cancel = %t, %v", removed, err)
+				}
+				id, err := parseJobID(job)
+				if err != nil || !target.cancelledOnHost(id) {
+					t.Fatalf("marker did not identify west: %v", err)
+				}
+			}
+			if code := run(ctx, a, []string{"job", job}, nil); code != 7 || eastReads < 3 ||
+				!strings.Contains(out.String(), "east result") || strings.Contains(out.String(), "taken off the queue") {
+				t.Fatalf("east follow = %d after %d reads, %q", code, eastReads, out)
+			}
+		})
+	}
+}
+
+func TestBareJobRejectsRetainedResultFromAnotherHost(t *testing.T) {
+	a, _, west, east := lookupTestApp(t, "agents")
+	a.dashboardURL = east.DashboardURL
+	const job = testBareJobID
+	// The first provenance builds wrote a locator object in the host field.
+	if err := writeJSON(a.statePath(job, ".result"), map[string]any{
+		"code": 4, "tail": "west tail", "host": jobLocator{Remote: west.Remote, Project: west.Project},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if end, ok := a.jobHostApp(west).recordedEnd(job); !ok || end.Code != 4 {
+		t.Fatalf("legacy result = %+v, found = %t", end, ok)
+	}
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" {
+			t.Fatalf("lookup used the wrong host: %q", cmd.Args)
+		}
+		return Result{Code: 3}, nil
+	})
+	exit, dirty := 7, false
+	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	_, id, _ := strings.Cut(job, ".")
+	started := jobStart(job)
+	found := true
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "east.example.com" {
+			t.Fatalf("lookup contacted the wrong boxd: %s", req.URL)
+		}
+		if found && strings.HasSuffix(req.URL.Path, "/api/queue/"+job) {
+			j := dash.Job{Box: "repo", ID: id, BoxUID: "east-uid", Key: dash.JobKey("repo", id, started), StartedAt: started,
+				State: dash.JobDone, Exit: &exit, Tail: "east tail", Source: source}
+			raw, _ := json.Marshal(j)
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+	}
+	for _, paged := range []bool{true, false} {
+		found = true
+		res, data := lookupTool(t, a, job, paged)
+		got, _ := data["source"].(map[string]any)
+		tail, _ := data["tail"].(string)
+		if res["isError"] != false || data["exitCode"] != 7.0 || !strings.HasSuffix(tail, "east tail") ||
+			strings.Contains(tail, "west tail") || got["commit"] != source.Commit {
+			t.Fatalf("lookup (paged %t) = %v", paged, res)
+		}
+		found = false
+		res, _ = lookupTool(t, a, job, paged)
+		if res["isError"] != true || strings.Contains(fmt.Sprint(res["content"]), "west tail") {
+			t.Fatalf("missing job (paged %t) returned foreign record: %v", paged, res)
+		}
 	}
 }
 

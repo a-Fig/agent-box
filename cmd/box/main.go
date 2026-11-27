@@ -131,6 +131,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	}
 	code := func(r JobResult, err error) int {
 		c := r.Code
+		if r.Job != "" {
+			fmt.Fprintln(a.Err, "box:", sourceLine(r.Source))
+		}
 		if r.Digest != "" {
 			fmt.Fprint(a.Err, "\n"+r.Digest)
 		}
@@ -207,9 +210,12 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: fs.Args(), Box: *box, Host: *host, New: *isNew, Fresh: *fresh, TTL: *ttl, Env: envs, Timeout: *timeout, Size: *size, Reason: why, Queue: !*noQueue})
 		if err == nil && r.State == stateQueued {
 			// This process follows the job through the queue and into its box (#93).
-			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}}
+			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}, Source: r.Source}
 			a.recordQueuedOnHost(info, r.Job, r.fleetHost, *size == mode.GPUSize, r.throwaway)
 			r, err = a.followQueuedResult(ctx, r)
+			if r.Source == nil {
+				r.Source = info.Source
+			}
 			a.markRead(r.Job, r, err, "box run")
 		}
 		return code(r, err)
@@ -233,7 +239,7 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			var r JobResult
 			var err error
 			if _, queued, queueErr := lookup.queued(ctx); queued {
-				seen := lookup.id.hostTag != "" && queueErr == nil
+				seen := queueErr == nil
 				r, err = lookup.app.followQueuedJob(ctx, lookup.id, seen)
 			} else {
 				r, err = lookup.job(ctx, 0)
@@ -245,12 +251,14 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if err != nil {
 			if end != nil {
 				fmt.Fprintf(a.Err, "box: can't read the log (%s); this is the tail recorded when the job ended\n", firstLine(err.Error()))
+				fmt.Fprintln(a.Err, "box:", sourceLine(end.Source))
 				io.WriteString(a.Out, end.Tail)
 				return 0
 			}
 			return fail(err)
 		}
 		fmt.Fprintln(a.Err, "box: "+p.pageHead())
+		fmt.Fprintln(a.Err, "box:", sourceLine(p.Source))
 		io.WriteString(a.Out, p.Text)
 		return 0
 	case "status", "hosts":

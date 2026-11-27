@@ -8,6 +8,7 @@
 package dash
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -212,6 +213,33 @@ type Agent struct {
 	Worktree string `json:"worktree"` // the worktree's path
 }
 
+// SourceRevision identifies the worktree snapshot a job was given.
+type SourceRevision struct {
+	Commit         string `json:"commit"`         // empty when source HEAD is unknown
+	Dirty          *bool  `json:"dirty"`          // whether the bundled tree differs from HEAD, null if unknown
+	SnapshotCommit string `json:"snapshotCommit"` // the commit advertised in the bundle
+}
+
+// Valid checks that source metadata names full Git object IDs. An unborn
+// worktree can identify its snapshot even though it has no HEAD to compare.
+func (s *SourceRevision) Valid() bool {
+	if s == nil || !gitObjectID(s.SnapshotCommit) {
+		return false
+	}
+	if s.Commit == "" {
+		return s.Dirty == nil
+	}
+	return gitObjectID(s.Commit)
+}
+
+func gitObjectID(id string) bool {
+	if len(id) != 40 && len(id) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
+}
+
 // Job is one command run on a box.
 type Job struct {
 	Key string `json:"key"` // box/id/startedAt: names and IDs get reused
@@ -227,16 +255,17 @@ type Job struct {
 	EndedAt   *time.Time `json:"endedAt"`
 	// Reason is the agent's one or two sentences on why this runs on a box,
 	// the job's headline. box run requires it; a job from before that has "".
-	Reason  string `json:"reason"`
-	Command string `json:"command"`
-	Kind    string `json:"kind"`
-	Repo    string `json:"repo"`
-	Branch  string `json:"branch"`
-	Commit  string `json:"commit"`
-	Agent   Agent  `json:"agent"`
-	Size    string `json:"size"`
-	GPU     bool   `json:"gpu"`
-	Tail    string `json:"tail"` // the log's last TailBytes, kept after the box goes
+	Reason  string          `json:"reason"`
+	Command string          `json:"command"`
+	Kind    string          `json:"kind"`
+	Repo    string          `json:"repo"`
+	Branch  string          `json:"branch"`
+	Commit  string          `json:"commit"`
+	Source  *SourceRevision `json:"source,omitempty"`
+	Agent   Agent           `json:"agent"`
+	Size    string          `json:"size"`
+	GPU     bool            `json:"gpu"`
+	Tail    string          `json:"tail"` // the log's last TailBytes, kept after the box goes
 	// QueuedAt is when a job that went through the queue was queued; null
 	// for one box started at once. While it waits, StartedAt is QueuedAt
 	// too, Position is its place in line from 1, and Why is what it waits
@@ -251,6 +280,12 @@ type Job struct {
 
 // TailBytes is how much of a job's log its Tail keeps.
 const TailBytes = 2 << 10
+
+// MaxJobMetaBytes is the metadata read budget for job logs and dashboard scans.
+const MaxJobMetaBytes = 16 << 10
+
+// MaxQueueMetaBytes leaves room for the daemon's fields when the job starts.
+const MaxQueueMetaBytes = MaxJobMetaBytes - (1 << 10)
 
 // JobBoxGrace is how much later than a job's start its box may have been made. box run --new
 // makes the job's ID, and its start, before it launches the box, so a throwaway's createdAt is a

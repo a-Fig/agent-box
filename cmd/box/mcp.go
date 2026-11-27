@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/a-Fig/agent-box/internal/mask"
 	"io"
 	"path/filepath"
 	"strconv"
@@ -17,6 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/mask"
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
 )
@@ -131,6 +132,15 @@ var jobOutput = obj(map[string]any{
 	"tail":     str("The end of the job's output (up to 32KiB), as in the text result."),
 	"error":    str("Why the call failed, when it did."),
 	"finished": str("Your jobs that ended since you last looked."),
+	"source": map[string]any{
+		"type":        []string{"object", "null"},
+		"description": "Provenance captured with the synced snapshot. Null when unavailable.",
+		"properties": map[string]any{
+			"commit":         str("Full source HEAD SHA. Empty for an unborn worktree."),
+			"dirty":          map[string]any{"type": []string{"boolean", "null"}, "description": "Whether the synced tree differs from source HEAD. Null when unknown."},
+			"snapshotCommit": str("Full SHA of the bundled snapshot commit."),
+		},
+	},
 	// Only for a log page (box_job with offset or limit).
 	"log":        str("This page of the log, as text."),
 	"offset":     map[string]any{"type": "integer"},
@@ -304,11 +314,11 @@ func pageResult(p Page) map[string]any {
 		one := 1
 		code = &one
 	}
-	res := textResult(p.pageHead()+"\n"+p.Text, false)
+	res := textResult(p.pageHead()+"\n"+sourceLine(p.Source)+"\n"+p.Text, false)
 	structured := map[string]any{
 		"job": p.Job, "box": p.Box, "state": p.State, "exitCode": code,
 		"offset": p.Offset, "nextOffset": p.NextOffset, "logBytes": p.LogBytes, "more": p.More,
-		"log": strings.ToValidUTF8(p.Text, "�"),
+		"log": strings.ToValidUTF8(p.Text, "�"), "source": p.Source,
 	}
 	if !utf8.ValidString(p.Text) {
 		structured["logBase64"] = base64.StdEncoding.EncodeToString([]byte(p.Text))
@@ -357,7 +367,11 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	if len(warnings) > 0 {
 		head += "\n" + strings.Join(warnings, "\n")
 	}
-	text := head + "\n" + r.Digest + log
+	text := head + "\n" + r.Digest
+	if r.Job != "" {
+		text += sourceLine(r.Source) + "\n"
+	}
+	text += log
 	if err != nil {
 		text += "\nerror: " + err.Error()
 	}
@@ -375,10 +389,11 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Digest   string   `json:"digest,omitempty"`
 		// Claude Code shows structuredContent instead of the text when a
 		// result has both (#33), so what the agent reads is here too.
-		Tail     string          `json:"tail"`
-		Error    string          `json:"error,omitempty"`
-		Capacity *capacityDetail `json:"capacity,omitempty"`
-	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity}
+		Tail     string               `json:"tail"`
+		Error    string               `json:"error,omitempty"`
+		Capacity *capacityDetail      `json:"capacity,omitempty"`
+		Source   *dash.SourceRevision `json:"source"`
+	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity, r.Source}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -518,7 +533,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		// would hear when it starts (docs/queue.md).
 		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
 		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Fresh: args.Fresh, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
-		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
+		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}, Source: r.Source}
 		startWatch := func(throwaway, queued bool) bool {
 			if r.fleetHost != nil {
 				return a.startWatchOnHost(info, r.Job, *r.fleetHost, args.Size == mode.GPUSize, throwaway, queued)
@@ -596,7 +611,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 				if end != nil {
 					box := lookup.id.Box
 					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
-					return jobResult(JobResult{Job: lookup.id.ID, Box: box, Host: lookup.host, State: stateDone, Code: end.Code, Digest: end.Digest}, nil, end.Tail, warnings)
+					return jobResult(JobResult{Job: lookup.id.ID, Box: box, Host: lookup.host, State: stateDone, Code: end.Code, Digest: end.Digest, Source: end.Source}, nil, end.Tail, warnings)
 				}
 				return textResult(err.Error(), true)
 			}
@@ -607,7 +622,10 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			return textResult(err.Error(), true)
 		}
 		if j, queued, err := lookup.queued(ctx); err == nil && queued {
-			return jobResult(JobResult{Job: lookup.id.ID, Box: j.Box, Host: lookup.host, State: stateQueued, Position: j.Position, Why: j.Why}, nil, "", warnings)
+			if j.Source == nil {
+				j.Source = lookup.app.savedJobSource(lookup.id)
+			}
+			return jobResult(JobResult{Job: lookup.id.ID, Box: j.Box, Host: lookup.host, State: stateQueued, Position: j.Position, Why: j.Why, Source: j.Source}, nil, "", warnings)
 		}
 		r, err := lookup.job(ctx, wait)
 		a.markRead(lookup.id.ID, r, err, "box_job")

@@ -102,9 +102,20 @@ func (a *App) Hook(stdin io.Reader, out io.Writer) {
 			continue
 		}
 		rec, err := a.readWatchRecord(job)
-		var end jobEnd
-		if err != nil || rec.Thread != thread || !rec.inProfile(baseDir) || readJSON(a.statePath(job, ".ended"), &end) != nil ||
+		if err != nil || rec.Thread != thread || !rec.inProfile(baseDir) ||
 			rec.Session != "" && ev.SessionID != "" && rec.Session != ev.SessionID {
+			continue
+		}
+		id, err := parseJobID(job)
+		if err != nil {
+			continue
+		}
+		target, err := a.watchTarget(rec, id)
+		if err != nil {
+			continue
+		}
+		end, ok := target.readJobEnd(id, ".ended", rec.Host != nil)
+		if !ok {
 			continue
 		}
 		msgs, jobs = append(msgs, endMessage(rec, end)), append(jobs, job)

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/a-Fig/agent-box/internal/dash"
 )
 
 // repo is the local git worktree a run starts from.
@@ -61,14 +63,19 @@ func boxName(s string) string {
 	return strings.TrimSuffix(s, "-")
 }
 
+type worktreeSnapshot struct {
+	bundle string
+	source *dash.SourceRevision
+}
+
 // snapshot commits the worktree as it is, untracked files included and
 // ignored files excluded, without touching the user's index, and writes a
 // bundle of that commit to a temporary file. The commit is reachable in the
 // bundle as refs/agent-box/<id>. The caller removes the bundle.
-func snapshot(ctx context.Context, r Runner, top, id string) (bundle string, err error) {
+func snapshot(ctx context.Context, r Runner, top, id string) (_ worktreeSnapshot, err error) {
 	tmp, err := os.MkdirTemp("", "box-")
 	if err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
 	}
 	defer func() {
 		os.Remove(filepath.Join(tmp, "index"))
@@ -82,7 +89,7 @@ func snapshot(ctx context.Context, r Runner, top, id string) (bundle string, err
 	index := filepath.Join(tmp, "index")
 	entries, err := runGit(ctx, r, Cmd{Args: []string{"ls-files", "--stage", "-z"}, Dir: top})
 	if err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
 	}
 	head, _ := git(ctx, r, top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}")
 	env := []string{
@@ -92,15 +99,19 @@ func snapshot(ctx context.Context, r Runner, top, id string) (bundle string, err
 	}
 	if entries != "" {
 		if _, err := runGit(ctx, r, Cmd{Args: []string{"update-index", "-z", "--index-info"}, Dir: top, Env: env, Stdin: strings.NewReader(entries)}); err != nil {
-			return "", err
+			return worktreeSnapshot{}, err
 		}
 	}
 	if _, err := git(ctx, r, top, env, "add", "-A"); err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
 	}
 	tree, err := git(ctx, r, top, env, "write-tree")
 	if err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
+	}
+	sourceHead := head
+	if current, _ := git(ctx, r, top, nil, "rev-parse", "-q", "--verify", "HEAD^{commit}"); current != head {
+		sourceHead = "" // a concurrent checkout makes the comparison ambiguous
 	}
 	args := []string{"commit-tree", tree, "-m", "box snapshot " + id}
 	// A shallow clone lacks the history below its cut, so a bundle of it
@@ -110,18 +121,25 @@ func snapshot(ctx context.Context, r Runner, top, id string) (bundle string, err
 	}
 	commit, err := git(ctx, r, top, env, args...)
 	if err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
+	}
+	source := &dash.SourceRevision{Commit: sourceHead, SnapshotCommit: commit}
+	if sourceHead != "" {
+		if headTree, err := git(ctx, r, top, nil, "rev-parse", "--verify", sourceHead+"^{tree}"); err == nil {
+			dirty := tree != headTree
+			source.Dirty = &dirty
+		}
 	}
 
 	// git bundle needs a ref; keep it only as long as the bundle takes.
 	ref := "refs/agent-box/" + id
 	if _, err := git(ctx, r, top, nil, "update-ref", ref, commit); err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
 	}
 	defer git(context.WithoutCancel(ctx), r, top, nil, "update-ref", "-d", ref)
-	bundle = filepath.Join(tmp, id+".bundle")
+	bundle := filepath.Join(tmp, id+".bundle")
 	if _, err := git(ctx, r, top, nil, "bundle", "create", "-q", bundle, ref); err != nil {
-		return "", err
+		return worktreeSnapshot{}, err
 	}
-	return bundle, nil
+	return worktreeSnapshot{bundle: bundle, source: source}, nil
 }

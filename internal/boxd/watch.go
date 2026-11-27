@@ -489,6 +489,9 @@ func boxUID(in Instance) string {
 
 func fillMeta(j *dash.Job, m *meta) {
 	j.Reason, j.Command, j.Repo, j.Branch, j.Commit = m.Reason, m.Command, m.Repo, m.Branch, m.Commit
+	if m.Source.Valid() {
+		j.Source = m.Source
+	}
 	session := m.Agent.Display
 	if session == "" {
 		session = lastElem(m.Agent.Worktree)

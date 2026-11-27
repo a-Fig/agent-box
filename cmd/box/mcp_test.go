@@ -117,13 +117,13 @@ func TestMCPJobIDSurvivesLongLog(t *testing.T) {
 	if first != "job agent-box.20261123-120000-0001 on box agent-box: done, exit code: 4" {
 		t.Errorf("first line = %q", first)
 	}
-	if !strings.HasPrefix(rest, "[earlier output cut]") {
-		t.Errorf("log tail not cut: %.40q", rest)
+	if !strings.HasPrefix(rest, "source unknown\n[earlier output cut]") {
+		t.Errorf("source or truncated log missing: %.65q", rest)
 	}
 }
 
 func TestMCPCancelDetaches(t *testing.T) {
-	f := &fakePC{t: t, insts: []instance{{Name: "agent-box", Status: "Running"}}, block: true}
+	f := &fakePC{t: t, insts: []instance{{Name: "agent-box", Status: "Running"}}, script: "running - 0\n", block: true}
 	a, _ := testApp(f)
 	pr, pw := io.Pipe()
 	var out bytes.Buffer
@@ -143,8 +143,8 @@ func TestMCPCancelDetaches(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("replied to a cancelled request: %s", out.String())
 	}
-	if c := f.callList(); c != "exec" {
-		t.Errorf("incus calls = %q, want only the follow (no delete, no kill)", c)
+	if c := f.callList(); c != "exec exec" {
+		t.Errorf("incus calls = %q, want only the log probe and follow", c)
 	}
 }
 
@@ -241,8 +241,9 @@ func TestMCPSubmoduleWarningSurvivesLongLog(t *testing.T) {
 	if got := reply.Result.StructuredContent.Warnings; len(got) != 1 || got[0] != warning {
 		t.Errorf("warnings = %q", got)
 	}
-	if got := strings.SplitN(reply.Result.Content[0].Text, "\n", 4); len(got) < 3 || got[1] != warning || got[2] != "[earlier output cut]" {
-		t.Error("warning was not shown ahead of the truncated log")
+	if got := strings.SplitN(reply.Result.Content[0].Text, "\n", 5); len(got) < 4 ||
+		got[1] != warning || !strings.HasPrefix(got[2], "source ") || got[3] != "[earlier output cut]" {
+		t.Error("warning and source were not shown ahead of the truncated log")
 	}
 }
 

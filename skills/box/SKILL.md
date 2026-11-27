@@ -19,6 +19,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
 7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel: `new: true`.
 
 CPU throwaways can be reused. `fresh: true` launches clean.
+Results and notices show HEAD, dirty state, and snapshot commit.
 An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).

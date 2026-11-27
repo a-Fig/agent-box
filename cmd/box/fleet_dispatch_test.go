@@ -42,6 +42,7 @@ type fakeFleetHost struct {
 
 	mu          sync.Mutex
 	pushedFiles []string
+	pushedMeta  []jobMeta
 	startJobs   []string
 	followJobs  []string
 	endReports  []string
@@ -203,6 +204,17 @@ func (ff *fakeFleet) Run(ctx context.Context, c Cmd) (Result, error) {
 			if h.onBundle != nil {
 				h.onBundle()
 			}
+		}
+		if strings.HasSuffix(args[len(args)-1], ".meta") {
+			raw, err := os.ReadFile(args[len(args)-2])
+			if err != nil {
+				return Result{}, err
+			}
+			var meta jobMeta
+			if err := json.Unmarshal(raw, &meta); err != nil {
+				return Result{}, err
+			}
+			h.pushedMeta = append(h.pushedMeta, meta)
 		}
 		h.pushedFiles = append(h.pushedFiles, args[len(args)-1])
 		return Result{}, nil
@@ -497,6 +509,10 @@ func TestFleetRunCustomProjectKeepsFiniteExpiryWhenDetached(t *testing.T) {
 			if cfg[expiresKey] != deadline {
 				t.Fatalf("detached custom-project box should have 24h expiry: %v", cfg)
 			}
+			if !r.Source.Valid() || len(beta.pushedMeta) != 1 {
+				t.Fatalf("detached source = %+v, guest metadata = %+v", r.Source, beta.pushedMeta)
+			}
+			requireSourceRevision(t, beta.pushedMeta[0].Source, gitT(t, dir, "rev-parse", "HEAD"), false, r.Source.SnapshotCommit)
 		})
 	}
 }
@@ -528,7 +544,7 @@ func TestFleetRunRecoversQualifiedResultWhenCoolingInterruptsFollow(t *testing.T
 	r, err := a.Run(context.Background(), RunOpts{
 		Dir: dir, New: true, Cmd: []string{"exit 7"}, Reason: "Recover a fleet job result after cooling interrupts follow.",
 	})
-	if err != nil || r.Job != job || r.Host != host.Name || r.State != stateDone || r.Code != 7 ||
+	if err != nil || r.Job != job || r.Host != host.Name || r.State != stateDone || r.Code != 7 || !r.Source.Valid() ||
 		!strings.Contains(out.String(), "using the recorded result") {
 		t.Fatalf("run = %+v, %v; out=%q", r, err, out)
 	}
@@ -616,12 +632,17 @@ func TestFleetRunQueuesOnBestAgentsHostAndFollowsCLI(t *testing.T) {
 	if len(overflow.enqueued) != 1 || workHost.boxdHits != 0 || len(noQueueHost.enqueued) != 0 {
 		t.Fatalf("enqueued overflow=%d workHits=%d noq=%d", len(overflow.enqueued), workHost.boxdHits, len(noQueueHost.enqueued))
 	}
+	var queuedMeta jobMeta
+	if err := json.Unmarshal(overflow.enqueued[0].Meta, &queuedMeta); err != nil || !r.Source.Valid() {
+		t.Fatalf("queue metadata = %+v, result source = %+v, error = %v", queuedMeta, r.Source, err)
+	}
+	requireSourceRevision(t, queuedMeta.Source, gitT(t, repoDir, "rev-parse", "HEAD"), false, r.Source.SnapshotCommit)
 	if !strings.Contains(out.String(), "box: queued job "+r.Job+" on overflow,") {
 		t.Fatalf("stderr = %q", out.String())
 	}
 
 	// CLI record + followQueuedResult must target overflow with bare IDs and return qualified result.
-	info := jobMeta{Reason: "Test fleet queue follow.", Command: "echo queued-done"}
+	info := jobMeta{Reason: "Test fleet queue follow.", Command: "echo queued-done", Source: r.Source}
 	a.recordQueuedOnHost(info, r.Job, r.fleetHost, false, r.throwaway)
 	rec, err := a.readWatchRecord(r.Job)
 	if err != nil || rec.Host == nil || rec.Host.Remote != "r3" || rec.Host.DashboardURL != "https://overflow.example.com" {
@@ -631,6 +652,12 @@ func TestFleetRunQueuesOnBestAgentsHostAndFollowsCLI(t *testing.T) {
 	if err != nil || followed.State != stateDone || followed.Code != 0 || followed.Job != r.Job || followed.Host != "overflow" {
 		t.Fatalf("followQueuedResult = %+v, %v", followed, err)
 	}
+	requireSourceRevision(t, followed.Source, r.Source.Commit, false, r.Source.SnapshotCommit)
+	end, ok := a.recordedEnd(r.Job)
+	if !ok || end.Host != r.Host {
+		t.Fatalf("retained queue result = %+v, found = %t", end, ok)
+	}
+	requireSourceRevision(t, end.Source, r.Source.Commit, false, r.Source.SnapshotCommit)
 	if len(overflow.followJobs) != 1 || strings.Contains(overflow.followJobs[0], jobHostPrefix) {
 		t.Fatalf("overflow followJobs = %v, want bare ID", overflow.followJobs)
 	}
@@ -819,7 +846,10 @@ func TestMCPBoxRunFleetWatcherAndSchemaUnchanged(t *testing.T) {
 		t.Fatalf("detached watch record = %+v, %v", rec, err)
 	}
 
-	if msg := endedMessage(rec, jobEnd{Code: 0}); !strings.Contains(msg, sc.Job+" on beta ended") {
+	if !rec.Source.Valid() || !strings.Contains(string(raw), `"snapshotCommit":"`+rec.Source.SnapshotCommit+`"`) {
+		t.Fatalf("detached watch source = %+v, structuredContent = %s", rec.Source, raw)
+	}
+	if msg := endMessage(rec, jobEnd{Code: 0, Source: rec.Source}); !strings.Contains(msg, sc.Job+" on beta ended") || !strings.Contains(msg, sourceLine(rec.Source)) {
 		t.Fatalf("completion notice = %q", msg)
 	}
 

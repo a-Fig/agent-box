@@ -17,6 +17,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/a-Fig/agent-box/internal/dash"
 )
 
 // Job states as box jobs reports them.
@@ -62,14 +64,19 @@ exit 0
 `, workRoot)
 }
 
-// pageScript prints "STATE CODE LOGBYTES", then limit bytes of the job's
-// log from offset. It exits 3 for an unknown job.
+// pageScript prints "STATE CODE LOGBYTES" and optional base64 metadata on
+// the first line, then limit bytes of the log from offset.
 func pageScript(job string, offset, limit int64) string {
 	return "# page\n" + aliveFn + jobStateFn + fmt.Sprintf(`cd %s/.box 2>/dev/null || exit 3
 test -f %[2]s.log || exit 3
-echo "$(jobstate %[2]s) $(( $(wc -c < %[2]s.log) ))"
+printf '%%s %%s' "$(jobstate %[2]s)" "$(( $(wc -c < %[2]s.log) ))"
+if [ -f %[2]s.meta ]; then
+  printf '\t'
+  timeout -k 1 1 head -c %[5]d %[2]s.meta 2>/dev/null | base64 -w0
+fi
+printf '\n'
 tail -c +%[3]d %[2]s.log | head -c %[4]d
-`, workRoot, job, offset+1, limit)
+`, workRoot, job, offset+1, limit, dash.MaxJobMetaBytes)
 }
 
 // cancelScript stops a job's session and writes 130 to its .exit if the
@@ -183,10 +190,11 @@ func printJobs(a *App, jobs []JobInfo) error {
 // Page is a piece of a job's log.
 type Page struct {
 	JobInfo
-	Offset     int64  `json:"offset"`
-	NextOffset int64  `json:"nextOffset"`
-	More       bool   `json:"more"` // the log goes on past this page, or the job is still writing it
-	Text       string `json:"-"`
+	Source     *dash.SourceRevision `json:"source"`
+	Offset     int64                `json:"offset"`
+	NextOffset int64                `json:"nextOffset"`
+	More       bool                 `json:"more"` // the log goes on past this page, or the job is still writing it
+	Text       string               `json:"-"`
 }
 
 const (
@@ -221,11 +229,12 @@ func (a *App) LogPage(ctx context.Context, job string, offset, limit int64) (Pag
 		return Page{}, fmt.Errorf("reading job %s: %s", job, strings.TrimSpace(res.Stderr))
 	}
 	head, text, _ := strings.Cut(res.Stdout, "\n")
+	head, meta, _ := strings.Cut(head, "\t")
 	jobs := parseJobs(box, job+" "+head)
 	if len(jobs) != 1 {
 		return Page{}, fmt.Errorf("reading job %s: bad state %q", job, head)
 	}
-	p := Page{JobInfo: jobs[0], Offset: offset, Text: text}
+	p := Page{JobInfo: jobs[0], Source: decodeSource(meta), Offset: offset, Text: text}
 	p.NextOffset = offset + int64(len(text))
 	if len(text) != 0 {
 		p.LogBytes = max(p.LogBytes, p.NextOffset) // the log grew while it was read

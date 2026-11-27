@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -234,12 +234,13 @@ func TestSnapshotShallowClone(t *testing.T) {
 	gitT(t, t.TempDir(), "clone", "-q", "--depth=1", "file://"+filepath.ToSlash(src), dir)
 	write(t, filepath.Join(dir, "a.txt"), "three\n")
 
-	bundle, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
+	snap, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(filepath.Dir(bundle))
-	clone := fetchSnapshot(t, bundle, "id-1")
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+	clone := fetchSnapshot(t, snap.bundle, "id-1")
+	requireSourceRevision(t, snap.source, gitT(t, dir, "rev-parse", "HEAD"), true, gitT(t, clone, "rev-parse", "FETCH_HEAD"))
 	if a := gitT(t, clone, "show", "FETCH_HEAD:a.txt"); a != "three" {
 		t.Errorf("a.txt = %q", a)
 	}
@@ -256,12 +257,13 @@ func TestSnapshotIgnoresIndexFlags(t *testing.T) {
 	write(t, filepath.Join(dir, "a.txt"), "a2\n")
 	write(t, filepath.Join(dir, "b.txt"), "b2\n")
 
-	bundle, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
+	snap, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(filepath.Dir(bundle))
-	clone := fetchSnapshot(t, bundle, "id-1")
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+	clone := fetchSnapshot(t, snap.bundle, "id-1")
+	requireSourceRevision(t, snap.source, gitT(t, dir, "rev-parse", "HEAD"), true, gitT(t, clone, "rev-parse", "FETCH_HEAD"))
 	for f, want := range map[string]string{"a.txt": "a2", "b.txt": "b2"} {
 		if got := gitT(t, clone, "show", "FETCH_HEAD:"+f); got != want {
 			t.Errorf("%s = %q, want %q", f, got, want)
@@ -279,12 +281,13 @@ func TestSnapshotIncludesForceAddedFile(t *testing.T) {
 	gitT(t, dir, "add", "-f", "ignored.txt")
 	write(t, filepath.Join(dir, "ignored.txt"), "worktree\n")
 
-	bundle, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
+	snap, err := snapshot(context.Background(), execRunner{}, dir, "id-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(filepath.Dir(bundle))
-	clone := fetchSnapshot(t, bundle, "id-1")
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+	clone := fetchSnapshot(t, snap.bundle, "id-1")
+	requireSourceRevision(t, snap.source, gitT(t, dir, "rev-parse", "HEAD"), true, gitT(t, clone, "rev-parse", "FETCH_HEAD"))
 	if got := gitT(t, clone, "show", "FETCH_HEAD:ignored.txt"); got != "worktree" {
 		t.Errorf("ignored.txt = %q, want worktree contents", got)
 	}
@@ -552,8 +555,10 @@ func TestFollowScriptPrintsTheTerminalMarker(t *testing.T) {
 	file := workRoot + "/.box/" + pauseTestJob
 	write(t, file+".log", "hi\n")
 	write(t, file+".exit", "42\n")
-	ef := &exitFilter{w: io.Discard}
-	var out bytes.Buffer
+	head, snapshot := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	write(t, file+".meta", `{"source":{"commit":"`+head+`","dirty":false,"snapshotCommit":"`+snapshot+`"}}`)
+	var stderr, out bytes.Buffer
+	ef := &exitFilter{w: &stderr}
 	res, err := (execRunner{}).Run(context.Background(), Cmd{Name: bash, Args: []string{"-c", followScript(pauseTestJob)}, Stdout: &out, Stderr: ef})
 	if err != nil || res.Code != 0 || out.String() != "hi\n" {
 		t.Fatalf("follow = %+v, %v, %q", res, err, out.String())
@@ -561,4 +566,29 @@ func TestFollowScriptPrintsTheTerminalMarker(t *testing.T) {
 	if marker, ok := ef.exit(); !ok || marker != "42 "+completionExited {
 		t.Errorf("exit marker = %q, %v", marker, ok)
 	}
+	requireSourceRevision(t, ef.source(), head, false, snapshot)
+	if stderr.Len() != 0 {
+		t.Errorf("metadata reached stderr: %q", stderr.String())
+	}
+	t.Run("nonregular metadata", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("requires a POSIX FIFO")
+		}
+		if err := os.Remove(file + ".meta"); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		runner := execRunner{}
+		fifo, err := runner.Run(ctx, Cmd{Name: bash, Args: []string{"-c", `mkfifo "$1"`, "bash", file + ".meta"}})
+		if err != nil || fifo.Code != 0 {
+			t.Fatalf("mkfifo = %+v, %v", fifo, err)
+		}
+		out.Reset()
+		ef := &exitFilter{w: &stderr}
+		res, err := runner.Run(ctx, Cmd{Name: bash, Args: []string{"-c", followScript(pauseTestJob)}, Stdout: &out, Stderr: ef})
+		if marker, ok := ef.exit(); err != nil || res.Code != 0 || out.String() != "hi\n" || !ok || marker != "42 "+completionExited || ef.source() != nil {
+			t.Fatalf("follow with FIFO metadata = %+v, %v, log %q, exit marker %q, source %+v", res, err, out.String(), marker, ef.source())
+		}
+	})
 }

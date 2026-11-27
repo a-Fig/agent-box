@@ -55,14 +55,14 @@ for l in "${logs[@]:first}"; do
   mt=0; [ -f "$j.exit" ] && mt=$(stat -c %%Y "$j.exit")
   meta=-; tail=-
   if [ -z "${skip[$j]}" ]; then
-    [ -f "$j.meta" ] && meta=$(head -c 16384 "$j.meta" | base64 -w0)
+    [ -f "$j.meta" ] && meta=$(head -c %d "$j.meta" | base64 -w0)
     tail=$(tail -c %d "$l" | base64 -w0); [ -n "$tail" ] || tail=-
     [ -n "$meta" ] || meta=-
   fi
   echo "J $j $st $(( $(wc -c < "$l") )) $mt $meta $tail"
 done
 exit 0
-`, jobDir, maxScanJobs, dash.TailBytes)
+`, jobDir, maxScanJobs, dash.MaxJobMetaBytes, dash.TailBytes)
 
 // logScript prints the log's size, then up to limit bytes of it from offset.
 // It exits 3 when the job isn't there.
@@ -93,12 +93,13 @@ type scanned struct {
 
 // meta is /work/.box/<job>.meta as box writes it (cmd/box/meta.go).
 type meta struct {
-	V       int    `json:"v"`
-	Reason  string `json:"reason"`
-	Command string `json:"command"`
-	Repo    string `json:"repo"`
-	Branch  string `json:"branch"`
-	Commit  string `json:"commit"`
+	V       int                  `json:"v"`
+	Reason  string               `json:"reason"`
+	Command string               `json:"command"`
+	Repo    string               `json:"repo"`
+	Branch  string               `json:"branch"`
+	Commit  string               `json:"commit"`
+	Source  *dash.SourceRevision `json:"source"`
 	Agent   struct {
 		Client   string `json:"client"`
 		Session  string `json:"session"`
