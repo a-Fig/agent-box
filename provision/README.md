@@ -29,7 +29,7 @@ With no tray, the mode is Shared for good: each box runs on its size's Shared CP
    .\install-pc.ps1 -AcceptVmp [-InstallDir D:\agent-box\wsl\agents] [-BoxtrayPath C:\...\boxtray.exe] [-BuildBase]
    ```
    If Windows features had to be enabled, it asks for a reboot; run it again afterwards.
-3. **`setup-host.sh --tailscale`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-host.sh [--build-base]`; a host already on the tailnet keeps its Tailscale steps without the flag. On WSL it keeps the PC's caps and the GPU keys.
+3. **`setup-host.sh --tailscale`** runs by itself at the end of step 2 (inside the distro, as root). To run it again by hand: `wsl -d agents -u root --exec bash /opt/agent-box-provision/setup-host.sh [--build-base|--rebuild-base]`; a host already on the tailnet keeps its Tailscale steps without the flag. On WSL it keeps the PC's caps and the GPU keys. On an existing host whose `agent-base` predates `#194`, ordinary reruns keep the legacy `default` profile's cloud-init intact until `--rebuild-base` publishes the new image.
 4. Add client certs (setup prints the agents' `incus remote add` line and the tray's commands), then `incus remote add pc https://agent-box.<tailnet>.ts.net:8443 --token ...` on the laptop. Use the tailnet name, not an IP: Incus serves a Let's Encrypt certificate for that name (`https-cert.sh`, needs HTTPS certificates enabled in the tailnet's DNS settings), so the client trusts it without pinning and renewals need no client change.
 
 ## Updating boxd
@@ -44,7 +44,7 @@ It sends one tar over SSH and pipes it into the distro with a `.cmd` (the distro
 
 Released builds update themselves (docs/releasing.md). `agent-box-update.timer` runs `update-boxd.sh` hourly: it takes GitHub's latest stable release when it is newer than the installed boxd, checks the release's `SHA256SUMS`, refuses a boxd whose `-version` doesn't say the tag, and installs through that release's `install-boxd.sh`. It never moves to an older release, and leaves alone a boxd that isn't one, such as `deploy-boxd.sh`'s. `AGENT_BOX_NO_UPDATE=1` in `/etc/agent-box/update.env` turns it off. To put a boxd on releases, or install a prerelease or an older one by hand, run `agent-box-update-boxd <tag>` as root in the distro.
 
-Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume, cloud-init), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
+Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume), `agent-base.yaml` (build-only cloud-init passed during `--build-base` / `--rebuild-base`, disabled in the published image), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
 ## What changes on the PC, and how to undo it
 
