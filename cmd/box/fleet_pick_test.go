@@ -320,9 +320,18 @@ func TestPickFleetHostAffinityStoppedAtCapAndStableOrder(t *testing.T) {
 			t.Fatalf("tier 2 pick = %+v", pick)
 		}
 		pick = pickFleetHost([]fleetCandidate{cold, repoWarm, busy}, pickRequest{Repo: "repo"})
-		if pick.Host.Name != "busy" || pick.Affinity != affinityRepoBusy {
-			t.Fatalf("tier 3 pick = %+v", pick)
+		if pick.Host.Name != "repo-warm" || pick.Affinity != affinityWarmHost {
+			t.Fatalf("immediate warm-host pick = %+v", pick)
 		}
+		pick = pickFleetHost([]fleetCandidate{busy, cold}, pickRequest{Repo: "repo"})
+		if pick.Host.Name != "cold" || pick.Affinity != affinityCold {
+			t.Fatalf("idle cold host must beat busy checkout: %+v", pick)
+		}
+		pick = pickFleetHost([]fleetCandidate{busy}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "busy" {
+			t.Fatalf("busy checkout remains usable when it is the only host: %+v", pick)
+		}
+
 		pick = pickFleetHost([]fleetCandidate{cold, repoWarm}, pickRequest{Repo: "repo"})
 		if pick.Host.Name != "repo-warm" || pick.Affinity != affinityWarmHost {
 			t.Fatalf("tier 4 pick = %+v", pick)

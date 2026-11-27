@@ -115,9 +115,11 @@ For multiple hosts, create `agent-box/hosts.json` in your user config directory 
 }
 ```
 
-`project` defaults to `BOX_PROJECT`. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs. A host's queue shows as `unknown` if its dashboard is unavailable. `BOX_REMOTE` and `BOX_PROJECT` still select where `box run` sends a job and determine the `box status` exit code. An absent or empty registry keeps the usual single-host behavior.
+`project` defaults to `BOX_PROJECT`. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs. A host's queue shows as `unknown` if its dashboard is unavailable.
 
-`box jobs` and `box_job` without an ID list jobs on the default and configured hosts. Jobs on the default keep their bare IDs so existing result and watcher records still match. Other hosts have qualified IDs. `box jobs --box` looks up a box on the default host.
+With a host registry, `box run` and `box_run` prefer a host that can start without waiting on another checkout. Repo affinity and registry order break ties. If no host can start, runs that allow queuing wait on an eligible host. Results name the host and include a qualified job ID for follow-up commands. `box run --host <name>` pins a host for debugging. `--box` uses the default host unless pinned. `BOX_REMOTE` and `BOX_PROJECT` set the default host. An absent or empty registry keeps single-host behavior and bare job IDs.
+
+`box jobs` and `box_job` without an ID list jobs on the default and configured hosts, including waiting jobs and recent runs reported by configured queues. Fleet listings qualify IDs for configured hosts and honor existing bare records on the default host. `box jobs --box` looks up a box on the default host.
 
 ## Website previews
 

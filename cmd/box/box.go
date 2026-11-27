@@ -81,6 +81,7 @@ type App struct {
 	HTTP func(*http.Request) (*http.Response, error)
 	// dashboardURL overrides the derived boxd address for a configured job host.
 	dashboardURL string
+	jobHostName  string // display name for a qualified job destination
 	// boxdDisabled keeps a qualified lookup outside boxd's fixed project on Incus.
 	boxdDisabled bool
 	// Pushing a job's result to the agent's T3 thread (push.go). Push sends
@@ -141,6 +142,7 @@ type jobNotice struct {
 	Event string `json:"event"`
 	Box   string `json:"box"`
 	Job   string `json:"job,omitempty"`
+	Host  string `json:"host,omitempty"`
 }
 
 func (a *App) notify(notice jobNotice) {
@@ -319,6 +321,10 @@ type errGPUBusy struct{ holder string }
 
 func (e *errGPUBusy) Error() string {
 	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
+}
+
+func invalidGPUBox(box string) error {
+	return fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
 }
 
 // errNoGPU is a GPU box asked for on a host without one (hasGPU). Callers
@@ -856,6 +862,7 @@ type RunOpts struct {
 	Dir   string   // local git worktree
 	Cmd   []string // one shell string, or argv to quote
 	Box   string   // box to use; "" is the repo's own box
+	Host  string   // CLI --host pin (debugging override); empty lets fleet pick
 	New   bool     // use a throwaway box, kept KeepEnded after the job, else deleted
 	Fresh bool     // launch a new throwaway even when a pooled box is idle
 	// Size of a box launched for this run: "" is medium for a new box and
@@ -934,7 +941,8 @@ type JobResult struct {
 	// (internal/digest). "" for other runs.
 	Digest string `json:"digest,omitempty"`
 
-	throwaway bool // a queued job's box is a throwaway, kept after the job
+	throwaway bool       // a queued job's box is a throwaway, kept after the job
+	fleetHost *fleetHost // exact fleet destination when dispatched via fleet routing
 }
 
 // Run syncs the worktree to a box, runs the command there and follows its
@@ -960,34 +968,57 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	if o.Timeout < 0 {
 		return JobResult{Code: 2}, errors.New("timeout must be positive")
 	}
+	return a.runDispatch(ctx, o, sz)
+}
+
+func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost *fleetHost, prepared *fleetRun) (JobResult, *turnAwayInfo, error) {
 	if sz.GPU && !a.hasGPU(ctx) { // refused, not queued: waiting won't bring a GPU
+		if targetHost != nil {
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{msg: errNoGPU{}.Error()}, nil
+		}
 		fmt.Fprintln(a.Err, "box:", errNoGPU{})
-		return JobResult{State: statePaused, Code: exitPaused}, nil
+		return JobResult{State: statePaused, Code: exitPaused}, nil, nil
 	}
-	rp, err := openRepo(ctx, a.R, o.Dir)
-	if err != nil {
-		return JobResult{Code: 1}, err
+	var rp repo
+	var info jobMeta
+	var id, bundle string
+	if prepared != nil {
+		rp, info, id, bundle = prepared.repo, prepared.info, prepared.ref, prepared.bundle
+	} else {
+		var err error
+		rp, err = openRepo(ctx, a.R, o.Dir)
+		if err != nil {
+			return JobResult{Code: 1}, nil, err
+		}
+		a.warnSubmodules(ctx, rp.Top)
+		info = a.runInfo(ctx, rp, o, sz)
 	}
 	box := o.Box
 	if box == "" {
 		box = rp.Name
 	}
 	if !validBox.MatchString(box) {
-		return JobResult{Code: 2}, fmt.Errorf("bad box name %q", box)
+		return JobResult{Code: 2}, nil, fmt.Errorf("bad box name %q", box)
 	}
-	a.warnSubmodules(ctx, rp.Top)
-	info := a.runInfo(ctx, rp, o, sz)
-	var id, bundle string
 	// qr is the run as the queue takes it, from where Run has got to. A run
 	// turned away by a pause gets a throwaway: the checks below on the repo's
 	// box (its size, that it isn't a throwaway) haven't run, and the tray may
 	// stop a frozen box, which the queue doesn't start again.
 	qr := func(paused bool) queueRun {
-		q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: info, bundle: bundle, ref: id}
+		q := queueRun{o: o, rp: rp, box: box, new: o.New, sz: sz, info: info, bundle: bundle, ref: id, host: targetHost}
 		if o.New || sz.GPU || paused {
 			q.box, q.new = rp.Name, true
 		}
 		return q
+	}
+	handleTurnAway := func(paused bool, msg string, cause func(context.Context) string) (JobResult, *turnAwayInfo, error) {
+		if targetHost != nil {
+			cctx, cancel := context.WithTimeout(ctx, refusalTimeout)
+			why := cause(cctx)
+			cancel()
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{why: why, msg: msg, queue: qr(paused)}, nil
+		}
+		return a.turnAway(ctx, qr(paused), msg, cause), nil, nil
 	}
 
 	insts, paused := a.reach(ctx)
@@ -998,14 +1029,14 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		if o.Box == "" {
 			o.New = true
 		} else if inst = find(insts, box); inst == nil || !mode.IsGPU(inst.Config) {
-			return JobResult{Box: box, Code: 2}, fmt.Errorf("--box %s isn't a GPU box; drop --box to run in a throwaway GPU box", box)
+			return JobResult{Box: box, Code: 2}, nil, invalidGPUBox(box)
 		}
 		except := ""
 		if !o.New {
 			except = box
 		}
 		if err := a.claimGPU(ctx, insts, except); err != nil {
-			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
+			return handleTurnAway(false, err.Error(), errCause(err))
 		}
 	}
 	if paused == "" && !o.New {
@@ -1019,21 +1050,30 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 					paused = box + " is paused"
 				}
 			default:
-				return JobResult{Box: box, Code: 1}, err
+				return JobResult{Box: box, Code: 1}, nil, err
 			}
 		}
 	}
 	if paused != "" {
-		return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+		return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
 	}
 
-	id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
-	bundle, err = snapshot(ctx, a.R, rp.Top, id)
-	if err != nil {
-		return JobResult{Code: 1}, err
+	if bundle == "" {
+		id = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
+		var err error
+		bundle, err = snapshot(ctx, a.R, rp.Top, id)
+		if err != nil {
+			return JobResult{Code: 1}, nil, err
+		}
+		defer os.RemoveAll(filepath.Dir(bundle))
 	}
-	defer os.RemoveAll(filepath.Dir(bundle))
 
+	setupFailed := func(r JobResult, err error) (JobResult, *turnAwayInfo, error) {
+		if targetHost != nil && ctx.Err() == nil {
+			return r, &turnAwayInfo{msg: err.Error()}, err
+		}
+		return r, nil, err
+	}
 	started := false // from here on the remote job may be running
 	setupCtx := ctx
 	reused := false
@@ -1046,11 +1086,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
 		case isTempFail(err):
-			return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
+			return handleTurnAway(false, err.Error(), errCause(err))
 		case err != nil:
-			return JobResult{Code: 1}, err
+			return setupFailed(JobResult{Code: 1}, err)
 		case paused != "":
-			return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+			return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
 		default:
 			sz = actual
 			info.Size, info.GPU = sz.Name, sz.GPU
@@ -1073,11 +1113,12 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 			box, setupCtx, reused = idle, claimCtx, true
 			fmt.Fprintf(a.Err, "box: reusing idle throwaway %s\n", box)
 		} else {
+			var err error
 			if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz, repoKey, id); err != nil {
 				if isTempFail(err) {
-					return a.turnAway(ctx, qr(false), err.Error(), errCause(err)), nil
+					return handleTurnAway(false, err.Error(), errCause(err))
 				}
-				return JobResult{Box: box, Code: 1}, err
+				return JobResult{Box: box, Code: 1}, nil, err
 			}
 			// A failed setup takes only the box it launched.
 			defer func() {
@@ -1089,25 +1130,30 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	}
 
 	job := box + "." + id
-	r := JobResult{Job: job, Box: box, Code: 1}
+	pubID, err := runJobID(targetHost, job, box)
+	if err != nil {
+		return JobResult{Box: box, Code: 1}, nil, err
+	}
+	hostName := a.jobHostName
+	r := JobResult{Job: pubID.ID, Box: box, Host: hostName, Code: 1, throwaway: o.New, fleetHost: targetHost}
 	remote := workRoot + "/.box/" + job
 	if _, err := a.incusOK(setupCtx, "file", "push", "--create-dirs", bundle, a.target(box)+remote+".bundle"); err != nil {
-		return r, err
+		return setupFailed(r, err)
 	}
 	if err := a.pushMeta(setupCtx, box, remote, filepath.Dir(bundle), info); err != nil {
 		a.warn(fmt.Sprintf("box: warning: recording %s.meta: %v", job, err))
 	}
 	if !reused {
 		if err := a.setExpiry(setupCtx, box, jobTTL); err != nil {
-			return r, fmt.Errorf("set job expiry: %w", err)
+			return setupFailed(r, fmt.Errorf("set job expiry: %w", err))
 		}
 	}
-	// Say the job ID before starting it, so a dropped connection can't lose it.
-	fmt.Fprintf(a.Err, "box: job %s on %s\n", job, box)
-	a.notify(jobNotice{Event: "starting_job", Box: box, Job: job})
 	if err := setupCtx.Err(); err != nil {
-		return r, err
+		return setupFailed(r, err)
 	}
+	// Say the job ID before starting it, so a dropped connection can't lose it.
+	fmt.Fprintf(a.Err, "box: job %s on %s%s\n", pubID.ID, box, onHost(hostName))
+	a.notify(jobNotice{Event: "starting_job", Box: box, Job: pubID.ID, Host: hostName})
 	started = true
 	if _, err := a.incusOK(setupCtx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
 		// The tray stops GPU boxes in My PC, and another run may then
@@ -1127,27 +1173,27 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 					// it for: let the launch defer remove it, rather than
 					// leaving it holding a slot and its 24h job expiry.
 					started = false
-					return a.turnAway(ctx, qr(true), paused+"; nothing started", a.pausedCause(paused)), nil
+					return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
 				}
 				// Any other failure may have happened after the script
 				// started the job, so keep the job ID: it may resume.
 				if sz.GPU {
-					fmt.Fprintln(a.Err, pausedGPU(job))
+					fmt.Fprintln(a.Err, pausedGPU(pubID.ID))
 				} else {
-					fmt.Fprintln(a.Err, pausedMidRun(job))
+					fmt.Fprintln(a.Err, pausedMidRun(pubID.ID))
 				}
 				r.State, r.Code = statePaused, exitPaused
-				return r, nil
+				return r, nil, nil
 			} else if sz.GPU && (in == nil || in.Status == "Stopped") {
 				fmt.Fprintf(a.Err, "box: the GPU box was stopped (the PC's owner needed it); rerun later or on CPU\n")
 				r.State, r.Code = statePaused, exitPaused
-				return r, nil
+				return r, nil, nil
 			}
 		}
 		if o.New {
-			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
+			fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, pubID.ID)
 		}
-		return r, err
+		return r, nil, err
 	}
 	// Again now that the job runs: another job finishing in between may have
 	// shortened the expiry before this one was visible to its running check,
@@ -1160,12 +1206,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		}
 	}
 
-	jobIdentity := jobID{ID: job, Bare: job, Box: box}
-	r.State, r.Code, r.Digest, err = a.attach(ctx, jobIdentity, o.Wait)
+	r.State, r.Code, r.Digest, err = a.attach(ctx, pubID, o.Wait)
 	recoveredEnd := false
 	if err != nil && ctx.Err() == nil && o.New && !sz.GPU && a.Project == mode.Project {
 		look, cancel := context.WithTimeout(ctx, refusalTimeout)
-		end, ok := a.endedElsewhere(look, jobIdentity)
+		end, ok := a.endedElsewhere(look, pubID)
 		cancel()
 		if ok {
 			fmt.Fprintln(a.Err, "box: using the recorded result after the log stream ended")
@@ -1181,9 +1226,9 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 	case sz.GPU && r.State == statePaused && a.gpuStopped(ctx, box) != "":
 		// attach said the GPU box was stopped: there is nothing to reattach (#118).
 	default:
-		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, job)
+		fmt.Fprintf(a.Err, "box: keeping %s; box job %s hands it to the reaper once the job has ended\n", box, pubID.ID)
 	}
-	return r, err
+	return r, nil, err
 }
 
 // launchThrowaway launches a fresh box for one job. It never adopts an
@@ -1200,7 +1245,7 @@ func (a *App) launchThrowaway(ctx context.Context, base string, insts []instance
 		if find(insts, name) != nil {
 			continue
 		}
-		a.notify(jobNotice{Event: "launching_box", Box: name})
+		a.notify(jobNotice{Event: "launching_box", Box: name, Host: a.jobHostName})
 		var config []string
 		if repoKey != "" {
 			config = []string{"-c", jobrun.ThrowawayRepoKey + "=" + repoKey, "-c", jobrun.ThrowawayOwnerKey + "=" + name + "." + ref}
@@ -1660,7 +1705,7 @@ func (a *App) attach(ctx context.Context, id jobID, wait time.Duration) (state s
 		a.markIdle(ctx, box, id.Bare)
 		a.reportEnded(ctx, id.Bare, code, ended, tail.String())
 		dg = ef.digest()
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg, Completion: completion})
+		a.recordEnd(job, jobEnd{Host: a.jobHostName, Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: dg, Completion: completion})
 		return stateDone, code, dg, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

@@ -194,16 +194,28 @@ type jobRecord struct {
 }
 
 type jobLocator struct {
+	Name         string `json:"name,omitempty"`
 	Remote       string `json:"remote"`
 	Project      string `json:"project"`
 	DashboardURL string `json:"dashboard_url,omitempty"`
+}
+
+func locateJobHost(h fleetHost) *jobLocator {
+	return &jobLocator{Name: h.Name, Remote: h.Remote, Project: h.Project, DashboardURL: h.DashboardURL}
+}
+
+func (rec jobRecord) noticeJob() string {
+	if rec.Host == nil {
+		return rec.Job
+	}
+	return rec.Job + onHost(rec.Host.Name)
 }
 
 func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 	if rec.Host == nil {
 		return fleetHost{}, fmt.Errorf("no saved host for qualified job %s", id.ID)
 	}
-	host := fleetHost{Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
+	host := fleetHost{Name: rec.Host.Name, Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
 	tag, err := jobHostTag(host)
 	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
 		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)
@@ -238,6 +250,7 @@ type jobEnd struct {
 	Tail       string `json:"tail,omitempty"`
 	Digest     string `json:"digest,omitempty"`     // a test run's failure digest
 	Completion string `json:"completion,omitempty"` // observed along with the exit file
+	Host       string `json:"host,omitempty"`
 }
 
 const (
@@ -437,7 +450,7 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 }
 
 func (a *App) startWatchOnHost(info jobMeta, job string, host fleetHost, gpu, throwaway, queued bool) bool {
-	locator := &jobLocator{Remote: host.Remote, Project: host.Project, DashboardURL: host.DashboardURL}
+	locator := locateJobHost(host)
 	return a.startWatchRecord(info, job, locator, gpu, throwaway, queued)
 }
 
@@ -718,7 +731,7 @@ func (r jobRecord) context() string {
 // agent reads next; any other failure is its last endedLines lines. box_job
 // always has the full result, and the message says so.
 func endedMessage(r jobRecord, e jobEnd) string {
-	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second))
+	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.noticeJob(), e.Code, elapsed(time.Duration(e.Took)*time.Second))
 	if why := shortReason(r.Reason); why != "" {
 		head += " (" + why + ")" // which run this is, after compaction or among parallel runs
 	}
@@ -792,11 +805,11 @@ func pausedMessage(r jobRecord) string {
 	// T3 may deliver this long after it was sent, when the job has resumed
 	// (#96); the end push follows either way.
 	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. Once it resumes, box_cancel this job if you no longer need it. %s\n%s",
-		r.Job, frozenWindow, fromBox, r.context())
+		r.noticeJob(), frozenWindow, fromBox, r.context())
 }
 
 func lostMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.Job, fromBox, r.context())
+	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.noticeJob(), fromBox, r.context())
 	if e.Tail != "" {
 		msg += "\n" + mask.Mask(e.Tail)
 	}
@@ -930,6 +943,7 @@ func (a *App) Watch(ctx context.Context, job string) error {
 			}
 			return nil // cancelled by the agent: nothing to tell it
 		}
+		end.Host = target.jobHostName
 		if err := writeJSON(a.statePath(job, ".ended"), end); err != nil {
 			return fmt.Errorf("recording the end of %s: %w", job, err)
 		}

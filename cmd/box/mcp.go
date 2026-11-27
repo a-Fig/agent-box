@@ -62,10 +62,10 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length. The advice, available and repo box fields describe the host box_run currently uses. Without a registry, the first line is that host's advice.`, obj(map[string]any{
+	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length; box_run routes each run to the best host. The advice, available and repo box fields describe the default host.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. With a host registry, box_run picks the best host that can start now (or queues on the best one), names the host in the result, and returns a qualified job ID. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box (and host when routed) and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
@@ -514,14 +514,20 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
 		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Fresh: args.Fresh, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
 		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
+		startWatch := func(throwaway, queued bool) bool {
+			if r.fleetHost != nil {
+				return a.startWatchOnHost(info, r.Job, *r.fleetHost, args.Size == mode.GPUSize, throwaway, queued)
+			}
+			return a.startWatch(info, r.Job, args.Size == mode.GPUSize, throwaway, queued)
+		}
 		switch {
 		case err != nil:
 		case r.Job == "" && r.State == statePaused:
 			r.State = stateRefused
 		case r.State == stateQueued:
-			if !a.startWatch(info, r.Job, args.Size == mode.GPUSize, r.throwaway, true) {
+			if !startWatch(r.throwaway, true) {
 				// Nobody would hear when it runs: take it back, and refuse.
-				if cerr := a.cancelQueued(ctx, r.Job); cerr == nil {
+				if cerr := a.cancelQueuedResult(ctx, r); cerr == nil {
 					job := r.Job
 					r = JobResult{State: stateRefused, Code: exitPaused}
 					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; nothing ran\n", job)
@@ -532,7 +538,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			r.Push = &push
 		case r.Job != "" && (r.State == stateDetached || r.State == statePaused):
 			if push {
-				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New || args.Fresh, false)
+				push = startWatch(r.throwaway || args.New || args.Fresh, false)
 			}
 			r.Push = &push
 		}
