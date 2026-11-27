@@ -8,6 +8,7 @@
 package dash
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -217,6 +218,26 @@ type SourceRevision struct {
 	Commit         string `json:"commit"`         // empty when source HEAD is unknown
 	Dirty          *bool  `json:"dirty"`          // whether the bundled tree differs from HEAD, null if unknown
 	SnapshotCommit string `json:"snapshotCommit"` // the commit advertised in the bundle
+}
+
+// Valid checks that source metadata names full Git object IDs. An unborn
+// worktree can identify its snapshot even though it has no HEAD to compare.
+func (s *SourceRevision) Valid() bool {
+	if s == nil || !gitObjectID(s.SnapshotCommit) {
+		return false
+	}
+	if s.Commit == "" {
+		return s.Dirty == nil
+	}
+	return gitObjectID(s.Commit)
+}
+
+func gitObjectID(id string) bool {
+	if len(id) != 40 && len(id) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
 }
 
 // Job is one command run on a box.

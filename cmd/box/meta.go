@@ -153,7 +153,10 @@ func (a *App) runInfo(ctx context.Context, rp repo, o RunOpts, sz mode.Size) job
 }
 
 func (m *jobMeta) setSource(source *dash.SourceRevision) {
-	m.Source, m.Commit = source, source.Commit
+	m.Source, m.Commit = source, ""
+	if source != nil {
+		m.Commit = source.Commit
+	}
 }
 
 // stripCredentials drops the userinfo from a remote URL, where tokens go

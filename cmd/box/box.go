@@ -1310,13 +1310,23 @@ var validJob = regexp.MustCompile(`^[a-z][a-z0-9-]*\.[0-9]{8}-[0-9]{6}-[0-9a-f]+
 // that never came) whose box a launch then took (#90).
 func (a *App) endedElsewhere(ctx context.Context, id jobID) (jobEnd, bool) {
 	if end, ok := a.recordedEnd(id.ID); ok {
+		if !end.Source.Valid() || !a.jobSourceMatchesHost(id, end.Host) {
+			end.Source = nil
+		}
+		if end.Source == nil {
+			end.Source = a.savedJobSource(id)
+		}
 		return end, true
 	}
 	j, found, err := a.queuedJob(ctx, id.Bare)
 	if err != nil || !found || j.State != dash.JobDone || j.Exit == nil {
 		return jobEnd{}, false
 	}
-	return jobEnd{Code: *j.Exit, Tail: j.Tail, Source: j.Source}, true
+	source := j.Source
+	if source == nil {
+		source = a.savedJobSource(id)
+	}
+	return jobEnd{Code: *j.Exit, Tail: j.Tail, Source: source}, true
 }
 
 // evictedFor names the queued job whose room took job's kept throwaway box,
@@ -1349,9 +1359,6 @@ func (a *App) job(ctx context.Context, id jobID, wait time.Duration, source *das
 		return JobResult{Code: 2}, errors.New("wait can't be negative")
 	}
 	job, box := id.ID, id.Box
-	if source == nil {
-		source = a.savedJobSource(job)
-	}
 	r, err := a.attach(ctx, id, wait, source)
 	if err != nil {
 		// A job whose exit was read once has ended: when its box has gone
@@ -1365,7 +1372,7 @@ func (a *App) job(ctx context.Context, id jobID, wait time.Duration, source *das
 			}
 			fmt.Fprint(a.Out, end.Tail)
 			r.State, r.Code, r.Digest = stateDone, end.Code, end.Digest
-			if end.Source != nil {
+			if r.Source == nil {
 				r.Source = end.Source
 			}
 			return r, nil
@@ -1391,8 +1398,10 @@ func runningScript() string { return jobrun.RunningScript(workRoot) }
 func followScript(job string) string {
 	f := workRoot + "/.box/" + job
 	return "# follow\n" + aliveFn + jobPIDFn + fmt.Sprintf(`test -f %[1]s.log || { echo "box: no job %[2]s" >&2; exit 3; }
-m=$(head -c 16384 %[1]s.meta 2>/dev/null | base64 -w0)
-[ -n "$m" ] && printf '%%s%%s\n' %[8]s "$m" >&2
+if [ -f %[1]s.meta ]; then
+  m=$(timeout -k 1 1 head -c 16384 %[1]s.meta 2>/dev/null | base64 -w0)
+  [ -n "$m" ] && printf '%%s%%s\n' %[8]s "$m" >&2
+fi
 pid=$(jobpid %[1]s)
 off=0
 while :; do
@@ -1515,12 +1524,7 @@ func (e *exitFilter) flush() {
 func (e *exitFilter) source() *dash.SourceRevision {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	var meta jobMeta
-	b, err := base64.StdEncoding.DecodeString(e.meta)
-	if err != nil || json.Unmarshal(b, &meta) != nil {
-		return nil
-	}
-	return meta.Source
+	return decodeSource(e.meta)
 }
 
 // digest is the failure digest of the report the follow printed, or "".
@@ -1635,6 +1639,9 @@ func (a *App) attach(ctx context.Context, id jobID, wait time.Duration, source *
 	if r.Source == nil {
 		r.Source = ef.source()
 	}
+	if r.Source == nil {
+		r.Source = a.savedJobSource(id)
+	}
 	if text, ok := ef.exit(); ok {
 		codeText, completion, hasCompletion := strings.Cut(text, " ")
 		code, cerr := strconv.Atoi(codeText)
@@ -1645,7 +1652,8 @@ func (a *App) attach(ctx context.Context, id jobID, wait time.Duration, source *
 		a.markIdle(ctx, box, id.Bare)
 		a.reportEnded(ctx, id.Bare, code, ended, tail.String())
 		r.State, r.Code, r.Digest = stateDone, code, ef.digest()
-		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: r.Digest, Completion: completion, Source: r.Source})
+		a.recordEnd(job, jobEnd{Code: code, Took: int64(ended.Sub(jobStart(id.Bare)) / time.Second), Tail: keepTail(kept.lastLines(1 << 20)), Digest: r.Digest, Completion: completion, Source: r.Source,
+			Host: &jobLocator{Remote: a.Remote, Project: a.Project}})
 		return r, nil
 	}
 	if hit.Load() && ctx.Err() == nil {

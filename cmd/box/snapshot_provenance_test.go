@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/a-Fig/agent-box/internal/dash"
@@ -55,6 +58,30 @@ func TestSnapshotIncludesUntrackedChangesInDirtyState(t *testing.T) {
 	}
 }
 
+func TestFollowMetadataRequiresFullGitObjectIDs(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	snap := strings.Repeat("b", 40)
+	for _, tc := range []struct {
+		name, meta string
+		want       bool
+	}{
+		{"legacy", `{"commit":"` + head + `"}`, false},
+		{"valid SHA-1", `{"source":{"commit":"` + head + `","dirty":false,"snapshotCommit":"` + snap + `"}}`, true},
+		{"valid SHA-256", `{"source":{"commit":"` + strings.Repeat("a", 64) + `","dirty":true,"snapshotCommit":"` + strings.Repeat("b", 64) + `"}}`, true},
+		{"unknown HEAD", `{"source":{"commit":"","dirty":null,"snapshotCommit":"` + snap + `"}}`, true},
+		{"unproven dirty state", `{"source":{"commit":"","dirty":false,"snapshotCommit":"` + snap + `"}}`, false},
+		{"arbitrary source", `{"source":{"commit":"` + strings.Repeat("z", 40) + `","dirty":false,"snapshotCommit":"` + snap + `"}}`, false},
+		{"short snapshot", `{"source":{"commit":"` + head + `","dirty":false,"snapshotCommit":"1234567"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ef := &exitFilter{meta: base64.StdEncoding.EncodeToString([]byte(tc.meta))}
+			if source := ef.source(); (source != nil) != tc.want {
+				t.Fatalf("marker metadata decoded to %+v", source)
+			}
+		})
+	}
+}
+
 func TestQueuedBundleKeepsSourceWhenHeadAdvances(t *testing.T) {
 	for _, mode := range []string{"build at enqueue", "reuse the prebuilt bundle"} {
 		t.Run(mode, func(t *testing.T) {
@@ -95,6 +122,15 @@ func TestQueuedBundleKeepsSourceWhenHeadAdvances(t *testing.T) {
 			clone := fetchSnapshot(t, bundle, b.req.Ref)
 			synced := gitT(t, clone, "rev-parse", "FETCH_HEAD")
 			requireSourceRevision(t, meta.Source, head, true, synced)
+			checkResult := func(text string, result map[string]any) {
+				t.Helper()
+				src, ok := result["source"].(map[string]any)
+				if !ok || src["commit"] != head || src["dirty"] != true || src["snapshotCommit"] != synced ||
+					!strings.Contains(text, sourceLine(meta.Source)) {
+					t.Fatalf("queued result lost its saved source: %v\n%s", result, text)
+				}
+			}
+			checkResult(text, st)
 			if got := gitT(t, clone, "show", "FETCH_HEAD:a.txt"); got != "two" {
 				t.Fatalf("queued tracked contents = %q", got)
 			}
@@ -106,6 +142,9 @@ func TestQueuedBundleKeepsSourceWhenHeadAdvances(t *testing.T) {
 				t.Fatal(err)
 			}
 			requireSourceRevision(t, rec.Source, head, true, synced)
+			b.views = []dash.Job{{State: dash.JobQueued, Position: 1, Source: meta.Source}}
+			text, st = e.call(t, "box_job", map[string]any{"id": queuedJobName})
+			checkResult(text, st)
 			exit := 7
 			b.views = []dash.Job{{State: dash.JobDone, Exit: &exit, Source: meta.Source}}
 			if err := e.a.Watch(context.Background(), queuedJobName); err != nil {
@@ -116,6 +155,55 @@ func TestQueuedBundleKeepsSourceWhenHeadAdvances(t *testing.T) {
 				t.Fatalf("retained queued end = %+v, present %t", end, ok)
 			}
 			requireSourceRevision(t, end.Source, head, true, synced)
+			if e.push.count() != 1 || !strings.Contains(e.push.sent[0].msg, sourceLine(meta.Source)) {
+				t.Fatalf("completion notice lost its saved source: %v", e.push.sent)
+			}
+			text, st = e.call(t, "box_job", map[string]any{"id": queuedJobName, "limit": 1})
+			checkResult(text, st)
 		})
+	}
+}
+
+func TestPagedJobSourceKeepsOffsetsAndLogBytes(t *testing.T) {
+	bash := gitBash(t)
+	old := workRoot
+	workRoot = filepath.ToSlash(t.TempDir())
+	defer func() { workRoot = old }()
+	const job = "fixture.20261123-120000-0001"
+	file := filepath.Join(workRoot, ".box", job)
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, file+".log", "ABC\n")
+	write(t, file+".exit", "0\n")
+
+	dirty := false
+	src := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
+	meta, err := json.Marshal(jobMeta{Source: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakePC{t: t, bash: bash}
+	a, _ := testApp(f)
+	var out, stderr bytes.Buffer
+	a.Out, a.Err = &out, &stderr
+	e := pushEnv{a: a}
+	for _, known := range []bool{false, true} {
+		want := "source unknown"
+		if known {
+			write(t, file+".meta", string(meta))
+			want = sourceLine(src)
+		}
+		text, st := e.call(t, "box_job", map[string]any{"id": job, "offset": 1, "limit": 2})
+		if st["log"] != "BC" || st["nextOffset"] != 3.0 || st["logBytes"] != 4.0 ||
+			(st["source"] != nil) != known || !strings.Contains(text, "\n"+want+"\nBC") {
+			t.Fatalf("MCP page = %v\n%s", st, text)
+		}
+		out.Reset()
+		stderr.Reset()
+		if code := run(context.Background(), a, []string{"job", job, "--offset", "1", "--limit", "2"}, nil); code != 0 ||
+			out.String() != "BC" || !strings.Contains(stderr.String(), "box: "+want+"\n") {
+			t.Fatalf("CLI page = %d, stdout %q, stderr %q", code, &out, &stderr)
+		}
 	}
 }

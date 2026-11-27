@@ -76,6 +76,9 @@ func (l jobLookup) page(ctx context.Context, offset, limit int64) (Page, *jobEnd
 	p, err := l.app.LogPage(ctx, l.id.Bare, offset, limit)
 	if err == nil {
 		p.Job, p.Host = l.id.ID, l.host
+		if p.Source == nil {
+			p.Source = l.app.savedJobSource(l.id)
+		}
 		return p, nil, nil
 	}
 	if offset < 0 || limit < 0 || offset > math.MaxInt64-maxPage {
@@ -104,10 +107,11 @@ func (l jobLookup) page(ctx context.Context, offset, limit int64) (Page, *jobEnd
 		}
 	}
 	if kept {
+		end.Source = l.app.savedJobSource(l.id)
 		return Page{}, &end, err
 	}
 	if ended {
-		return Page{}, &jobEnd{Code: *j.Exit, Tail: j.Tail}, err
+		return Page{}, &jobEnd{Code: *j.Exit, Tail: j.Tail, Source: j.Source}, err
 	}
 	return Page{}, nil, err
 }
@@ -142,5 +146,9 @@ func (l jobLookup) stoppedPage(ctx context.Context, j dash.Job, offset, limit in
 		return Page{}, false
 	}
 	info := JobInfo{Job: l.id.ID, Box: j.Box, Host: l.host, State: jobDone, Code: j.Exit, Started: j.StartedAt, LogBytes: chunk.LogBytes}
-	return Page{JobInfo: info, Offset: offset, NextOffset: chunk.Offset, More: !chunk.EOF, Text: data}, true
+	source := j.Source
+	if source == nil {
+		source = l.app.savedJobSource(l.id)
+	}
+	return Page{JobInfo: info, Source: source, Offset: offset, NextOffset: chunk.Offset, More: !chunk.EOF, Text: data}, true
 }

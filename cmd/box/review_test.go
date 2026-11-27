@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -554,7 +555,8 @@ func TestFollowScriptPrintsTheTerminalMarker(t *testing.T) {
 	file := workRoot + "/.box/" + pauseTestJob
 	write(t, file+".log", "hi\n")
 	write(t, file+".exit", "42\n")
-	write(t, file+".meta", `{"source":{"commit":"source-commit","dirty":false,"snapshotCommit":"snapshot-commit"}}`)
+	head, snapshot := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	write(t, file+".meta", `{"source":{"commit":"`+head+`","dirty":false,"snapshotCommit":"`+snapshot+`"}}`)
 	var stderr, out bytes.Buffer
 	ef := &exitFilter{w: &stderr}
 	res, err := (execRunner{}).Run(context.Background(), Cmd{Name: bash, Args: []string{"-c", followScript(pauseTestJob)}, Stdout: &out, Stderr: ef})
@@ -564,8 +566,29 @@ func TestFollowScriptPrintsTheTerminalMarker(t *testing.T) {
 	if marker, ok := ef.exit(); !ok || marker != "42 "+completionExited {
 		t.Errorf("exit marker = %q, %v", marker, ok)
 	}
-	requireSourceRevision(t, ef.source(), "source-commit", false, "snapshot-commit")
+	requireSourceRevision(t, ef.source(), head, false, snapshot)
 	if stderr.Len() != 0 {
 		t.Errorf("metadata reached stderr: %q", stderr.String())
 	}
+	t.Run("nonregular metadata", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("requires a POSIX FIFO")
+		}
+		if err := os.Remove(file + ".meta"); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		runner := execRunner{}
+		fifo, err := runner.Run(ctx, Cmd{Name: bash, Args: []string{"-c", `mkfifo "$1"`, "bash", file + ".meta"}})
+		if err != nil || fifo.Code != 0 {
+			t.Fatalf("mkfifo = %+v, %v", fifo, err)
+		}
+		out.Reset()
+		ef := &exitFilter{w: &stderr}
+		res, err := runner.Run(ctx, Cmd{Name: bash, Args: []string{"-c", followScript(pauseTestJob)}, Stdout: &out, Stderr: ef})
+		if marker, ok := ef.exit(); err != nil || res.Code != 0 || out.String() != "hi\n" || !ok || marker != "42 "+completionExited || ef.source() != nil {
+			t.Fatalf("follow with FIFO metadata = %+v, %v, log %q, exit marker %q, source %+v", res, err, out.String(), marker, ef.source())
+		}
+	})
 }

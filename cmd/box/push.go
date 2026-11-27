@@ -241,6 +241,7 @@ type jobEnd struct {
 	Digest     string               `json:"digest,omitempty"`     // a test run's failure digest
 	Completion string               `json:"completion,omitempty"` // observed along with the exit file
 	Source     *dash.SourceRevision `json:"source,omitempty"`
+	Host       *jobLocator          `json:"host,omitempty"` // proves which target produced a bare job's source
 }
 
 const (
@@ -453,7 +454,7 @@ func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, 
 		err = fmt.Errorf("saved fleet host requires a qualified job ID")
 	}
 	baseDir := a.t3BaseDir()
-	if err == nil && id.hostTag == "" && baseDir != "" {
+	if err == nil && id.hostTag == "" && (baseDir != "" || info.Source != nil) {
 		host = &jobLocator{Remote: a.Remote, Project: a.Project, DashboardURL: a.dashboardURL}
 	}
 	rec := jobRecord{Job: job, Host: host, Source: info.Source, Thread: a.thread(), T3BaseDir: baseDir, Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
@@ -645,15 +646,22 @@ func (a *App) recordedEnd(job string) (jobEnd, bool) {
 	return jobEnd{}, false
 }
 
-func (a *App) savedJobSource(job string) *dash.SourceRevision {
+func (a *App) jobSourceMatchesHost(id jobID, host *jobLocator) bool {
+	// A qualified ID already identifies the resolved remote and project.
+	return id.hostTag != "" || (host != nil && host.Remote == a.Remote && host.Project == a.Project)
+}
+
+func (a *App) savedJobSource(id jobID) *dash.SourceRevision {
 	if a.StateDir == "" {
 		return nil
 	}
-	if rec, err := a.readWatchRecord(job); err == nil && rec.Source != nil {
+	if end, ok := a.recordedEnd(id.ID); ok && end.Source.Valid() && a.jobSourceMatchesHost(id, end.Host) {
+		return end.Source
+	}
+	if rec, err := a.readWatchRecord(id.ID); err == nil && rec.Source.Valid() && a.jobSourceMatchesHost(id, rec.Host) {
 		return rec.Source
 	}
-	end, _ := a.recordedEnd(job)
-	return end.Source
+	return nil
 }
 
 // lineTail keeps the end of what it is written, for the last lines of a log.
@@ -819,13 +827,16 @@ func lostMessage(r jobRecord, e jobEnd) string {
 
 // endMessage is what the agent is told of a job's end.
 func endMessage(rec jobRecord, end jobEnd) string {
+	var msg string
 	switch {
 	case end.Dropped:
-		return droppedMessage(rec)
+		msg = droppedMessage(rec)
 	case end.Lost:
-		return lostMessage(rec, end)
+		msg = lostMessage(rec, end)
+	default:
+		msg = endedMessage(rec, end)
 	}
-	return endedMessage(rec, end)
+	return msg + "\n" + sourceLine(end.Source)
 }
 
 // send delivers a message, retrying a few times.
@@ -936,6 +947,9 @@ func (a *App) Watch(ctx context.Context, job string) error {
 				target.boxdDisabled = a.boxdDisabled
 			}
 		}
+		if !target.jobSourceMatchesHost(id, rec.Host) {
+			rec.Source = nil
+		}
 		var ended bool
 		end, ended = target.follow(ctx, rec, id)
 		if !ended {
@@ -947,6 +961,7 @@ func (a *App) Watch(ctx context.Context, job string) error {
 		if end.Source == nil {
 			end.Source = rec.Source
 		}
+		end.Host = &jobLocator{Remote: target.Remote, Project: target.Project}
 		if err := writeJSON(a.statePath(job, ".ended"), end); err != nil {
 			return fmt.Errorf("recording the end of %s: %w", job, err)
 		}
@@ -960,7 +975,8 @@ func (a *App) Watch(ctx context.Context, job string) error {
 func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, ended bool) {
 	job := rec.Job
 	var saved jobEnd
-	if readJSON(a.statePath(job, ".result"), &saved) == nil && !saved.Lost && !saved.Dropped {
+	if readJSON(a.statePath(job, ".result"), &saved) == nil && !saved.Lost && !saved.Dropped &&
+		(saved.Host == nil || a.jobSourceMatchesHost(id, saved.Host)) {
 		switch saved.Completion {
 		case completionExited:
 			return saved, true

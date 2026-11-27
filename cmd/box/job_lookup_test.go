@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -111,9 +112,11 @@ func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
 	a, out, west, _ := lookupTestApp(t, "agents")
 	id := requireQualifiedJobID(t, west, testBareJobID)
 	exit := 7
+	dirty := true
+	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
 	started := jobStart(id.Bare)
 	_, suffix, _ := strings.Cut(id.Bare, ".")
-	j := dash.Job{Box: id.Box, ID: suffix, BoxUID: "west-original", State: dash.JobDone, StartedAt: started, Exit: &exit}
+	j := dash.Job{Box: id.Box, ID: suffix, BoxUID: "west-original", State: dash.JobDone, StartedAt: started, Exit: &exit, Source: source}
 	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
 	const log = "aé\xffmore bytes"
 	want := log[1:3]
@@ -160,7 +163,8 @@ func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
 	result := callTool(ctx, a, params, nil)
 	page, ok := result["structuredContent"].(map[string]any)
 	if result["isError"] != false || !ok || page["job"] != id.ID || page["host"] != west.Name ||
-		page["log"] != want || page["nextOffset"] != int64(3) || page["logBytes"] != int64(len(log)) || page["more"] != true {
+		page["log"] != want || page["nextOffset"] != int64(3) || page["logBytes"] != int64(len(log)) || page["more"] != true ||
+		!reflect.DeepEqual(page["source"], source) {
 		t.Fatalf("stopped MCP page = %+v", result)
 	}
 	if len(calls) != 4 {

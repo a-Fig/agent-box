@@ -229,7 +229,11 @@ func (a *App) queuedJob(ctx context.Context, job string) (j dash.Job, found bool
 	case code != http.StatusOK:
 		return j, false, errors.New(boxdError(code, b))
 	}
-	return j, true, json.Unmarshal(b, &j)
+	err = json.Unmarshal(b, &j)
+	if !j.Source.Valid() {
+		j.Source = nil
+	}
+	return j, true, err
 }
 
 // errNotQueued is cancelQueued's answer for a job that isn't waiting.
@@ -378,7 +382,7 @@ func (a *App) recordQueued(info jobMeta, job string, gpu, throwaway bool) {
 	if a.StateDir == "" || os.MkdirAll(a.StateDir, 0o755) != nil {
 		return
 	}
-	rec := jobRecord{Job: job, Source: info.Source, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
+	rec := jobRecord{Job: job, Source: info.Source, Host: &jobLocator{Remote: a.Remote, Project: a.Project}, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: recording queued job " + job + ": " + err.Error())
 	}
@@ -398,20 +402,28 @@ func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResu
 	rec := jobRecord{Job: job, Queued: true}
 	readJSON(a.statePath(job, ".json"), &rec)
 	rec.Job = job
-	rec.Thread = "" // whoever follows here sees the job; no nudge is pushed
+	rec.Thread = ""  // whoever follows here sees the job; no nudge is pushed
+	rec.Source = nil // a manual follow takes its source from the host first
 	out, ok := a.waitQueuedJob(ctx, rec, id.Bare, seen)
+	r := JobResult{Job: job, Box: box, State: stateDone, Source: out.source}
+	if r.Source == nil {
+		r.Source = a.savedJobSource(id)
+	}
 	switch {
 	case !ok && a.notifiedBy(job) == "cancel":
 		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
-		return JobResult{Job: job, Box: box, State: stateDone, Code: exitDetached, Source: out.source}, nil
+		r.Code = exitDetached
+		return r, nil
 	case !ok:
 		// Interrupted: 130 as for a detach from a running job, not 75, which
 		// says nothing started, though the job will still run on the PC.
 		fmt.Fprintf(a.Err, "box: job %s is still queued; box job %s follows it, box cancel %s takes it off\n", job, job, job)
-		return JobResult{Job: job, Box: box, State: stateQueued, Code: exitDetached, Source: out.source}, nil
+		r.State, r.Code = stateQueued, exitDetached
+		return r, nil
 	case out.end != nil && out.end.Dropped:
 		fmt.Fprintf(a.Err, "box: job %s left the queue without running (it waited %s at most, or couldn't start)\n", job, elapsed(dash.QueueMaxAge))
-		return JobResult{Job: job, Box: box, State: stateDone, Code: exitPaused, Source: out.source}, nil
+		r.Code = exitPaused
+		return r, nil
 	case out.end != nil:
 		// It ran and ended between two looks: its kept box has the full log
 		// and digest; boxd's tail is the fallback once the box is gone.
@@ -419,7 +431,8 @@ func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResu
 			return r, nil // not a pause: a kept box frozen by My PC doesn't undo an end boxd has
 		}
 		io.WriteString(a.Out, out.end.Tail+"\n")
-		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code, Source: out.source}, nil
+		r.Code = out.end.Code
+		return r, nil
 	}
 	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box)
 	return a.job(ctx, id, 0, out.source)

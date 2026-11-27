@@ -8,17 +8,18 @@ description: Run heavy test suites and builds from your worktree on a disposable
 **Offload** Go `-race`, full suites, Gradle/Android tests, runs over ~2 min, and parallel builds.
 
 1. `box_status` with `dir` reports room per host.
-2. `box_run` with `dir`, `command` and `reason` (the PC's owner reads it). It syncs uncommitted and untracked files, not ignored ones. Set `timeout` if it might hang (exit 124). With `pipefail`, `| head` can exit 141.
+2. `box_run` takes `dir`, `command`, and `reason`. It syncs uncommitted and untracked files, skipping ignored ones. `timeout` exits 124. With `pipefail`, `| head` can exit 141.
 3. A run ending within 30 s returns its result; else `running`:
    - `push: true`: **don't wait or poll.** Expect "box: job …" (Claude Code: mid-turn). Notices retry on Box MCP restart in the same T3 profile. Details in `box_job`.
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
    - **Subagents pass `push: false`** (it would wake the parent).
 4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; snapshot waits for the host; `box_cancel` drops it.
-5. **`state: refused` (exit 75)**: nothing started (PC busy, paused or unreachable). Retry later, or smaller `size` if no room. A pushed "lost" job didn't finish; a "paused" one may resume (its end is pushed). `done` with exit 75 is the command's own.
+5. **`state: refused` (exit 75)**: nothing started. Retry later or use a smaller `size` if full. A paused job may resume. A lost job stopped before finishing. `done` with exit 75 is the command's own.
 6. `go test`/vitest show failures first (file:line). `box_job` pages logs (`offset`/`limit`) or lists fleet jobs (no `id`).
 7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel: `new: true`.
 
 CPU throwaways can be reused. `fresh: true` launches clean.
+Results and notices show source HEAD, dirty state, and the bundled commit.
 An EOF during the Incus image lookup gets one launch retry.
 
 **Never put secrets in `env`** (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*` are refused).

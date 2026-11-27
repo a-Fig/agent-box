@@ -127,6 +127,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 	}
 	code := func(r JobResult, err error) int {
 		c := r.Code
+		if r.Job != "" {
+			fmt.Fprintln(a.Err, "box:", sourceLine(r.Source))
+		}
 		if r.Digest != "" {
 			fmt.Fprint(a.Err, "\n"+r.Digest)
 		}
@@ -203,6 +206,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			info := jobMeta{Reason: why, Command: displayCommand(fs.Args()), Agent: agentInfo{Worktree: dir}, Source: r.Source}
 			a.recordQueued(info, r.Job, *size == mode.GPUSize, r.throwaway)
 			r, err = a.followQueued(ctx, r.Job)
+			if r.Source == nil {
+				r.Source = info.Source
+			}
 			a.markRead(r.Job, r, err, "box run")
 		}
 		return code(r, err)
@@ -238,12 +244,14 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		if err != nil {
 			if end != nil {
 				fmt.Fprintf(a.Err, "box: can't read the log (%s); this is the tail recorded when the job ended\n", firstLine(err.Error()))
+				fmt.Fprintln(a.Err, "box:", sourceLine(end.Source))
 				io.WriteString(a.Out, end.Tail)
 				return 0
 			}
 			return fail(err)
 		}
 		fmt.Fprintln(a.Err, "box: "+p.pageHead())
+		fmt.Fprintln(a.Err, "box:", sourceLine(p.Source))
 		io.WriteString(a.Out, p.Text)
 		return 0
 	case "status", "hosts":
