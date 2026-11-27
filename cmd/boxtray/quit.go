@@ -20,7 +20,7 @@ const releaseStoreTimeout = 30 * time.Second
 // project, so after Quit the headless enforcer applies it, not an older one.
 // It ends the release before poke, so the tick that wakes starts the distro
 // again, without the boxes' memory (#204).
-func releaseMemory(mgr *mode.Manager, terminate func() error, poke func(), logf func(string, ...any)) {
+func releaseMemory(mgr *mode.Manager, drop *cacheDrop, terminate func() error, poke func(), logf func(string, ...any)) {
 	ctx, cancel := context.WithTimeout(context.Background(), releaseStoreTimeout)
 	ok := mgr.BeginRelease(ctx)
 	cancel()
@@ -28,8 +28,13 @@ func releaseMemory(mgr *mode.Manager, terminate func() error, poke func(), logf 
 		logf("release memory: already running")
 		return
 	}
+	if drop != nil {
+		drop.stop()
+	}
 	if err := terminate(); err != nil {
 		logf("release memory: wsl --terminate: %v", err)
+	} else if drop != nil {
+		drop.arm()
 	}
 	mgr.EndRelease()
 	poke()

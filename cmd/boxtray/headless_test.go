@@ -158,6 +158,8 @@ func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 func TestQuitRightAfterReleaseStoresThePick(t *testing.T) {
 	inc := &recIncus{}
 	mgr := mode.New(inc, mode.Full)
+	drop := newDropHarness(nil)
+	drop.d.busy = mgr.Releasing
 	mgr.Handshake = true
 	mgr.SetChosen(mode.MyPC)
 	var releases sync.WaitGroup
@@ -167,10 +169,14 @@ func TestQuitRightAfterReleaseStoresThePick(t *testing.T) {
 	go func() {
 		defer releases.Done()
 		<-start // the goroutine is slow to begin
-		releaseMemory(mgr, func() error { terminated = true; return nil }, func() {}, t.Logf)
+		releaseMemory(mgr, drop.d, func() error { terminated = true; return nil }, func() {
+			drop.d.observe(mode.Status{Chosen: mode.MyPC})
+		}, t.Logf)
 	}()
 	go func() { time.Sleep(50 * time.Millisecond); close(start) }()
+	drop.d.setPaused(true)
 	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	drop.wantNoRun(t)
 	if !terminated {
 		t.Fatal("Quit returned before the release terminated the distro")
 	}
@@ -189,7 +195,7 @@ func TestQuitStoresAPickMadeDuringTheRelease(t *testing.T) {
 	releases.Add(1)
 	go func() {
 		defer releases.Done()
-		releaseMemory(mgr, func() error { mgr.SetChosen(mode.Shared); return nil }, func() {}, t.Logf)
+		releaseMemory(mgr, nil, func() error { mgr.SetChosen(mode.Shared); return nil }, func() {}, t.Logf)
 	}()
 	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
 	got := inc.snapshot()
@@ -251,7 +257,7 @@ func TestQuitRetryGetsItsOwnDeadlineAfterSlowRelease(t *testing.T) {
 		releases.Add(1)
 		go func() {
 			defer releases.Done()
-			releaseMemory(mgr, func() error {
+			releaseMemory(mgr, nil, func() error {
 				time.Sleep(quitTimeout - 500*time.Millisecond)
 				return nil
 			}, func() {}, t.Logf)
@@ -273,7 +279,7 @@ func TestUpdateStartsReplacementAfterQuit(t *testing.T) {
 		releases.Add(1)
 		go func() {
 			defer releases.Done()
-			releaseMemory(mgr, func() error {
+			releaseMemory(mgr, nil, func() error {
 				time.Sleep(25 * time.Second) // longer than v0.1.7's mutex wait
 				mgr.SetChosen(mode.MyPC)
 				return nil

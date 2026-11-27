@@ -103,6 +103,16 @@ func main() {
 		}
 	}
 
+	sensors := &winSensors{}
+	drop := &cacheDrop{
+		hostUp: sensors.HostUp,
+		run: func(ctx context.Context) error {
+			_, err := wslRoot(ctx, "sh", "-c", dropCachesScript)
+			return err
+		},
+		logf: lg.Printf,
+		busy: mgr.Releasing,
+	}
 	var releases sync.WaitGroup // Release memory runs in flight
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
@@ -119,7 +129,7 @@ func main() {
 			releases.Add(1)
 			go func() {
 				defer releases.Done()
-				releaseMemory(mgr, func() error {
+				releaseMemory(mgr, drop, func() error {
 					ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
 					defer cancel()
 					return hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run()
@@ -130,6 +140,7 @@ func main() {
 	sl := &statusLog{logf: lg.Printf}
 	report := func(st mode.Status) {
 		sl.observe(st)
+		drop.observe(st)
 		if t != nil {
 			t.setStatus(st)
 		}
@@ -147,10 +158,12 @@ func main() {
 	restarts := make(chan func() bool, 1)
 	up := autoUpdater(os.Args[1:], lg.Printf, func(start func() bool) {
 		finish := func() bool {
+			drop.setPaused(true)
 			if finishUpdate(&releases, mgr, quitTimeout, lg.Printf, start) {
 				cancel()
 				return true
 			}
+			drop.setPaused(false)
 			return false
 		}
 		if t == nil {
@@ -176,7 +189,7 @@ func main() {
 		}
 	})
 	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Logf: lg.Printf, Maintain: up.maintain}
-	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
+	go supervise(ctx, func() { run(ctx, lc, sensors, 5*time.Second, wake, report) })
 	lg.Printf("mode loop started")
 
 	if t == nil {
@@ -192,6 +205,7 @@ func main() {
 	// Stop ticking, then let a release in flight finish and store the last
 	// pick, so the headless enforcer that takes over applies it (#204).
 	cancel()
+	drop.setPaused(true)
 	beforeQuit(&releases, mgr, quitTimeout, lg.Printf)
 	lg.Printf("exit")
 }

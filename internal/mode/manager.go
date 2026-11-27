@@ -478,6 +478,10 @@ func (m *Manager) BeginRelease(ctx context.Context) bool {
 // EndRelease lets ticks and reclaims call out again.
 func (m *Manager) EndRelease() { m.releasing.Store(false) }
 
+// Releasing lets the tray's background page-cache drop avoid calling
+// wsl.exe during Release memory.
+func (m *Manager) Releasing() bool { return m.releasing.Load() }
+
 // StartHost calls start, which brings the Incus host up, unless a release is
 // running. It holds the tick lock, so a release that begins meanwhile cancels
 // start's context and waits for it to return before it terminates anything.
