@@ -67,7 +67,7 @@ function post(path, body) {
 function applyUpdates(info) {
   const at = info?.checkedAt;
   const last = S.updates?.checkedAt;
-  // Both paths carry UTC timestamps from boxd. Drop the trailing Z so whole
+  // Snapshots and check results carry UTC timestamps from boxd. Drop the trailing Z so whole
   // seconds sort before fractional seconds, and keep precision past milliseconds.
   if (at && (!last || at.slice(0, -1) > last.slice(0, -1))) S.updates = info;
 }
@@ -77,7 +77,7 @@ function applyState(st) {
   S.machines = new Map((st.machines || []).map((m) => [m.id, m]));
   S.boxes = new Map((st.boxes || []).map((b) => [b.machine + "/" + b.name, b]));
   S.jobs = new Map((st.jobs || []).map((j) => [j.key, j]));
-  S.updates = st.updates || null;
+  applyUpdates(st.updates);
   S.gen++;
   S.conn = "live";
 }

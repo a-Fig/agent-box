@@ -106,6 +106,20 @@ test("delayed checks cannot replace a newer result from either path", async (t) 
   assert.equal(await latest.locator("[data-t]").getAttribute("data-t"), newer.checkedAt);
 });
 
+test("the initial stream snapshot cannot replace a newer check response", async (t) => {
+  const { page, state } = await settings(t, (state) => {
+    state.updates = { latest: "v0.3.0", checkedAt: tick + "Z" };
+  });
+  const newer = { latest: "v0.3.1", checkedAt: tick + ".000000001Z" };
+  const latest = row(page, "Latest stable release");
+  await page.route("**/api/updates/check", (route) => route.fulfill({ json: newer }));
+  await page.getByRole("button", { name: "Check for updates" }).click();
+  await latest.getByText(newer.latest, { exact: true }).waitFor();
+  await event(page, "state", state);
+  assert.equal(await latest.locator("[data-t]").getAttribute("data-t"), newer.checkedAt);
+  assert.equal(await latest.getByText(newer.latest, { exact: true }).count(), 1);
+});
+
 test("matching release badges keep keyboard focus on the same component after a redraw", async (t) => {
   const { page, state } = await settings(t, (state) => {
     state.updates = { latest: "" };
