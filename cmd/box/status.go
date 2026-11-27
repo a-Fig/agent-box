@@ -55,6 +55,17 @@ type RepoBox struct {
 	Running []JobInfo `json:"running"`
 }
 
+// hostProbeOpts tunes how probeHostStatus reads one Incus host. Legacy Status
+// leaves strictCaps and gpuRequest false; typed fleet probing enables
+// strictCaps so failed Incus cap reads never masquerade as unlimited caps, and
+// sets gpuRequest when inspecting GPU reclaimability via inspectGPUBox.
+type hostProbeOpts struct {
+	repoName   string
+	gpuRequest bool
+	exceptGPU  string
+	strictCaps bool
+}
+
 // hostStatusProbe holds the typed facts gathered from one Incus host so Status
 // and fleet target probing share a single inspection path without parsing
 // display strings.
@@ -77,7 +88,7 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 			repoName = rp.Name
 		}
 	}
-	p := a.probeHostStatus(ctx, repoName)
+	p := a.probeHostStatus(ctx, hostProbeOpts{repoName: repoName})
 	s = p.report
 	s.Update = behind(a.StateDir, version.Tag)
 	if !s.Reachable {
@@ -92,8 +103,8 @@ func (a *App) Status(ctx context.Context, dir string) (s StatusReport) {
 	return s
 }
 
-func (a *App) probeHostStatus(ctx context.Context, repoName string) hostStatusProbe {
-	s := StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1, Repo: repoName}
+func (a *App) probeHostStatus(ctx context.Context, opts hostProbeOpts) hostStatusProbe {
+	s := StatusReport{Remote: a.Remote, MaxBoxes: -1, SlotsFree: -1, Repo: opts.repoName}
 	insts, err := a.list(ctx)
 	if err != nil {
 		s.Error = firstLine(err.Error())
@@ -102,7 +113,60 @@ func (a *App) probeHostStatus(ctx context.Context, repoName string) hostStatusPr
 	}
 	s.Reachable = true
 	s.Boxes = len(insts)
-	s.Mode = a.mode(ctx)
+	failCap := func(err error) hostStatusProbe {
+		return hostStatusProbe{report: StatusReport{
+			Remote: a.Remote, Reachable: true, Mode: s.Mode, Repo: opts.repoName,
+			MaxBoxes: -1, SlotsFree: -1, Error: firstLine(err.Error()),
+		}}
+	}
+	if opts.strictCaps {
+		m, err := a.projectKeyStrict(ctx, mode.ProjectModeKey)
+		if err != nil {
+			return failCap(err)
+		}
+		s.Mode = m
+	} else {
+		s.Mode = a.mode(ctx)
+	}
+
+	hasGPU := false
+	if opts.strictCaps {
+		g, err := a.hasGPUStrict(ctx)
+		if err != nil {
+			return failCap(err)
+		}
+		hasGPU = g
+	} else {
+		hasGPU = a.hasGPU(ctx)
+	}
+
+	var gpuHolders []string
+	var gpuReclaimable map[string]bool
+	if hasGPU {
+		if opts.gpuRequest {
+			gpuReclaimable = make(map[string]bool)
+			for _, in := range insts {
+				if !mode.IsGPU(in.Config) {
+					continue
+				}
+				if opts.exceptGPU != "" && in.Name == opts.exceptGPU {
+					if in.Status != "Stopped" || a.beingCreated(in) {
+						gpuHolders = append(gpuHolders, in.Name)
+					}
+					continue
+				}
+				switch state, _ := a.inspectGPUBox(ctx, in); state {
+				case gpuBoxReclaimable:
+					gpuReclaimable[in.Name] = true
+				case gpuBoxBusy:
+					gpuHolders = append(gpuHolders, in.Name)
+				}
+			}
+		} else {
+			gpuHolders = a.gpuHolders(insts)
+		}
+	}
+
 	keptThrowaways := a.keptThrowaways(ctx, insts)
 	idleRepos := a.idleRepoBoxes(ctx, insts)
 	kept := make(map[string]bool, len(keptThrowaways)+len(idleRepos))
@@ -112,33 +176,80 @@ func (a *App) probeHostStatus(ctx context.Context, repoName string) hostStatusPr
 	for _, in := range idleRepos {
 		kept[in.Name] = true
 	}
-	evictable := func(in instance) bool { return reclaimable(in, a.Now()) || kept[in.Name] } // the next launch deletes it first
-	if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
-		free := n - len(insts)
+	evictable := func(in instance) bool {
+		return reclaimable(in, a.Now()) || kept[in.Name] || gpuReclaimable[in.Name]
+	}
+
+	var instRaw string
+	if opts.strictCaps {
+		instRaw, err = a.projectKeyStrict(ctx, "limits.instances")
+		if err != nil {
+			return failCap(err)
+		}
+		if instRaw != "" {
+			n, perr := strconv.Atoi(instRaw)
+			if perr != nil || n < 0 {
+				return failCap(fmt.Errorf("invalid limits.instances %q", instRaw))
+			}
+			s.MaxBoxes = n
+		}
+	} else if n, err := strconv.Atoi(a.projectKey(ctx, "limits.instances")); err == nil && n >= 0 {
+		s.MaxBoxes = n
+	}
+	if s.MaxBoxes >= 0 {
+		free := s.MaxBoxes - len(insts)
 		for _, in := range insts {
 			if evictable(in) {
 				free++
 				s.Replaceable++
 			}
 		}
-		s.MaxBoxes, s.SlotsFree = n, max(free, 0)
+		s.SlotsFree = max(free, 0)
 	}
+
 	now := mode.Mode(s.Mode)
 	if s.Mode == "" { // no tray: boxes keep the Shared CPUs they launched with
 		now = mode.Shared
 	}
-	s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
-	hasGPU := a.hasGPU(ctx)
-	var gpuHolders []string
-	if hasGPU {
-		gpuHolders = a.gpuHolders(insts)
+	if opts.strictCaps {
+		var cpuCap int64
+		var cpuKnown bool
+		if raw, err := a.projectKeyStrict(ctx, "limits.cpu"); err != nil {
+			return failCap(err)
+		} else if raw != "" {
+			n, perr := strconv.ParseInt(raw, 10, 64)
+			if perr != nil || n < 0 {
+				return failCap(fmt.Errorf("invalid limits.cpu %q", raw))
+			}
+			cpuCap, cpuKnown = n, true
+		}
+		var memCap int64
+		var memKnown bool
+		if raw, err := a.projectKeyStrict(ctx, "limits.memory"); err != nil {
+			return failCap(err)
+		} else if raw != "" {
+			m, ok := mode.ParseBytes(raw)
+			if !ok {
+				return failCap(fmt.Errorf("invalid limits.memory %q", raw))
+			}
+			memCap, memKnown = m, true
+		}
+		resources, err := a.projectResourcesStrict(ctx)
+		if err != nil {
+			return failCap(err)
+		}
+		s.Sizes, s.Room = computeRoom(insts, now, s.MaxBoxes, cpuCap, cpuKnown, memCap, memKnown, resources, evictable)
 	} else {
+		s.Sizes, s.Room = a.room(ctx, insts, now, s.MaxBoxes, evictable)
+	}
+	if !hasGPU {
 		s.Sizes = slices.DeleteFunc(s.Sizes, func(sz SizeRoom) bool { return sz.GPU })
 	}
+
 	var repoBox *instance
 	repoBoxThrowaway := false
-	if repoName != "" {
-		repoBox = find(insts, repoName)
+	if opts.repoName != "" {
+		repoBox = find(insts, opts.repoName)
 	}
 	if repoBox != nil {
 		repoBoxThrowaway = repoBox.Config[throwawayKey] == "true"
@@ -178,6 +289,24 @@ func (a *App) gpuHolders(insts []instance) []string {
 	return holders
 }
 
+func (a *App) hasGPUStrict(ctx context.Context) (bool, error) {
+	v, err := a.projectKeyStrict(ctx, gpuKey)
+	if err != nil {
+		return false, err
+	}
+	switch v {
+	case "block":
+		return false, nil
+	case "":
+		r, err := a.projectKeyStrict(ctx, "restricted")
+		if err != nil {
+			return false, err
+		}
+		return !incusTrue(r), nil
+	}
+	return true, nil
+}
+
 // gpuNone is the GPU status of a host that can't run a GPU box (hasGPU).
 const gpuNone = "none on this host"
 
@@ -215,9 +344,14 @@ func (a *App) gpuStatus(ctx context.Context, s StatusReport, insts []instance) s
 // max(the mode's budget, what they hold), since a tick can lower it to that
 // between the delete and the retry.
 func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxes int, evictable func(instance) bool) ([]SizeRoom, string) {
-	instCap := int64(maxBoxes)
 	cpuCap, cpuErr := strconv.ParseInt(a.projectKey(ctx, "limits.cpu"), 10, 64)
 	memCap, memKnown := mode.ParseBytes(a.projectKey(ctx, "limits.memory"))
+	resources := a.projectResources(ctx)
+	return computeRoom(insts, now, maxBoxes, cpuCap, cpuErr == nil && cpuCap >= 0, memCap, memKnown, resources, evictable)
+}
+
+func computeRoom(insts []instance, now mode.Mode, maxBoxes int, cpuCap int64, cpuKnown bool, memCap int64, memKnown bool, resources map[string]projectResource, evictable func(instance) bool) ([]SizeRoom, string) {
+	instCap := int64(maxBoxes)
 	// held is what existing boxes allocate; evict is the reclaimable part.
 	type alloc struct{ n, cpus, mem, disk, gpus int64 }
 	var held, evict alloc
@@ -243,7 +377,6 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 			evict = alloc{evict.n + one.n, evict.cpus + one.cpus, evict.mem + one.mem, evict.disk + one.disk, evict.gpus + one.gpus}
 		}
 	}
-	resources := a.projectResources(ctx)
 	diskFree, diskKnown := resources["disk"].remaining()
 	containersFree, containersKnown := resources["containers"].remaining()
 	evictMemCap := memCap
@@ -279,7 +412,7 @@ func (a *App) room(ctx context.Context, insts []instance, now mode.Mode, maxBoxe
 			if containersKnown {
 				limit(containersFree+gone.n, 1, "containers")
 			}
-			if cpuErr == nil && cpuCap >= 0 { // each box counts at its Full CPUs, which the tray may give it
+			if cpuKnown { // each box counts at its Full CPUs, which the tray may give it
 				limit(cpuCap-held.cpus+gone.cpus, int64(sz.FullCPUs), fmt.Sprintf("CPUs: %d of %d reserved", held.cpus, cpuCap))
 			}
 			if memKnown {
@@ -330,19 +463,26 @@ func (r projectResource) remaining() (int64, bool) {
 	return *r.Limit - *r.Usage, true
 }
 
-// projectResources reads Incus's allocation counters, when available.
-func (a *App) projectResources(ctx context.Context) map[string]projectResource {
+// projectResourcesStrict reads Incus's allocation counters and distinguishes a
+// command or decode failure from a project with no resource limits.
+func (a *App) projectResourcesStrict(ctx context.Context) (map[string]projectResource, error) {
 	out, err := a.incusOK(ctx, "project", "info", a.target(a.Project), "--format", "json")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var st struct {
 		Resources map[string]projectResource `json:"resources"`
 	}
-	if json.Unmarshal([]byte(out), &st) != nil {
-		return nil
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		return nil, fmt.Errorf("incus project info: %w", err)
 	}
-	return st.Resources
+	return st.Resources, nil
+}
+
+// projectResources reads Incus's allocation counters, when available.
+func (a *App) projectResources(ctx context.Context) map[string]projectResource {
+	r, _ := a.projectResourcesStrict(ctx)
+	return r
 }
 
 // sizeText is "medium: 2 CPUs/4GiB" for a size as it is now.
@@ -407,13 +547,20 @@ func modeNote(s StatusReport) string {
 	return ""
 }
 
-// projectKey reads one key of the box project's config; "" if unset or unreadable.
-func (a *App) projectKey(ctx context.Context, key string) string {
+// projectKeyStrict reads one key of the box project's config, returning "" with
+// a nil error when unset and a non-nil error when the Incus call fails.
+func (a *App) projectKeyStrict(ctx context.Context, key string) (string, error) {
 	out, err := a.incusOK(ctx, "project", "get", a.target(a.Project), key)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimSpace(out)
+	return strings.TrimSpace(out), nil
+}
+
+// projectKey reads one key of the box project's config; "" if unset or unreadable.
+func (a *App) projectKey(ctx context.Context, key string) string {
+	v, _ := a.projectKeyStrict(ctx, key)
+	return v
 }
 
 func firstLine(s string) string {

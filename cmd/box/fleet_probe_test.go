@@ -16,6 +16,22 @@ import (
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
+// respondHealthyProject handles Incus project get / project info for a healthy
+// host whose unset keys return exit 0 with an empty string (as real Incus does).
+func respondHealthyProject(cmd Cmd, keys map[string]string, infoJSON string) (Result, bool) {
+	if len(cmd.Args) >= 5 && cmd.Args[2] == "project" && cmd.Args[3] == "get" {
+		key := cmd.Args[5]
+		return Result{Stdout: keys[key] + "\n"}, true
+	}
+	if len(cmd.Args) >= 6 && cmd.Args[2] == "project" && cmd.Args[3] == "info" {
+		if infoJSON == "" {
+			infoJSON = "{}"
+		}
+		return Result{Stdout: infoJSON}, true
+	}
+	return Result{}, false
+}
+
 func TestProbeFleetCandidatesIndependentAndTyped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -23,6 +39,17 @@ func TestProbeFleetCandidatesIndependentAndTyped(t *testing.T) {
 	slowStarted := make(chan struct{})
 	fastDone := make(chan struct{})
 	var workBoxdCalls atomic.Int32
+
+	fastKeys := map[string]string{
+		mode.ProjectModeKey: "full",
+		"limits.instances":  "4",
+		gpuKey:              "allow",
+	}
+	workKeys := map[string]string{
+		mode.ProjectModeKey: "shared",
+		"limits.instances":  "2",
+		gpuKey:              "block",
+	}
 
 	a := newApp()
 	a.Now = func() time.Time { return time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC) }
@@ -51,18 +78,18 @@ func TestProbeFleetCandidatesIndependentAndTyped(t *testing.T) {
 			}
 		case "--project work list custom: --format json":
 			return Result{Stdout: "[]"}, nil
-		case "--project agents project get fast:agents user.agent-box.mode":
-			return Result{Stdout: "full"}, nil
-		case "--project agents project get fast:agents limits.instances":
-			return Result{Stdout: "4"}, nil
-		case "--project agents project get fast:agents restricted.devices.unix-char":
-			return Result{Stdout: "allow"}, nil
-		case "--project work project get custom:work user.agent-box.mode":
-			return Result{Stdout: "shared"}, nil
-		case "--project work project get custom:work limits.instances":
-			return Result{Stdout: "2"}, nil
-		case "--project work project get custom:work restricted.devices.unix-char":
-			return Result{Stdout: "block"}, nil
+		}
+		if len(cmd.Args) >= 5 && cmd.Args[2] == "project" {
+			if strings.HasPrefix(cmd.Args[4], "fast:") {
+				if res, ok := respondHealthyProject(cmd, fastKeys, "{}"); ok {
+					return res, nil
+				}
+			}
+			if strings.HasPrefix(cmd.Args[4], "custom:") {
+				if res, ok := respondHealthyProject(cmd, workKeys, "{}"); ok {
+					return res, nil
+				}
+			}
 		}
 		if len(cmd.Args) >= 5 && cmd.Args[2] == "exec" && cmd.Args[3] == "fast:repo" {
 			return Result{Stdout: ""}, nil
@@ -113,16 +140,19 @@ func TestProbeFleetCandidatesIndependentAndTyped(t *testing.T) {
 }
 
 func TestProbeFleetCandidateBoxdQueueCapabilityRequiresExplicitBit(t *testing.T) {
+	keys := map[string]string{
+		mode.ProjectModeKey: "full",
+		"limits.instances":  "1",
+		gpuKey:              "allow",
+	}
 	a := newApp()
 	a.Now = func() time.Time { return time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC) }
 	a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
-		switch strings.Join(cmd.Args, " ") {
-		case "--project agents list pc: --format json":
+		if strings.Join(cmd.Args, " ") == "--project agents list pc: --format json" {
 			return Result{Stdout: `[{"name":"busy","status":"Running","config":{"user.box.size":"medium"}}]`}, nil
-		case "--project agents project get pc:agents user.agent-box.mode":
-			return Result{Stdout: "full"}, nil
-		case "--project agents project get pc:agents limits.instances":
-			return Result{Stdout: "1"}, nil
+		}
+		if res, ok := respondHealthyProject(cmd, keys, "{}"); ok {
+			return res, nil
 		}
 		return Result{Code: 1}, nil
 	})
@@ -161,6 +191,12 @@ func TestProbeFleetCandidateBoxdQueueCapabilityRequiresExplicitBit(t *testing.T)
 }
 
 func TestProbeFleetCandidateTimeoutIsolation(t *testing.T) {
+	keys := map[string]string{
+		mode.ProjectModeKey: "full",
+		"limits.instances":  "3",
+		gpuKey:              "allow",
+	}
+
 	t.Run("timeout during Incus probe fails closed", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 		defer cancel()
@@ -172,6 +208,8 @@ func TestProbeFleetCandidateTimeoutIsolation(t *testing.T) {
 				return Result{Stdout: "[]"}, nil
 			case "user.agent-box.mode":
 				return Result{Stdout: "full"}, nil
+			case gpuKey:
+				return Result{Stdout: "allow"}, nil
 			case "limits.instances":
 				<-ctx.Done()
 				return Result{}, ctx.Err()
@@ -197,13 +235,11 @@ func TestProbeFleetCandidateTimeoutIsolation(t *testing.T) {
 		defer cancel()
 		a := newApp()
 		a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
-			switch strings.Join(cmd.Args, " ") {
-			case "--project agents list pc: --format json":
+			if strings.Join(cmd.Args, " ") == "--project agents list pc: --format json" {
 				return Result{Stdout: "[]"}, nil
-			case "--project agents project get pc:agents user.agent-box.mode":
-				return Result{Stdout: "full"}, nil
-			case "--project agents project get pc:agents limits.instances":
-				return Result{Stdout: "3"}, nil
+			}
+			if res, ok := respondHealthyProject(cmd, keys, "{}"); ok {
+				return res, nil
 			}
 			return Result{Code: 1}, nil
 		})
@@ -222,11 +258,190 @@ func TestProbeFleetCandidateTimeoutIsolation(t *testing.T) {
 	})
 }
 
+func TestProbeFleetCandidateFailedCapReadFailsClosed(t *testing.T) {
+	// Non-timeout EOF after incus list succeeds must fail closed instead of
+	// treating failed cap reads as unlimited, while a healthy host with
+	// genuinely unset limits (exit 0, empty string, {}) succeeds as unlimited.
+	healthyKeys := map[string]string{
+		mode.ProjectModeKey: "full",
+		gpuKey:              "block",
+		// limits.instances, limits.cpu, limits.memory genuinely unset
+	}
+
+	for _, failTarget := range []string{mode.ProjectModeKey, gpuKey, "limits.instances", "limits.cpu", "limits.memory", "info"} {
+		t.Run("EOF on "+failTarget, func(t *testing.T) {
+			var brokenBoxdCalls atomic.Int32
+			a := newApp()
+			a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+				if strings.Join(cmd.Args, " ") == "--project agents list broken: --format json" ||
+					strings.Join(cmd.Args, " ") == "--project agents list healthy: --format json" {
+					return Result{Stdout: "[]"}, nil
+				}
+				if len(cmd.Args) >= 5 && cmd.Args[2] == "project" && strings.HasPrefix(cmd.Args[4], "broken:") {
+					if (cmd.Args[3] == "info" && failTarget == "info") ||
+						(cmd.Args[3] == "get" && len(cmd.Args) >= 6 && cmd.Args[5] == failTarget) {
+						return Result{Code: 1, Stderr: "Error: EOF"}, nil
+					}
+					if res, ok := respondHealthyProject(cmd, healthyKeys, "{}"); ok {
+						return res, nil
+					}
+				}
+				if len(cmd.Args) >= 5 && cmd.Args[2] == "project" && strings.HasPrefix(cmd.Args[4], "healthy:") {
+					if res, ok := respondHealthyProject(cmd, healthyKeys, "{}"); ok {
+						return res, nil
+					}
+				}
+				return Result{Code: 1}, nil
+			})
+			a.HTTP = func(req *http.Request) (*http.Response, error) {
+				if strings.HasPrefix(req.URL.String(), "https://broken.example.com") {
+					brokenBoxdCalls.Add(1)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"jobs":[]}`))}, nil
+			}
+
+			targets := []fleetHost{
+				{Name: "broken", Remote: "broken", Project: mode.Project, DashboardURL: "https://broken.example.com"},
+				{Name: "healthy", Remote: "healthy", Project: mode.Project, DashboardURL: "https://healthy.example.com"},
+			}
+			cands := a.probeFleetCandidates(context.Background(), targets, pickRequest{}, "")
+			broken, healthy := cands[0], cands[1]
+			if !broken.Reachable || broken.Error == "" || len(broken.Sizes) != 0 || broken.BoxdAvailable || brokenBoxdCalls.Load() != 0 {
+				t.Fatalf("broken candidate = %+v, boxdCalls=%d; want failed closed", broken, brokenBoxdCalls.Load())
+			}
+			if !healthy.Reachable || healthy.Error != "" || len(healthy.Sizes) == 0 || healthy.Sizes[0].Fits != -1 {
+				t.Fatalf("healthy candidate = %+v; want unlimited room from genuinely unset limits", healthy)
+			}
+			if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "healthy" {
+				t.Fatalf("pick = %+v, want start on healthy", pick)
+			}
+		})
+	}
+}
+
+func TestProbeFleetCandidateGPUReclaimableVsBusy(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	gpu := pickTestSize(t, mode.GPUSize)
+	med := pickTestSize(t, "medium")
+
+	// Caps fit exactly one GPU box (1 slot, 12GiB RAM), so a new GPU box fits
+	// only when the existing GPU box is reclaimable by claimGPU.
+	keys := map[string]string{
+		mode.ProjectModeKey: "shared",
+		"limits.instances":  "1",
+		"limits.cpu":        "24",
+		"limits.memory":     "12GiB",
+		gpuKey:              "allow",
+	}
+
+	probeWith := func(t *testing.T, inst instance, execRes Result, execErr error, req pickRequest) (fleetCandidate, fleetPick) {
+		t.Helper()
+		b, _ := json.Marshal([]instance{inst})
+		a := newApp()
+		a.Now = func() time.Time { return now }
+		a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+			if strings.Join(cmd.Args, " ") == "--project agents list pc: --format json" {
+				return Result{Stdout: string(b)}, nil
+			}
+			if res, ok := respondHealthyProject(cmd, keys, "{}"); ok {
+				return res, nil
+			}
+			if len(cmd.Args) >= 5 && cmd.Args[2] == "exec" && cmd.Args[3] == "pc:"+inst.Name {
+				return execRes, execErr
+			}
+			return Result{Code: 1}, nil
+		})
+		a.HTTP = func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"jobs":[]}`))}, nil
+		}
+		cands := a.probeFleetCandidates(context.Background(), []fleetHost{{Name: "pc", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"}}, req, "")
+		return cands[0], pickFleetHost(cands, req)
+	}
+
+	idleUnheld := instance{
+		Name:      "gpu-old",
+		Status:    "Running",
+		CreatedAt: now.Add(-20 * time.Minute),
+		Config: map[string]string{
+			mode.SizeKey:    mode.GPUSize,
+			throwawayKey:    "true",
+			"limits.memory": "8GiB",
+			expiresKey:      now.Add(20 * time.Hour).Format(time.RFC3339), // outside keptThrowawayConfig window
+		},
+	}
+
+	t.Run("idle unheld throwaway past startup grace is reclaimable for GPU request only", func(t *testing.T) {
+		gpuCand, gpuPick := probeWith(t, idleUnheld, Result{Stdout: ""}, nil, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
+		if len(gpuCand.GPUHolders) != 0 || gpuPick.Action != pickStart || gpuPick.Host.Name != "pc" {
+			t.Fatalf("GPU request: cand=%+v pick=%+v; want start with reclaimed GPU capacity", gpuCand, gpuPick)
+		}
+
+		// CPU request does not run claimGPU, so the same GPU box does NOT free CPU capacity.
+		cpuCand, cpuPick := probeWith(t, idleUnheld, Result{Stdout: ""}, nil, pickRequest{Size: med, ExplicitSize: true, Queue: true})
+		if cpuPick.Action != pickQueue || cpuPick.Why != refusedFull {
+			t.Fatalf("CPU request: cand=%+v pick=%+v; want queue full (CPU cannot reclaim GPU via claimGPU)", cpuCand, cpuPick)
+		}
+	})
+
+	t.Run("stopped unheld throwaway past startup grace without tray mark is reclaimable for GPU only", func(t *testing.T) {
+		stoppedOld := idleUnheld
+		stoppedOld.Status = "Stopped"
+		_, gpuPick := probeWith(t, stoppedOld, Result{}, nil, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
+		if gpuPick.Action != pickStart {
+			t.Fatalf("GPU request on stopped old throwaway = %+v, want start", gpuPick)
+		}
+		_, cpuPick := probeWith(t, stoppedOld, Result{}, nil, pickRequest{Size: med, ExplicitSize: true, Queue: true})
+		if cpuPick.Action != pickQueue || cpuPick.Why != refusedFull {
+			t.Fatalf("CPU request on stopped old throwaway = %+v, want queue full", cpuPick)
+		}
+	})
+
+	t.Run("held, starting, paused, busy, and unverified GPU holders stay busy", func(t *testing.T) {
+		held := idleUnheld
+		held.Config = map[string]string{
+			mode.SizeKey:    mode.GPUSize,
+			throwawayKey:    "true",
+			"limits.memory": "8GiB",
+			expiresKey:      now.Add(20 * time.Hour).Format(time.RFC3339),
+			mode.HoldKey:    now.Add(time.Hour).Format(time.RFC3339),
+		}
+		starting := idleUnheld
+		starting.CreatedAt = now.Add(-5 * time.Minute)
+		paused := idleUnheld
+		paused.Status = "Frozen"
+
+		for _, tc := range []struct {
+			name    string
+			inst    instance
+			execRes Result
+			execErr error
+		}{
+			{name: "held idle throwaway", inst: held, execRes: Result{Stdout: ""}},
+			{name: "starting within grace", inst: starting, execRes: Result{Stdout: ""}},
+			{name: "paused GPU box", inst: paused},
+			{name: "running job", inst: idleUnheld, execRes: Result{Stdout: "gpu-old.1\n"}},
+			{name: "unverified exec failure", inst: idleUnheld, execRes: Result{Code: 1}, execErr: fmt.Errorf("exec EOF")},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				cand, pick := probeWith(t, tc.inst, tc.execRes, tc.execErr, pickRequest{Size: gpu, ExplicitSize: true, Queue: true})
+				if !slices.Equal(cand.GPUHolders, []string{tc.inst.Name}) || pick.Action != pickQueue || pick.Why != refusedGPUBusy {
+					t.Fatalf("%s: holders=%v pick=%+v; want busy + queue gpu-busy", tc.name, cand.GPUHolders, pick)
+				}
+			})
+		}
+	})
+}
+
 func TestProbeFleetCandidatePooledThrowawayRequiresIdleAndPoolEnabled(t *testing.T) {
 	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
 	origin := "https://github.com/example/repo.git"
 	med := pickTestSize(t, "medium")
 	repoKey := throwawayRepoKey(origin, med)
+	keys := map[string]string{
+		mode.ProjectModeKey: "full",
+		"limits.instances":  "1",
+		gpuKey:              "allow",
+	}
 
 	makeInsts := func(exp string) string {
 		insts := []instance{{
@@ -303,14 +518,11 @@ func TestProbeFleetCandidatePooledThrowawayRequiresIdleAndPoolEnabled(t *testing
 			a := newApp()
 			a.Now = func() time.Time { return now }
 			a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
-				joined := strings.Join(cmd.Args, " ")
-				switch joined {
-				case "--project agents list pc: --format json":
+				if strings.Join(cmd.Args, " ") == "--project agents list pc: --format json" {
 					return Result{Stdout: makeInsts(tc.exp)}, nil
-				case "--project agents project get pc:agents user.agent-box.mode":
-					return Result{Stdout: "full"}, nil
-				case "--project agents project get pc:agents limits.instances":
-					return Result{Stdout: "1"}, nil
+				}
+				if res, ok := respondHealthyProject(cmd, keys, "{}"); ok {
+					return res, nil
 				}
 				if len(cmd.Args) >= 5 && cmd.Args[2] == "exec" && cmd.Args[3] == "pc:repo-abcd" {
 					return Result{Stdout: tc.keptScriptOut}, nil

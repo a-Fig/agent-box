@@ -49,7 +49,12 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 	hostApp := a.jobHostApp(host)
 	hostApp.Warn = func(string) {}
 
-	p := hostApp.probeHostStatus(hostCtx, targetBox)
+	p := hostApp.probeHostStatus(hostCtx, hostProbeOpts{
+		repoName:   targetBox,
+		gpuRequest: sz.GPU,
+		exceptGPU:  req.Box,
+		strictCaps: true,
+	})
 	// If the Incus probe timed out after connecting, capacity is incomplete:
 	// fail closed rather than treating partial caps as unlimited.
 	if p.report.Reachable && hostCtx.Err() != nil {
