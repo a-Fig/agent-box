@@ -306,8 +306,9 @@ type State struct {
 	Jobs     []Job     `json:"jobs"`
 	// Queue reports whether this boxd accepts queued jobs (POST /api/queue).
 	// Absent or false means no fleet queue capability.
-	Queue bool      `json:"queue,omitempty"`
-	Now   time.Time `json:"now"`
+	Queue   bool        `json:"queue,omitempty"`
+	Updates *UpdateInfo `json:"updates,omitempty"`
+	Now     time.Time   `json:"now"`
 }
 
 // FinishedInState is how many finished jobs State.Jobs keeps.

@@ -105,3 +105,22 @@ func TestLatestWithNoStableRelease(t *testing.T) {
 		t.Fatalf("ByTag err = %v", err)
 	}
 }
+
+func TestStableTag(t *testing.T) {
+	for _, c := range []struct {
+		tag  string
+		want bool
+	}{
+		{"v0.3.0", true},
+		{"v1.12.4", true},
+		{"v0.3.1-nightly.20261125.1", false},
+		{"v0.0.0-test.1", false},
+		{"", false},
+		{"v0.3", false},
+		{"0.3.0", false},
+	} {
+		if got := StableTag(c.tag); got != c.want {
+			t.Errorf("StableTag(%q) = %t, want %t", c.tag, got, c.want)
+		}
+	}
+}
