@@ -5,7 +5,7 @@
 
 import { clock } from "./dom.js";
 
-export { S, api, post, start, retryNow, changed, setChanged, toast, jobsOf, machineOf, boxOf, trayAlive, RETRY_MS };
+export { S, api, post, applyUpdates, start, retryNow, changed, setChanged, toast, jobsOf, machineOf, boxOf, trayAlive, RETRY_MS };
 
 const RETRY_MS = 10000;
 const TRAY_STALE_MS = 90000; // dash.TrayStaleAfter
@@ -62,6 +62,14 @@ async function api(path, opts = {}) {
 // without a preflight that boxd never grants.
 function post(path, body) {
   return api(path, { method: "POST", body: JSON.stringify(body || {}), headers: { "Content-Type": "application/json", "X-Agent-Box": "1" } });
+}
+
+function applyUpdates(info) {
+  const at = info?.checkedAt;
+  const last = S.updates?.checkedAt;
+  // Both paths carry UTC timestamps from boxd. Drop the trailing Z so whole
+  // seconds sort before fractional seconds, and keep precision past milliseconds.
+  if (at && (!last || at.slice(0, -1) > last.slice(0, -1))) S.updates = info;
 }
 
 function applyState(st) {
@@ -125,7 +133,7 @@ function openStream() {
   on("box-gone", (b) => S.boxes.delete(b.machine + "/" + b.name));
   on("job", (j) => S.jobs.set(j.key, j));
   on("job-gone", (j) => S.jobs.delete(j.key));
-  on("updates", (u) => (S.updates = u));
+  on("updates", applyUpdates);
   // On a drop the page starts over from the state, after a breath, so a stream that keeps
   // failing doesn't spin.
   es.onerror = () => {

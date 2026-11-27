@@ -38,6 +38,9 @@ function versions(m, named) {
 function drift(b, t, trayUp) {
   if (!b || !t || !b.commit || !t.commit || (b.commit === t.commit && (b.tag || "") === (t.tag || ""))) return null;
   const kb = tagKey(b.tag), kt = tagKey(t.tag);
+  if ((b.tag && !kb) || (t.tag && !kt)) {
+    return { text: "boxd and tray are different builds", why: "The order of these builds is unknown." };
+  }
   // A dev build (no release tag) never updates itself; the release beside it can't be ordered
   // against it.
   if (!kb && !kt) return { text: "boxd and tray are different builds", why: "Neither is a release, so neither updates itself: build both from the same commit, or install a release." };
@@ -75,10 +78,9 @@ const cmpKey = (a, b) => a.reduce((c, v, i) => c || Math.sign(v - b[i]), 0);
 // How one reported build compares to the latest stable release (updates: { latest, checkedAt }).
 // Uses the same tag order as internal/update.After: a nightly of vX.Y.Z is behind vX.Y.Z.
 // Returns { label, cls, why } for a reported build, or null when no build is reported.
-function releaseStatus(v, updates, { isTray = false, trayUp = true } = {}) {
+function releaseStatus(v, updates) {
   if (!v || !v.commit) return null;
-  const kv = tagKey(v.tag);
-  if (!kv) {
+  if (!v.tag) {
     return {
       label: "dev build",
       cls: "badge-outline",
@@ -99,12 +101,16 @@ function releaseStatus(v, updates, { isTray = false, trayUp = true } = {}) {
       why: "No stable release has been published on GitHub yet.",
     };
   }
+  // The release workflow also publishes custom prereleases. Their version
+  // numbers suffice to compare them with a stable release.
+  const prerelease = /^v(\d+)\.(\d+)\.(\d+)-[0-9A-Za-z.-]+$/.exec(v.tag);
+  const kv = prerelease ? [...prerelease.slice(1).map(Number), 0, 0, 0] : tagKey(v.tag);
   const kl = tagKey(updates.latest);
-  if (!kl) {
+  if (!kv || kl?.[3] !== 1) {
     return {
       label: "unknown",
       cls: "badge-outline",
-      why: "The latest stable release tag couldn't be compared.",
+      why: "This build couldn't be compared with the latest stable release.",
     };
   }
   const c = cmpKey(kv, kl);
@@ -116,19 +122,16 @@ function releaseStatus(v, updates, { isTray = false, trayUp = true } = {}) {
     };
   }
   if (c < 0) {
-    const how = isTray && !trayUp
-      ? "The tray isn't running, so it won't update until it starts."
-      : "Follows the stable channel and installs newer stable releases at its hourly check.";
     return {
       label: "update available",
       cls: "badge-warn",
-      why: "Behind the latest stable release (" + updates.latest + "). " + how,
+      why: "Behind the latest stable release (" + updates.latest + ").",
     };
   }
   return {
     label: "ahead of stable",
     cls: "badge-info",
-    why: "Newer than the latest stable release (" + updates.latest + "). Stable updates won't downgrade it.",
+    why: "Newer than the latest stable release (" + updates.latest + ").",
   };
 }
 

@@ -6,7 +6,7 @@
 // mode on Overview or in the tray, the caps and times in the host's setup.
 
 import { h, icon, bytes, dur, timeEl } from "./dom.js";
-import { S, post, trayAlive, changed } from "./store.js";
+import { S, post, applyUpdates, trayAlive, changed } from "./store.js";
 import { hint } from "./tip.js";
 import { section, modeLabel, MODE_HINTS } from "./views.js";
 import { drift, releaseStatus } from "./versions.js";
@@ -94,9 +94,7 @@ async function checkUpdates() {
   checkErr = "";
   changed();
   try {
-    const info = await post("/api/updates/check");
-    // An event from a newer check in another tab can arrive before this response.
-    if (!S.updates?.checkedAt || Date.parse(info.checkedAt) > Date.parse(S.updates.checkedAt)) S.updates = info;
+    applyUpdates(await post("/api/updates/check"));
   } catch (e) {
     checkErr = e.message || "Couldn't check for updates.";
   } finally {
@@ -105,9 +103,9 @@ async function checkUpdates() {
   }
 }
 
-function statusBadge(st) {
+function statusBadge(st, key) {
   if (!st) return null;
-  return h("span", hint(st.why, { class: "badge " + st.cls }, true), st.label);
+  return h("span", hint(st.why, { class: "badge " + st.cls }, key), st.label);
 }
 
 function latestRow(machineId) {
@@ -138,16 +136,16 @@ function updates(m) {
   const alive = trayAlive(m);
   const note = drift(m.boxd, m.tray, alive);
   const boxdStatus = releaseStatus(m.boxd, S.updates);
-  const trayStatus = releaseStatus(m.tray, S.updates, { isTray: true, trayUp: alive });
+  const trayStatus = releaseStatus(m.tray, S.updates);
   return [
     latestRow(m.id),
     row(
-      ["boxd", statusBadge(boxdStatus)],
+      ["boxd", statusBadge(boxdStatus, m.id + "/boxd/release-status")],
       m.boxd?.commit ? "The server behind this page." : "This server hasn't reported its build.",
       m.boxd?.commit ? buildCell(m.boxd, "running since") : h("span", { class: "badge badge-outline" }, "unknown"),
     ),
     row(
-      ["Tray", statusBadge(trayStatus)],
+      ["Tray", statusBadge(trayStatus, m.id + "/tray/release-status")],
       m.tray?.commit ? "Applies the mode on the PC." : "This host hasn't reported a tray build.",
       m.tray?.commit ? buildCell(m.tray, "this build since") : h("span", { class: "badge badge-outline" }, "not reporting"),
     ),
