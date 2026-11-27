@@ -102,6 +102,7 @@ func (s *server) routes() http.Handler {
 	api("POST /api/boxes/{name}/extend", s.control(s.handleExtend))
 	api("POST /api/refusals", s.control(s.handleRefusal))
 	api("POST /api/jobs/ended", s.control(s.handleJobEnded))
+	api("POST /api/updates/check", s.control(s.handleUpdatesCheck))
 	api("POST /api/queue/{job}/cancel", s.control(s.handleQueueCancel))
 	api("POST /api/queue/{job}/front", s.control(s.handleQueueFront))
 	api("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +153,7 @@ func (s *server) control(fn func(r *http.Request, body []byte) (int, any, error)
 			writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "couldn't read the body")
 			return
 		}
-		if s.fail && r.URL.Path != "/api/refusals" && r.URL.Path != "/api/jobs/ended" {
+		if r.URL.Path != "/api/refusals" && r.URL.Path != "/api/jobs/ended" && r.URL.Path != "/api/updates/check" && s.fail {
 			writeErr(w, http.StatusBadGateway, dash.CodeIncus, "Incus didn't answer: Post \"http://unix.socket/1.0/instances\": context deadline exceeded")
 			return
 		}

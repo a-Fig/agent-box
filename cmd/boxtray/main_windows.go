@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"runtime"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -102,6 +103,7 @@ func main() {
 		}
 	}
 
+	var releases sync.WaitGroup // Release memory runs in flight
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
 			mgr.SetChosen(m)
@@ -113,20 +115,15 @@ func main() {
 			poke()
 		},
 		release: func() {
+			// Counted before it starts, so a Quit right after it waits for it.
+			releases.Add(1)
 			go func() {
-				// One release at a time; while it runs, no tick, reclaim or
-				// swap call starts a wsl.exe that would bring the distro back.
-				if !mgr.BeginRelease() {
-					lg.Printf("release memory: already running")
-					return
-				}
-				defer mgr.EndRelease()
-				ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
-				defer cancel()
-				if err := hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run(); err != nil {
-					lg.Printf("release memory: wsl --terminate: %v", err)
-				}
-				poke()
+				defer releases.Done()
+				releaseMemory(mgr, func() error {
+					ctx, cancel := context.WithTimeout(context.Background(), wslTerminateTimeout)
+					defer cancel()
+					return hidden(exec.CommandContext(ctx, "wsl.exe", "--terminate", distro)).Run()
+				}, poke, lg.Printf)
 			}()
 		},
 	})
@@ -147,21 +144,56 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hb := newHeartbeat(mgr.Incus, mode.EnforcerTray, lg.Printf)
-	up := autoUpdater(os.Args[1:], lg.Printf, func() {
-		if t == nil {
-			os.Exit(0)
+	restarts := make(chan func() bool, 1)
+	up := autoUpdater(os.Args[1:], lg.Printf, func(start func() bool) {
+		finish := func() bool {
+			if finishUpdate(&releases, mgr, quitTimeout, lg.Printf, start) {
+				cancel()
+				return true
+			}
+			return false
 		}
-		t.close() // the message loop ends, the icon goes, main returns
+		if t == nil {
+			if finish() {
+				os.Exit(0)
+			}
+			return
+		}
+		// The mode loop stays here until the menu has stopped and the handoff
+		// has finished. On a launch failure, both loops can resume.
+		done := make(chan struct{})
+		restarts <- func() bool {
+			defer close(done)
+			return finish()
+		}
+		if !t.requestRestart() {
+			<-restarts
+			return
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
 	})
-	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Maintain: up.maintain}
+	lc := loopCfg{Manager: func() *mode.Manager { return mgr }, Beat: hb.beat, Logf: lg.Printf, Maintain: up.maintain}
 	go supervise(ctx, func() { run(ctx, lc, &winSensors{}, 5*time.Second, wake, report) })
 	lg.Printf("mode loop started")
 
 	if t == nil {
 		select {} // nothing to pump; only a kill ends this
 	}
-	t.loop()
+	for t.loop() {
+		if (<-restarts)() {
+			return
+		}
+		t.restartIcon()
+	}
 	lg.Printf("exit: message loop ended")
+	// Stop ticking, then let a release in flight finish and store the last
+	// pick, so the headless enforcer that takes over applies it (#204).
+	cancel()
+	beforeQuit(&releases, mgr, quitTimeout, lg.Printf)
+	lg.Printf("exit")
 }
 
 // supervise reruns f if it panics, so a bug in one tick can't leave the tray

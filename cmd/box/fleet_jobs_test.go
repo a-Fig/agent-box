@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 func TestFleetJobsListUniqueDestinationsWithPartialResults(t *testing.T) {
 	a, out, west, east := lookupTestApp(t, "work")
+	a.HTTP = func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("dashboard offline") }
 	alias := west
 	alias.Name = "West alias"
 	westAgents := fleetHost{Name: "West agents", Remote: west.Remote, Project: "agents"}
@@ -141,6 +143,7 @@ func TestFleetJobsPreserveDefaultListings(t *testing.T) {
 
 func TestFleetJobsReportUnavailableAndConflictingHosts(t *testing.T) {
 	a, _, west, east := lookupTestApp(t, "work")
+	a.HTTP = func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("dashboard offline") }
 	alias := west
 	alias.Name, alias.DashboardURL = "Conflicting alias", "https://example.com/conflict"
 	writeLookupTestHosts(t, west, alias, east)

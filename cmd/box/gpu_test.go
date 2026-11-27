@@ -107,7 +107,7 @@ func TestGPUNewAndMCP(t *testing.T) {
 	}
 	// A second GPU box is refused while the first holds the GPU.
 	out.Reset()
-	if code := run(context.Background(), a, []string{"new", "--gpu"}, nil); code == 0 || !strings.Contains(out.String(), "the GPU box is in use (box trainer); run on CPU or wait") || len(f.launches) != 1 {
+	if code := run(context.Background(), a, []string{"new", "--gpu"}, nil); code == 0 || !strings.Contains(out.String(), "the GPU box is in use (box trainer)") || len(f.launches) != 1 {
 		t.Errorf("second box new --gpu = %d\n%s", code, out)
 	}
 	var schema struct {
@@ -129,7 +129,7 @@ func TestGPUInUseExits75(t *testing.T) {
 		return &fakePC{t: t, mode: "shared", running: "other-1234.20261123-110000-beef\n",
 			insts: []instance{{Name: "other-1234", Status: "Running", Config: gpuConfig(throwawayKey, "true")}}}
 	}
-	want := "box: the GPU box is in use (job other-1234.20261123-110000-beef); run on CPU or wait\n"
+	want := "box: refused: the GPU box is in use (job other-1234.20261123-110000-beef); nothing started\n"
 
 	f := busy(t)
 	a, out := testApp(f)
@@ -432,7 +432,7 @@ func TestGPUHostDetection(t *testing.T) {
 	f := &fakePC{t: t, mode: "shared", project: block}
 	a, out := testApp(f)
 	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"nvidia-smi"}, Size: mode.GPUSize, Queue: true})
-	if err != nil || r.Code != exitPaused || r.Job != "" || len(f.launches) != 0 || !strings.Contains(out.String(), "box: this host has no GPU for boxes") {
+	if err != nil || r.Code != exitPaused || r.Job != "" || len(f.launches) != 0 || !strings.Contains(out.String(), "box: refused: this host has no GPU for boxes") {
 		t.Errorf("Run = %+v, %v, %d launches\n%s", r, err, len(f.launches), out)
 	}
 	if _, err := a.New(context.Background(), "", time.Hour, mode.GPUSize, ""); !isTempFail(err) || len(f.launches) != 0 {

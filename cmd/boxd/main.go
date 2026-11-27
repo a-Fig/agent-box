@@ -22,6 +22,7 @@ import (
 	"github.com/a-Fig/agent-box/internal/boxd"
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
+	"github.com/a-Fig/agent-box/internal/update"
 	"github.com/a-Fig/agent-box/internal/version"
 )
 
@@ -77,7 +78,11 @@ func main() {
 	}
 	go w.Run(ctx, cfg.CoolIdleThrowaways, cfg.ReuseThrowaways)
 
-	srv := &boxd.Server{W: w, ReuseThrowaways: cfg.ReuseThrowaways}
+	srv := &boxd.Server{
+		W:               w,
+		Updates:         &boxd.UpdateChecker{Lookup: update.Client{}, BaseCtx: ctx},
+		ReuseThrowaways: cfg.ReuseThrowaways,
+	}
 	if *page != "" {
 		srv.Page = os.DirFS(*page)
 	}

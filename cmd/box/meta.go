@@ -245,16 +245,21 @@ func (a *App) turnAway(ctx context.Context, q queueRun, msg string, cause func(c
 		why := cause(cctx)
 		cancel()
 		if queueable(why, q.sz) {
-			r, ok, qmsg := a.enqueue(ctx, q)
-			if ok {
+			r, qmsg, _ := a.enqueue(ctx, q)
+			if qmsg == "" {
 				return r
 			}
 			msg += "; not queued: " + qmsg
 		}
 		cause = func(context.Context) string { return why }
 	}
+	detail := a.capacityHint(ctx, q.sz, q.o.Box, q.limits)
+	if detail != nil {
+		msg = "refused: " + msg + "; nothing started"
+	}
 	a.refuse(ctx, msg, q.info, cause)
-	return JobResult{State: statePaused, Code: exitPaused}
+	a.printCapacity(detail)
+	return JobResult{State: statePaused, Code: exitPaused, Capacity: detail}
 }
 
 // refuse prints msg and tells boxd the cause, as a best effort: errors are
@@ -271,15 +276,15 @@ func (a *App) refuse(ctx context.Context, msg string, m jobMeta, cause func(cont
 	if why == "" {
 		return
 	}
-	host := a.pcHost(ctx)
-	if host == "" {
+	address := a.boxdURL(ctx, "/api/refusals")
+	if address == "" {
 		return
 	}
 	b, err := json.Marshal(refusal{Why: why, Reason: m.Reason, Size: m.Size, GPU: m.GPU, Repo: m.Repo, Agent: m.Agent.Display})
 	if err != nil {
 		return
 	}
-	a.Post(ctx, "https://"+host+"/api/refusals", b)
+	a.Post(ctx, address, b)
 }
 
 // tailWriter passes writes through and keeps the last dash.TailBytes, the tail boxd keeps.

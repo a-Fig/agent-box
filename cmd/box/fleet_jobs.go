@@ -7,39 +7,47 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/a-Fig/agent-box/internal/dash"
 )
 
-// listJobs extends the running-box scan to configured destinations. An explicit
-// box name still means a box on the default host.
+// listJobs scans guest jobs and configured queues. An explicit box name
+// limits the guest scan to the default host.
 func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
-	if box != "" {
-		return a.Jobs(ctx, box)
-	}
 	hosts, err := a.configuredHosts()
 	if err != nil {
 		return nil, err
 	}
 	if len(hosts) == 0 {
-		return a.Jobs(ctx, "")
+		return a.Jobs(ctx, box)
 	}
 
 	type listing struct {
-		host     fleetHost
-		bare     bool
-		jobs     []JobInfo
-		warnings []string
-		err      error
+		host      fleetHost
+		bare      bool
+		jobs      []JobInfo
+		queueJobs []JobInfo
+		warnings  []string
+		err       error
 	}
 	defaultHost := fleetHost{Name: a.Remote, Remote: a.Remote, Project: a.Project}
 	defaultKey := [2]string{a.Remote, a.Project}
 	seen := make(map[[2]string]bool, len(hosts)+1)
 	lists := make([]listing, 0, len(hosts)+1)
-	for _, host := range append(hosts, defaultHost) {
+	for i, host := range append(hosts, defaultHost) {
 		key := [2]string{host.Remote, host.Project}
+		if box != "" && key != defaultKey {
+			continue
+		}
 		if !seen[key] {
 			seen[key] = true
-			lists = append(lists, listing{host: host, bare: key == defaultKey})
+			lists = append(lists, listing{host: host, bare: i == len(hosts)})
 		}
+	}
+
+	// A filtered legacy scan keeps its original output and errors.
+	if box != "" && lists[0].bare {
+		return a.Jobs(ctx, box)
 	}
 
 	var wg sync.WaitGroup
@@ -50,21 +58,28 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 			tag, err := jobHostTag(host)
 			if err == nil {
 				// A row should only advertise IDs that the reader can resolve.
-				_, err = resolveJobHost(tag, fleetHost{}, hosts)
+				resolved, resolveErr := resolveJobHost(tag, fleetHost{}, hosts)
+				host.DashboardURL, err = resolved.DashboardURL, resolveErr
 			}
 			if err != nil {
 				result.err = err
 				continue
 			}
 		}
+		app := a.jobHostApp(host)
+		app.Warn = func(msg string) { result.warnings = append(result.warnings, msg) }
 		wg.Go(func() {
 			hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
 			defer cancel()
-			app := *a
-			app.Remote, app.Project = host.Remote, host.Project
-			app.Warn = func(msg string) { result.warnings = append(result.warnings, msg) }
-			result.jobs, result.err = app.Jobs(hostCtx, "")
+			result.jobs, result.err = app.Jobs(hostCtx, box)
 		})
+		if box == "" && !result.bare && !app.boxdDisabled {
+			wg.Go(func() {
+				hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
+				defer cancel()
+				result.queueJobs = app.listQueueJobs(hostCtx, host.DashboardURL)
+			})
+		}
 	}
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
@@ -78,26 +93,34 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 		label := fmt.Sprintf("%s (%s/%s)", host.Name, host.Remote, host.Project)
 		if result.err != nil {
 			failures = append(failures, fmt.Errorf("listing jobs on %s: %w", label, result.err))
-			continue
 		}
 		for _, msg := range result.warnings {
 			a.warn(fmt.Sprintf("box: %s: %s", label, strings.TrimPrefix(msg, "box: ")))
 		}
-		for _, job := range result.jobs {
-			// Existing default-host jobs still use bare IDs in local state.
+		seen := make(map[string]bool, len(result.jobs)+len(result.queueJobs))
+		for _, job := range append(result.jobs, result.queueJobs...) {
+			if seen[job.Job] {
+				continue
+			}
+			seen[job.Job] = true
 			if !result.bare {
 				id, err := qualifyJobID(host, job.Job)
 				if err != nil {
 					a.warn(fmt.Sprintf("box: listing jobs on %s: %v", label, err))
 					continue
 				}
-				job.Job = id.ID
+				// Keep legacy IDs only when there is no qualified record.
+				legacy := [2]string{host.Remote, host.Project} == defaultKey &&
+					a.hasJobRecord(id.Bare) && !a.hasJobRecord(id.ID)
+				if !legacy {
+					job.Job = id.ID
+				}
 			}
 			job.Host = host.Name
 			jobs = append(jobs, job)
 		}
 	}
-	if len(failures) == len(lists) {
+	if len(failures) == len(lists) && len(jobs) == 0 {
 		return nil, errors.Join(failures...)
 	}
 	for _, err := range failures {
@@ -105,4 +128,25 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 	}
 	slices.SortStableFunc(jobs, func(a, b JobInfo) int { return b.Started.Compare(a.Started) })
 	return jobs, nil
+}
+
+func (a *App) hasJobRecord(job string) bool {
+	return a.StateDir != "" && (a.exists(job, ".json") || a.exists(job, ".result"))
+}
+
+// listQueueJobs recovers jobs whose submission reply was lost, even when
+// they started or ended before Incus shows a guest log. Boxd bounds the
+// finished jobs in this snapshot.
+func (a *App) listQueueJobs(ctx context.Context, dashboardURL string) []JobInfo {
+	state, ok := a.readFleetBoxdState(ctx, dashboardURL)
+	if !ok {
+		return nil
+	}
+	var jobs []JobInfo
+	for _, j := range state.Jobs {
+		if j.State == dash.JobQueued || j.QueuedAt != nil {
+			jobs = append(jobs, JobInfo{Job: j.Box + "." + j.ID, Box: j.Box, State: j.State, Code: j.Exit, Started: j.StartedAt})
+		}
+	}
+	return jobs
 }

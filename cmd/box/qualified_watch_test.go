@@ -41,7 +41,7 @@ func TestQualifiedWatchRestartsOnSavedHosts(t *testing.T) {
 		host fleetHost
 	}{{westID, west}, {eastID, east}} {
 		rec, err := a.readWatchRecord(tc.id)
-		want := jobLocator{Remote: tc.host.Remote, Project: tc.host.Project, DashboardURL: tc.host.DashboardURL}
+		want := jobLocator{Name: tc.host.Name, Remote: tc.host.Remote, Project: tc.host.Project, DashboardURL: tc.host.DashboardURL}
 		if err != nil || rec.Host == nil || *rec.Host != want || rec.Thread != "thread-owner" {
 			t.Fatalf("record for %s = %+v, %v", tc.id, rec, err)
 		}
@@ -145,8 +145,15 @@ func TestQualifiedWatchRestartsOnSavedHosts(t *testing.T) {
 		t.Fatalf("queue requests %d, end reports %d, follows %v", queueCalls, endReports, follows)
 	}
 	if pusher.count() != 2 || pusher.sent[0].thread != "thread-owner" || pusher.sent[1].thread != "thread-owner" ||
-		!strings.Contains(pusher.sent[0].msg, westID+" ended, exit 4") || !strings.Contains(pusher.sent[1].msg, eastID+" ended, exit 7") {
+		!strings.Contains(pusher.sent[0].msg, westID+" on "+west.Name+" ended, exit 4") ||
+		!strings.Contains(pusher.sent[1].msg, eastID+" on "+east.Name+" ended, exit 7") {
 		t.Fatalf("wrong delivery records: %v", pusher.sent)
+	}
+	for id, host := range map[string]string{westID: west.Name, eastID: east.Name} {
+		end, ok := restarted.recordedEnd(id)
+		if !ok || end.Host != host {
+			t.Fatalf("recorded end for %s = %+v, %v, want host %s", id, end, ok, host)
+		}
 	}
 	for _, ext := range []string{".json", ".result", ".ended", ".notified", ".watch", ".sending"} {
 		if restarted.exists(testBareJobID, ext) {

@@ -20,6 +20,7 @@ type fake struct {
 	project  map[string]string
 	config   map[string]map[string]string // instance -> its own config
 	logCap   bool                         // log project limits.memory writes (only cap tests want them)
+	onSet    func(k, v string)            // called after a project key is written
 }
 
 func newFake(kv ...string) *fake {
@@ -138,6 +139,9 @@ func (f *fake) SetProjectConfig(_ context.Context, k, v string) error {
 		return err
 	}
 	f.project[k] = v
+	if f.onSet != nil {
+		f.onSet(k, v)
+	}
 	return nil
 }
 

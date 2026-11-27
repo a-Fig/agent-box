@@ -87,10 +87,14 @@ func runHeadless() {
 			m.Reclaim = mode.CgroupReclaim{Run: wslRoot} // swap limits are part of the job
 			return m
 		},
-		Idle:     trayRunning,
-		Beat:     hb.beat,
-		Logf:     lg.Printf,
-		Maintain: autoUpdater(os.Args[1:], lg.Printf, func() { os.Exit(0) }).maintain,
+		Idle: trayRunning,
+		Beat: hb.beat,
+		Logf: lg.Printf,
+		Maintain: autoUpdater(os.Args[1:], lg.Printf, func(start func() bool) {
+			if start() {
+				os.Exit(0)
+			}
+		}).maintain,
 	}
 	sl := &statusLog{logf: lg.Printf}
 	ctx := context.Background()

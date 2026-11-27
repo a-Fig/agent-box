@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -148,4 +151,148 @@ func TestHeadlessStandsAsideForTheTrayAndResumes(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// My PC, then Release memory, then Quit at once: Quit waits for the release
+// goroutine (which has not even begun) and the project ends with my-pc (#204).
+func TestQuitRightAfterReleaseStoresThePick(t *testing.T) {
+	inc := &recIncus{}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	mgr.SetChosen(mode.MyPC)
+	var releases sync.WaitGroup
+	start := make(chan struct{})
+	terminated := false
+	releases.Add(1)
+	go func() {
+		defer releases.Done()
+		<-start // the goroutine is slow to begin
+		releaseMemory(mgr, func() error { terminated = true; return nil }, func() {}, t.Logf)
+	}()
+	go func() { time.Sleep(50 * time.Millisecond); close(start) }()
+	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	if !terminated {
+		t.Fatal("Quit returned before the release terminated the distro")
+	}
+	if inc.count(mode.ProjectChosenKey+`={"mode":"`+string(mode.MyPC)+`"`) != 1 {
+		t.Fatalf("writes %q, want my-pc stored once", inc.snapshot())
+	}
+}
+
+// A pick made while the release runs, after its write, is stored by Quit.
+func TestQuitStoresAPickMadeDuringTheRelease(t *testing.T) {
+	inc := &recIncus{}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	mgr.SetChosen(mode.MyPC)
+	var releases sync.WaitGroup
+	releases.Add(1)
+	go func() {
+		defer releases.Done()
+		releaseMemory(mgr, func() error { mgr.SetChosen(mode.Shared); return nil }, func() {}, t.Logf)
+	}()
+	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	got := inc.snapshot()
+	if len(got) == 0 || !strings.HasPrefix(got[len(got)-1], mode.ProjectChosenKey+`={"mode":"shared"`) {
+		t.Fatalf("writes %q, want shared last", got)
+	}
+}
+
+func TestQuitWithNothingPendingExitsAtOnce(t *testing.T) {
+	inc := &noIncus{}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	var releases sync.WaitGroup
+	start := time.Now()
+	beforeQuit(&releases, mgr, 5*time.Second, t.Logf)
+	if d := time.Since(start); d > time.Second || inc.calls != 0 {
+		t.Fatalf("took %s with %d Incus calls, want at once with none", d, inc.calls)
+	}
+}
+
+// failIncus fails its first n project writes, as Incus does while the distro boots.
+type failIncus struct {
+	recIncus
+	n int
+}
+
+func (f *failIncus) SetProjectConfig(ctx context.Context, k, v string) error {
+	f.mu.Lock()
+	if f.n > 0 {
+		f.n--
+		f.mu.Unlock()
+		return errors.New("incus is starting")
+	}
+	f.mu.Unlock()
+	return f.recIncus.SetProjectConfig(ctx, k, v)
+}
+
+// Quit right after a release, while Incus is still coming up: the pick is
+// retried until it is stored, within Quit's limit.
+func TestQuitRetriesThePickWhileIncusStarts(t *testing.T) {
+	inc := &failIncus{n: 2}
+	mgr := mode.New(inc, mode.Full)
+	mgr.Handshake = true
+	mgr.SetChosen(mode.MyPC)
+	var releases sync.WaitGroup
+	beforeQuit(&releases, mgr, 10*time.Second, t.Logf)
+	if inc.count(mode.ProjectChosenKey+`={"mode":"`+string(mode.MyPC)+`"`) != 1 {
+		t.Fatalf("writes %q, want my-pc stored once", inc.snapshot())
+	}
+}
+
+func TestQuitRetryGetsItsOwnDeadlineAfterSlowRelease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inc := &failIncus{n: 2} // fail before termination and on the first attempt after it
+		mgr := mode.New(inc, mode.Full)
+		mgr.Handshake = true
+		mgr.SetChosen(mode.MyPC)
+		var releases sync.WaitGroup
+		releases.Add(1)
+		go func() {
+			defer releases.Done()
+			releaseMemory(mgr, func() error {
+				time.Sleep(quitTimeout - 500*time.Millisecond)
+				return nil
+			}, func() {}, t.Logf)
+		}()
+		beforeQuit(&releases, mgr, quitTimeout, t.Logf)
+		if inc.count(mode.ProjectChosenKey+`={"mode":"mypc"`) != 1 {
+			t.Fatalf("writes %q, want My PC stored on retry", inc.snapshot())
+		}
+	})
+}
+
+func TestUpdateStartsReplacementAfterQuit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inc := &recIncus{}
+		mgr := mode.New(inc, mode.Full)
+		mgr.Handshake = true
+		var releases sync.WaitGroup
+		completed := make(chan struct{})
+		releases.Add(1)
+		go func() {
+			defer releases.Done()
+			releaseMemory(mgr, func() error {
+				time.Sleep(25 * time.Second) // longer than v0.1.7's mutex wait
+				mgr.SetChosen(mode.MyPC)
+				return nil
+			}, func() {}, t.Logf)
+			close(completed)
+		}()
+		launched := finishUpdate(&releases, mgr, quitTimeout, t.Logf, func() bool {
+			select {
+			case <-completed:
+			default:
+				t.Error("started the replacement while Release memory was running")
+			}
+			if inc.count(mode.ProjectChosenKey+`={"mode":"mypc"`) != 1 {
+				t.Errorf("started the replacement before My PC was stored: %q", inc.snapshot())
+			}
+			return true
+		})
+		if !launched {
+			t.Fatal("replacement was not launched")
+		}
+	})
 }
