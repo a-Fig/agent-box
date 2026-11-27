@@ -31,6 +31,7 @@ const (
 type JobInfo struct {
 	Job      string    `json:"job"`
 	Box      string    `json:"box"`
+	Host     string    `json:"host,omitempty"`
 	State    string    `json:"state"`
 	Code     *int      `json:"exitCode,omitempty"` // when done
 	Started  time.Time `json:"started"`
@@ -165,8 +166,15 @@ func printJobs(a *App, jobs []JobInfo) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
+	fleet := jobs[0].Host != ""
+	if fleet {
+		fmt.Fprint(w, "HOST\t")
+	}
 	fmt.Fprintln(w, "JOB\tSTATE\tSTARTED\tLOG")
 	for _, j := range jobs {
+		if fleet {
+			fmt.Fprintf(w, "%s\t", j.Host)
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%dB\n", j.Job, j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
 	}
 	return w.Flush()
@@ -228,7 +236,11 @@ func (a *App) LogPage(ctx context.Context, job string, offset, limit int64) (Pag
 
 // pageHead is the one-line summary of a log page.
 func (p Page) pageHead() string {
-	s := fmt.Sprintf("job %s on box %s: %s, log bytes %d-%d of %d", p.Job, p.Box, p.stateText(), p.Offset, p.NextOffset, p.LogBytes)
+	location := p.Box
+	if p.Host != "" {
+		location += " on " + p.Host
+	}
+	s := fmt.Sprintf("job %s on box %s: %s, log bytes %d-%d of %d", p.Job, location, p.stateText(), p.Offset, p.NextOffset, p.LogBytes)
 	if p.More {
 		s += fmt.Sprintf("; next offset %d", p.NextOffset)
 	}
@@ -242,7 +254,12 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("bad job id %q", job)
 	}
 	box, _, _ := strings.Cut(job, ".")
-	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", cancelScript(job)}})
+	return a.cancelJob(ctx, jobID{ID: job, Bare: job, Box: box})
+}
+
+func (a *App) cancelJob(ctx context.Context, id jobID) (cancelled bool, code int, err error) {
+	job, box := id.ID, id.Box
+	res, err := a.incus(ctx, Cmd{Args: []string{"exec", a.target(box), "--", "bash", "-c", cancelScript(id.Bare)}})
 	if err != nil {
 		return false, 0, err
 	}
@@ -262,7 +279,7 @@ func (a *App) Cancel(ctx context.Context, job string) (cancelled bool, code int,
 		return false, 0, fmt.Errorf("cancel %s: bad exit code %q", job, f[1])
 	}
 	if f[0] == "cancelled" {
-		a.markIdle(ctx, box, job)
+		a.markIdle(ctx, box, id.Bare)
 		a.markNotified(job, "cancel") // the agent cancelled it: no push of its end
 	}
 	return f[0] == "cancelled", code, nil
@@ -414,19 +431,26 @@ func localPullName(name string) bool {
 }
 
 // Pull copies a file or directory from a box into the local directory
-// local, as local/<base name>. target is a job ID or a box name. A relative
+// local, as local/<base name>. target is a qualified or bare job ID, or a box name. A relative
 // remote path starts at the job's checkout (or the box's only checkout).
 // Nothing is written outside local: the copy lands in a staging directory
 // inside it, symlinks and special files are dropped, and an existing
 // local/<base name> is never replaced.
 func (a *App) Pull(ctx context.Context, target, remote, local string) (string, error) {
-	box, job := target, ""
-	if validJob.MatchString(target) {
-		box, _, _ = strings.Cut(target, ".")
-		job = target
-	} else if !validBox.MatchString(target) {
+	if validBox.MatchString(target) {
+		return a.pull(ctx, target, "", remote, local)
+	}
+	if !validJob.MatchString(target) && !strings.ContainsRune(target, '~') {
 		return "", fmt.Errorf("bad job id or box name %q", target)
 	}
+	lookup, err := a.lookupJob(target)
+	if err != nil {
+		return "", err
+	}
+	return lookup.app.pull(ctx, lookup.id.Box, lookup.id.Bare, remote, local)
+}
+
+func (a *App) pull(ctx context.Context, box, job, remote, local string) (string, error) {
 	if remote == "" || strings.ContainsAny(remote, "\x00\n") {
 		return "", errors.New("give a remote path")
 	}

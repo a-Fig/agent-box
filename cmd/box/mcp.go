@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/a-Fig/agent-box/internal/mask"
 	"io"
-	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
 )
@@ -57,17 +55,17 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var pausedHint = "state refused (exit 75) means box couldn't run it now and nothing started: the PC is busy, paused or out of reach, and the run wasn't queued. Retry later, or with a smaller size if it said no room. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
+var pausedHint = "state refused (exit 75) means nothing started or queued. A capacity result names the limit and may estimate a smaller size that fits. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
 
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
 
 var tools = []tool{
-	{"box_status", `Say in one call whether offloading to the PC is worth it now. The first line is advice like "available: room for 1 large, or 2 medium, or 4 small" or "unavailable: PC is in My PC mode: box run, or box_run with push, would wait in the PC's queue (a GPU run doesn't wait)"; details and structuredContent follow: reachability, mode, box slots, CPUs and RAM per size, whether the GPU is free, and this repo's box with its size and running jobs.`, obj(map[string]any{
+	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length; box_run routes each run to the best host. The advice, available and repo box fields describe the default host.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. With a host registry, box_run picks the best host that can start now (or queues on the best one), names the host in the result, and returns a qualified job ID. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box (and host when routed) and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
@@ -81,7 +79,7 @@ var tools = []tool{
 		"env": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
 			"description": "Environment variables for the command. Boxes are shared: never pass secrets; names containing TOKEN, SECRET, KEY or PASSWORD are refused."},
 	}, "dir", "command", "reason"), jobOutput},
-	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept up to 30 minutes after its job ends (for box_pull), unless another run needs the room. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs, newest first, with state, start time and log size; use it to find a job ID you lost. " + pausedHint, obj(map[string]any{
+	{"box_job", "Get the result of a job started by box_run. With id it waits up to wait (default 10m) and returns the exit code (first line) and output tail; state running means it still runs, so call again. A throwaway box from box_run new is kept up to 30 minutes after its job ends (for box_pull), unless another run needs the room. With offset or limit it doesn't wait: it returns that piece of the log (structuredContent's log), the job's state and nextOffset, so a long log can be read in pieces. Without id it lists jobs newest first on the default and configured hosts. Fleet listings name each host and qualify job IDs outside the default. " + pausedHint, obj(map[string]any{
 		"id":     str("Job ID from box_run. Omit to list jobs."),
 		"wait":   str(`Stop waiting after this long. Default 10m.`),
 		"offset": integer("Read the log from this byte offset, without waiting. Default 0."),
@@ -117,10 +115,15 @@ func sizeEnum() []string {
 var jobOutput = obj(map[string]any{
 	"job":      str("Job ID, for box_job."),
 	"box":      str("Box the job runs in."),
+	"host":     str("Host name for a qualified job ID."),
 	"state":    str("done (exitCode is the command's), running, queued (waiting in the PC's queue), paused (exitCode 75; the job may resume), refused (exitCode 75; nothing started), or empty after an error."),
 	"push":     map[string]any{"type": "boolean", "description": "box_run, state running or queued: the result will arrive as a turn in your thread."},
 	"position": map[string]any{"type": "integer", "description": "State queued: place in line, from 1."},
 	"why":      str("State queued: what it waits for: full (room), gpu-busy, or mypc."),
+	"capacity": obj(map[string]any{
+		"limits":      map[string]any{"type": "array", "items": str("Limiting resource, or unknown.")},
+		"smallerSize": str("Smaller size that appears to fit on the selected host now."),
+	}, "limits"),
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -310,6 +313,9 @@ func pageResult(p Page) map[string]any {
 	if !utf8.ValidString(p.Text) {
 		structured["logBase64"] = base64.StdEncoding.EncodeToString([]byte(p.Text))
 	}
+	if p.Host != "" {
+		structured["host"] = p.Host
+	}
 	res["structuredContent"] = structured
 	return res
 }
@@ -340,7 +346,11 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		head += fmt.Sprintf(", push: %t", *r.Push)
 	}
 	if r.Job != "" {
-		head = fmt.Sprintf("job %s on box %s: %s", r.Job, r.Box, head)
+		location := r.Box
+		if r.Host != "" {
+			location += " on " + r.Host
+		}
+		head = fmt.Sprintf("job %s on box %s: %s", r.Job, location, head)
 	} else if r.Box != "" {
 		head = fmt.Sprintf("box %s: %s", r.Box, head)
 	}
@@ -355,6 +365,7 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	out := struct {
 		Job      string   `json:"job,omitempty"`
 		Box      string   `json:"box,omitempty"`
+		Host     string   `json:"host,omitempty"`
 		State    string   `json:"state,omitempty"`
 		ExitCode *int     `json:"exitCode"` // null while the job is running
 		Push     *bool    `json:"push,omitempty"`
@@ -364,9 +375,10 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Digest   string   `json:"digest,omitempty"`
 		// Claude Code shows structuredContent instead of the text when a
 		// result has both (#33), so what the agent reads is here too.
-		Tail  string `json:"tail"`
-		Error string `json:"error,omitempty"`
-	}{r.Job, r.Box, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, ""}
+		Tail     string          `json:"tail"`
+		Error    string          `json:"error,omitempty"`
+		Capacity *capacityDetail `json:"capacity,omitempty"`
+	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -436,7 +448,10 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 
 	switch p.Name {
 	case "box_status":
-		st := a.Status(ctx, args.Dir)
+		st, err := a.fleetStatus(ctx, args.Dir, false)
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
 		var b strings.Builder
 		writeStatus(&b, st)
 		res := textResult(withWarnings(strings.TrimRight(b.String(), "\n")), false)
@@ -504,16 +519,22 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		queue := push && (args.Queue == nil || *args.Queue) && a.canPush()
 		r, err := a.Run(ctx, RunOpts{Dir: args.Dir, Cmd: []string{args.Command}, New: args.New, Fresh: args.Fresh, Size: args.Size, Wait: wait, Env: args.Env, Timeout: timeout, Reason: reason, Queue: queue})
 		info := jobMeta{Reason: reason, Command: displayCommand([]string{args.Command}), Agent: agentInfo{Worktree: filepath.FromSlash(args.Dir)}}
+		startWatch := func(throwaway, queued bool) bool {
+			if r.fleetHost != nil {
+				return a.startWatchOnHost(info, r.Job, *r.fleetHost, args.Size == mode.GPUSize, throwaway, queued)
+			}
+			return a.startWatch(info, r.Job, args.Size == mode.GPUSize, throwaway, queued)
+		}
 		switch {
 		case err != nil:
 		case r.Job == "" && r.State == statePaused:
 			r.State = stateRefused
 		case r.State == stateQueued:
-			if !a.startWatch(info, r.Job, args.Size == mode.GPUSize, r.throwaway, true) {
+			if !startWatch(r.throwaway, true) {
 				// Nobody would hear when it runs: take it back, and refuse.
-				if cerr := a.cancelQueued(ctx, r.Job); cerr == nil {
+				if cerr := a.cancelQueuedResult(ctx, r); cerr == nil {
 					job := r.Job
-					r = JobResult{State: stateRefused, Code: exitPaused}
+					r = JobResult{Host: r.Host, State: stateRefused, Code: exitPaused, Capacity: r.Capacity}
 					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; nothing ran\n", job)
 					break
 				}
@@ -522,7 +543,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			r.Push = &push
 		case r.Job != "" && (r.State == stateDetached || r.State == statePaused):
 			if push {
-				push = a.startWatch(info, r.Job, args.Size == mode.GPUSize, args.New || args.Fresh, false)
+				push = startWatch(r.throwaway || args.New || args.Fresh, false)
 			}
 			r.Push = &push
 		}
@@ -533,7 +554,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		return jobResult(r, err, log, warnings)
 	case "box_job":
 		if args.ID == "" && args.Offset == nil && args.Limit == nil {
-			jobs, err := a.Jobs(ctx, "")
+			jobs, err := a.listJobs(ctx, "")
 			if err != nil {
 				return textResult(withWarnings(err.Error()), true)
 			}
@@ -546,11 +567,19 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			var b strings.Builder
 			fmt.Fprintf(&b, "%d job(s), %d running\n", len(jobs), running)
 			for _, j := range jobs {
-				fmt.Fprintf(&b, "%s %s, started %s, log %dB\n", j.Job, j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
+				fmt.Fprint(&b, j.Job)
+				if j.Host != "" {
+					fmt.Fprintf(&b, " on %s", j.Host)
+				}
+				fmt.Fprintf(&b, " %s, started %s, log %dB\n", j.stateText(), j.Started.Format(time.RFC3339), j.LogBytes)
 			}
 			res := textResult(withWarnings(strings.TrimRight(b.String(), "\n")), false)
 			res["structuredContent"] = map[string]any{"jobs": append([]JobInfo{}, jobs...), "warnings": append([]string{}, warnings...)}
 			return res
+		}
+		lookup, err := a.lookupJob(args.ID)
+		if err != nil {
+			return textResult(err.Error(), true)
 		}
 		if args.Offset != nil || args.Limit != nil {
 			var off, lim int64
@@ -560,14 +589,14 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 			if args.Limit != nil {
 				lim = *args.Limit
 			}
-			pg, err := a.LogPage(ctx, args.ID, off, lim)
+			pg, end, err := lookup.page(ctx, off, lim)
 			if err != nil {
 				// The box can't be read (gone, most likely): its recorded end
 				// is all there is. A bad offset or limit is still an error.
-				if end, ok := a.endedElsewhere(ctx, args.ID); ok && off >= 0 && lim >= 0 && off <= math.MaxInt64-maxPage {
-					box, _, _ := strings.Cut(args.ID, ".")
+				if end != nil {
+					box := lookup.id.Box
 					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
-					return jobResult(JobResult{Job: args.ID, Box: box, State: stateDone, Code: end.Code, Digest: end.Digest}, nil, end.Tail, warnings)
+					return jobResult(JobResult{Job: lookup.id.ID, Box: box, Host: lookup.host, State: stateDone, Code: end.Code, Digest: end.Digest}, nil, end.Tail, warnings)
 				}
 				return textResult(err.Error(), true)
 			}
@@ -577,13 +606,11 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		if a.wasQueued(args.ID) { // still waiting: there is nothing in a box to wait on
-			if j, found, err := a.queuedJob(ctx, args.ID); err == nil && found && j.State == dash.JobQueued {
-				return jobResult(JobResult{Job: args.ID, Box: j.Box, State: stateQueued, Position: j.Position, Why: j.Why}, nil, "", warnings)
-			}
+		if j, queued, err := lookup.queued(ctx); err == nil && queued {
+			return jobResult(JobResult{Job: lookup.id.ID, Box: j.Box, Host: lookup.host, State: stateQueued, Position: j.Position, Why: j.Why}, nil, "", warnings)
 		}
-		r, err := a.Job(ctx, args.ID, wait)
-		a.markRead(args.ID, r, err, "box_job")
+		r, err := lookup.job(ctx, wait)
+		a.markRead(lookup.id.ID, r, err, "box_job")
 		return jobResult(r, err, out.String(), warnings)
 	}
 	return textResult("unknown tool "+p.Name, true)

@@ -151,6 +151,9 @@ var tagRE = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d{8})\.(\d+)
 // vX.Y.Z-test.N (docs/releasing.md), which only installs by hand.
 func ValidTag(tag string) bool { return tagRE.MatchString(tag) }
 
+// StableTag says tag is a stable release tag, vX.Y.Z (not a nightly or test prerelease).
+func StableTag(tag string) bool { return ValidTag(tag) && !strings.Contains(tag, "-") }
+
 // After says release a comes after b. A tag that isn't a release's (a dev build's "") never
 // comes after anything, and anything valid comes after it. A nightly of X.Y.Z comes before
 // X.Y.Z itself.

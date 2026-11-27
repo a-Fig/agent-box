@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,6 +120,37 @@ func TestPooledEvictionAndOldCleanupLoseToClaim(t *testing.T) {
 				t.Fatalf("stale %s changed the owner's config: %v", action, current.Config)
 			}
 		})
+	}
+}
+
+type abortEvictionAfterClaim struct {
+	Incus
+	cancel context.CancelFunc
+}
+
+func (f abortEvictionAfterClaim) SetConfigIf(ctx context.Context, name string, decide func(Instance) map[string]string) (bool, error) {
+	wrote, err := f.Incus.SetConfigIf(ctx, name, decide)
+	if wrote {
+		f.cancel()
+	}
+	return wrote, err
+}
+
+func TestAbortedEvictionLeaseExpiresPromptly(t *testing.T) {
+	r := newQueueRig(t, nil)
+	in := idleFinished(t, r, "kept", t0.Add(-time.Minute), true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.w.Incus = abortEvictionAfterClaim{r.f, cancel}
+	changed, err := r.w.evictPooled(ctx, in.Name, boxUID(in))
+	if changed || !errors.Is(err, context.Canceled) || len(r.f.cli) != 0 {
+		t.Fatalf("cancelled eviction changed=%t, err=%v, CLI %v", changed, err, r.f.cli)
+	}
+	reserved, _ := r.f.instance(in.Name)
+	now := r.c.now()
+	if !jobrun.ThrowawayClaimed(reserved.Config, now) || jobrun.ThrowawayClaimed(reserved.Config, now.Add(jobrun.EvictTTL)) ||
+		reserved.Config[jobrun.ExpiresKey] != in.Config[jobrun.ExpiresKey] {
+		t.Fatalf("wrong eviction lease: %v", reserved.Config)
 	}
 }
 

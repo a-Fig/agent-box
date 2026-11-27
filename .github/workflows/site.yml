@@ -1,0 +1,51 @@
+# Manual deploy only while Project Fano is not yet published publicly.
+# Add a push-to-main trigger when fano.afig.dev is ready to go live.
+name: site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'a-Fig/agent-box' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: site/package-lock.json
+
+      - name: Test static site files
+        run: node --test site/test/files.test.mjs
+
+      - name: Warn if Cloudflare secrets missing
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::warning::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID secret is not set; skipping Wrangler deploy."
+
+      - name: Install Wrangler
+        if: env.HAS_TOKEN == 'true'
+        working-directory: site
+        run: npm ci
+
+      - name: Deploy static assets to Cloudflare
+        if: env.HAS_TOKEN == 'true'
+        working-directory: site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node_modules/.bin/wrangler deploy

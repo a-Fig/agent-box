@@ -6,6 +6,7 @@
     feat(dash): a box opens to show the jobs it ran -->
 
 Closes #
+<!-- Use Closes #N when this PR to main completes an issue. Remove the line otherwise. -->
 
 ## Preview
 <!-- Only for a PR that changes the website (site/). Delete this section, heading and all, when it doesn't.

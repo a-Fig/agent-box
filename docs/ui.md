@@ -105,10 +105,11 @@ the jobs it ran before, each linked to its page (#184, 2026-11-25).
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
 
-**Settings** (2026-11-26, #158): the theme, a control that saves at once in the browser; and, read-only,
-each host's builds of boxd and the tray, its mode and enforcer, the CPUs a box of each size gets in
-Shared and Full, the caps and expiry times, and whether it has a GPU. Nothing there writes to the PC:
-the mode stays on Overview and in the tray, the caps in the host's setup. `Machine.Config` carries
+**Settings** (2026-11-26, #158, #250) holds the browser's theme and shows each host's boxd and tray
+builds, mode and enforcer, sizes, caps, expiry times and GPU availability. **Check for updates**
+compares the running builds with the latest stable release on GitHub. It downloads release
+metadata only. The latest release reads as unknown until the first check succeeds. Boxd keeps
+the last successful result in memory, so it starts fresh after a restart. `Machine.Config` carries
 the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
 
 **History**: charts over a day or a week:
@@ -129,7 +130,7 @@ The same set everywhere, since everywhere is the same page.
 |---|---|
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
-| Delete a box | `incus delete --force`, after a confirm on the page |
+| Delete a box | `incus delete --force`. The page confirms only when a job on that box is starting, running or paused, or ended within the last 2 minutes (#247); otherwise the first click deletes. boxd rechecks on an unconfirmed request and refuses with the warning when work appeared after the page's last update |
 | Extend a box | adds 1h, 4h or 24h to `user.expires` and holds the box until then (`user.box.hold-until`): a job's end or a launch short of room won't take that time (#198) |
 | Move a queued job to the front | reorders boxd's queue (docs/queue.md) |
 | Cancel a queued job | takes it out of the queue and deletes its snapshot, after a confirm on the page |
@@ -323,7 +324,7 @@ JSON over HTTPS, on the same origin as the page.
 The page polls nothing. It opens one `GET /api/events` server-sent-events stream.
 - The first event is `state`, the full `/api/state`.
 - After that, each event carries one whole object, which replaces the old one: `machine`, `box`,
-  `job`, `box-gone` and `job-gone`.
+  `job`, `box-gone`, `job-gone` and `updates`.
 - On reconnect the page starts over from `state`. There is no replay. If `/api/state` fails too, the
   page shows "PC unreachable" and tries again every 10s.
 - A running job's `job` events carry its `tail`, so Overview's log tails are live without a call.
@@ -334,18 +335,19 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 | Method and path | Returns or does |
 |---|---|
-| `GET /api/state` | `{machines, boxes, jobs, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. |
+| `GET /api/state` | `{machines, boxes, jobs, updates, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. `updates` is `{latest, checkedAt}`. Before the first successful check, `checkedAt` is omitted. An empty `latest` after a successful check means there is no stable release. |
 | `GET /api/events` | SSE, as above |
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&uid=&created=&q=&before=&limit=` | `{jobs, more, last}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` with `machine`, `uid` and `created` (its `createdAt`) one box: its jobs as above, and `last`, the one of them that ended last (400 without all four), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
-| `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next; `eof` means nothing more for now. 404 once the box is gone: the page shows the job's kept `tail`. |
+| `GET /api/jobs/{key}/log?offset=` | `{offset, data, eof, paused}`, at most 64KiB per call, cut at a UTF-8 character's start. `offset` is where to ask next. `eof` means nothing more for now. For a finished job whose original box is stopped, boxd reads the file in place and returns `stopped: true` and `logBytes`. `stopped=1` requests only stopped files, with an optional byte `limit` and `dataBase64` when the exact bytes aren't valid UTF-8. Once the box is gone, the page shows the kept `tail`. |
 | `GET /api/history?range=day\|week` | `{range, buckets, segments}`, where each bucket is `{start, jobs: {byResult, byKind, byRepo, byAgent}, boxHours: {bySize}, refusals: {byWhy}, medianSeconds: {byRepo}, memUsed, memCap}`, oldest first. A day has 24 hourly buckets, a week 7 daily ones, each a UTC day. `jobs` counts by start; `memUsed` is the mean of the minute samples. The mode timeline is `segments: [{start, end, mode}]`. |
 | `POST /api/mode` | `{mode}`. 202 with the `Machine`, its `modeRequested` set until the tray applies it. |
 | `POST /api/jobs/{key}/cancel` | 200 with the `Job`, ended with exit 130 |
-| `POST /api/boxes/{name}/delete` | `{createdAt}`. 204. Its running jobs become `lost`. |
+| `POST /api/boxes/{name}/delete` | `{createdAt, confirmed?}`. 204. Its running jobs become `lost`. Without `confirmed`, boxd scans a Running or Frozen box fresh and classifies the scan for that request (read-only; a job can start or freeze after the last poll), rechecks identity after the scan, and answers 409 `needs-confirmation` with `{error, code, warning:{active, recent}}` when that box instance has a starting, running or paused job, or one that ended within 2 minutes. When the scan cannot establish the box's state — a probe failure, or a status besides Running, Frozen or Stopped — and no work is known, it answers 502 `incus` and deletes nothing, so the page retries rather than confirming past an unknown; with `confirmed` it deletes as before. Incus deletes by name: a job or a replacement can arrive after the final recheck and before or during the delete call, and that arrival is not covered (#217) |
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
+| `POST /api/updates/check` | `{}`. Queries GitHub for the latest stable release (read-only, coalescing concurrent clicks), updates `State.updates`, broadcasts `updates` over SSE, and answers 200 with `{latest, checkedAt}` (or 502 `update-check` on lookup failure). |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
 | `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
 | `GET /api/queue/{job}`, `POST /api/queue` | the queue itself, for `box` (docs/queue.md) |

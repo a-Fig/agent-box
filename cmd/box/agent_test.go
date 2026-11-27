@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/digest"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/skills"
 )
 
@@ -283,16 +284,22 @@ func TestMCPLogPagePreservesSplitUTF8(t *testing.T) {
 	}
 }
 
-// A GPU box that My PC stopped can't exec, but its files still pull: the
-// job's .repo names the checkout (#117).
+// A stopped throwaway can't exec, but its files still pull using the
+// job's .repo and checkout ownership marker.
 func TestPullFromStoppedBox(t *testing.T) {
 	job := "my-repo-725d.20261123-120000-0001"
-	f := &fakePC{t: t, insts: []instance{{Name: "my-repo-725d", Status: "Stopped"}},
-		files: map[string]string{"pc:my-repo-725d/work/.box/" + job + ".repo": "my-repo\n"}}
+	f := &fakePC{t: t, insts: []instance{{Name: "my-repo-725d", Status: "Stopped",
+		Config: map[string]string{jobrun.ThrowawayKey: "true", jobrun.ThrowawayStopKey: jobrun.ThrowawayStopped}}},
+		files: map[string]string{"pc:my-repo-725d/work/.box/" + job + ".repo": "my-repo\n",
+			"pc:my-repo-725d/work/.box/my-repo.checkout": job + "\n"}}
 	f.pull = func(src, dst string) { write(t, filepath.Join(dst, "result.txt"), "done\n") }
 	a, out := testApp(f)
-	if _, err := a.Pull(context.Background(), job, "result.txt", t.TempDir()); err != nil {
+	dest := t.TempDir()
+	if _, err := a.Pull(context.Background(), job, "result.txt", dest); err != nil {
 		t.Fatalf("Pull: %v\n%s", err, out)
+	}
+	if data, err := os.ReadFile(filepath.Join(dest, "result.txt")); err != nil || string(data) != "done\n" {
+		t.Fatalf("stopped artifact = %q, %v", data, err)
 	}
 	pulledResult := false
 	for _, p := range f.pulls {
@@ -1168,6 +1175,7 @@ func TestSkill(t *testing.T) {
 }
 
 func TestMCPAgentTools(t *testing.T) {
+	hostsTestPath(t)
 	f := &fakePC{t: t, mode: "shared", project: map[string]string{"limits.instances": "3"}, memory: "4GiB",
 		insts:  []instance{{Name: "my-repo", Status: "Running"}},
 		jobs:   map[string]string{"my-repo": "my-repo.20261123-120000-0001 running - 7\n"},
@@ -1208,6 +1216,9 @@ func TestMCPAgentTools(t *testing.T) {
 	}
 	if s := got[1].Result.Structured; s["slotsFree"] != 2.0 || s["mode"] != "shared" || s["room"] != "2 large, or 2 medium, or 2 small" {
 		t.Errorf("box_status structured = %v", s)
+	}
+	if _, exists := got[1].Result.Structured["hosts"]; exists {
+		t.Error("box_status has a fleet report without a registry")
 	}
 	if l := first(2); l != "1 job(s), 1 running" {
 		t.Errorf("box_job list first line = %q", l)

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -23,16 +24,18 @@ import (
 
 // fakeIncus is a project whose boxes and job files a test sets.
 type fakeIncus struct {
-	mu     sync.Mutex
-	ins    []Instance
-	cfg    map[string]string
-	jobs   map[string][]fakeJob // box -> its job files
-	err    error
-	execs  int
-	cli    []string
-	cliErr func(args []string) error
-	files  map[string]string
-	cancel string // the last cancel script
+	busyOperation bool
+	mu            sync.Mutex
+	ins           []Instance
+	cfg           map[string]string
+	jobs          map[string][]fakeJob // box -> its job files
+	err           error
+	execs         int
+	fileReads     int
+	cli           []string
+	cliErr        func(args []string) error
+	files         map[string]string
+	cancel        string // the last cancel script
 	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
 	expirySets []string
@@ -41,6 +44,31 @@ type fakeIncus struct {
 	runChecks  int                 // running-jobs scripts run
 	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
 	onScan     func(box string)    // runs, under the lock, as a scan of box starts
+}
+
+func (f *fakeIncus) InstanceBusy(ctx context.Context, name string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.busyOperation, ctx.Err()
+}
+
+func (f *fakeIncus) FileRange(ctx context.Context, box, path string, offset, limit int64) ([]byte, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileReads++
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	for _, j := range f.jobs[box] {
+		if path == jobDir+"/"+j.name+".log" {
+			size := int64(len(j.log))
+			if offset >= size {
+				return nil, size, nil
+			}
+			return []byte(j.log[offset:min(offset+limit, size)]), size, nil
+		}
+	}
+	return nil, 0, fs.ErrNotExist
 }
 
 type fakeJob struct {
@@ -205,6 +233,19 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if strings.HasPrefix(script, "# idle stop") {
+		found := false
+		for _, j := range f.jobs[box] {
+			if j.state != "done" {
+				return nil, &ExitError{Code: 4}
+			}
+			found = found || strings.Contains(script, j.name+".log")
+		}
+		if !found {
+			return nil, &ExitError{Code: 3}
+		}
+		return nil, nil
+	}
 	if strings.HasPrefix(script, "test -e ") { // startedInBox, and startJob's own check
 		for _, j := range f.jobs[box] {
 			if strings.Contains(script, "/"+j.name+".log") {
@@ -255,6 +296,13 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 		for i, in := range f.ins {
 			if in.Name == args[1] {
 				f.ins = append(f.ins[:i], f.ins[i+1:]...)
+				break
+			}
+		}
+	case "stop":
+		for i, in := range f.ins {
+			if in.Name == args[1] {
+				f.ins[i].Status = "Stopped"
 				break
 			}
 		}
@@ -586,9 +634,18 @@ func TestAPI(t *testing.T) {
 		return resp.StatusCode
 	}
 	var st dash.State
-	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 {
-		t.Fatalf("state %+v", st)
+	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 || st.Queue {
+		t.Fatalf("state %+v (want Queue=false when W.Queue is nil)", st)
 	}
+	q, err := OpenQueue(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Queue = q
+	if get("/api/state", &st) != 200 || !st.Queue {
+		t.Fatalf("state with queue = %+v, want Queue=true", st)
+	}
+	w.Queue = nil
 	key := url.PathEscape(st.Jobs[0].Key)
 	var chunk dash.LogChunk
 	if code := get("/api/jobs/"+key+"/log?offset=0", &chunk); code != 200 || chunk.EOF || len(chunk.Data) > dash.MaxLogChunk ||

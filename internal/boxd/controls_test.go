@@ -91,11 +91,14 @@ func TestControls(t *testing.T) {
 		t.Fatalf("cancel again: %d %s", code, b)
 	}
 
-	// Delete: only the box the page saw.
+	// Delete: only the box the page saw, and a running job needs the warning first (#247).
 	if code, _ := r.post("/api/boxes/w/delete", `{"createdAt":"2026-11-24T10:00:00Z"}`); code != 409 {
 		t.Fatalf("delete another: %d", code)
 	}
-	if code, b := r.post("/api/boxes/w/delete", `{"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 204 {
+	if code, b := r.post("/api/boxes/w/delete", `{"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 409 || !strings.Contains(string(b), dash.CodeNeedsConfirm) {
+		t.Fatalf("delete unconfirmed with a running job: %d %s", code, b)
+	}
+	if code, b := r.post("/api/boxes/w/delete", `{"createdAt":"`+created.Format(time.RFC3339)+`","confirmed":true}`); code != 204 {
 		t.Fatalf("delete: %d %s", code, b)
 	}
 	if last := r.f.cli[len(r.f.cli)-1]; last != "delete w --force" {

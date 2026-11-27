@@ -107,7 +107,7 @@ func withoutDisk(proj Project, gone []Instance) Project {
 func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 	var out []Instance
 	for _, in := range ins {
-		if !w.boxBusy(in.Name, "") && keptThrowaway(in, now) && w.Hist != nil && w.Hist.EndedHere(in) {
+		if in.Name != w.idleStopping && !w.boxBusy(in.Name, "") && keptThrowaway(in, now) && w.Hist != nil && w.Hist.EndedHere(in) {
 			out = append(out, in)
 		}
 	}
@@ -120,55 +120,84 @@ func (w *Watcher) spareThrowaways(ins []Instance, now time.Time) []Instance {
 }
 
 func keptThrowaway(in Instance, now time.Time) bool {
+	return keptThrowawayWindow(in, now) && !jobrun.ThrowawayClaimed(in.Config, now)
+}
+
+func keptThrowawayWindow(in Instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 	return in.Config[jobrun.ThrowawayKey] == "true" && in.Status != "Frozen" && err == nil &&
-		!exp.After(now.Add(jobrun.EndedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
-		!jobrun.ThrowawayClaimed(in.Config, now)
+		!exp.After(now.Add(jobrun.EndedKeep+time.Minute)) && !mode.Held(in.Config, now).After(now)
 }
 
 // claimThrowaway reserves an idle CPU throwaway for client-side job setup.
 // The same conditional write that takes it out of the pool protects its
 // expiry. A client that disappears leaves a claim that expires on its own.
 func (w *Watcher) claimThrowaway(ctx context.Context, box, repoKey, size, job string) (bool, error) {
-	claimedBefore := w.Now().Add(controlTimeout)
-	return w.reservePooled(ctx, box, job, func(in Instance) bool {
-		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
-		return in.Status == "Running" && in.Config[jobrun.ThrowawayRepoKey] == repoKey &&
-			mode.SizeOf(in.Config).Name == size && expires.After(claimedBefore)
+	return w.reserveThrowaway(ctx, box, job, func(in Instance) bool {
+		return warmClaimable(in, w.Now()) && in.Config[jobrun.ThrowawayRepoKey] == repoKey &&
+			mode.SizeOf(in.Config).Name == size
 	})
+}
+
+func warmClaimable(in Instance, now time.Time) bool {
+	expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	return in.Status == "Running" && in.Config[jobrun.ThrowawayRepoKey] != "" && expires.After(now.Add(controlTimeout))
 }
 
 // A run and an eviction compete for the same Incus reservation. The empty
 // owner on an eviction fences expiry writes from the previous job.
-func (w *Watcher) reservePooled(ctx context.Context, box, job string, matches func(Instance) bool) (bool, error) {
+func (w *Watcher) reserveThrowaway(ctx context.Context, box, job string, matches func(Instance) bool) (bool, error) {
 	return w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
 		now := w.Now().UTC()
-		if in.Config[jobrun.ThrowawayRepoKey] == "" || !keptThrowaway(in, now) || !matches(in) {
+		if !keptThrowaway(in, now) || !matches(in) {
 			return nil
 		}
-		if in.Status == "Running" {
+		switch in.Status {
+		case "Running":
 			out, err := w.Incus.Exec(ctx, box, jobrun.KeptScript(workRoot))
 			if err != nil || strings.TrimSpace(string(out)) != "kept" {
 				return nil
 			}
-		} else if w.Hist == nil || !w.Hist.EndedHere(in) {
+		case "Stopped":
+			if w.Hist == nil || !w.Hist.EndedHere(in) {
+				return nil
+			}
+		default:
 			return nil
 		}
 		expires, _ := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 		until := now.Add(jobrun.ThrowawayClaimTTL)
-		if expires.Before(until) {
+		if job == "" {
+			until = now.Add(jobrun.EvictTTL)
+		}
+		if expires.Before(until) && (job != "" || in.Config[jobrun.ThrowawayRepoKey] != "") {
 			expires = until
 		}
-		return map[string]string{
+		changes := map[string]string{
 			jobrun.ExpiresKey:        expires.Format(time.RFC3339),
 			jobrun.ThrowawayClaimKey: until.Format(time.RFC3339),
 			jobrun.ThrowawayOwnerKey: job,
 		}
+		if job != "" && in.Config[jobrun.ThrowawayStopKey] == jobrun.ThrowawayStopped {
+			changes[jobrun.ThrowawayStopKey] = ""
+		}
+		return changes
 	})
 }
 
 func (w *Watcher) evictPooled(ctx context.Context, box, uid string) (bool, error) {
-	reserved, err := w.reservePooled(ctx, box, "", func(in Instance) bool { return boxUID(in) == uid })
+	return w.evictThrowaway(ctx, box, uid, true)
+}
+
+func (w *Watcher) evictThrowaway(ctx context.Context, box, uid string, pooled bool) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
+	defer cancel()
+	reserved, err := w.reserveThrowaway(ctx, box, "", func(in Instance) bool {
+		w.mu.Lock()
+		busy := w.idleStopping == box || w.boxBusy(box, "")
+		w.mu.Unlock()
+		return !busy && boxUID(in) == uid && (in.Config[jobrun.ThrowawayRepoKey] != "") == pooled
+	})
 	if err != nil || !reserved {
 		return false, err
 	}
@@ -177,11 +206,15 @@ func (w *Watcher) evictPooled(ctx context.Context, box, uid string) (bool, error
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		for _, in := range ins {
 			if in.Name == box {
 				now := w.Now()
+				until, _ := time.Parse(time.RFC3339, in.Config[jobrun.ThrowawayClaimKey])
 				if boxUID(in) != uid || in.Status == "Frozen" || mode.Held(in.Config, now).After(now) ||
-					in.Config[jobrun.ThrowawayOwnerKey] != "" || !jobrun.ThrowawayClaimed(in.Config, now) {
+					in.Config[jobrun.ThrowawayOwnerKey] != "" || jobrun.IdleStopReserved(in.Config) || !until.After(now) {
 					return errNotIdle
 				}
 				_, err := w.Incus.CLI(ctx, "", "delete", box, "--force")
@@ -290,6 +323,9 @@ func (w *Watcher) roomFor(it *queued, byName map[string]Instance, room dash.Room
 	// A box of a job whose start was cut short is the job's own, even a
 	// throwaway: startQueued looks in it before starting again.
 	if in, ok := byName[it.Box]; ok && (!it.New || w.Queue.startMark(it) != nil) {
+		if in.Name == w.idleStopping || jobrun.IdleStopReserved(in.Config) {
+			return dash.RefusedFull
+		}
 		switch in.Status {
 		case "Running":
 			return ""
@@ -550,9 +586,9 @@ func (w *Watcher) startQueued(it *queued, reuse bool, sz mode.Size, evict []Inst
 		if in.Config[jobrun.ThrowawayKey] != "true" {
 			what = "idle box"
 		}
-		if in.Config[jobrun.ThrowawayRepoKey] != "" {
+		if in.Config[jobrun.ThrowawayKey] == "true" {
 			var evicted bool
-			evicted, err = w.evictPooled(ctx, box, boxUID(in))
+			evicted, err = w.evictThrowaway(ctx, box, boxUID(in), in.Config[jobrun.ThrowawayRepoKey] != "")
 			if err == nil && !evicted {
 				err = errNotIdle
 			}
@@ -810,6 +846,13 @@ func (w *Watcher) sweepEnded(now time.Time, ins []Instance, scans map[string][]s
 // boxBusy says whether a job other than own runs, or is being started, in
 // box, as far as boxd knows. With w.mu held.
 func (w *Watcher) boxBusy(box, own string) bool {
+	if w.Queue != nil {
+		for _, j := range w.Queue.StartingFor(box) {
+			if j.Box+"."+j.ID != own {
+				return true
+			}
+		}
+	}
 	for _, o := range w.live {
 		if o.Box == box && o.Box+"."+o.ID != own {
 			return true

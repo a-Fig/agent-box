@@ -31,7 +31,7 @@ import (
 //
 // The laptop keeps a few small files per job in App.StateDir:
 //
-//	<job>.json       the record: thread, reason, command, worktree
+//	<job>.json       the record: thread, reason, command, worktree, qualified host locator
 //	<job>.watch      the watcher's lease: "<token> <expiry>", renewed while it lives
 //	<job>.ended      the job's end (exit code or lost, took, tail), written
 //	                 before anything is sent
@@ -72,13 +72,21 @@ type Pusher interface {
 	Send(ctx context.Context, thread, message string) error
 }
 
-// t3CLI sends with `t3 thread send <thread> -`, the message on stdin.
-type t3CLI struct{ path string }
+// t3CLI sends through the local T3 launcher with the message on stdin.
+type t3CLI struct{ path, baseDir string }
+
+func (c t3CLI) sendArgs(thread string) []string {
+	args := []string{"thread", "send"}
+	if c.baseDir != "" {
+		args = append(args, "--base-dir", c.baseDir)
+	}
+	return append(args, thread, "-")
+}
 
 func (c t3CLI) Send(ctx context.Context, thread, message string) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTry)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.path, "thread", "send", thread, "-")
+	cmd := exec.CommandContext(ctx, c.path, c.sendArgs(thread)...)
 	cmd.Stdin = strings.NewReader(message)
 	hideWindow(cmd)
 	var out bytes.Buffer
@@ -168,8 +176,10 @@ func startDetached(start func(breakaway bool) error) error {
 
 // jobRecord is <job>.json.
 type jobRecord struct {
-	Job    string `json:"job"`
-	Thread string `json:"thread"` // the session the result is for
+	Job       string      `json:"job"`
+	Thread    string      `json:"thread"` // the session the result is for
+	T3BaseDir string      `json:"t3BaseDir,omitempty"`
+	Host      *jobLocator `json:"host,omitempty"`
 	// Session is Claude Code's session ID, when box_run ran under Claude
 	// Code: box hook tells only that session, not a claude started inside it.
 	Session  string `json:"session,omitempty"`
@@ -183,16 +193,70 @@ type jobRecord struct {
 	Queued bool `json:"queued,omitempty"`
 }
 
+type jobLocator struct {
+	Name         string `json:"name,omitempty"`
+	Remote       string `json:"remote"`
+	Project      string `json:"project"`
+	DashboardURL string `json:"dashboard_url,omitempty"`
+}
+
+func locateJobHost(h fleetHost) *jobLocator {
+	return &jobLocator{Name: h.Name, Remote: h.Remote, Project: h.Project, DashboardURL: h.DashboardURL}
+}
+
+func (rec jobRecord) noticeJob() string {
+	if rec.Host == nil {
+		return rec.Job
+	}
+	return rec.Job + onHost(rec.Host.Name)
+}
+
+func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
+	if rec.Host == nil {
+		return fleetHost{}, fmt.Errorf("no saved host for qualified job %s", id.ID)
+	}
+	host := fleetHost{Name: rec.Host.Name, Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
+	tag, err := jobHostTag(host)
+	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
+		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)
+	}
+	if host.DashboardURL != "" && !validDashboardURL(host.DashboardURL) {
+		return fleetHost{}, fmt.Errorf("invalid saved dashboard URL for job %s", id.ID)
+	}
+	if rec.Queued && id.hostTag != "" && host.Project != mode.Project {
+		return fleetHost{}, fmt.Errorf("boxd cannot follow queued job %s in project %q", id.ID, host.Project)
+	}
+	return host, nil
+}
+
+func (a *App) readWatchRecord(job string) (jobRecord, error) {
+	var rec jobRecord
+	if err := readJSON(a.statePath(job, ".json"), &rec); err != nil {
+		return jobRecord{}, fmt.Errorf("no record of %s: %w", job, err)
+	}
+	if rec.Job != job {
+		return jobRecord{}, fmt.Errorf("record does not match job %s", job)
+	}
+	return rec, nil
+}
+
 // jobEnd is <job>.ended: everything needed to send the end again.
 type jobEnd struct {
 	Code int  `json:"code"`
 	Lost bool `json:"lost,omitempty"`
 	// Dropped is a queued job that left the queue without running.
-	Dropped bool   `json:"dropped,omitempty"`
-	Took    int64  `json:"tookSeconds"`
-	Tail    string `json:"tail,omitempty"`
-	Digest  string `json:"digest,omitempty"` // a test run's failure digest
+	Dropped    bool   `json:"dropped,omitempty"`
+	Took       int64  `json:"tookSeconds"`
+	Tail       string `json:"tail,omitempty"`
+	Digest     string `json:"digest,omitempty"`     // a test run's failure digest
+	Completion string `json:"completion,omitempty"` // observed along with the exit file
+	Host       string `json:"host,omitempty"`
 }
+
+const (
+	completionExited    = "exited"
+	completionCancelled = "cancelled"
+)
 
 // thread is the T3 thread of this session, or "".
 func (a *App) thread() string {
@@ -286,8 +350,11 @@ func (a *App) exists(job, ext string) bool {
 // anywhere else (a person's terminal, another session), the push still goes.
 // If the watcher pushed it in the same moment, the agent gets it twice.
 func (a *App) markRead(job string, r JobResult, err error, who string) {
-	var rec jobRecord
-	if err == nil && r.State == stateDone && readJSON(a.statePath(job, ".json"), &rec) == nil && rec.Thread == a.thread() {
+	if err != nil || r.State != stateDone || a.StateDir == "" {
+		return
+	}
+	rec, err := a.readWatchRecord(job)
+	if err == nil && rec.Thread == a.thread() && rec.inProfile(a.t3BaseDir()) {
 		a.markNotified(job, who)
 	}
 }
@@ -329,26 +396,36 @@ func (a *App) leaseHeld(job, ext string) bool {
 	return ok && exp.After(a.Now())
 }
 
-func (a *App) acquireLease(job, ext string, ttl time.Duration) (string, error) {
-	token := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	for try := 0; try < 2; try++ {
-		won, err := a.claimBy(job, ext, a.leaseText(token, ttl))
-		if err != nil {
-			return "", err
-		}
-		if won {
-			return token, nil
-		}
-		if a.leaseHeld(job, ext) {
-			return "", errLeaseHeld
-		}
-		os.Remove(a.statePath(job, ext)) // expired: take it over
+func (a *App) acquireLease(ctx context.Context, job, ext string, ttl time.Duration) (string, error) {
+	lock, err := a.lockLeases(ctx)
+	if err != nil {
+		return "", err
 	}
-	return "", errLeaseHeld
+	defer lock.Close()
+	if a.leaseHeld(job, ext) {
+		return "", errLeaseHeld
+	}
+	if err := os.Remove(a.statePath(job, ext)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	token := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	won, err := a.claimBy(job, ext, a.leaseText(token, ttl))
+	if err != nil {
+		return "", err
+	}
+	if !won {
+		return "", errLeaseHeld
+	}
+	return token, nil
 }
 
 // renewLease extends a lease this token holds; false means it was lost.
 func (a *App) renewLease(job, ext, token string, ttl time.Duration) bool {
+	lock, err := a.lockLeasesBriefly()
+	if err != nil {
+		return false
+	}
+	defer lock.Close()
 	if t, _, ok := a.readLease(job, ext); !ok || t != token {
 		return false
 	}
@@ -356,6 +433,11 @@ func (a *App) renewLease(job, ext, token string, ttl time.Duration) bool {
 }
 
 func (a *App) releaseLease(job, ext, token string) {
+	lock, err := a.lockLeasesBriefly()
+	if err != nil {
+		return
+	}
+	defer lock.Close()
 	if t, _, ok := a.readLease(job, ext); ok && t == token {
 		os.Remove(a.statePath(job, ext))
 	}
@@ -364,21 +446,49 @@ func (a *App) releaseLease(job, ext, token string) {
 // startWatch records a running or queued job and starts its watcher. It
 // says whether the result will be pushed.
 func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) bool {
+	return a.startWatchRecord(info, job, nil, gpu, throwaway, queued)
+}
+
+func (a *App) startWatchOnHost(info jobMeta, job string, host fleetHost, gpu, throwaway, queued bool) bool {
+	locator := locateJobHost(host)
+	return a.startWatchRecord(info, job, locator, gpu, throwaway, queued)
+}
+
+func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, throwaway, queued bool) bool {
 	if !a.canPush() {
+		return false
+	}
+	id, err := parseJobID(job)
+	if err == nil && id.hostTag == "" && host != nil {
+		err = fmt.Errorf("saved fleet host requires a qualified job ID")
+	}
+	baseDir := a.t3BaseDir()
+	if err == nil && id.hostTag == "" && baseDir != "" {
+		host = &jobLocator{Remote: a.Remote, Project: a.Project, DashboardURL: a.dashboardURL}
+	}
+	rec := jobRecord{Job: job, Host: host, Thread: a.thread(), T3BaseDir: baseDir, Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
+	if err == nil && (id.hostTag != "" || rec.Host != nil) {
+		_, err = rec.watchHost(id)
+	}
+	if err != nil {
+		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
 	if err := os.MkdirAll(a.StateDir, 0o755); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	rec := jobRecord{Job: job, Thread: a.thread(), Session: a.getenv("CLAUDE_CODE_SESSION_ID"), Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: queued}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: no push for " + job + ": " + err.Error())
 		return false
 	}
-	err := a.Spawn(a.StateDir, job)
+	err = a.Spawn(a.StateDir, job)
 	if errors.Is(err, errWatcherInJob) {
-		a.warn("box: notice: this push lasts only as long as box's MCP server, which can't outlive your client here; if your session restarts before it arrives, call box_job " + job + ".")
+		recovery := "Call box_job " + job + " to recover the result after a restart."
+		if rec.T3BaseDir != "" {
+			recovery = "Box retries when this T3 profile starts Box MCP again. You can also call box_job " + job + "."
+		}
+		a.warn("box: notice: this watcher stops with Box MCP. " + recovery)
 		err = nil
 	}
 	if err != nil {
@@ -403,6 +513,7 @@ func (a *App) safetyNet(skip string) string {
 	if err != nil {
 		return ""
 	}
+	baseDir := a.t3BaseDir()
 	var lines []string
 	for _, e := range ents {
 		name := e.Name()
@@ -425,17 +536,20 @@ func (a *App) safetyNet(skip string) string {
 		if !ok {
 			continue
 		}
-		var rec jobRecord
-		if readJSON(a.statePath(job, ".json"), &rec) != nil {
+		id, err := parseJobID(job)
+		if err != nil {
 			continue
 		}
-		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
-			for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog", ".result"} {
-				os.Remove(a.statePath(job, ext))
-			}
+		rec, err := a.readWatchRecord(job)
+		if err != nil || !rec.inProfile(baseDir) {
 			continue
 		}
-		if rec.Thread != thread || job == skip || a.exists(job, ".notified") {
+		notified := a.exists(job, ".notified")
+		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep && (rec.T3BaseDir == "" || notified) {
+			a.pruneWatchRecord(job)
+			continue
+		}
+		if rec.Thread != thread || job == skip || notified {
 			continue
 		}
 		var end jobEnd
@@ -450,6 +564,11 @@ func (a *App) safetyNet(skip string) string {
 			}
 		} else if a.leaseHeld(job, ".watch") {
 			continue
+		} else if id.hostTag != "" || (rec.T3BaseDir != "" && rec.Host != nil) {
+			if _, err := rec.watchHost(id); err != nil {
+				a.warn("box: warning: cannot restart the watcher: " + err.Error())
+				continue
+			}
 		}
 		// Running with no watcher, or ended with nobody sending it: start one.
 		if a.Spawn != nil {
@@ -462,6 +581,20 @@ func (a *App) safetyNet(skip string) string {
 		return ""
 	}
 	return "finished since you last looked: " + strings.Join(lines, ", ") + "\n"
+}
+
+func (a *App) pruneWatchRecord(job string) {
+	lock, err := a.lockLeasesBriefly()
+	if err != nil {
+		return
+	}
+	defer lock.Close()
+	if a.leaseHeld(job, ".watch") || a.leaseHeld(job, ".sending") {
+		return
+	}
+	for _, ext := range []string{".json", ".watch", ".ended", ".sending", ".notified", ".paused", ".nudged", ".watchlog", ".result"} {
+		os.Remove(a.statePath(job, ext))
+	}
 }
 
 // keptTail is how much of a job's output its recorded end keeps: as much as
@@ -491,10 +624,14 @@ func (a *App) recordEnd(job string, end jobEnd) {
 	writeJSON(a.statePath(job, ".result"), end)
 	ents, _ := os.ReadDir(a.StateDir)
 	for _, e := range ents {
-		if !strings.HasSuffix(e.Name(), ".result") {
+		job, ok := strings.CutSuffix(e.Name(), ".result")
+		if !ok {
 			continue
 		}
 		if info, err := e.Info(); err == nil && a.Now().Sub(info.ModTime()) > recordKeep {
+			if rec, err := a.readWatchRecord(job); err == nil && rec.T3BaseDir != "" && !a.exists(job, ".notified") {
+				continue
+			}
 			os.Remove(filepath.Join(a.StateDir, e.Name()))
 		}
 	}
@@ -503,7 +640,10 @@ func (a *App) recordEnd(job string, end jobEnd) {
 // recordedEnd is a job's recorded end: the exit box read, else the end the
 // watcher recorded if it ran to an exit code.
 func (a *App) recordedEnd(job string) (jobEnd, bool) {
-	if a.StateDir == "" || !validJob.MatchString(job) {
+	if a.StateDir == "" {
+		return jobEnd{}, false
+	}
+	if _, err := parseJobID(job); err != nil {
 		return jobEnd{}, false
 	}
 	for _, ext := range []string{".result", ".ended"} {
@@ -591,7 +731,7 @@ func (r jobRecord) context() string {
 // agent reads next; any other failure is its last endedLines lines. box_job
 // always has the full result, and the message says so.
 func endedMessage(r jobRecord, e jobEnd) string {
-	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.Job, e.Code, elapsed(time.Duration(e.Took)*time.Second))
+	head := fmt.Sprintf("box: job %s ended, exit %d, after %s", r.noticeJob(), e.Code, elapsed(time.Duration(e.Took)*time.Second))
 	if why := shortReason(r.Reason); why != "" {
 		head += " (" + why + ")" // which run this is, after compaction or among parallel runs
 	}
@@ -665,11 +805,11 @@ func pausedMessage(r jobRecord) string {
 	// T3 may deliver this long after it was sent, when the job has resumed
 	// (#96); the end push follows either way.
 	return fmt.Sprintf("box: job %s paused: the PC's owner took the PC back. It resumes if they switch back within %s, else it is lost; its end is pushed either way. Once it resumes, box_cancel this job if you no longer need it. %s\n%s",
-		r.Job, frozenWindow, fromBox, r.context())
+		r.noticeJob(), frozenWindow, fromBox, r.context())
 }
 
 func lostMessage(r jobRecord, e jobEnd) string {
-	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.Job, fromBox, r.context())
+	msg := fmt.Sprintf("box: job %s lost, exit 75: it stopped before it finished. %s\n%s", r.noticeJob(), fromBox, r.context())
 	if e.Tail != "" {
 		msg += "\n" + mask.Mask(e.Tail)
 	}
@@ -726,24 +866,43 @@ func (a *App) sleep(ctx context.Context, d time.Duration) bool {
 // It is `box watch`, started detached by box_run. It holds the job's watch
 // lease, so a second watcher exits at once.
 func (a *App) Watch(ctx context.Context, job string) error {
-	if !validJob.MatchString(job) {
-		return fmt.Errorf("bad job id %q", job)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id, err := parseJobID(job)
+	if err != nil {
+		return err
 	}
 	if a.StateDir == "" || a.Push == nil {
 		return errors.New("no state directory or T3 CLI to push with")
 	}
-	var rec jobRecord
-	if err := readJSON(a.statePath(job, ".json"), &rec); err != nil {
-		return fmt.Errorf("no record of %s: %w", job, err)
+	rec, err := a.readWatchRecord(job)
+	if err != nil {
+		return err
+	}
+	if rec.T3BaseDir != "" {
+		if !filepath.IsAbs(rec.T3BaseDir) {
+			return fmt.Errorf("invalid saved T3 base directory for job %s", job)
+		}
+		if pusher, ok := a.Push.(t3CLI); ok {
+			scoped := *a
+			pusher.baseDir = rec.T3BaseDir
+			scoped.Push = pusher
+			a = &scoped
+		}
 	}
 	if a.exists(job, ".notified") {
 		return nil
 	}
-	token, err := a.acquireLease(job, ".watch", watchLease)
+	token, err := a.acquireLease(ctx, job, ".watch", watchLease)
 	if err != nil {
 		if errors.Is(err, errLeaseHeld) {
 			return nil
 		}
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		a.releaseLease(job, ".watch", token)
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -765,14 +924,26 @@ func (a *App) Watch(ctx context.Context, job string) error {
 
 	var end jobEnd
 	if readJSON(a.statePath(job, ".ended"), &end) != nil {
+		target := a
+		if id.hostTag != "" || (rec.T3BaseDir != "" && rec.Host != nil) {
+			host, err := rec.watchHost(id)
+			if err != nil {
+				return err
+			}
+			target = a.jobHostApp(host)
+			if id.hostTag == "" {
+				target.boxdDisabled = a.boxdDisabled
+			}
+		}
 		var ended bool
-		end, ended = a.follow(ctx, rec)
+		end, ended = target.follow(ctx, rec, id)
 		if !ended {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			return nil // cancelled by the agent: nothing to tell it
 		}
+		end.Host = target.jobHostName
 		if err := writeJSON(a.statePath(job, ".ended"), end); err != nil {
 			return fmt.Errorf("recording the end of %s: %w", job, err)
 		}
@@ -783,8 +954,18 @@ func (a *App) Watch(ctx context.Context, job string) error {
 // follow follows the job to its end. It retries transport errors, and says
 // the job is lost only when that is confirmed. ended is false when ctx ended
 // or the agent cancelled the job.
-func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool) {
+func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, ended bool) {
 	job := rec.Job
+	var saved jobEnd
+	if readJSON(a.statePath(job, ".result"), &saved) == nil && !saved.Lost && !saved.Dropped {
+		switch saved.Completion {
+		case completionExited:
+			return saved, true
+		case completionCancelled:
+			a.markNotified(job, "cancel")
+			return jobEnd{}, false
+		}
+	}
 	w := *a
 	tail := &lineTail{}
 	w.Out, w.Err = tail, io.Discard
@@ -792,13 +973,19 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 	w.Notify = nil
 	w.Thread = rec.Thread
 	w.KeepEnded = endedKeep
-	start := jobStart(job)
+	start := jobStart(id.Bare)
 	took := func() int64 { return int64(a.Now().Sub(start) / time.Second) }
 	lost := func() (jobEnd, bool) {
 		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines)}, true
 	}
 	if rec.Queued {
-		out, ok := w.waitQueued(ctx, rec)
+		var out queueOutcome
+		var ok bool
+		if id.hostTag == "" {
+			out, ok = w.waitQueued(ctx, rec)
+		} else {
+			out, ok = w.waitQueuedJob(ctx, rec, id.Bare, false)
+		}
 		switch {
 		case !ok:
 			return jobEnd{}, false
@@ -814,13 +1001,14 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 		// Each follow prints the whole log from its start, so a follow after
 		// a pause or a broken connection mustn't add to the last one's.
 		tail.reset()
-		res, err := w.Job(ctx, job, 0)
+		res, err := w.job(ctx, id, 0)
 		if ctx.Err() != nil {
 			return jobEnd{}, false
 		}
 		switch {
 		case err == nil && res.State == stateDone:
-			if w.wasCancelled(ctx, job) {
+			saved, _ := w.recordedEnd(job)
+			if saved.Completion == completionCancelled || (saved.Completion != completionExited && w.wasCancelled(ctx, id.Bare)) {
 				a.markNotified(job, "cancel")
 				return jobEnd{}, false
 			}
@@ -834,14 +1022,14 @@ func (a *App) follow(ctx context.Context, rec jobRecord) (end jobEnd, ended bool
 			if pauseDeadline.IsZero() {
 				pauseDeadline = a.Now().Add(mode.FrozenSwappedStop + 10*time.Minute)
 			}
-			if a.Now().After(pauseDeadline) && w.probe(ctx, rec) == probeLost {
+			if a.Now().After(pauseDeadline) && w.probe(ctx, id) == probeLost {
 				return lost()
 			}
 			a.sleep(ctx, 30*time.Second)
 			continue
 		}
 		// An error: the follow broke. Look before calling it lost.
-		switch w.probe(ctx, rec) {
+		switch w.probe(ctx, id) {
 		case probeLost:
 			return lost()
 		case probeRunning, probeDone:
@@ -863,22 +1051,21 @@ const (
 	probeLost // confirmed: the box is gone or stopped, or the job's process is dead with no exit code
 )
 
-func (a *App) probe(ctx context.Context, rec jobRecord) probeResult {
+func (a *App) probe(ctx context.Context, id jobID) probeResult {
 	look, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	box, _, _ := strings.Cut(rec.Job, ".")
 	insts, err := a.list(look)
 	if err != nil {
 		return probeUnknown
 	}
-	in := find(insts, box)
+	in := find(insts, id.Box)
 	switch {
 	case in == nil, in.Status == "Stopped":
 		return probeLost
 	case in.Status != "Running":
 		return probeUnknown // frozen: the pause path owns it
 	}
-	pg, err := a.LogPage(look, rec.Job, 0, 1)
+	pg, err := a.LogPage(look, id.Bare, 0, 1)
 	switch {
 	case err != nil && strings.HasPrefix(err.Error(), "no job "):
 		return probeLost
@@ -899,7 +1086,7 @@ func (a *App) deliver(ctx context.Context, rec jobRecord, end jobEnd) error {
 	if a.exists(rec.Job, ".notified") {
 		return nil
 	}
-	token, err := a.acquireLease(rec.Job, ".sending", sendLease)
+	token, err := a.acquireLease(ctx, rec.Job, ".sending", sendLease)
 	if err != nil {
 		if errors.Is(err, errLeaseHeld) {
 			return nil

@@ -32,14 +32,18 @@ const stateQueued = "queued"
 // since a snapshot can be large.
 const queueTimeout = 15 * time.Second
 
-// boxdDo sends a request to boxd on the PC (pcHost) and returns the status
+// boxdDo sends a request to the selected boxd and returns the status
 // and body. A transport failure, or no host, is an error.
 func (a *App) boxdDo(ctx context.Context, method, path, contentType string, body io.Reader) (int, []byte, error) {
-	host := a.pcHost(ctx)
-	if host == "" {
+	address := a.boxdURL(ctx, path)
+	if address == "" {
 		return 0, nil, errors.New("no address for boxd (incus remote " + a.Remote + ")")
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "https://"+host+path, body)
+	return a.boxdRequest(ctx, method, address, contentType, body)
+}
+
+func (a *App) boxdRequest(ctx context.Context, method, url, contentType string, body io.Reader) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -92,24 +96,33 @@ type queueRun struct {
 	info   jobMeta
 	bundle string // a snapshot made already, or "" to make one
 	ref    string
+	host   *fleetHost // non-nil for fleet dispatch (qualifies returned job ID)
+	limits []string   // why the host could not start the run immediately
 }
 
-// enqueue sends the run to boxd's queue. ok is false when it isn't queued;
-// msg then says why, for the refusal.
-func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, msg string) {
+type queueFailure uint8
+
+const (
+	queueUnconfirmed queueFailure = iota
+	queueRejected
+	queueInvalid
+)
+
+// enqueue sends the run to boxd. Only a confirmed host rejection can be retried.
+func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, msg string, failure queueFailure) {
 	bundle, ref := q.bundle, q.ref
 	if bundle == "" {
 		ref = a.Now().UTC().Format("20060102-150405") + "-" + a.Rand()
 		b, err := snapshot(ctx, a.R, q.rp.Top, ref)
 		if err != nil {
-			return r, false, "can't snapshot the worktree for the queue: " + err.Error()
+			return r, "can't snapshot the worktree for the queue: " + err.Error(), queueInvalid
 		}
 		defer os.RemoveAll(filepath.Dir(b))
 		bundle = b
 	}
 	meta, err := json.Marshal(q.info)
 	if err != nil {
-		return r, false, err.Error()
+		return r, err.Error(), queueInvalid
 	}
 	timeout := int(q.o.Timeout.Round(time.Second) / time.Second)
 	if q.o.Timeout > 0 && timeout == 0 {
@@ -122,7 +135,7 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, ms
 	}
 	f, err := os.Open(bundle)
 	if err != nil {
-		return r, false, err.Error()
+		return r, err.Error(), queueInvalid
 	}
 	defer f.Close()
 
@@ -152,23 +165,49 @@ func (a *App) enqueue(ctx context.Context, q queueRun) (r JobResult, ok bool, ms
 	pr.Close()
 	switch {
 	case err != nil:
-		return r, false, "can't reach boxd to queue the run: " + firstLine(err.Error())
+		return r, "can't reach boxd to queue the run: " + firstLine(err.Error()), queueUnconfirmed
 	case code != http.StatusCreated:
-		return r, false, "boxd didn't queue the run: " + boxdError(code, b)
+		msg := boxdError(code, b)
+		return r, "boxd didn't queue the run: " + msg, classifyQueueRejection(code, msg)
 	}
 	var rep dash.QueueReply
 	if err := json.Unmarshal(b, &rep); err != nil || !validJob.MatchString(rep.Job) {
-		return r, false, "boxd's answer to the queue: " + string(b)
+		return r, "boxd's answer to the queue: " + string(b), queueUnconfirmed
 	}
 	box, _, _ := strings.Cut(rep.Job, ".")
+	pubID, err := runJobID(q.host, rep.Job, box)
+	if err != nil {
+		return r, err.Error(), queueUnconfirmed
+	}
+	hostName := a.jobHostName
 	// The launch above, if any, was refused: say which box the job will be
 	// on, since boxd names a throwaway of its own (#89).
 	on := "on " + box
 	if q.new {
 		on = "on a new box, " + box + ","
 	}
-	fmt.Fprintf(a.Err, "box: queued job %s, %s (%s); it starts %s when it can\n", rep.Job, place(rep.Position), waitText(rep.Why), on)
-	return JobResult{Job: rep.Job, Box: box, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, throwaway: q.new}, true, ""
+	fmt.Fprintf(a.Err, "box: queued job %s%s, %s (%s); it starts %s when it can\n", pubID.ID, onHost(hostName), place(rep.Position), waitText(rep.Why), on)
+	detail := a.capacityHint(ctx, q.sz, q.o.Box, q.limits)
+	a.printCapacity(detail)
+	return JobResult{Job: pubID.ID, Box: box, Host: hostName, State: stateQueued, Code: exitPaused, Position: rep.Position, Why: rep.Why, Capacity: detail, throwaway: q.new, fleetHost: q.host}, "", 0
+}
+
+// Boxd uses 400 for both request validation and failures
+// storing a snapshot. The latter have a distinct error message.
+func classifyQueueRejection(status int, message string) queueFailure {
+	switch status {
+	case http.StatusNotFound, http.StatusConflict, http.StatusInsufficientStorage:
+		return queueRejected
+	case http.StatusBadRequest:
+		if strings.HasPrefix(message, "storing the snapshot: ") {
+			return queueRejected
+		}
+		return queueInvalid
+	case http.StatusForbidden:
+		return queueInvalid
+	default:
+		return queueUnconfirmed
+	}
 }
 
 // place says where a queued job is in line.
@@ -260,14 +299,14 @@ func (a *App) wasQueued(job string) bool {
 // nudgeMessage is the one push a job gets once it has waited dash.QueueNudge.
 func nudgeMessage(r jobRecord, waited time.Duration, why string) string {
 	return fmt.Sprintf("box: job %s still queued after %s (%s). It runs when there is room; box_cancel takes it off the queue. %s\n%s",
-		r.Job, elapsed(waited), waitText(why), fromBox, r.context())
+		r.noticeJob(), elapsed(waited), waitText(why), fromBox, r.context())
 }
 
 // droppedMessage is the push for a queued job that never ran: boxd dropped
 // it after dash.QueueMaxAge, or couldn't start it.
 func droppedMessage(r jobRecord) string {
 	return fmt.Sprintf("box: job %s left the queue without running (it waited %s at most, or couldn't start), exit 75. %s\n%s",
-		r.Job, elapsed(dash.QueueMaxAge), fromBox, r.context())
+		r.noticeJob(), elapsed(dash.QueueMaxAge), fromBox, r.context())
 }
 
 // queueOutcome is how a queued job left the queue: started is when it began
@@ -290,22 +329,26 @@ func (a *App) jobInBox(ctx context.Context, job string) bool {
 // agent once at dash.QueueNudge. ok is false when ctx ended or the agent
 // cancelled the job.
 func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, ok bool) {
-	queuedAt := jobStart(rec.Job) // boxd names a queued job by when it was queued
+	return a.waitQueuedJob(ctx, rec, rec.Job, false)
+}
+
+func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, seen bool) (out queueOutcome, ok bool) {
+	queuedAt := jobStart(bare) // boxd names a queued job by when it was queued
 	dropped := func() (queueOutcome, bool) {
 		return queueOutcome{end: &jobEnd{Code: exitPaused, Lost: true, Dropped: true, Took: int64(a.Now().Sub(queuedAt) / time.Second)}}, true
 	}
 	backoff := 15 * time.Second
-	seen, gone := false, 0 // boxd has answered queued; 404s in a row since
+	gone := 0 // 404s in a row since boxd answered queued
 	for ctx.Err() == nil {
 		if a.exists(rec.Job, ".notified") {
 			return out, false // box_cancel took it off the queue
 		}
-		j, found, err := a.queuedJob(ctx, rec.Job)
+		j, found, err := a.queuedJob(ctx, bare)
 		switch {
 		case err != nil:
 			// Out of reach: keep waiting, but not past the queue's own limit.
 			if a.Now().Sub(queuedAt) > dash.QueueMaxAge+time.Hour {
-				if a.jobInBox(ctx, rec.Job) {
+				if a.jobInBox(ctx, bare) {
 					return out, true
 				}
 				return dropped()
@@ -318,7 +361,7 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 			// restart forgets a start it hasn't scanned yet), the box says the
 			// rest. A job boxd had queued that is in no box was taken off the
 			// queue (from the page): it never ran.
-			if !seen || a.jobInBox(ctx, rec.Job) {
+			if !seen || a.jobInBox(ctx, bare) {
 				return out, true
 			}
 			if gone++; gone >= 2 {
@@ -358,10 +401,18 @@ func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, 
 // cancel know it waits in boxd's queue (wasQueued). It has no thread: a CLI
 // run follows its own job, so no watcher or push is started for it.
 func (a *App) recordQueued(info jobMeta, job string, gpu, throwaway bool) {
+	a.recordQueuedOnHost(info, job, nil, gpu, throwaway)
+}
+
+func (a *App) recordQueuedOnHost(info jobMeta, job string, host *fleetHost, gpu, throwaway bool) {
 	if a.StateDir == "" || os.MkdirAll(a.StateDir, 0o755) != nil {
 		return
 	}
-	rec := jobRecord{Job: job, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
+	var loc *jobLocator
+	if host != nil {
+		loc = locateJobHost(*host)
+	}
+	rec := jobRecord{Job: job, Host: loc, Reason: info.Reason, Command: info.Command, Worktree: info.Agent.Worktree, GPU: gpu, New: throwaway, Queued: true}
 	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
 		a.warn("box: warning: recording queued job " + job + ": " + err.Error())
 	}
@@ -372,11 +423,17 @@ func (a *App) recordQueued(info jobMeta, job string, gpu, throwaway bool) {
 // as box job does. Interrupted, it leaves the job queued and says how to
 // get back to it.
 func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
+	box, _, _ := strings.Cut(job, ".")
+	return a.followQueuedJob(ctx, jobID{ID: job, Bare: job, Box: box}, false)
+}
+
+func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResult, error) {
+	job, box := id.ID, id.Box
 	rec := jobRecord{Job: job, Queued: true}
 	readJSON(a.statePath(job, ".json"), &rec)
+	rec.Job = job
 	rec.Thread = "" // whoever follows here sees the job; no nudge is pushed
-	out, ok := a.waitQueued(ctx, rec)
-	box, _, _ := strings.Cut(job, ".")
+	out, ok := a.waitQueuedJob(ctx, rec, id.Bare, seen)
 	switch {
 	case !ok && a.notifiedBy(job) == "cancel":
 		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
@@ -392,22 +449,14 @@ func (a *App) followQueued(ctx context.Context, job string) (JobResult, error) {
 	case out.end != nil:
 		// It ran and ended between two looks: its kept box has the full log
 		// and digest; boxd's tail is the fallback once the box is gone.
-		if r, err := a.Job(ctx, job, 0); err == nil && r.State == stateDone {
+		if r, err := a.job(ctx, id, 0); err == nil && r.State == stateDone {
 			return r, nil // not a pause: a kept box frozen by My PC doesn't undo an end boxd has
 		}
 		io.WriteString(a.Out, out.end.Tail+"\n")
 		return JobResult{Job: job, Box: box, State: stateDone, Code: out.end.Code}, nil
 	}
-	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box)
-	return a.Job(ctx, job, 0)
-}
-
-// stillQueued says whether job may still wait in boxd's queue: boxd says so,
-// or can't be asked, in which case waitQueued rides out the outage. box job
-// follows such a job through the queue; any other is the box's to report.
-func (a *App) stillQueued(ctx context.Context, job string) bool {
-	j, found, err := a.queuedJob(ctx, job)
-	return err != nil || found && j.State == dash.JobQueued
+	fmt.Fprintf(a.Err, "box: job %s left the queue and started on %s\n", job, box+onHost(a.jobHostName))
+	return a.job(ctx, id, 0)
 }
 
 // notifiedBy is who wrote job's .notified ("cancel", "watcher", "box run",
@@ -429,31 +478,34 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// CancelAny cancels a job wherever it is, for box_cancel and box cancel:
-// waiting in boxd's queue (removed, it never ran), or running in its box. A
-// job queued from elsewhere has no record here, so when its box can't stop
-// it, boxd's queue is asked too (#100); a job that isn't waiting there keeps
-// the box's error.
+// CancelAny cancels a job in the selected host's queue or box. A qualified ID
+// can come from another client, so its queue is checked without a local record.
+// Legacy IDs without a queue marker still try the default host's box first.
 func (a *App) CancelAny(ctx context.Context, job string) (removed, cancelled bool, code int, err error) {
-	if a.wasQueued(job) {
-		removed, err = a.cancelQueuedOrStarted(ctx, job)
+	lookup, err := a.lookupJob(job)
+	if err != nil {
+		return false, false, 0, err
+	}
+	target, id := lookup.app, lookup.id
+	if id.hostTag != "" || target.wasQueued(id.ID) {
+		removed, err = target.cancelQueuedOrStarted(ctx, id.Bare)
 		if err != nil {
-			return false, false, 0, fmt.Errorf("cancel %s: %w", job, err)
+			return false, false, 0, fmt.Errorf("cancel %s: %w", id.ID, err)
 		}
 	}
 	if !removed {
-		cancelled, code, err = a.Cancel(ctx, job)
-		if err != nil && a.cancelQueued(ctx, job) == nil {
+		cancelled, code, err = target.cancelJob(ctx, id)
+		if err != nil && target.cancelQueued(ctx, id.Bare) == nil {
 			removed, err = true, nil
 		}
 	}
 	if removed {
-		a.markNotified(job, "cancel")
+		target.markNotified(id.ID, "cancel")
 	}
 	return removed, cancelled, code, err
 }
 
-// cancelQueuedOrStarted cancels a job this laptop queued. A job boxd is
+// cancelQueuedOrStarted tries to remove a job from the queue. A job boxd is
 // starting right now can't be taken off the queue, nor stopped in its box
 // yet, so it waits for the start, up to a minute, then stops it there.
 // removed is false when the job wasn't boxd's to cancel; the caller then
