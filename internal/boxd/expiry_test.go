@@ -171,6 +171,78 @@ func TestExpiryLeavesStoppedThrowawayUntilRetentionEnds(t *testing.T) {
 	}
 }
 
+func TestExpiryRepairsDeadlineAndHoldExtendedByLegacyDashboard(t *testing.T) {
+	const extended = "9999-01-01T01:00:00Z"
+	in := expiryBox("Running", extended)
+	in.Config[mode.HoldKey] = extended
+	in.Config[jobrun.SetupKey] = jobrun.SetupValue(expiryJob, t0)
+	in.Config[jobrun.ThrowawayKey] = "true"
+	end := t0.Add(time.Hour)
+	f := &fakeIncus{ins: []Instance{in}, jobs: map[string][]fakeJob{
+		in.Name: {{name: expiryJob, state: "done", endedAt: end.Unix()}},
+	}}
+	reapAt(t, f, end.Add(time.Minute))
+	got, ok := f.instance(in.Name)
+	if !ok || got.Config[mode.HoldKey] != "" || got.Config[jobrun.ExpiresKey] != end.Add(jobrun.EndedKeep).Format(time.RFC3339) ||
+		!keptThrowaway(got, end.Add(time.Minute)) {
+		t.Fatalf("reconciled config: %v", got.Config)
+	}
+}
+
+func TestAbandonedLegacyClaimIgnoresPreviousSetupOwner(t *testing.T) {
+	now := t0.Add(time.Hour)
+	in := expiryBox("Running", now.Add(-time.Minute).Format(time.RFC3339))
+	in.Config[jobrun.ThrowawayKey] = "true"
+	in.Config[jobrun.SetupKey] = jobrun.SetupValue(expiryJob, t0)
+	in.Config[jobrun.ThrowawayOwnerKey] = "work.20261124-184000-cafe"
+	in.Config[jobrun.ThrowawayClaimKey] = now.Add(-time.Minute).Format(time.RFC3339)
+	f := &fakeIncus{ins: []Instance{in}, jobs: map[string][]fakeJob{
+		in.Name: {{name: expiryJob, state: "done", endedAt: t0.Unix()}},
+	}}
+	reapAt(t, f, now)
+	reapAt(t, f, now.Add(time.Minute))
+	got, ok := f.instance(in.Name)
+	if !ok || got.Config[jobrun.ExpiresKey] != now.Add(jobrun.EndedKeep).Format(time.RFC3339) {
+		t.Fatalf("abandoned claim did not get retention: %v", got.Config)
+	}
+}
+
+type expiryScriptIncus struct {
+	*fakeIncus
+	run func(context.Context, string) ([]byte, error)
+}
+
+func (f expiryScriptIncus) Exec(ctx context.Context, _ string, script string, _ ...string) ([]byte, error) {
+	return f.run(ctx, script)
+}
+
+func TestExpiryDefersWhenPIDReadFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("guest script runs on Linux")
+	}
+	dir := t.TempDir()
+	in := expiryBox("Running", t0.Format(time.RFC3339))
+	f := &fakeIncus{ins: []Instance{in}}
+	reapAt(t, expiryScriptIncus{f, func(ctx context.Context, script string) ([]byte, error) {
+		prefix := `printf '%s\n' "$$" > "$2/$1.pid"
+head() {
+  [[ ${@: -1} != *.pid ]] || return 1
+  command head "$@"
+}
+`
+		cmd := exec.CommandContext(ctx, "bash", "-s", "--", expiryJob, dir)
+		cmd.Stdin = strings.NewReader(prefix + strings.ReplaceAll(script, "/work/.box", jobrun.Shq(dir)))
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "could not read PID for "+expiryJob) {
+			t.Fatalf("scan: %v\n%s", err, out)
+		}
+		return out, err
+	}}, t0.Add(time.Minute))
+	if len(f.cli) != 0 || len(f.expirySets) != 0 {
+		t.Fatalf("cleanup changed state after a failed PID read: %v, %v", f.cli, f.expirySets)
+	}
+}
+
 func TestExpiryScanChecksPIDOwnershipAndTerminalState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("guest script runs on Linux")

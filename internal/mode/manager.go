@@ -16,6 +16,16 @@ import (
 // which the instance is deleted.
 const ExpiresKey = "user.expires"
 
+// ProtectedExpiry keeps managed jobs safe with timestamp-only reapers.
+const ProtectedExpiry = "9999-01-01T00:00:00Z"
+
+// ProtectedDeadline also recognizes a deadline an older dashboard extended
+// from ProtectedExpiry. Year 9999 is reserved for job protection.
+func ProtectedDeadline(raw string) bool {
+	t, err := time.Parse(time.RFC3339, raw)
+	return err == nil && t.Year() == 9999
+}
+
 // HoldKey is the RFC3339 UTC time a person asked a box to live until: an
 // extend from the dashboard, or box new --ttl. Only those write it. Whatever
 // sets ExpiresKey writes Held of its own deadline, the reaper deletes a box
@@ -33,7 +43,7 @@ var holdFormat = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{
 func Held(cfg map[string]string, t time.Time) time.Time {
 	// UTC only, so older reapers interpret the hold the same way.
 	v := cfg[HoldKey]
-	if h, err := time.Parse(time.RFC3339, v); err == nil && holdFormat.MatchString(v) && h.After(t) {
+	if h, err := time.Parse(time.RFC3339, v); err == nil && h.Year() != 9999 && holdFormat.MatchString(v) && h.After(t) {
 		return h
 	}
 	return t

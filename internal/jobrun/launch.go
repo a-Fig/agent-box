@@ -34,10 +34,8 @@ const EndedKeep = 30 * time.Minute
 
 // Instance keys a box is launched with (cmd/box reads them too).
 const (
-	ExpiresKey = "user.expires"
-	// ProtectedExpiry is a readable deadline for timestamp-only reapers.
-	// The host reaper replaces it with a real deadline after checking the box.
-	ProtectedExpiry   = "9999-01-01T00:00:00Z"
+	ExpiresKey        = "user.expires"
+	ProtectedExpiry   = mode.ProtectedExpiry
 	SetupKey          = "user.box.setup"
 	SetupTTL          = 10 * time.Minute
 	ThrowawayKey      = "user.box.throwaway"

@@ -190,6 +190,26 @@ func TestExtendRetriesAfterConcurrentExtend(t *testing.T) {
 	}
 }
 
+func TestExtendReplacesLegacySentinelHold(t *testing.T) {
+	r := newQueueRig(t, nil)
+	created := t0.Add(-time.Hour)
+	r.f.set(func() {
+		in := inst("w", "Running", "small", created)
+		in.Config["user.expires"] = "9999-01-01T01:00:00Z"
+		in.Config["user.box.hold-until"] = in.Config["user.expires"]
+		r.f.ins = []Instance{in}
+	})
+	r.poll()
+	if code, b := r.post("/api/boxes/w/extend", `{"hours":4,"createdAt":"`+created.Format(time.RFC3339)+`"}`); code != 200 {
+		t.Fatalf("extend: %d %s", code, b)
+	}
+	in, _ := r.f.instance("w")
+	if in.Config["user.expires"] != "9999-01-01T01:00:00Z" ||
+		in.Config["user.box.hold-until"] != r.c.now().Add(4*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("config after extend: %v", in.Config)
+	}
+}
+
 func TestExtendRejectsReplacementOnRetry(t *testing.T) {
 	r := newQueueRig(t, nil)
 	created := t0.Add(-time.Hour)

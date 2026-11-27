@@ -238,7 +238,7 @@ func (w *Watcher) setPoolExpiry(ctx context.Context, box, job string, ended bool
 }
 
 func (w *Watcher) poolExpiryConfig(ctx context.Context, in Instance, job string, ended bool) map[string]string {
-	if in.Config[jobrun.ExpiresKey] == jobrun.ProtectedExpiry ||
+	if mode.ProtectedDeadline(in.Config[jobrun.ExpiresKey]) ||
 		in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job {
 		return nil
 	}
@@ -738,10 +738,24 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 		// stream failed, as box run allows for: then it runs, and is ours.
 		check, cancel := context.WithTimeout(context.WithoutCancel(ctx), execTimeout)
 		defer cancel()
-		if _, perr := w.Incus.Exec(check, box, "test -e "+remote+".pid -o -e "+remote+".exit"); perr == nil {
+		if _, perr := w.Incus.Exec(check, box, "test -e "+remote+".pid -o -e "+remote+".exit"); perr != nil {
+			return fmt.Errorf("start: %w", err)
+		}
+	}
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), execTimeout)
+	defer cancel()
+	if _, err := w.Incus.SetConfigIf(check, box, func(in Instance) map[string]string {
+		owner, _ := jobrun.SetupOwner(in.Config)
+		if owner != it.Job || mode.ProtectedDeadline(in.Config[jobrun.ExpiresKey]) {
 			return nil
 		}
-		return fmt.Errorf("start: %w", err)
+		out, err := w.Incus.Exec(check, box, jobrun.RunningScript(workRoot))
+		if err != nil || !slices.Contains(strings.Fields(string(out)), it.Job) {
+			return nil
+		}
+		return map[string]string{jobrun.ExpiresKey: jobrun.ProtectedExpiry}
+	}); err != nil {
+		w.logf("boxd: check protection for %s: %v", it.Job, err)
 	}
 	return nil
 }

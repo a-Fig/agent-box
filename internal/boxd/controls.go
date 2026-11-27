@@ -629,12 +629,13 @@ func (w *Watcher) ExtendBox(ctx context.Context, name string, createdAt time.Tim
 		}
 		from := w.Now().UTC()
 		raw := in.Config[jobrun.ExpiresKey]
-		if t, err := time.Parse(time.RFC3339, raw); raw != jobrun.ProtectedExpiry && err == nil && t.After(from) {
+		protected := mode.ProtectedDeadline(raw)
+		if t, err := time.Parse(time.RFC3339, raw); !protected && err == nil && t.After(from) {
 			from = t.UTC()
 		}
 		until = mode.Held(in.Config, from).UTC().Add(time.Duration(hours) * time.Hour).Truncate(time.Second)
 		at := until.Format(time.RFC3339)
-		if raw == jobrun.ProtectedExpiry {
+		if protected {
 			return map[string]string{mode.HoldKey: at}
 		}
 		return map[string]string{jobrun.ExpiresKey: at, mode.HoldKey: at}

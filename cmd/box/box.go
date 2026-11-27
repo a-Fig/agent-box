@@ -847,6 +847,26 @@ func (a *App) reserveSetup(ctx context.Context, box, job string, pooled bool) er
 	return check()
 }
 
+// A legacy client can shorten the deadline while the bundle is still being
+// uploaded. Once the wrapper is visible, check the write and repair it if
+// this job is still running.
+func (a *App) confirmProtection(ctx context.Context, box, job string) error {
+	ctx, cancel := a.probeCtx(ctx)
+	defer cancel()
+	return jobrun.RetryETag(ctx, func() error {
+		raw, err := a.incusOK(ctx, "config", "get", a.target(box), expiresKey)
+		if err != nil || mode.ProtectedDeadline(strings.TrimSpace(raw)) {
+			return err
+		}
+		out, err := a.incusOK(ctx, "exec", a.target(box), "--", "bash", "-c", runningScript())
+		if err != nil || !slices.Contains(strings.Fields(out), job) {
+			return err
+		}
+		_, err = a.incusOK(ctx, "config", "set", a.target(box), expiresKey+"="+jobrun.ProtectedExpiry)
+		return err
+	})
+}
+
 // isConflict says whether a launch failed because the name is taken.
 func isConflict(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already exists")
@@ -878,7 +898,7 @@ func (a *App) Ls(ctx context.Context) error {
 	fmt.Fprintln(w, "NAME\tSTATUS\tEXPIRES")
 	for _, in := range insts {
 		exp := in.Config[expiresKey]
-		if exp == jobrun.ProtectedExpiry {
+		if mode.ProtectedDeadline(exp) {
 			exp = "job protected"
 		} else if exp == "" {
 			exp = "-"
@@ -1145,7 +1165,11 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 		return r, err
 	}
 	started = true
-	if _, err := a.incusOK(setupCtx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o))); err != nil {
+	_, err = a.incusOK(setupCtx, "exec", a.target(box), "--", "bash", "-lc", startScript(job, id, rp.Name, payload(o)))
+	if protectErr := a.confirmProtection(ctx, box, job); protectErr != nil && err == nil {
+		a.warn(fmt.Sprintf("box: warning: checking job protection on %s: %v", box, protectErr))
+	}
+	if err != nil {
 		// The tray stops GPU boxes in My PC, and another run may then
 		// delete one. Only then does the job surely not run: a frozen box's
 		// job may resume, so it keeps its job ID below.

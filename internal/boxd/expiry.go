@@ -18,10 +18,10 @@ const expiryScan = "# expiry scan\n" + jobrun.AliveFn + jobStateFn + `set -e
 if [ -e /work/.box ]; then
   cd /work/.box
   for file in *.log *.pid *.exit; do
-    [ -e "$file" ] || continue
+    [ -e "$file" ] || [ -L "$file" ] || continue
     job=${file%.*}
     for f in "$job.log" "$job.pid" "$job.exit"; do
-      if [ -e "$f" ] && [ ! -f "$f" ]; then exit 4; fi
+      if { [ -e "$f" ] || [ -L "$f" ]; } && [ ! -f "$f" ]; then exit 4; fi
     done
     read -r state code <<< "$(jobstate "$job")"
     case "$state" in
@@ -31,6 +31,7 @@ if [ -e /work/.box ]; then
         stamp=$(stat -c %Y -- "$job.exit")
         echo "done $job $stamp";;
       died) ;;
+      unknown) echo "could not read PID for $job" >&2; exit 4;;
       *) exit 4;;
     esac
   done
@@ -69,13 +70,13 @@ func (w *Watcher) reapInstance(ctx context.Context, selected Instance, dryRun bo
 	if err != nil {
 		return fmt.Errorf("invalid %s %q", jobrun.ExpiresKey, raw)
 	}
-	managed := raw == jobrun.ProtectedExpiry
+	managed := mode.ProtectedDeadline(raw)
 	claim := selected.Config[jobrun.ThrowawayClaimKey] != "" && selected.Config[jobrun.ThrowawayOwnerKey] != ""
 	if jobrun.ThrowawayClaimed(selected.Config, now) || (!managed && !claim && !mode.Held(selected.Config, expires).Before(now)) {
 		return nil
 	}
 	owner, setup := jobrun.SetupOwner(selected.Config)
-	if claim && owner == "" {
+	if claim {
 		owner = selected.Config[jobrun.ThrowawayOwnerKey]
 		setup, _ = time.Parse(time.RFC3339, selected.Config[jobrun.ThrowawayClaimKey])
 	}
@@ -122,9 +123,13 @@ func (w *Watcher) reapInstance(ctx context.Context, selected Instance, dryRun bo
 			return nil
 		}
 		if update {
-			return map[string]string{
+			changes := map[string]string{
 				jobrun.ExpiresKey: deadline.Format(time.RFC3339Nano), jobrun.ThrowawayClaimKey: "",
 			}
+			if mode.ProtectedDeadline(in.Config[mode.HoldKey]) {
+				changes[mode.HoldKey] = ""
+			}
+			return changes
 		}
 		return map[string]string{jobrun.DirectEvictKey: lease}
 	})

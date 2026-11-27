@@ -48,16 +48,15 @@ Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nes
 
 ### Switching the expiry timer to host job state
 
-The host-side reaper needs a boxd build with `-reap`. After installing that build, run
-`/opt/agent-box/bin/boxd -reap -dry-run` as root in the distro. Install this checkout's
-`reaper.sh` as `/usr/local/sbin/agent-box-reaper` with mode 0755, as `setup-host.sh` does.
-The existing systemd timer uses that path. Update both the interactive tray and the
+Setup, checkout deploys and release updates install the wrapper used by the existing
+`agent-box-reaper.timer`. Run `/usr/local/sbin/agent-box-reaper --dry-run` as root in
+the distro to verify the installed path. Update both the interactive tray and the
 headless enforcer to a build that leaves expiry to the timer.
 
-During rollback, a timer that reads only timestamps leaves protected boxes alone.
-Restore the host-side timer to reconcile finished boxes with protected deadlines.
-If a boxd binary from before this change is installed under the new wrapper, the
-timer reports the unsupported flag and leaves the boxes in place.
+The wrapper uses timestamp expiry on hosts with an older or missing boxd. This keeps
+idle boxes expiring during setup and rollback. Timestamp expiry leaves protected boxes
+in place until a capable boxd returns and can reconcile them. Drain older jobs carrying
+the 24-hour deadline before relying on timestamp expiry.
 
 ## What changes on the PC, and how to undo it
 

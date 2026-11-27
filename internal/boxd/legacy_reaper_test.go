@@ -32,10 +32,11 @@ func TestLegacyTimerKeepsProtectedJobsOnRollback(t *testing.T) {
 	]`
 	for _, tc := range []struct {
 		name, list, status string
-		fail, dryRun       bool
+		fail, dryRun, old  bool
 		deleted            string
 	}{
 		{name: "expiry and hold decisions", list: records, deleted: "plain\njunk\noffset\npasthold\nmultiline\n"},
+		{name: "rolled-back boxd", list: records, old: true, deleted: "plain\njunk\noffset\npasthold\nmultiline\n"},
 		{name: "dry run", list: records, dryRun: true},
 		{name: "list failure with valid output", list: records, status: "1", fail: true},
 		{name: "truncated JSON", list: records[:len(records)-1], fail: true},
@@ -63,7 +64,14 @@ esac
 			t.Setenv("REAPER_LIST", list)
 			t.Setenv("REAPER_DELETES", log)
 			t.Setenv("REAPER_STATUS", tc.status)
-			cmd := exec.Command("sh", "testdata/legacy-reaper.sh")
+			boxd := filepath.Join(dir, "boxd")
+			t.Setenv("AGENT_BOX_BOXD", boxd)
+			if tc.old {
+				if err := os.WriteFile(boxd, []byte("#!/bin/sh\n[ \"$1\" = -help ] || exit 2\necho '  -version' >&2\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("sh", "../../provision/reaper.sh")
 			if tc.dryRun {
 				cmd.Args = append(cmd.Args, "--dry-run")
 			}
@@ -82,5 +90,47 @@ esac
 				t.Fatalf("deleted %q, want %q\n%s", got, tc.deleted, out)
 			}
 		})
+	}
+}
+
+func TestReaperUsesCapableBoxdEvenWhenItsProbeFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reaper.sh runs in the Linux distro")
+	}
+	boxd := filepath.Join(t.TempDir(), "boxd")
+	const fake = `#!/bin/sh
+case "$*" in
+    -help) printf '  -reap\n' >&2 ;;
+    "-reap -project test --dry-run") echo "host probe failed"; exit 7 ;;
+    *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(boxd, []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT_BOX_BOXD", boxd)
+	t.Setenv("AGENTS_PROJECT", "test")
+	out, err := exec.Command("sh", "../../provision/reaper.sh", "--dry-run").CombinedOutput()
+	if e, ok := err.(*exec.ExitError); !ok || e.ExitCode() != 7 || string(out) != "host probe failed\n" {
+		t.Fatalf("reaper: %v\n%s", err, out)
+	}
+}
+
+func TestPackagedBoxdInstallerCarriesReaper(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("installer runs in the Linux distro")
+	}
+	want, err := os.ReadFile("../../provision/reaper.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("sh", "../../provision/package-boxd-install.sh").CombinedOutput()
+	if err != nil {
+		t.Fatalf("package installer: %v\n%s", err, out)
+	}
+	_, body, found := strings.Cut(string(out), "cat <<'AGENT_BOX_REAPER'\n")
+	wrapper, _, closed := strings.Cut(body, "AGENT_BOX_REAPER\n")
+	if !found || !closed || wrapper != string(want) {
+		t.Fatal("the packaged installer did not include the reaper wrapper")
 	}
 }

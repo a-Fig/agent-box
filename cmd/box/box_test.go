@@ -69,6 +69,8 @@ type fakePC struct {
 	digest       string            // canned digest.Script output the follow reports
 	etagFails    int               // this many config sets fail as if another write came first
 	gone         map[string]bool   // boxes exec can't find
+	afterBundle  func(string)      // runs when a bundle is uploaded, under f.mu
+	onStart      func()            // runs when the start script dispatches, under f.mu
 }
 
 func isScript(c Cmd, marker string) bool {
@@ -207,6 +209,9 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, nil
 		}
 		f.pushed++
+		if f.afterBundle != nil && strings.HasSuffix(args[4], ".bundle") {
+			f.afterBundle(args[4])
+		}
 		if b, err := os.ReadFile(args[3]); err != nil {
 			f.t.Errorf("pushed file missing: %v", err)
 		} else if strings.HasSuffix(args[4], ".meta") {
@@ -302,6 +307,8 @@ func (f *fakePC) Run(ctx context.Context, c Cmd) (Result, error) {
 				return Result{Stdout: f.exit}, nil
 			case f.startErr:
 				return Result{}, errors.New("connection reset")
+			case f.onStart != nil && strings.Contains(c.Args[len(c.Args)-1], "setsid nohup"):
+				f.onStart()
 			}
 			return Result{}, nil
 		}
@@ -509,8 +516,31 @@ func TestRunRetriesExpiryOnETagRace(t *testing.T) {
 	if err != nil || r.Code != 0 || strings.Contains(out.String(), "warning") {
 		t.Fatalf("Run = %d, %v\n%s", r.Code, err, out)
 	}
-	if got := strings.Count(f.callList(), "config"); got != 8 {
+	if got := strings.Count(f.callList(), "config"); got != 9 {
 		t.Errorf("config calls = %d: %s", got, f.callList())
+	}
+}
+
+func TestRunRestoresProtectionAfterLegacyCompletionDuringUpload(t *testing.T) {
+	const box, job = "my-repo", "my-repo.20261123-120000-0001"
+	f := &fakePC{t: t, block: true, insts: []instance{{Name: box, Status: "Running"}}}
+	a, out := testApp(f)
+	legacyWrite := false
+	f.afterBundle = func(string) {
+		in := f.inst(box)
+		if in.Config[expiresKey] != jobrun.ProtectedExpiry || f.running != "" {
+			t.Fatalf("during upload: config %v, running %q", in.Config, f.running)
+		}
+		in.Config[expiresKey] = a.Now().Add(idleTTL).Format(time.RFC3339)
+		legacyWrite = true
+	}
+	f.onStart = func() { f.running = job + "\n" }
+	r, err := a.Run(context.Background(), RunOpts{Dir: newRepo(t), Cmd: []string{"true"}, Wait: 10 * time.Millisecond})
+	if err != nil || r.State != stateDetached || !legacyWrite {
+		t.Fatalf("Run = %+v, legacy write = %v, error = %v\n%s", r, legacyWrite, err, out)
+	}
+	if got := f.inst(box).Config[expiresKey]; got != jobrun.ProtectedExpiry {
+		t.Fatalf("legacy deadline left behind: %s", got)
 	}
 }
 
