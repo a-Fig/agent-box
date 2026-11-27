@@ -39,7 +39,7 @@ type Incus interface {
 	Resume(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	// Delete removes the instance and its disk (forced, so a frozen or running one goes too).
-	Delete(ctx context.Context, name string) error
+
 	SetInstanceConfig(ctx context.Context, name, key, value string) error
 	// ProjectConfig reads one key of the project's config ("" when unset).
 	ProjectConfig(ctx context.Context, key string) (string, error)
@@ -88,11 +88,6 @@ func (c CLI) Resume(ctx context.Context, name string) error {
 // Stop is forced because a frozen instance won't stop gracefully.
 func (c CLI) Stop(ctx context.Context, name string) error {
 	return c.do(ctx, "stop", name, "--force", "--project", Project)
-}
-
-// Delete is forced because the reaper deletes running and frozen instances.
-func (c CLI) Delete(ctx context.Context, name string) error {
-	return c.do(ctx, "delete", name, "--force", "--project", Project)
 }
 
 func (c CLI) SetInstanceConfig(ctx context.Context, name, key, value string) error {

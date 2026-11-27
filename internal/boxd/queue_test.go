@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"mime/multipart"
@@ -159,16 +158,21 @@ func TestQueueWaitsForRoomThenStarts(t *testing.T) {
 		t.Fatalf("running: %+v", st.Jobs)
 	}
 
-	// It ends: boxd keeps the throwaway it launched for half an hour.
-	r.f.set(func() { r.f.jobs[box][0].state, r.f.jobs[box][0].exit = "done", "0" })
+	// It ends: the cleanup timer keeps the throwaway for half an hour.
+	r.f.set(func() {
+		j := &r.f.jobs[box][0]
+		j.state, j.exit, j.endedAt = "done", "0", r.c.now().Unix()
+	})
 	r.c.add(3 * time.Second)
 	r.poll()
-	time.Sleep(50 * time.Millisecond)
+	if err := r.w.ReapExpired(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
 	r.f.mu.Lock()
 	sets := r.f.expirySets
 	r.f.mu.Unlock()
-	start := box + " " + r.c.now().Add(-6*time.Second).UTC().Add(24*time.Hour).Format(time.RFC3339)
-	if want := box + " " + r.c.now().UTC().Add(30*time.Minute).Format(time.RFC3339); len(sets) != 2 || sets[0] != start || sets[1] != want {
+	start := box + " " + jobrun.ProtectedExpiry
+	if want := box + " " + r.c.now().UTC().Add(30*time.Minute-3*time.Second).Format(time.RFC3339); len(sets) != 2 || sets[0] != start || sets[1] != want {
 		t.Fatalf("throwaway's expiry: %v, want the job's %s then %s", sets, start, want)
 	}
 	var h dash.History
@@ -266,7 +270,8 @@ func TestQueueRefusalsAndLimits(t *testing.T) {
 		t.Fatal("stray bundle kept")
 	}
 
-	// A start that fails drops the job as lost and removes its throwaway.
+	// A failed reply after dispatch drops the queue entry. The timer checks
+	// the protected box before deciding whether the start was abandoned.
 	r.f.set(func() {
 		r.f.cfg["user.agent-box.mode"] = "full"
 		r.f.cliErr = func(args []string) error {
@@ -288,8 +293,8 @@ func TestQueueRefusalsAndLimits(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].State != dash.JobLost {
 		t.Fatalf("after a failed start: %+v", jobs)
 	}
-	if last := r.f.cli[len(r.f.cli)-1]; !strings.HasPrefix(last, "delete ") {
-		t.Fatalf("throwaway kept: %s", fmt.Sprint(r.f.cli))
+	if last := r.f.cli[len(r.f.cli)-1]; !strings.HasPrefix(last, "exec ") {
+		t.Fatalf("commands after dispatch: %v", r.f.cli)
 	}
 
 	// Over 24 hours waiting: dropped.

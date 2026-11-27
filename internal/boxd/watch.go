@@ -521,7 +521,11 @@ func (w *Watcher) box(now time.Time, in Instance) dash.Box {
 	}
 	b := dash.Box{Name: in.Name, Machine: w.MachineID, Size: sz.Name, GPU: sz.GPU, State: strings.ToLower(in.Status),
 		Throwaway: in.Config[jobrun.ThrowawayKey] == "true", Repo: repo, CreatedAt: in.CreatedAt.UTC(), UID: boxUID(in)}
-	if t, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey]); err == nil {
+	if raw := in.Config[jobrun.ExpiresKey]; raw == jobrun.ProtectedExpiry {
+		if hold := mode.Held(in.Config, now); hold.After(now) {
+			b.ExpiresAt = &hold
+		}
+	} else if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		t = mode.Held(in.Config, t).UTC() // when the reaper deletes it
 		b.ExpiresAt = &t
 	}

@@ -27,7 +27,7 @@ const (
 	workRoot  = "/work"
 	idleTTL   = 2 * time.Hour  // a box launched for a job, as box new gives it
 	jobTTL    = 24 * time.Hour // while a job runs, as box run sets it
-	startTime = 10 * time.Minute
+	startTime = jobrun.SetupTTL
 )
 
 var errNoRoom = errors.New("no room")
@@ -238,7 +238,8 @@ func (w *Watcher) setPoolExpiry(ctx context.Context, box, job string, ended bool
 }
 
 func (w *Watcher) poolExpiryConfig(ctx context.Context, in Instance, job string, ended bool) map[string]string {
-	if in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job {
+	if in.Config[jobrun.ExpiresKey] == jobrun.ProtectedExpiry ||
+		in.Config[jobrun.ThrowawayRepoKey] == "" || in.Config[jobrun.ThrowawayOwnerKey] != job {
 		return nil
 	}
 	if in.Status != "Running" && (in.Status != "Frozen" || ended) {
@@ -306,7 +307,7 @@ func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
 func idleRepo(in Instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
 	return in.Config[jobrun.ThrowawayKey] != "true" && in.Status == "Running" && err == nil &&
-		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now)
+		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now) && !jobrun.DeleteReserved(in.Config, now)
 }
 
 // spareBoxes is what a queued job short of room may delete, in the order it
@@ -673,11 +674,13 @@ func (w *Watcher) startedInBox(ctx context.Context, it *queued) bool {
 }
 
 // startJob does what box run does once it has a box: launch one if needed,
-// push the snapshot and the .meta, set the job's expiry and start it.
+// reserve setup, push the snapshot and metadata, and start it.
 func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.Size, now time.Time) (err error) {
 	box := it.Box
+	dispatched := false
 	if !reuse {
-		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New)
+		flags, devices := jobrun.LaunchFlags(sz, now.Add(idleTTL), it.New,
+			"-c", jobrun.SetupKey+"="+jobrun.SetupValue(it.Job, w.Now()))
 		args := append([]string{"launch", "agent-base", box}, flags...)
 		if _, err := w.Incus.CLI(ctx, devices, args...); err != nil {
 			if jobrun.LimitRefusal.MatchString(err.Error()) {
@@ -687,11 +690,27 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 		}
 		if it.New {
 			defer func() {
-				if err != nil {
+				if err != nil && !dispatched {
 					w.delete(context.WithoutCancel(ctx), box)
 				}
 			}()
 		}
+	}
+	reserved, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
+		if in.Status != "Running" || jobrun.ThrowawayClaimed(in.Config, w.Now()) {
+			return nil
+		}
+		return map[string]string{
+			jobrun.ExpiresKey: jobrun.ProtectedExpiry,
+			jobrun.SetupKey:   jobrun.SetupValue(it.Job, w.Now()),
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("reserve job setup: %w", err)
+	}
+	if !reserved {
+		dispatched = true // any competing reservation owns the box now
+		return errNoRoom
 	}
 	remote := workRoot + "/.box/" + it.Job
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", w.Queue.BundlePath(it.Job), box+remote+".bundle"); err != nil {
@@ -712,15 +731,8 @@ func (w *Watcher) startJob(ctx context.Context, it *queued, reuse bool, sz mode.
 	if _, err := w.Incus.CLI(ctx, "", "file", "push", "--create-dirs", tmp, box+remote+".meta"); err != nil {
 		return fmt.Errorf("push the .meta: %w", err)
 	}
-	// The job's 24h, or the box's hold if later. SetConfigIf retries the ETag
-	// race with the tray, which sets a new box's CPU limits within a tick of
-	// its launch, just now.
-	if _, err := w.Incus.SetConfigIf(ctx, box, func(in Instance) map[string]string {
-		return map[string]string{jobrun.ExpiresKey: mode.Held(in.Config, now.Add(jobTTL)).UTC().Format(time.RFC3339)}
-	}); err != nil {
-		return fmt.Errorf("set the expiry: %w", err)
-	}
 	payload := jobrun.Payload(it.Env, it.Command, time.Duration(it.Timeout)*time.Second)
+	dispatched = true
 	if _, err := w.Incus.CLI(ctx, "", "exec", box, "--", "bash", "-lc", jobrun.StartScript(workRoot, it.Job, it.Ref, it.Checkout, payload)); err != nil {
 		// The job may have started and only the wait for its PID or the
 		// stream failed, as box run allows for: then it runs, and is ours.

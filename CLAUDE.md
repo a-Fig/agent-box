@@ -76,7 +76,7 @@ Tyler's rules:
 
 ## Layout
 
-`cmd/box` CLI + MCP · `cmd/boxtray` tray · `internal/mode` mode logic and reaper ·
+`cmd/box` CLI + MCP · `cmd/boxtray` tray · `internal/mode` mode logic · `internal/boxd` dashboard server and reaper ·
 `internal/dash` the dashboard's contract, fixtures, devserver and page ·
 `provision/` PC setup · `docs/`.
 

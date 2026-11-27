@@ -63,11 +63,11 @@ if ($LASTEXITCODE -ne 0) { throw "Creating $name failed" }
 ### Run the repository tests and check the idle expiry
 
 ```powershell
-function Assert-BoxExpiry([string]$Name, [double]$Hours) {
+function Assert-BoxExpiry([string]$Name, [double]$Hours, [DateTimeOffset]$From = [DateTimeOffset]::UtcNow) {
     $raw = incus --project agents config get "pc:$Name" user.expires
     if ($LASTEXITCODE -ne 0) { throw "Could not read expiry for $Name" }
     if ($raw -notmatch 'Z$') { throw "Expected a UTC expiry for $Name, got $raw" }
-    $left = ([DateTimeOffset]::Parse($raw) - [DateTimeOffset]::UtcNow).TotalHours
+    $left = ([DateTimeOffset]::Parse($raw) - $From).TotalHours
     if ([Math]::Abs($left - $Hours) -gt (5.0 / 60.0)) {
         throw "Expected $Name to expire about ${Hours}h from now, got $raw"
     }
@@ -80,7 +80,9 @@ try {
     & $box run --reason "Live smoke test of agent-box (docs/testing.md)." --box $name -- go test ./internal/...
     if ($LASTEXITCODE -ne 0) { throw 'Remote Go tests failed' }
 } finally { Pop-Location }
-Assert-BoxExpiry $name 2
+$ended = [DateTimeOffset]::UtcNow
+# Wait for the cleanup timer to observe the end, after setup grace.
+Assert-BoxExpiry $name 2 $ended
 ```
 
 ### Detach with Ctrl-C and reattach
@@ -93,15 +95,14 @@ Push-Location -LiteralPath $repo
 After `smoke-job-started` appears, press Ctrl-C once. Record the job ID printed by `box`. Keep the PowerShell session open and use its prompt to check the expiry and reattach.
 
 ```powershell
-Assert-BoxExpiry $name 24
+& $box ls  # This box should show job protected.
 $job = '<job ID printed by box run>'
 & $box job $job
 if ($LASTEXITCODE -ne 7) { throw 'Reattached job did not return 7' }
 Pop-Location
-Assert-BoxExpiry $name 2
 ```
 
-The reattached log should end with `smoke-job-finished`. The running expiry is about 24 hours and the idle expiry returns to about two hours after the exit code is read.
+The reattached log should end with `smoke-job-finished`. A reusable box can show `job protected` through the 10-minute setup grace. After the timer reconciles it, check that the expiry is two hours from when the job ended.
 
 ### Verify My PC mode and restricted access
 
@@ -156,7 +157,7 @@ if (-not ($instances | Where-Object { $_.name -eq $throwaway })) { throw "Throwa
 & $box rm $throwaway
 ```
 
-The throwaway is kept for 30 minutes after a run whose exit code was read, for `box pull`, and the
+The throwaway is kept for 30 minutes after a run ends, for `box pull`, and the
 run's last line says so (since #86). A queued job or a launch short of room may take it sooner.
 
 If a previous step left the named smoke box behind, use `box ls` to confirm the printed name and remove only that box.

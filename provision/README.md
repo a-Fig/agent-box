@@ -46,6 +46,19 @@ Released builds update themselves (docs/releasing.md). `agent-box-update.timer` 
 
 Files: `default-profile.yaml` (project `agents`'s `default` profile: limits, nesting, cache volume, cloud-init), `incus-preseed.yaml` (Incus init), `wsl.conf` (copied to `/etc/wsl.conf`).
 
+### Switching the expiry timer to host job state
+
+The host-side reaper needs a boxd build with `-reap`. After installing that build, run
+`/opt/agent-box/bin/boxd -reap -dry-run` as root in the distro. Install this checkout's
+`reaper.sh` as `/usr/local/sbin/agent-box-reaper` with mode 0755, as `setup-host.sh` does.
+The existing systemd timer uses that path. Update both the interactive tray and the
+headless enforcer to a build that leaves expiry to the timer.
+
+During rollback, a timer that reads only timestamps leaves protected boxes alone.
+Restore the host-side timer to reconcile finished boxes with protected deadlines.
+If a boxd binary from before this change is installed under the new wrapper, the
+timer reports the unsupported flag and leaves the boxes in place.
+
 ## What changes on the PC, and how to undo it
 
 | Script | Change | Undo |

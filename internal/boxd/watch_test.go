@@ -199,6 +199,19 @@ func (f *fakeIncus) Exec(_ context.Context, box, script string, args ...string) 
 		}
 		return []byte(b.String()), nil
 	}
+	if script == expiryScan {
+		var b strings.Builder
+		for _, j := range f.jobs[box] {
+			switch j.state {
+			case "running", "starting":
+				fmt.Fprintf(&b, "busy %s\n", j.name)
+			case "done":
+				fmt.Fprintf(&b, "done %s %d\n", j.name, j.endedAt)
+			}
+		}
+		b.WriteString("checked\n")
+		return []byte(b.String()), nil
+	}
 	if strings.HasPrefix(script, "# kept jobs") {
 		ended := false
 		for _, j := range f.jobs[box] {
@@ -272,7 +285,9 @@ func (f *fakeIncus) CLI(_ context.Context, stdin string, args ...string) ([]byte
 	defer f.mu.Unlock()
 	f.cli = append(f.cli, strings.Join(args, " "))
 	if f.cliErr != nil {
-		return nil, f.cliErr(args)
+		if err := f.cliErr(args); err != nil {
+			return nil, err
+		}
 	}
 	switch args[0] {
 	case "file":

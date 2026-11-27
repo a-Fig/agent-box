@@ -1,4 +1,4 @@
-package mode
+package boxd
 
 import (
 	"os"
@@ -7,14 +7,17 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/a-Fig/agent-box/internal/jobrun"
 )
 
-func TestReaperShellParsing(t *testing.T) {
+func TestLegacyTimerKeepsProtectedJobsOnRollback(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("reaper.sh runs in the Linux distro")
 	}
 	// A malformed config value is still part of one instance's record.
-	const records = `[
+	records := `[
+        {"name":"protected","config":{"user.expires":"` + jobrun.ProtectedExpiry + `"}},
 		{"name":"plain","config":{"user.expires":"2020-01-01T00:00:00Z"}},
 		{"name":"held","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2999-01-01T00:00:00Z"}},
 		{"name":"fraction","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2999-01-01T00:00:00.5Z"}},
@@ -60,7 +63,7 @@ esac
 			t.Setenv("REAPER_LIST", list)
 			t.Setenv("REAPER_DELETES", log)
 			t.Setenv("REAPER_STATUS", tc.status)
-			cmd := exec.Command("sh", "../../provision/reaper.sh")
+			cmd := exec.Command("sh", "testdata/legacy-reaper.sh")
 			if tc.dryRun {
 				cmd.Args = append(cmd.Args, "--dry-run")
 			}
