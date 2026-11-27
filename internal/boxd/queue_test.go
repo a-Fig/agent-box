@@ -547,29 +547,40 @@ func TestQueueDeletesIdleRepoBoxForRoom(t *testing.T) {
 	}
 }
 
-// An idle repo box is read again just before its delete: one a person
-// extended since the poll that found it idle is left (#187).
+// Recheck a repo box after the guest probe catches a hold or setup
+// reservation that arrived after it was selected for pressure eviction.
 func TestQueueRechecksIdleRepoBoxBeforeDelete(t *testing.T) {
-	r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
-	r.f.set(func() {
-		r.f.afterRun = func(box string) {
-			if box == "murmur" {
-				r.f.ins[0].Config = maps.Clone(r.f.ins[0].Config)
-				r.f.ins[0].Config[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
-				r.f.afterRun = nil
+	for _, state := range []string{"held", "setup with a shortened legacy deadline"} {
+		t.Run(state, func(t *testing.T) {
+			r := idleRepoRig(t, map[string]string{"user.agent-box.mode": "full", "limits.memory": "24GiB", "limits.instances": "2"})
+			r.f.set(func() {
+				r.f.afterRun = func(box string) {
+					if box != "murmur" {
+						return
+					}
+					cfg := maps.Clone(r.f.ins[0].Config)
+					if state == "held" {
+						cfg[mode.HoldKey] = r.c.now().Add(10 * time.Minute).Format(time.RFC3339)
+					} else {
+						cfg[jobrun.SetupKey] = jobrun.SetupValue("murmur.20261124-180000-0001", r.c.now())
+						cfg[jobrun.ExpiresKey] = r.c.now().Add(idleTTL).Format(time.RFC3339)
+					}
+					r.f.ins[0].Config = cfg
+					r.f.afterRun = nil
+				}
+			})
+			if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
+				t.Fatalf("enqueue: %d %+v", code, rep)
 			}
-		}
-	})
-	if code, rep, _ := r.enqueue(small("job", "quiet-otter"), "B"); code != 201 {
-		t.Fatalf("enqueue: %d %+v", code, rep)
-	}
-	r.c.add(3 * time.Second)
-	r.poll()
-	if len(r.f.cli) != 0 {
-		t.Fatalf("deleted a box extended since the poll: %v", r.f.cli)
-	}
-	if q := r.w.Queued(); len(q) != 1 {
-		t.Fatalf("queued: %+v", q)
+			r.c.add(3 * time.Second)
+			r.poll()
+			if len(r.f.cli) != 0 {
+				t.Fatalf("deleted a reserved box: %v", r.f.cli)
+			}
+			if q := r.w.Queued(); len(q) != 1 {
+				t.Fatalf("queued: %+v", q)
+			}
+		})
 	}
 }
 

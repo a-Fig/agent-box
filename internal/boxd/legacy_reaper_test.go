@@ -30,10 +30,11 @@ func TestLegacyTimerKeepsProtectedJobsOnRollback(t *testing.T) {
 		{"name":"multiline","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"bad\nheld,2020-01-01T00:00:00Z,\n"}},
 		{"name":"badtype","config":{"user.expires":1}}
 	]`
+	const expired = `[{"name":"plain","config":{"user.expires":"2020-01-01T00:00:00Z"}}]`
 	for _, tc := range []struct {
-		name, list, status string
-		fail, dryRun, old  bool
-		deleted            string
+		name, list, current, status string
+		fail, dryRun, old           bool
+		deleted                     string
 	}{
 		{name: "expiry and hold decisions", list: records, deleted: "plain\njunk\noffset\npasthold\nmultiline\n"},
 		{name: "rolled-back boxd", list: records, old: true, deleted: "plain\njunk\noffset\npasthold\nmultiline\n"},
@@ -41,6 +42,9 @@ func TestLegacyTimerKeepsProtectedJobsOnRollback(t *testing.T) {
 		{name: "list failure with valid output", list: records, status: "1", fail: true},
 		{name: "truncated JSON", list: records[:len(records)-1], fail: true},
 		{name: "invalid record after expired one", list: `[{"name":"plain","config":{"user.expires":"2020-01-01T00:00:00Z"}},null]`, fail: true},
+		{name: "setup reserved after list", list: expired, current: `[{"name":"plain","config":{"user.expires":"` + jobrun.ProtectedExpiry + `"}}]`},
+		{name: "held after list", list: expired, current: `[{"name":"plain","config":{"user.expires":"2020-01-01T00:00:00Z","user.box.hold-until":"2999-01-01T00:00:00Z"}}]`},
+		{name: "recheck unavailable", list: expired, current: "[]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -49,9 +53,28 @@ func TestLegacyTimerKeepsProtectedJobsOnRollback(t *testing.T) {
 			if err := os.WriteFile(list, []byte(tc.list), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			current := list
+			if tc.current != "" {
+				current = filepath.Join(dir, "current.json")
+				if err := os.WriteFile(current, []byte(tc.current), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			const fake = `#!/bin/sh
 case "$*" in
     "list --project test -f json") cat "$REAPER_LIST"; exit "${REAPER_STATUS:-0}" ;;
+    "query /1.0/instances/"*'?project=test')
+        target=${2%%\?*}
+        python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    for box in json.load(f):
+        if box["name"] == sys.argv[2]:
+            print(json.dumps(box))
+            sys.exit(0)
+sys.exit(1)
+' "${REAPER_CURRENT:-$REAPER_LIST}" "${target##*/}"
+        ;;
     "delete --force --project test -- "*) printf '%s\n' "$6" >> "$REAPER_DELETES" ;;
     *) exit 2 ;;
 esac
@@ -62,6 +85,7 @@ esac
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("AGENTS_PROJECT", "test")
 			t.Setenv("REAPER_LIST", list)
+			t.Setenv("REAPER_CURRENT", current)
 			t.Setenv("REAPER_DELETES", log)
 			t.Setenv("REAPER_STATUS", tc.status)
 			boxd := filepath.Join(dir, "boxd")

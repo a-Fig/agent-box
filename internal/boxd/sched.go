@@ -306,8 +306,10 @@ func (w *Watcher) idleRepoBoxes(ins []Instance, now time.Time) []Instance {
 // throwaway, its expiry still the idle one and not held.
 func idleRepo(in Instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[jobrun.ExpiresKey])
+	_, setup := jobrun.SetupOwner(in.Config)
 	return in.Config[jobrun.ThrowawayKey] != "true" && in.Status == "Running" && err == nil &&
-		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now) && !jobrun.DeleteReserved(in.Config, now)
+		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
+		!setup.After(now) && !jobrun.DeleteReserved(in.Config, now)
 }
 
 // spareBoxes is what a queued job short of room may delete, in the order it

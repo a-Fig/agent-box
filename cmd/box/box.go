@@ -602,7 +602,7 @@ func (a *App) hasEndedJob(ctx context.Context, box string) bool {
 func (a *App) idleRepoBoxes(ctx context.Context, insts []instance) []instance {
 	var out []instance
 	for _, in := range insts {
-		if a.idleRepo(ctx, in) {
+		if idleRepoConfig(in, a.Now()) && a.hasEndedJob(ctx, in.Name) {
 			out = append(out, in)
 		}
 	}
@@ -611,22 +611,20 @@ func (a *App) idleRepoBoxes(ctx context.Context, insts []instance) []instance {
 	return out
 }
 
-// idleRepo says whether in is an idle repo box, as idleRepoBoxes counts it.
-func (a *App) idleRepo(ctx context.Context, in instance) bool {
-	now := a.Now()
+// idleRepoConfig checks whether the config allows pressure eviction.
+func idleRepoConfig(in instance, now time.Time) bool {
 	exp, err := time.Parse(time.RFC3339, in.Config[expiresKey])
-	if in.Config[throwawayKey] == "true" || in.Status != "Running" || err != nil ||
-		exp.After(now.Add(idleTTL+time.Minute)) || mode.Held(in.Config, now).After(now) || jobrun.DeleteReserved(in.Config, now) {
-		return false
-	}
-	return a.hasEndedJob(ctx, in.Name)
+	_, setup := jobrun.SetupOwner(in.Config)
+	return in.Config[throwawayKey] != "true" && in.Status == "Running" && err == nil &&
+		!exp.After(now.Add(idleTTL+time.Minute)) && !mode.Held(in.Config, now).After(now) &&
+		!setup.After(now) && !jobrun.DeleteReserved(in.Config, now)
 }
 
-// stillIdle checks the selected instance just before a delete. For
-// throwaways, read the config last to catch a claim still in setup.
+// stillIdle reads the config after checking the guest, so a setup that
+// reserves the box during the probe is visible before the delete.
 func (a *App) stillIdle(ctx context.Context, selected instance, lease string) bool {
 	throwaway := selected.Config[throwawayKey] == "true"
-	if throwaway && selected.Status != "Stopped" && !a.hasEndedJob(ctx, selected.Name) {
+	if selected.Status != "Stopped" && !a.hasEndedJob(ctx, selected.Name) {
 		return false
 	}
 	insts, err := a.list(ctx)
@@ -651,7 +649,7 @@ func (a *App) stillIdle(ctx context.Context, selected instance, lease string) bo
 				}
 				return keptThrowawayConfig(in, a.Now())
 			}
-			return a.idleRepo(ctx, in)
+			return idleRepoConfig(in, a.Now())
 		}
 	}
 	return false

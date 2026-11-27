@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/dash"
+	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
@@ -375,14 +376,25 @@ func TestIdleRepoBoxRecheckedBeforeDelete(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		change func(f *fakePC)
+		probe  int
 	}{
-		{"job started", func(f *fakePC) { f.kept["murmur"] = false }},
-		{"held", func(f *fakePC) { f.insts[0].Config[mode.HoldKey] = "2026-11-23T15:00:00Z" }},
-		{"expiry set by a job", func(f *fakePC) { f.insts[0].Config[expiresKey] = "2026-11-24T12:00:00Z" }},
+		{"job started", func(f *fakePC) { f.kept["murmur"] = false }, 1},
+		{"held", func(f *fakePC) { f.insts[0].Config[mode.HoldKey] = "2026-11-23T15:00:00Z" }, 1},
+		{"expiry set by a job", func(f *fakePC) { f.insts[0].Config[expiresKey] = "2026-11-24T12:00:00Z" }, 1},
+		{"setup with a shortened legacy deadline", func(f *fakePC) {
+			f.insts[0].Config[jobrun.SetupKey] = "murmur.20261123-120000-0001 2026-11-23T12:10:00Z"
+			f.insts[0].Config[expiresKey] = "2026-11-23T14:00:00Z"
+		}, 2},
 	} {
 		f := &fakePC{t: t, refuse: memoryRefusal, kept: map[string]bool{"murmur": true},
 			insts: []instance{{Name: "murmur", Status: "Running", Config: map[string]string{expiresKey: "2026-11-23T13:30:00Z"}}}}
-		f.afterKept = func(string) { tc.change(f); f.afterKept = nil } // after the first look
+		checks := 0
+		f.afterKept = func(string) {
+			checks++
+			if checks == tc.probe {
+				tc.change(f)
+			}
+		}
 		a, out := testApp(f)
 		if err := a.launch(context.Background(), "new-1", time.Hour, true, mustSize(t, "small")); !isNoRoom(err) {
 			t.Fatalf("%s: launch: %v\n%s", tc.name, err, out)
@@ -404,13 +416,14 @@ func TestIdleRepoBoxes(t *testing.T) {
 		}
 		return c
 	}
-	f := &fakePC{t: t, kept: map[string]bool{"newer": true, "older": true, "held": true, "job-24h": true, "old-0001": true},
+	f := &fakePC{t: t, kept: map[string]bool{"newer": true, "older": true, "held": true, "job-24h": true, "old-0001": true, "setup": true},
 		insts: []instance{
 			{Name: "newer", Status: "Running", Config: cfg("2026-11-23T13:50:00Z")},
 			{Name: "older", Status: "Running", Config: cfg("2026-11-23T12:30:00Z")},
 			{Name: "held", Status: "Running", Config: cfg("2026-11-23T13:00:00Z", mode.HoldKey, "2026-11-23T13:00:00Z")},
 			{Name: "busy", Status: "Running", Config: cfg("2026-11-23T13:00:00Z")}, // a job runs: not kept
 			{Name: "job-24h", Status: "Running", Config: cfg("2026-11-24T12:00:00Z")},
+			{Name: "setup", Status: "Running", Config: cfg("2026-11-23T14:00:00Z", jobrun.SetupKey, "setup.20261123-120000-0001 2026-11-23T12:10:00Z")},
 			{Name: "frozen", Status: "Frozen", Config: cfg("2026-11-23T13:00:00Z")},
 			{Name: "old-0001", Status: "Running", Config: cfg("2026-11-23T12:20:00Z", throwawayKey, "true")},
 		}}
