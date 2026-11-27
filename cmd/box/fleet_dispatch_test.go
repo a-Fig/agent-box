@@ -438,6 +438,39 @@ func TestFleetRunPicksBestHostIssuesQualifiedIDAndBareGuestID(t *testing.T) {
 	}
 }
 
+func TestFleetRunRecoversQualifiedResultWhenCoolingInterruptsFollow(t *testing.T) {
+	host := fleetHost{Name: "beta", Remote: "r2", Project: mode.Project, DashboardURL: "https://beta.example.com"}
+	beta := &fakeFleetHost{remote: host.Remote, project: host.Project, mode: "full"}
+	ff := newFakeFleet(t, beta)
+	ff.dashHosts[host.DashboardURL] = beta
+	a, out, dir := fleetDispatchTestApp(t, ff, []fleetHost{host})
+	var job string
+	a.Notify = func(n jobNotice) {
+		if n.Event == "starting_job" {
+			job = n.Job
+		}
+	}
+	a.R = lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
+		if isScript(cmd, "# follow") {
+			id, err := parseJobID(job)
+			if err != nil || id.hostTag == "" {
+				t.Fatalf("following without a qualified job ID: %q, %v", job, err)
+			}
+			a.recordEnd(id.Bare, jobEnd{Code: 3})
+			a.recordEnd(id.ID, jobEnd{Host: host.Name, Code: 7})
+			return Result{}, nil // The guest cooled before the exit marker reached the client.
+		}
+		return ff.Run(ctx, cmd)
+	})
+	r, err := a.Run(context.Background(), RunOpts{
+		Dir: dir, New: true, Cmd: []string{"exit 7"}, Reason: "Recover a fleet job result after cooling interrupts follow.",
+	})
+	if err != nil || r.Job != job || r.Host != host.Name || r.State != stateDone || r.Code != 7 ||
+		!strings.Contains(out.String(), "using the recorded result") {
+		t.Fatalf("run = %+v, %v; out=%q", r, err, out)
+	}
+}
+
 func TestFleetRunFallsBackOnPreStartRaceButNotOnCommandFailure(t *testing.T) {
 	alpha := &fakeFleetHost{
 		remote:       "r1",

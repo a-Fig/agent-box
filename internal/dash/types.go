@@ -306,8 +306,9 @@ type State struct {
 	Jobs     []Job     `json:"jobs"`
 	// Queue reports whether this boxd accepts queued jobs (POST /api/queue).
 	// Absent or false means no fleet queue capability.
-	Queue bool      `json:"queue,omitempty"`
-	Now   time.Time `json:"now"`
+	Queue   bool        `json:"queue,omitempty"`
+	Updates *UpdateInfo `json:"updates,omitempty"`
+	Now     time.Time   `json:"now"`
 }
 
 // FinishedInState is how many finished jobs State.Jobs keeps.
@@ -597,6 +598,7 @@ const (
 	CodeFrozen       = "frozen"             // 409: the box is frozen for My PC
 	CodeNotRunning   = "not-running"        // 409: the job has already ended
 	CodeGone         = "gone"               // 409: the box of that name is another one now
+	CodeStopping     = "stopping"           // 409: an idle stop has reserved the box
 	CodeNeedsConfirm = "needs-confirmation" // 409: deleting needs the warning first (#247)
 	CodeIncus        = "incus"              // 502: Incus failed
 	CodeQueueFull    = "queue-full"         // 507: the queue's snapshots would pass QueueBytes
