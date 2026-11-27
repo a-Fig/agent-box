@@ -631,7 +631,11 @@ func TestCLIBoxJobOnAFinishedQueuedJob(t *testing.T) {
 	}
 
 	// Taken off with box cancel while someone followed it: that follower says so.
-	b.views = []dash.Job{{Box: "my-repo-ab12", State: dash.JobQueued, QueuedAt: &queued, StartedAt: queued, Position: 1, Why: dash.RefusedFull}}
+	b.gone = true
+	if err := writeJSON(e.a.statePath(queuedJobName, ".json"), jobRecord{Job: queuedJobName, Queued: true,
+		Host: &jobLocator{Remote: e.a.Remote, Project: e.a.Project}}); err != nil {
+		t.Fatal(err)
+	}
 	os.Remove(e.a.statePath(queuedJobName, ".notified"))
 	e.a.markNotified(queuedJobName, "cancel")
 	errOut.Reset()

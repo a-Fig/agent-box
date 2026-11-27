@@ -1007,13 +1007,7 @@ func (a *App) follow(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, 
 		return jobEnd{Code: exitPaused, Lost: true, Took: took(), Tail: tail.lastLines(tailLines), Source: source}, true
 	}
 	if rec.Queued {
-		var out queueOutcome
-		var ok bool
-		if id.hostTag == "" {
-			out, ok = w.waitQueued(ctx, rec)
-		} else {
-			out, ok = w.waitQueuedJob(ctx, rec, id.Bare, false)
-		}
+		out, ok := w.waitQueuedJob(ctx, rec, id, false, true)
 		source = out.source
 		switch {
 		case !ok:

@@ -285,9 +285,10 @@ func droppedMessage(r jobRecord) string {
 // running in its box (zero when only the box can say), or end is how it ended
 // when boxd already knows: its exit code, or that it never ran.
 type queueOutcome struct {
-	started time.Time
-	end     *jobEnd
-	source  *dash.SourceRevision
+	started   time.Time
+	end       *jobEnd
+	source    *dash.SourceRevision
+	cancelled bool
 }
 
 // jobInBox says whether the job's log exists in its box: it started there.
@@ -298,14 +299,11 @@ func (a *App) jobInBox(ctx context.Context, job string) bool {
 	return err == nil
 }
 
-// waitQueued follows a queued job until it leaves the queue, nudging the
-// agent once at dash.QueueNudge. ok is false when ctx ended or the agent
-// cancelled the job.
-func (a *App) waitQueued(ctx context.Context, rec jobRecord) (out queueOutcome, ok bool) {
-	return a.waitQueuedJob(ctx, rec, rec.Job, false)
-}
-
-func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, seen bool) (out queueOutcome, ok bool) {
+// waitQueuedJob follows the selected host. A watcher stops once the job
+// was acknowledged. A manual follow uses a local cancel marker only to
+// explain why the job is gone after checking the host.
+func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, id jobID, seen, watching bool) (out queueOutcome, ok bool) {
+	bare := id.Bare
 	queuedAt := jobStart(bare) // boxd names a queued job by when it was queued
 	out.source = rec.Source
 	dropped := func() (queueOutcome, bool) {
@@ -315,8 +313,8 @@ func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, see
 	backoff := 15 * time.Second
 	gone := 0 // 404s in a row since boxd answered queued
 	for ctx.Err() == nil {
-		if a.exists(rec.Job, ".notified") {
-			return out, false // box_cancel took it off the queue
+		if watching && a.exists(rec.Job, ".notified") {
+			return out, false
 		}
 		j, found, err := a.queuedJob(ctx, bare)
 		if err == nil && found && out.source == nil {
@@ -339,7 +337,15 @@ func (a *App) waitQueuedJob(ctx context.Context, rec jobRecord, bare string, see
 			// restart forgets a start it hasn't scanned yet), the box says the
 			// rest. A job boxd had queued that is in no box was taken off the
 			// queue (from the page): it never ran.
-			if !seen || a.jobInBox(ctx, bare) {
+			cancelled := !watching && a.jobSourceMatchesHost(id, rec.Host) && a.notifiedBy(rec.Job) == "cancel"
+			if (seen || cancelled) && a.jobInBox(ctx, bare) {
+				return out, true
+			}
+			if cancelled {
+				out.cancelled = true
+				return out, true
+			}
+			if !seen {
 				return out, true
 			}
 			if gone++; gone >= 2 {
@@ -406,13 +412,13 @@ func (a *App) followQueuedJob(ctx context.Context, id jobID, seen bool) (JobResu
 	rec.Job = job
 	rec.Thread = ""  // whoever follows here sees the job; no nudge is pushed
 	rec.Source = nil // a manual follow takes its source from the host first
-	out, ok := a.waitQueuedJob(ctx, rec, id.Bare, seen)
+	out, ok := a.waitQueuedJob(ctx, rec, id, seen, false)
 	r := JobResult{Job: job, Box: box, State: stateDone, Source: out.source}
 	if r.Source == nil {
 		r.Source = a.savedJobSource(id)
 	}
 	switch {
-	case !ok && a.notifiedBy(job) == "cancel":
+	case out.cancelled:
 		fmt.Fprintf(a.Err, "box: job %s was taken off the queue; it never ran\n", job)
 		r.Code = exitDetached
 		return r, nil

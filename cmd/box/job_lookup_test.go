@@ -409,8 +409,9 @@ func TestQualifiedJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 }
 
 func TestBareJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
-	a, out, _, east := lookupTestApp(t, "agents")
+	a, out, west, east := lookupTestApp(t, "agents")
 	a.dashboardURL, a.Err = east.DashboardURL, out
+	a.WatchPoll = time.Millisecond
 	const job = testBareJobID
 	dirty, exit := true, 7
 	source := &dash.SourceRevision{Commit: strings.Repeat("a", 40), Dirty: &dirty, SnapshotCommit: strings.Repeat("b", 40)}
@@ -421,14 +422,14 @@ func TestBareJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 		}
 		requests++
 		j := dash.Job{Box: "repo", State: dash.JobQueued, Position: 2, Source: source}
-		if requests > 2 {
+		if requests > 3 {
 			j.State, j.Exit, j.Tail = dash.JobDone, &exit, "queued tail"
 		}
 		raw, _ := json.Marshal(j)
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
 	}
 	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
-		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" || (requests < 3 && !isScript(cmd, "# page")) {
+		if len(cmd.Args) != 8 || cmd.Args[3] != "east:repo" || (requests < 4 && !isScript(cmd, "# page")) {
 			t.Fatalf("unexpected Incus call: %q", cmd.Args)
 		}
 		return Result{Code: 3}, nil // a waiting job has no guest log
@@ -439,8 +440,15 @@ func TestBareJobLooksUpQueueWithoutLocalMarker(t *testing.T) {
 		got["commit"] != source.Commit || !strings.Contains(fmt.Sprint(res["content"]), sourceLine(source)) {
 		t.Fatalf("queued MCP result = %v", res)
 	}
+	// Another host's job with this bare ID was cancelled locally.
+	rec := jobRecord{Job: job, Queued: true, Host: &jobLocator{Remote: west.Remote, Project: west.Project}}
+	if err := writeJSON(a.statePath(job, ".json"), rec); err != nil {
+		t.Fatal(err)
+	}
+	a.markNotified(job, "cancel")
 	if code := run(context.Background(), a, []string{"job", job}, nil); code != exit ||
-		!strings.Contains(out.String(), "queued tail") || !strings.Contains(out.String(), sourceLine(source)) {
+		!strings.Contains(out.String(), "queued tail") || !strings.Contains(out.String(), sourceLine(source)) ||
+		strings.Contains(out.String(), "taken off the queue") {
 		t.Fatalf("CLI follow = %d, %q", code, out)
 	}
 }
