@@ -18,6 +18,7 @@ const S = {
   boxes: new Map(),
   gen: 0, // counts snapshots (a reconnect replaces the jobs, so what was fetched before may be stale)
   jobs: new Map(), // by key: running, paused and the last finished, from the state and events
+  updates: null, // { latest, checkedAt } from boxd's last stable release check, or null
   toast: null,
 };
 
@@ -68,6 +69,7 @@ function applyState(st) {
   S.machines = new Map((st.machines || []).map((m) => [m.id, m]));
   S.boxes = new Map((st.boxes || []).map((b) => [b.machine + "/" + b.name, b]));
   S.jobs = new Map((st.jobs || []).map((j) => [j.key, j]));
+  S.updates = st.updates || null;
   S.gen++;
   S.conn = "live";
 }
@@ -123,6 +125,7 @@ function openStream() {
   on("box-gone", (b) => S.boxes.delete(b.machine + "/" + b.name));
   on("job", (j) => S.jobs.set(j.key, j));
   on("job-gone", (j) => S.jobs.delete(j.key));
+  on("updates", (u) => (S.updates = u));
   // On a drop the page starts over from the state, after a breath, so a stream that keeps
   // failing doesn't spin.
   es.onerror = () => {

@@ -5,7 +5,7 @@ import { h, dur, stamp, clock } from "./dom.js";
 import { trayAlive } from "./store.js";
 import { hint } from "./tip.js";
 
-export { versions, drift };
+export { versions, drift, releaseStatus };
 
 // The builds boxd and the tray run (dash.Version), and a note when they differ: twice on
 // 2026-11-25 the PC ran builds hours behind the repo and nothing showed it. Both follow stable
@@ -71,4 +71,64 @@ function tagKey(tag) {
   return [n(m[1]), n(m[2]), n(m[3]), 1, 0, 0];
 }
 const cmpKey = (a, b) => a.reduce((c, v, i) => c || Math.sign(v - b[i]), 0);
+
+// How one reported build compares to the latest stable release (updates: { latest, checkedAt }).
+// Uses the same tag order as internal/update.After: a nightly of vX.Y.Z is behind vX.Y.Z.
+// Returns { label, cls, why } for a reported build, or null when no build is reported.
+function releaseStatus(v, updates, { isTray = false, trayUp = true } = {}) {
+  if (!v || !v.commit) return null;
+  const kv = tagKey(v.tag);
+  if (!kv) {
+    return {
+      label: "dev build",
+      cls: "badge-outline",
+      why: "Built without a release tag, so it doesn't follow stable releases or update itself.",
+    };
+  }
+  if (!updates || !updates.checkedAt) {
+    return {
+      label: "not checked",
+      cls: "badge-outline",
+      why: "Click Check for updates to compare this build with the latest stable release.",
+    };
+  }
+  if (!updates.latest) {
+    return {
+      label: "no stable release",
+      cls: "badge-outline",
+      why: "No stable release has been published on GitHub yet.",
+    };
+  }
+  const kl = tagKey(updates.latest);
+  if (!kl) {
+    return {
+      label: "unknown",
+      cls: "badge-outline",
+      why: "The latest stable release tag couldn't be compared.",
+    };
+  }
+  const c = cmpKey(kv, kl);
+  if (c === 0) {
+    return {
+      label: "up to date",
+      cls: "badge-on",
+      why: "Matches the latest stable release (" + updates.latest + ").",
+    };
+  }
+  if (c < 0) {
+    const how = isTray && !trayUp
+      ? "The tray isn't running, so it won't update until it starts."
+      : "Follows the stable channel and installs newer stable releases at its hourly check.";
+    return {
+      label: "update available",
+      cls: "badge-warn",
+      why: "Behind the latest stable release (" + updates.latest + "). " + how,
+    };
+  }
+  return {
+    label: "ahead of stable",
+    cls: "badge-info",
+    why: "Newer than the latest stable release (" + updates.latest + "). Stable updates won't downgrade it.",
+  };
+}
 

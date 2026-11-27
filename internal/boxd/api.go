@@ -22,6 +22,7 @@ import (
 // Server is boxd's HTTP API and page (docs/ui.md, "API"). Wrap it in Owners.
 type Server struct {
 	W               *Watcher
+	Updates         *UpdateChecker
 	Page            fs.FS // static.FS, or a folder while working on the page
 	ReuseThrowaways bool
 }
@@ -29,7 +30,7 @@ type Server struct {
 // Handler routes the API and serves the page.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.W.State()) })
+	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.state()) })
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/jobs", s.jobs)
 	mux.HandleFunc("GET /api/jobs/{key}", s.job)
@@ -37,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/history", s.history)
 	mux.Handle("POST /api/refusals", control(http.HandlerFunc(s.refusal)))
 	mux.Handle("POST /api/jobs/ended", control(http.HandlerFunc(s.ended)))
+	mux.Handle("POST /api/updates/check", control(http.HandlerFunc(s.checkUpdates)))
 	s.queueRoutes(mux)
 	s.controlRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +75,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, dash.CodeIncus, "no streaming")
 		return
 	}
-	st, ch, cancel := s.W.Subscribe()
+	st, ch, cancel := s.subscribe()
 	defer cancel()
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")

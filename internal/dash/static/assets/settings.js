@@ -1,14 +1,15 @@
 // The Settings page, laid out as Murmur's: sections, a row per setting with a line under it saying
-// what it does, saved at once. Only the theme is a control: it lives in this browser. The rest is
-// shown from what boxd reports (Machine.Config, the caps, the tray's heartbeat and build) and
-// changes where it lives today: the mode on Overview or in the tray, the caps and times in the
-// host's setup. Nothing here writes to the PC, so there is nothing for the owner's auth to guard.
+// what it does, saved at once. Only the theme and the read-only update check are interactive: the
+// theme lives in this browser, and Check for updates asks boxd for the latest stable release on
+// GitHub without touching the running builds. The rest is shown from what boxd reports
+// (Machine.Config, the caps, the tray's heartbeat and build) and changes where it lives today: the
+// mode on Overview or in the tray, the caps and times in the host's setup.
 
-import { h, bytes, dur, timeEl } from "./dom.js";
-import { S, trayAlive, changed } from "./store.js";
+import { h, icon, bytes, dur, timeEl } from "./dom.js";
+import { S, post, trayAlive, changed } from "./store.js";
 import { hint } from "./tip.js";
 import { section, modeLabel, MODE_HINTS } from "./views.js";
-import { drift } from "./versions.js";
+import { drift, releaseStatus } from "./versions.js";
 
 export { settings, themeSwitch };
 
@@ -62,11 +63,11 @@ function themeSwitch() {
 }
 
 // A row: its title, one line saying what it is, and its value or control on the right.
-function row(title, description, control) {
+function row(title, description, control, feedback) {
   return h(
     "div",
     { class: "row" },
-    h("div", { class: "row-grid" }, h("div", null, h("div", { class: "row-title" }, title), description && h("p", { class: "row-description" }, description)), control && h("div", { class: "row-control" }, control)),
+    h("div", { class: "row-grid" }, h("div", null, h("div", { class: "row-title" }, title), description && h("p", { class: "row-description" }, description), feedback), control && h("div", { class: "row-control" }, control)),
   );
 }
 
@@ -84,14 +85,71 @@ function buildCell(v, what) {
   return h("div", { class: "settings-stack" }, build(v), v?.since ? h("span", { class: "muted" }, timeEl("ago", v.since, what + " ")) : null);
 }
 
+let checking = false;
+let checkErr = "";
+
+async function checkUpdates() {
+  if (checking) return;
+  checking = true;
+  checkErr = "";
+  changed();
+  try {
+    const info = await post("/api/updates/check");
+    // An event from a newer check in another tab can arrive before this response.
+    if (!S.updates?.checkedAt || Date.parse(info.checkedAt) > Date.parse(S.updates.checkedAt)) S.updates = info;
+  } catch (e) {
+    checkErr = e.message || "Couldn't check for updates.";
+  } finally {
+    checking = false;
+    changed();
+  }
+}
+
+function statusBadge(st) {
+  if (!st) return null;
+  return h("span", hint(st.why, { class: "badge " + st.cls }, true), st.label);
+}
+
+function latestRow(machineId) {
+  const u = S.updates;
+  return row(
+    "Latest stable release",
+    [u?.checkedAt ? timeEl("ago", u.checkedAt, "Last checked ") : "Not checked yet", ". Running builds stay as they are."],
+    [
+      value(u?.checkedAt ? u.latest || "none published" : "unknown"),
+      h(
+        "button",
+        {
+          class: "btn btn-sm btn-outline settings-check",
+          type: "button",
+          "data-key": "check-updates-" + machineId,
+          "aria-disabled": checking ? "true" : null,
+          onclick: checkUpdates,
+        },
+        icon("retry", checking ? "spin" : ""),
+        checking ? "Checking…" : "Check for updates",
+      ),
+    ],
+    checkErr ? h("p", { class: "row-error settings-error", role: "alert" }, checkErr) : null,
+  );
+}
+
 function updates(m) {
-  const note = drift(m.boxd, m.tray, trayAlive(m));
+  const alive = trayAlive(m);
+  const note = drift(m.boxd, m.tray, alive);
+  const boxdStatus = releaseStatus(m.boxd, S.updates);
+  const trayStatus = releaseStatus(m.tray, S.updates, { isTray: true, trayUp: alive });
   return [
-    row("boxd", m.boxd?.tag ? "The server behind this page. It follows stable releases and checks for a new one hourly, unless updates are turned off (AGENT_BOX_NO_UPDATE)." : "The server behind this page. This is a dev build, not a release, so it doesn't update itself.", buildCell(m.boxd, "running since")),
+    latestRow(m.id),
     row(
-      "Tray",
-      !m.tray ? "Nothing reports a tray build for this host, so there is no tray to update." : m.tray.tag ? "Applies the mode on the PC. It follows stable releases the same way, unless updates are turned off (AGENT_BOX_NO_UPDATE)." : "Applies the mode on the PC. This is a dev build, not a release, so it doesn't update itself.",
-      m.tray ? buildCell(m.tray, "this build since") : value("not reporting"),
+      ["boxd", statusBadge(boxdStatus)],
+      m.boxd?.commit ? "The server behind this page." : "This server hasn't reported its build.",
+      m.boxd?.commit ? buildCell(m.boxd, "running since") : h("span", { class: "badge badge-outline" }, "unknown"),
+    ),
+    row(
+      ["Tray", statusBadge(trayStatus)],
+      m.tray?.commit ? "Applies the mode on the PC." : "This host hasn't reported a tray build.",
+      m.tray?.commit ? buildCell(m.tray, "this build since") : h("span", { class: "badge badge-outline" }, "not reporting"),
     ),
     note ? row(note.warn ? "Out of step" : "Different builds", note.why, h("span", { class: "badge " + (note.warn ? "badge-warn" : "") }, note.text)) : null,
   ];
@@ -146,6 +204,9 @@ function gpuRows(m) {
 const settings = {
   mount(el) {
     this.update(el);
+  },
+  leave() {
+    if (!checking) checkErr = "";
   },
   update(el) {
     const ms = [...S.machines.values()];
