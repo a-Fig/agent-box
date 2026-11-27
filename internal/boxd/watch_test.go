@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -23,16 +24,17 @@ import (
 
 // fakeIncus is a project whose boxes and job files a test sets.
 type fakeIncus struct {
-	mu     sync.Mutex
-	ins    []Instance
-	cfg    map[string]string
-	jobs   map[string][]fakeJob // box -> its job files
-	err    error
-	execs  int
-	cli    []string
-	cliErr func(args []string) error
-	files  map[string]string
-	cancel string // the last cancel script
+	mu        sync.Mutex
+	ins       []Instance
+	cfg       map[string]string
+	jobs      map[string][]fakeJob // box -> its job files
+	err       error
+	execs     int
+	fileReads int
+	cli       []string
+	cliErr    func(args []string) error
+	files     map[string]string
+	cancel    string // the last cancel script
 	// SetConfigIf: each expiry write made, as "<box> <expiry>", and a write that
 	// comes between a read and its PATCH (making it stale) when set.
 	expirySets []string
@@ -41,6 +43,25 @@ type fakeIncus struct {
 	runChecks  int                 // running-jobs scripts run
 	afterRun   func(box string)    // runs after each running-jobs script, under f.mu
 	onScan     func(box string)    // runs, under the lock, as a scan of box starts
+}
+
+func (f *fakeIncus) FileRange(ctx context.Context, box, path string, offset, limit int64) ([]byte, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileReads++
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	for _, j := range f.jobs[box] {
+		if path == jobDir+"/"+j.name+".log" {
+			size := int64(len(j.log))
+			if offset >= size {
+				return nil, size, nil
+			}
+			return []byte(j.log[offset:min(offset+limit, size)]), size, nil
+		}
+	}
+	return nil, 0, fs.ErrNotExist
 }
 
 type fakeJob struct {

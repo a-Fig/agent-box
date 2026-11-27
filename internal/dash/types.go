@@ -343,10 +343,13 @@ type JobsPage struct {
 // more now; a running job's may grow, so the page asks again. Paused means
 // the box is frozen, so the log can't be read now; that is not an error.
 type LogChunk struct {
-	Offset int64  `json:"offset"`
-	Data   string `json:"data"`
-	EOF    bool   `json:"eof"`
-	Paused bool   `json:"paused"`
+	Offset     int64  `json:"offset"`
+	Data       string `json:"data"`
+	EOF        bool   `json:"eof"`
+	Paused     bool   `json:"paused"`
+	Stopped    bool   `json:"stopped,omitempty"` // the page came from a stopped instance's filesystem
+	LogBytes   int64  `json:"logBytes,omitempty"`
+	DataBase64 string `json:"dataBase64,omitempty"` // exact bytes when a stopped page splits or contains invalid UTF-8
 }
 
 // MaxLogChunk is the most bytes a LogChunk's Data holds.

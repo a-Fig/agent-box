@@ -3,9 +3,11 @@ package boxd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -150,10 +152,11 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) log(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	var offset int64
-	if v := r.URL.Query().Get("offset"); v != "" {
+	if v := q.Get("offset"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || n < 0 {
+		if err != nil || n < 0 || n > math.MaxInt64-dash.MaxLogChunk {
 			writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "offset must be a byte count")
 			return
 		}
@@ -164,6 +167,19 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "no such job")
 		return
 	}
+	if q.Get("stopped") == "1" {
+		limit := int64(dash.MaxLogChunk)
+		if v := q.Get("limit"); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 1 || n > dash.MaxLogChunk {
+				writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "limit must be a positive byte count within the log page limit")
+				return
+			}
+			limit = n
+		}
+		s.stoppedLog(w, r, j, offset, limit, true)
+		return
+	}
 	b, ok := s.W.Box(j.Box)
 	if !ok || !ranOn(j, b) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "the job's box is gone")
@@ -172,6 +188,9 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 	switch b.State {
 	case dash.BoxFrozen:
 		writeJSON(w, 200, dash.LogChunk{Offset: offset, Data: "", Paused: true})
+		return
+	case dash.BoxStopped:
+		s.stoppedLog(w, r, j, offset, dash.MaxLogChunk, false)
 		return
 	case dash.BoxRunning:
 	default:
@@ -188,6 +207,63 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, 200, chunk)
 	}
+}
+
+func (s *Server) stoppedLog(w http.ResponseWriter, r *http.Request, j dash.Job, offset, limit int64, raw bool) {
+	chunk, err := readStoppedLog(r.Context(), s.W.Incus, j, offset, limit, raw)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		writeError(w, http.StatusNotFound, dash.CodeNotFound, "the stopped job's log is unavailable")
+	case err != nil:
+		writeError(w, http.StatusBadGateway, dash.CodeIncus, "reading the stopped job's log: "+err.Error())
+	default:
+		writeJSON(w, http.StatusOK, chunk)
+	}
+}
+
+func readStoppedLog(ctx context.Context, inc Incus, j dash.Job, offset, limit int64, raw bool) (dash.LogChunk, error) {
+	job := j.Box + "." + j.ID
+	if j.State != dash.JobDone || j.BoxUID == "" || !validJob.MatchString(job) {
+		return dash.LogChunk{}, fs.ErrNotExist
+	}
+	ctx, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+	if err := checkStoppedJob(ctx, inc, j); err != nil {
+		return dash.LogChunk{}, err
+	}
+	data, size, err := inc.FileRange(ctx, j.Box, jobDir+"/"+job+".log", offset, limit)
+	if err != nil {
+		return dash.LogChunk{}, err
+	}
+	// The file endpoint names the box by name. Discard the bytes if it was
+	// replaced or started between the identity check and the read.
+	if err := checkStoppedJob(ctx, inc, j); err != nil {
+		return dash.LogChunk{}, err
+	}
+	if !raw && offset+int64(len(data)) < size {
+		if cut := cutUTF8(data); len(cut) > 0 {
+			data = cut
+		}
+	}
+	next := offset + int64(len(data))
+	chunk := dash.LogChunk{Offset: next, Data: strings.ToValidUTF8(string(data), "�"), EOF: next >= size, Stopped: true, LogBytes: size}
+	if raw && !utf8.Valid(data) {
+		chunk.DataBase64 = base64.StdEncoding.EncodeToString(data)
+	}
+	return chunk, nil
+}
+
+func checkStoppedJob(ctx context.Context, inc Incus, j dash.Job) error {
+	instances, err := inc.Instances(ctx)
+	if err != nil {
+		return err
+	}
+	for _, in := range instances {
+		if in.Status == "Stopped" && ranOnInstance(j, in) {
+			return nil
+		}
+	}
+	return fs.ErrNotExist
 }
 
 // readLog reads at most MaxLogChunk bytes of a job's log from offset, cut

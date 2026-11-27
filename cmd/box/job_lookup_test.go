@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +104,180 @@ func TestQualifiedJobLogRoutesByHost(t *testing.T) {
 		if res["isError"] != false || data["job"] != tc.id || data["log"] != tc.log || (tc.host == "" && data["host"] != nil) || (tc.host != "" && data["host"] != tc.host) {
 			t.Fatalf("MCP log %s = %v", tc.id, res)
 		}
+	}
+}
+
+func TestStoppedJobLogPagingUsesResolvedHost(t *testing.T) {
+	a, out, west, _ := lookupTestApp(t, "agents")
+	id := requireQualifiedJobID(t, west, testBareJobID)
+	exit := 7
+	started := jobStart(id.Bare)
+	_, suffix, _ := strings.Cut(id.Bare, ".")
+	j := dash.Job{Box: id.Box, ID: suffix, BoxUID: "west-original", State: dash.JobDone, StartedAt: started, Exit: &exit}
+	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
+	const log = "aé\xffmore bytes"
+	want := log[1:3]
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) != 8 || cmd.Args[1] != west.Project || cmd.Args[3] != west.Remote+":"+id.Box ||
+			!strings.Contains(cmd.Args[7], id.Bare) || strings.Contains(cmd.Args[7], id.ID) {
+			t.Fatalf("log call used the wrong target or ID: %q", cmd.Args)
+		}
+		return Result{Code: 1, Stderr: notRunning}, nil
+	})
+	var calls []string
+	oldServer := false
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.Host != "west.example.com" {
+			t.Fatalf("stopped page used the wrong boxd: %s %s", req.Method, req.URL)
+		}
+		calls = append(calls, req.URL.EscapedPath())
+		var body any
+		switch req.URL.EscapedPath() {
+		case "/dashboard/api/queue/" + id.Bare:
+			body = j
+		case "/dashboard/api/jobs/" + url.PathEscape(j.Key) + "/log":
+			if req.URL.Query().Get("offset") != "1" || req.URL.Query().Get("limit") != "2" || req.URL.Query().Get("stopped") != "1" {
+				t.Fatalf("stopped page request = %s", req.URL)
+			}
+			body = dash.LogChunk{Data: want, Offset: 3, Stopped: !oldServer, LogBytes: int64(len(log))}
+		default:
+			t.Fatalf("unexpected boxd path %s", req.URL)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	}
+	ctx := context.Background()
+	if code := run(ctx, a, []string{"job", id.ID, "--offset", "1", "--limit", "2"}, strings.NewReader("")); code != 0 || out.String() != want {
+		t.Fatalf("stopped CLI page = %d %q", code, out.String())
+	}
+	params, err := json.Marshal(map[string]any{"name": "box_job", "arguments": map[string]any{"id": id.ID, "offset": 1, "limit": 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := callTool(ctx, a, params, nil)
+	page, ok := result["structuredContent"].(map[string]any)
+	if result["isError"] != false || !ok || page["job"] != id.ID || page["host"] != west.Name ||
+		page["log"] != want || page["nextOffset"] != int64(3) || page["logBytes"] != int64(len(log)) || page["more"] != true {
+		t.Fatalf("stopped MCP page = %+v", result)
+	}
+	if len(calls) != 4 {
+		t.Fatalf("CLI and MCP made %d queue and page reads, want 4", len(calls))
+	}
+
+	oldServer = true
+	if err := writeJSON(a.statePath(id.ID, ".result"), jobEnd{Code: exit, Tail: "local tail"}); err != nil {
+		t.Fatal(err)
+	}
+	result = callTool(ctx, a, params, nil)
+	raw, err := json.Marshal(result["structuredContent"])
+	if err != nil || !strings.Contains(string(raw), `"tail":"local tail"`) {
+		t.Fatalf("old boxd did not fall back to the local tail: %s, %v", raw, err)
+	}
+	oldServer = false
+	result = callTool(ctx, a, params, nil)
+	if page, ok := result["structuredContent"].(map[string]any); !ok || page["log"] != want {
+		t.Fatalf("available stopped log did not take precedence over local tail: %+v", result)
+	}
+}
+
+func TestStoppedJobLogDoesNotCrossProjectsForSameBareID(t *testing.T) {
+	a, _, west, _ := lookupTestApp(t, "work")
+	a.Remote, a.dashboardURL = west.Remote, west.DashboardURL
+	exit := 3
+	box, suffix, _ := strings.Cut(testBareJobID, ".")
+	j := dash.Job{Box: box, ID: suffix, BoxUID: "agents-only", State: dash.JobDone, StartedAt: jobStart(testBareJobID), Exit: &exit, Tail: "legacy tail"}
+	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) != 8 || cmd.Args[1] != a.Project || cmd.Args[3] != west.Remote+":"+box {
+			t.Fatalf("local page used the wrong Incus project or remote: %q", cmd.Args)
+		}
+		return Result{Code: 1, Stderr: notRunning}, nil
+	})
+	var fullReads int
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		var payload any = j
+		if strings.HasSuffix(req.URL.Path, "/log") {
+			fullReads++
+			payload = dash.LogChunk{Stopped: true, Offset: 5, EOF: true, LogBytes: 5, Data: "there"}
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	}
+
+	ctx := context.Background()
+	a.Project = "agents"
+	lookup, err := a.lookupJob(testBareJobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, _, err := lookup.page(ctx, 0, 0); err != nil || p.Text != "there" || fullReads != 1 {
+		t.Fatalf("agents page = %+v, %v, full reads %d", p, err, fullReads)
+	}
+	a.Project = "work"
+	lookup, err = a.lookupJob(testBareJobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, end, err := lookup.page(ctx, 0, 0); err == nil || p.Text != "" || end == nil || end.Tail != j.Tail || fullReads != 1 {
+		t.Fatalf("work project page = %+v, end %+v, %v, full reads %d", p, end, err, fullReads)
+	}
+}
+
+func TestStoppedJobLogBoundsOptionalReadWithLocalTail(t *testing.T) {
+	a, _, west, _ := lookupTestApp(t, "agents")
+	id := requireQualifiedJobID(t, west, testBareJobID)
+	a.R = lookupRunner(func(context.Context, Cmd) (Result, error) {
+		return Result{Code: 1, Stderr: notRunning}, nil
+	})
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) > stoppedPageWithTailBudget {
+			t.Fatalf("optional lookup lacks the short tail budget: %s, %t", deadline, ok)
+		}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}
+	if err := writeJSON(a.statePath(id.ID, ".result"), jobEnd{Code: 2, Tail: "kept tail"}); err != nil {
+		t.Fatal(err)
+	}
+	lookup, err := a.lookupJob(id.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, end, err := lookup.page(context.Background(), 0, 0); err == nil || p.Text != "" || end == nil || end.Tail != "kept tail" {
+		t.Fatalf("read with unavailable boxd = %+v, end %+v, %v", p, end, err)
+	}
+}
+
+func TestStoppedJobLogPageKeepsRawBytes(t *testing.T) {
+	a, _, west, _ := lookupTestApp(t, "agents")
+	id := requireQualifiedJobID(t, west, testBareJobID)
+	exit := 0
+	_, suffix, _ := strings.Cut(id.Bare, ".")
+	j := dash.Job{Box: id.Box, ID: suffix, BoxUID: "west-original", State: dash.JobDone, StartedAt: jobStart(id.Bare), Exit: &exit}
+	j.Key = dash.JobKey(j.Box, j.ID, j.StartedAt)
+	lookup, err := a.lookupJob(id.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := dash.LogChunk{Stopped: true, Offset: 2, LogBytes: 2, EOF: true, Data: "a�", DataBase64: base64.StdEncoding.EncodeToString([]byte("a\xff"))}
+	lookup.app.HTTP = func(req *http.Request) (*http.Response, error) {
+		raw, _ := json.Marshal(chunk)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+	}
+	p, ok := lookup.stoppedPage(context.Background(), j, 0, 2)
+	if !ok || p.Text != "a\xff" || p.More {
+		t.Fatalf("raw page = %+v, ok %t", p, ok)
+	}
+	chunk.Offset++
+	if p, ok := lookup.stoppedPage(context.Background(), j, 0, 2); ok {
+		t.Fatalf("wrong next offset produced a page: %+v", p)
 	}
 }
 
