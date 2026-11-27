@@ -543,6 +543,9 @@ func TestFleetRunQueuesOnBestAgentsHostAndFollowsCLI(t *testing.T) {
 	if r.State != stateQueued || r.Host != "overflow" || r.fleetHost == nil || *r.fleetHost != hosts[2] {
 		t.Fatalf("queued result = %+v\n%s", r, out.String())
 	}
+	if r.Capacity == nil || !slices.Equal(r.Capacity.Limits, []string{"instances"}) || r.Capacity.SmallerSize != "" {
+		t.Fatalf("queue capacity detail = %+v, want instances without a smaller size", r.Capacity)
+	}
 	id, err := parseJobID(r.Job)
 	if err != nil || id.hostTag == "" {
 		t.Fatalf("queued job ID should be qualified, got %q (%v)", r.Job, err)

@@ -302,12 +302,11 @@ func lookupSize(name string) (mode.Size, error) {
 // errNoRoom is a launch that Incus refused for the project's limits. Callers
 // treat it like a paused PC: nothing starts (exit 75).
 type errNoRoom struct {
-	size   string
-	reason string
+	size, resource, reason string
 }
 
 func (e *errNoRoom) Error() string {
-	return fmt.Sprintf("no room on the PC for a %s box (%s); nothing started, and a smaller size may fit", e.size, e.reason)
+	return fmt.Sprintf("no room on the PC for a %s box (%s)", e.size, e.reason)
 }
 
 func isNoRoom(err error) bool {
@@ -320,7 +319,7 @@ func isNoRoom(err error) bool {
 type errGPUBusy struct{ holder string }
 
 func (e *errGPUBusy) Error() string {
-	return fmt.Sprintf("the GPU box is in use (%s); run on CPU or wait", e.holder)
+	return fmt.Sprintf("the GPU box is in use (%s)", e.holder)
 }
 
 func invalidGPUBox(box string) error {
@@ -332,7 +331,7 @@ func invalidGPUBox(box string) error {
 type errNoGPU struct{}
 
 func (errNoGPU) Error() string {
-	return "this host has no GPU for boxes; nothing started, run on CPU"
+	return "this host has no GPU for boxes"
 }
 
 // gpuKey is the project key that tells a GPU host from one without:
@@ -798,8 +797,23 @@ func (a *App) launchOnce(ctx context.Context, name string, ttl time.Duration, th
 	if err == nil && res.Code != 0 {
 		err = fmt.Errorf("incus launch: %s", strings.TrimSpace(res.Stderr))
 	}
-	if err != nil && projectLimitRefusal.MatchString(err.Error()) {
-		return &errNoRoom{size: sz.Name, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
+	if err != nil {
+		if match := projectLimitRefusal.FindStringSubmatch(err.Error()); match != nil {
+			resource := match[1]
+			if resource == "" {
+				switch strings.ToLower(match[2]) {
+				case "":
+					resource = "instances"
+				case "container":
+					resource = "containers"
+				case "virtual-machine":
+					resource = "virtual-machines"
+				default:
+					resource = "unknown"
+				}
+			}
+			return &errNoRoom{size: sz.Name, resource: resource, reason: firstLine(strings.TrimPrefix(err.Error(), "incus launch: "))}
+		}
 	}
 	return err
 }
@@ -934,8 +948,9 @@ type JobResult struct {
 	// whether its result will arrive as a turn in the agent's T3 thread.
 	Push *bool `json:"push,omitempty"`
 	// A queued job's place in line, from 1, and what it waits for.
-	Position int    `json:"position,omitempty"`
-	Why      string `json:"why,omitempty"`
+	Position int             `json:"position,omitempty"`
+	Why      string          `json:"why,omitempty"`
+	Capacity *capacityDetail `json:"capacity,omitempty"`
 	// Digest leads a finished Go test or vitest run's result: the failed
 	// tests with file:line and first message, then the counts
 	// (internal/digest). "" for other runs.
@@ -973,11 +988,14 @@ func (a *App) Run(ctx context.Context, o RunOpts) (JobResult, error) {
 
 func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost *fleetHost, prepared *fleetRun) (JobResult, *turnAwayInfo, error) {
 	if sz.GPU && !a.hasGPU(ctx) { // refused, not queued: waiting won't bring a GPU
+		limits := []string{"gpu"}
 		if targetHost != nil {
-			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{msg: errNoGPU{}.Error()}, nil
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{msg: errNoGPU{}.Error(), queue: queueRun{limits: limits}}, nil
 		}
-		fmt.Fprintln(a.Err, "box:", errNoGPU{})
-		return JobResult{State: statePaused, Code: exitPaused}, nil, nil
+		fmt.Fprintln(a.Err, "box: refused:", errNoGPU{}.Error()+"; nothing started")
+		detail := &capacityDetail{Limits: limits}
+		a.printCapacity(detail)
+		return JobResult{State: statePaused, Code: exitPaused, Capacity: detail}, nil, nil
 	}
 	var rp repo
 	var info jobMeta
@@ -1011,14 +1029,22 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 		}
 		return q
 	}
-	handleTurnAway := func(paused bool, msg string, cause func(context.Context) string) (JobResult, *turnAwayInfo, error) {
+	handleTurnAway := func(paused bool, err error) (JobResult, *turnAwayInfo, error) {
+		q := qr(paused)
+		msg, cause := err.Error(), errCause(err)
+		if paused {
+			cause = a.pausedCause(msg)
+			msg += "; nothing started"
+		} else {
+			q.limits = launchLimits(err)
+		}
 		if targetHost != nil {
 			cctx, cancel := context.WithTimeout(ctx, refusalTimeout)
 			why := cause(cctx)
 			cancel()
-			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{why: why, msg: msg, queue: qr(paused)}, nil
+			return JobResult{State: statePaused, Code: exitPaused}, &turnAwayInfo{why: why, msg: msg, queue: q}, nil
 		}
-		return a.turnAway(ctx, qr(paused), msg, cause), nil, nil
+		return a.turnAway(ctx, q, msg, cause), nil, nil
 	}
 
 	insts, paused := a.reach(ctx)
@@ -1036,7 +1062,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 			except = box
 		}
 		if err := a.claimGPU(ctx, insts, except); err != nil {
-			return handleTurnAway(false, err.Error(), errCause(err))
+			return handleTurnAway(false, err)
 		}
 	}
 	if paused == "" && !o.New {
@@ -1055,7 +1081,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 		}
 	}
 	if paused != "" {
-		return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
+		return handleTurnAway(true, errors.New(paused))
 	}
 
 	if bundle == "" {
@@ -1086,11 +1112,11 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 			fmt.Fprintf(a.Err, "box: %s is %s, so this run uses a throwaway %s box\n", box, string(have), sz.Name)
 			o.New = true
 		case isTempFail(err):
-			return handleTurnAway(false, err.Error(), errCause(err))
+			return handleTurnAway(false, err)
 		case err != nil:
 			return setupFailed(JobResult{Code: 1}, err)
 		case paused != "":
-			return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
+			return handleTurnAway(true, errors.New(paused))
 		default:
 			sz = actual
 			info.Size, info.GPU = sz.Name, sz.GPU
@@ -1116,7 +1142,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 			var err error
 			if box, err = a.launchThrowaway(ctx, rp.Name, insts, ttl, sz, repoKey, id); err != nil {
 				if isTempFail(err) {
-					return handleTurnAway(false, err.Error(), errCause(err))
+					return handleTurnAway(false, err)
 				}
 				return JobResult{Box: box, Code: 1}, nil, err
 			}
@@ -1173,7 +1199,7 @@ func (a *App) runOnHost(ctx context.Context, o RunOpts, sz mode.Size, targetHost
 					// it for: let the launch defer remove it, rather than
 					// leaving it holding a slot and its 24h job expiry.
 					started = false
-					return handleTurnAway(true, paused+"; nothing started", a.pausedCause(paused))
+					return handleTurnAway(true, errors.New(paused))
 				}
 				// Any other failure may have happened after the script
 				// started the job, so keep the job ID: it may resume.

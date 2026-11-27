@@ -55,7 +55,7 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var pausedHint = "state refused (exit 75) means box couldn't run it now and nothing started: the PC is busy, paused or out of reach, and the run wasn't queued. Retry later, or with a smaller size if it said no room. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
+var pausedHint = "state refused (exit 75) means nothing started or queued. A capacity result names the limit and may estimate a smaller size that fits. A running job that was paused resumes if the PC's owner switches back within " + frozenWindow + ", else it is lost; a paused or lost push says so. Exit 75 from a state done result is the command's own exit code, not a refusal."
 
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
@@ -120,6 +120,10 @@ var jobOutput = obj(map[string]any{
 	"push":     map[string]any{"type": "boolean", "description": "box_run, state running or queued: the result will arrive as a turn in your thread."},
 	"position": map[string]any{"type": "integer", "description": "State queued: place in line, from 1."},
 	"why":      str("State queued: what it waits for: full (room), gpu-busy, or mypc."),
+	"capacity": obj(map[string]any{
+		"limits":      map[string]any{"type": "array", "items": str("Limiting resource, or unknown.")},
+		"smallerSize": str("Smaller size that appears to fit on the selected host now."),
+	}, "limits"),
 	"exitCode": map[string]any{"type": []string{"integer", "null"},
 		"description": "The command's exit code when state is done; 75 when paused or refused; null while the job is still running (state running), since a running job has no exit code."},
 	"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -371,9 +375,10 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Digest   string   `json:"digest,omitempty"`
 		// Claude Code shows structuredContent instead of the text when a
 		// result has both (#33), so what the agent reads is here too.
-		Tail  string `json:"tail"`
-		Error string `json:"error,omitempty"`
-	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, ""}
+		Tail     string          `json:"tail"`
+		Error    string          `json:"error,omitempty"`
+		Capacity *capacityDetail `json:"capacity,omitempty"`
+	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -529,7 +534,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 				// Nobody would hear when it runs: take it back, and refuse.
 				if cerr := a.cancelQueuedResult(ctx, r); cerr == nil {
 					job := r.Job
-					r = JobResult{State: stateRefused, Code: exitPaused}
+					r = JobResult{Host: r.Host, State: stateRefused, Code: exitPaused, Capacity: r.Capacity}
 					fmt.Fprintf(out, "box: can't follow %s from here, so it was taken off the queue; nothing ran\n", job)
 					break
 				}

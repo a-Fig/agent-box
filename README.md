@@ -121,6 +121,8 @@ With a host registry, `box run` and `box_run` prefer a host that can start witho
 
 `box jobs` and `box_job` without an ID list jobs on the default and configured hosts, including waiting jobs and recent runs reported by configured queues. Fleet listings qualify IDs for configured hosts and honor existing bare records on the default host. `box jobs --box` looks up a box on the default host.
 
+When capacity blocks a run, the CLI and MCP report the limiting resource and whether it queued or was refused. A suggested smaller size is an estimate for the selected host. A queued run keeps the requested size and GPU requirement.
+
 ## Website previews
 
 Run the preview command from a trusted checkout of `main`, with `gh` and Wrangler signed in. Pass the PR number while staying on `main`. The command prints a public preview link and a link pinned to this deployment.

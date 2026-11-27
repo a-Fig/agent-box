@@ -14,7 +14,7 @@ description: Run heavy test suites and builds from your worktree on a disposable
    - `push: false`: call `box_job` with the ID; it waits ≤10 min.
    - **Subagents pass `push: false`** (it would wake the parent).
 4. **`state: queued`**: no room, My PC (owner paused boxes), or the GPU taken; snapshot waits for the host; `box_cancel` drops it.
-5. **`state: refused` (exit 75)**: nothing started (PC busy, paused or unreachable). Retry later, or smaller `size` if no room. A pushed "lost" job didn't finish; a "paused" one may resume (its end is pushed). `done` with exit 75 is the command's own.
+5. **`state: refused` (exit 75)**: nothing started. Capacity results name the limit and may suggest a smaller size. Paused jobs may resume. Lost jobs never finished. `done` with exit 75 is the command's own.
 6. `go test`/vitest show failures first (file:line). `box_job` pages logs (`offset`/`limit`) or lists fleet jobs (no `id`).
 7. `box_pull` fetches artifacts (refuses if a later run replaced the checkout). Parallel: `new: true`.
 

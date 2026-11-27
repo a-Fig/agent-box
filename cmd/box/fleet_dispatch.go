@@ -80,6 +80,8 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 
 	var failedSetup JobResult
 	var setupErr error
+	var lastCapacityHost *App
+	var lastLimits []string
 	for {
 		pick := pickFleetHost(candidates, pickReq)
 		if pick.Action == pickRefuse {
@@ -89,13 +91,31 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 			if setupErr != nil {
 				return failedSetup, setupErr
 			}
+			reporter := a
+			var detail *capacityDetail
+			switch {
+			case len(candidates) == 1:
+				reporter = a.jobHostApp(candidates[0].Host)
+				detail = reporter.capacityHint(ctx, sz, o.Box, pick.Limits)
+			case lastCapacityHost != nil:
+				reporter = lastCapacityHost
+				detail = reporter.capacityHint(ctx, sz, o.Box, lastLimits)
+			case len(pick.Limits) != 0:
+				detail = &capacityDetail{Limits: pick.Limits}
+			}
 			msg := pick.Reason + "; nothing started"
+			r := JobResult{State: statePaused, Code: exitPaused, Capacity: detail}
+			if detail != nil {
+				msg = "refused: " + msg
+				r.Host = reporter.jobHostName
+			}
 			if len(candidates) == 1 && pick.Why != "" && candidates[0].BoxdAvailable {
-				a.jobHostApp(candidates[0].Host).refuse(ctx, msg, info, func(context.Context) string { return pick.Why })
+				reporter.refuse(ctx, msg, info, func(context.Context) string { return pick.Why })
 			} else {
 				fmt.Fprintln(a.Err, "box:", msg)
 			}
-			return JobResult{State: statePaused, Code: exitPaused}, nil
+			reporter.printCapacity(detail)
+			return r, nil
 		}
 
 		if prepared.bundle == "" {
@@ -116,6 +136,9 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 			if err != nil {
 				failedSetup, setupErr = r, fmt.Errorf("%s: %w", selected.Name, err)
 			}
+			if len(away.queue.limits) > 0 {
+				lastCapacityHost, lastLimits = hostApp, away.queue.limits
+			}
 			candidate.startRefusal = away
 			continue
 		}
@@ -126,6 +149,7 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		} else {
 			q = fleetQueueRun(o, prepared, box, sz, &selected, *candidate, pick.Why)
 		}
+		q.limits = pick.Limits
 		r, msg, failure := hostApp.enqueue(ctx, q)
 		if msg == "" {
 			return r, nil
@@ -134,6 +158,9 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		// A lost reply can mean the job was accepted and may already be running.
 		switch failure {
 		case queueRejected:
+			if len(q.limits) > 0 {
+				lastCapacityHost, lastLimits = hostApp, q.limits
+			}
 			candidate.BoxdAvailable = false
 			candidate.queueError = msg
 		case queueInvalid:

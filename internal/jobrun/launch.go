@@ -13,7 +13,7 @@ import (
 
 // LimitRefusal matches Incus refusing a launch over a project cap
 // (limits.memory and the like, or limits.instances).
-var LimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.[^"]+"|number of instances(?: of type "[^"]+")?) in project "`)
+var LimitRefusal = regexp.MustCompile(`(?i)(?:^|: )reached maximum (?:aggregate value "[^"]+" for "limits\.([^"]+)"|number of instances(?: of type "([^"]+)")?) in project "`)
 
 // IsDisallowedMetadata reports whether err is the Incus 7.6 (2026-11-24) btrfs
 // launch failure where a concurrent config write while EnsureImage unpacks an
