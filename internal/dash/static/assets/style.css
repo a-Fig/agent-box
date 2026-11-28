@@ -701,47 +701,71 @@ code {
   font-weight: 500;
   color: var(--sidebar-muted-foreground);
 }
-.side-machine {
+/* A host in the sidebar's Fleet: its kind's icon, its name, and a line of state under it. */
+.menu-button.side-host {
+  height: auto;
+  min-height: 2.75rem;
+  padding-block: 0.375rem;
+}
+.side-host-text {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
-  padding: 0.375rem 0.625rem;
-  font-size: 0.8125rem;
+  gap: 0.0625rem;
+  min-width: 0;
 }
-.side-machine-name {
+.side-host-name {
+  color: var(--sidebar-foreground);
+}
+.side-host-line {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 500;
-}
-.side-machine-line {
-  padding-left: 1rem;
+  gap: 0.375rem;
   font-size: 0.75rem;
+  font-weight: 400;
   color: var(--sidebar-muted-foreground);
 }
 .sidebar-foot {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.75rem 1rem 1rem;
+  padding: 0.5rem 0.5rem 0.75rem;
+  border-top: 1px solid var(--sidebar-border);
   font-size: 0.75rem;
   color: var(--sidebar-muted-foreground);
 }
 .sidebar-foot .segmented {
   align-self: flex-start;
 }
-.versions {
+.foot-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-left: 0.625rem;
 }
-.versions-drift {
+.foot-settings {
+  width: 2rem;
+  height: 2rem;
+  color: var(--sidebar-icon);
+}
+.foot-settings:hover,
+.foot-settings[aria-current="page"] {
+  background: var(--sidebar-row-selected);
+  color: var(--sidebar-foreground);
+}
+/* A host's builds want attention: as Murmur's update notice, a tinted line that opens the host. */
+.side-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, var(--warning) 12%, transparent);
   color: var(--warning-foreground);
+  font-weight: 500;
 }
-.versions-note {
-  color: var(--sidebar-muted-foreground);
+.side-notice:hover {
+  background: color-mix(in oklab, var(--warning) 18%, transparent);
 }
 .conn {
   display: flex;
@@ -789,6 +813,38 @@ code {
   max-width: 64rem;
   margin: 0 auto;
   padding: 1.5rem var(--gutter) 3rem;
+}
+.host-head {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+.host-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-xl);
+  border: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  background: color-mix(in oklab, var(--card) 40%, transparent);
+  color: var(--muted-foreground);
+}
+.host-ico .icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+a.machine-name {
+  border-radius: var(--control-radius);
+}
+a.machine-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.machine-chev {
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
 }
 .page-head h2 {
   font-size: 1.375rem;
@@ -1295,8 +1351,7 @@ code {
 }
 .badge.hint,
 .conn.hint,
-.side-machine.hint,
-.versions.hint,
+.side-host.hint,
 .queue-pos.hint {
   text-decoration: none;
 }

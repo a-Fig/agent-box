@@ -1,5 +1,5 @@
 // Start the devserver with -scenario headless -still, make playwright-core
-// available on NODE_PATH, then run node --test internal/dash/devserver/settings.test.mjs.
+// available on NODE_PATH, then run node --test internal/dash/devserver/host.test.mjs.
 // DASH_FIXTURE_URL and CHROMIUM_PATH override the fixture URL and Chromium path.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -15,7 +15,7 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function settings(t, arrange = () => {}) {
+async function hostPage(t, arrange = () => {}) {
   const page = await browser.newPage();
   page.setDefaultTimeout(5000);
   t.after(() => page.close());
@@ -32,8 +32,8 @@ async function settings(t, arrange = () => {}) {
       close() {}
     };
   });
-  await page.goto(fixture + "/#settings");
-  await page.getByRole("heading", { name: "Updates", exact: true }).waitFor();
+  await page.goto(fixture + "/#fleet/" + state.machines[0].id);
+  await page.getByRole("heading", { name: "Builds", exact: true }).waitFor();
   return { page, state };
 }
 
@@ -49,7 +49,7 @@ function row(page, title) {
 }
 
 test("custom prereleases compare against stable and unsupported tags show unknown", async (t) => {
-  const { page, state } = await settings(t, (state) => {
+  const { page, state } = await hostPage(t, (state) => {
     state.updates = { latest: "v0.3.0", checkedAt: tick + "Z" };
     state.machines[0].boxd.tag = "v0.3.1-rc.1";
     state.machines[0].tray.tag = "custom";
@@ -68,7 +68,7 @@ test("custom prereleases compare against stable and unsupported tags show unknow
 });
 
 test("the update badge describes the comparison without promising an install", async (t) => {
-  const { page } = await settings(t, (state) => {
+  const { page } = await hostPage(t, (state) => {
     state.updates = { latest: "v0.3.1", checkedAt: tick + "Z" };
   });
   const badge = row(page, "Tray").getByText("update available", { exact: true });
@@ -76,7 +76,7 @@ test("the update badge describes the comparison without promising an install", a
 });
 
 test("delayed checks cannot replace a newer result from either path", async (t) => {
-  const { page } = await settings(t);
+  const { page } = await hostPage(t);
   const older = { latest: "v0.3.0", checkedAt: tick + "Z" };
   const first = { latest: "v0.3.1", checkedAt: tick + ".000000001Z" };
   const newer = { latest: "v0.3.2", checkedAt: tick + ".000000002Z" };
@@ -107,7 +107,7 @@ test("delayed checks cannot replace a newer result from either path", async (t) 
 });
 
 test("the initial stream snapshot cannot replace a newer check response", async (t) => {
-  const { page, state } = await settings(t, (state) => {
+  const { page, state } = await hostPage(t, (state) => {
     state.updates = { latest: "v0.3.0", checkedAt: tick + "Z" };
   });
   const newer = { latest: "v0.3.1", checkedAt: tick + ".000000001Z" };
@@ -121,11 +121,28 @@ test("the initial stream snapshot cannot replace a newer check response", async 
 });
 
 test("matching release badges keep keyboard focus on the same component after a redraw", async (t) => {
-  const { page, state } = await settings(t, (state) => {
+  const { page, state } = await hostPage(t, (state) => {
     state.updates = { latest: "" };
   });
   const tray = row(page, "Tray").getByText("not checked", { exact: true });
   await tray.focus();
   await event(page, "machine", state.machines[0]);
   assert.equal(await tray.evaluate((el) => el === document.activeElement), true);
+});
+
+test("Settings holds only what can be changed, and is reached from the sidebar's foot", async (t) => {
+  const { page } = await hostPage(t);
+  await page.locator(".sidebar-foot").getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("heading", { name: "Appearance", exact: true }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Builds", exact: true }).count(), 0);
+  assert.equal(await page.locator(".sidebar-menu").getByRole("link", { name: "Settings" }).count(), 0);
+});
+
+test("a host in the sidebar's Fleet opens its page", async (t) => {
+  const { page, state } = await hostPage(t);
+  await page.goto(fixture + "/#overview");
+  const m = state.machines[0];
+  await page.locator(".side-host").filter({ hasText: m.name }).click();
+  await page.getByRole("heading", { name: m.name, exact: true, level: 2 }).waitFor();
+  assert.equal(await page.locator('.side-host[aria-current="page"]').count(), 1);
 });
