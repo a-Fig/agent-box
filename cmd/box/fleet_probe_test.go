@@ -653,6 +653,32 @@ func TestProbeFleetTiers(t *testing.T) {
 		}
 	})
 
+	t.Run("probes deferred non-boxd tier when startable boxd host reports lower negative priority", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-boxd": openKeys,
+			"r-low":  openKeys,
+			"r-sunk": openKeys,
+		}, nil)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "boxd.example.com" {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":-10,"jobs":[]}`))}, nil
+			}
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		targets := []fleetHost{
+			{Name: "boxd", Remote: "r-boxd", Project: mode.Project, DashboardURL: "https://boxd.example.com", Priority: 0},
+			{Name: "low", Remote: "r-low", Project: "work", Priority: -1},
+			{Name: "sunk", Remote: "r-sunk", Project: "work", Priority: -5},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		if !slices.Equal(*probed, []string{"r-boxd", "r-low"}) || len(rest) != 1 || rest[0].Name != "sunk" {
+			t.Fatalf("probed=%v rest=%+v, want [r-boxd r-low] and rest=[sunk]", *probed, rest)
+		}
+		if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "low" {
+			t.Fatalf("pick = %+v, want low (-1 beats boxd -10)", pick)
+		}
+	})
+
 	t.Run("probes lower non-boxd tier when higher tier cannot start and stops at first startable tier", func(t *testing.T) {
 		a, probed := newProbeApp(t, map[string]map[string]string{
 			"r-high": fullKeys,

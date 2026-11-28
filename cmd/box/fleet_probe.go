@@ -12,7 +12,9 @@ import (
 )
 
 // probeFleetTiers probes hosts in tiers and stops right after the first tier
-// where pickFleetHost returns pickStart, returning unprobed hosts in rest.
+// where pickFleetHost returns pickStart and no unprobed lower tier could
+// outrank or tie-break the selected candidate (nextTierPriority < winner.Priority).
+// Any unprobed lower-priority hosts are returned in rest.
 //
 // All boxd-capable hosts (Project == mode.Project) are always probed together in
 // the initial tier (alongside any non-boxd hosts with Priority >= 0) so a
@@ -22,14 +24,27 @@ func (a *App) probeFleetTiers(ctx context.Context, targets []fleetHost, req pick
 	tiers := fleetPriorityTiers(targets)
 	for i, tier := range tiers {
 		cands = append(cands, a.probeFleetCandidates(ctx, tier, req, repoOrigin)...)
-		if pickFleetHost(cands, req).Action == pickStart {
+		if pick := pickFleetHost(cands, req); pick.Action == pickStart {
+			var remHosts []fleetHost
 			for _, rem := range tiers[i+1:] {
-				rest = append(rest, rem...)
+				remHosts = append(remHosts, rem...)
 			}
-			return cands, rest
+			if !needsLowerTierProbe(pick, cands, remHosts) {
+				return cands, remHosts
+			}
 		}
 	}
 	return cands, nil
+}
+
+func needsLowerTierProbe(pick fleetPick, cands []fleetCandidate, rest []fleetHost) bool {
+	if len(rest) == 0 {
+		return false
+	}
+	if pick.Action != pickStart {
+		return true
+	}
+	return rest[0].Priority >= findCandidate(cands, pick.Host).Priority
 }
 
 func isBoxdHost(host fleetHost) bool {
