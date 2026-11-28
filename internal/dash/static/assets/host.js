@@ -246,7 +246,7 @@ const host = {
         h("div", { class: "page-head host-head" }, h("span", { class: "host-ico" }, icon(kind.icon)), h("div", { class: "host-title" }, nameHead(m, el), ed?.id === m.id ? null : h("p", null, kind.about + (m.reachable ? "" : " It isn't answering now.")))),
         banners(m),
         section("Now", null, machineCard(m)),
-        section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map(runningRow) : h("p", { class: "row-empty" }, "Nothing is running on " + m.name + "."))),
+        section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map((j) => runningRow(j)) : h("p", { class: "row-empty" }, "Nothing is running on " + m.name + "."))),
         q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes on " + m.name + "."))),
         section("Builds", null, group(buildRows(m).filter(Boolean))),

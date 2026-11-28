@@ -212,7 +212,9 @@ function draw() {
     return;
   }
   const r = route();
-  const page = r.name === "fleet" ? { title: S.machines.get(r.key)?.name || "Host", view: host } : r.key ? { title: "Job", view: jobDetail } : PAGES[r.name];
+  // A host's page has its name as its heading (with the rename), so the top bar says where it is:
+  // Fleet. Every other page's name is said once, in the top bar (#293).
+  const page = r.name === "fleet" ? { title: "Fleet", doc: S.machines.get(r.key)?.name || "Host", view: host } : r.key ? { title: "Job", view: jobDetail } : PAGES[r.name];
   const v = page.view;
   if (!shell) {
     const content = h("main", { class: "content", id: "content", tabindex: "-1" });
@@ -230,7 +232,7 @@ function draw() {
   if (!drawer) scrim?.remove();
   const name = r.name === "fleet" ? "fleet" : r.key ? "job" : r.name;
   shell.title.textContent = page.title;
-  document.title = page.title + " · agent-box";
+  document.title = (page.doc || page.title) + " · agent-box";
   if (!current || current.name !== name || current.key !== r.key) {
     current?.view.leave?.();
     current = { name, key: r.key, view: v };
