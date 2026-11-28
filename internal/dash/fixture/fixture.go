@@ -539,14 +539,16 @@ func (w *world) hasBox(name string) bool {
 // historyFor is a range's history, with the totals of the span before it.
 func (w *world) historyFor(rng string, done []dash.Job) dash.History {
 	start, step, n, _ := dash.Window(rng, w.now)
-	h := w.span(start, step, n, done)
+	h := w.span(start, step, n, w.now, done)
 	h.Range = rng
-	h.Previous = dash.Total(w.span(start.Add(-time.Duration(n)*step), step, n, done).Buckets)
+	back := time.Duration(n) * step
+	h.Previous = dash.Total(w.span(start.Add(-back), step, n, w.now.Add(-back), done).Buckets)
 	return h
 }
 
-// span buckets the finished jobs, box lives, refusals and samples.
-func (w *world) span(start time.Time, step time.Duration, n int, done []dash.Job) dash.History {
+// span buckets the finished jobs, box lives, refusals and samples up to upto. Memory samples
+// are kept boxd.SampleDays, as boxd keeps them; older buckets have none.
+func (w *world) span(start time.Time, step time.Duration, n int, upto time.Time, done []dash.Job) dash.History {
 	h := dash.History{Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
 	durs := make([]map[string][]float64, n)
 	for i := range h.Buckets {
@@ -559,10 +561,13 @@ func (w *world) span(start time.Time, step time.Duration, n int, done []dash.Job
 			MedianSeconds: dash.Medians{ByRepo: map[string]float64{}},
 			MemCap:        w.machine.Caps.Memory,
 		}
+		if b := &h.Buckets[i]; !b.Start.Before(w.now.Add(-boxd.SampleDays * 24 * time.Hour).Truncate(24 * time.Hour)) {
+			b.MemSamples = int(step.Minutes())
+		}
 		durs[i] = map[string][]float64{}
 	}
 	at := func(t time.Time) int {
-		if t.Before(start) {
+		if t.Before(start) || t.After(upto) {
 			return -1
 		}
 		i := int(t.Sub(start) / step)
@@ -609,13 +614,15 @@ func (w *world) span(start time.Time, step time.Duration, n int, done []dash.Job
 		for i := range h.Buckets {
 			bs := h.Buckets[i].Start
 			be := bs.Add(step)
-			lo, hi := later(l.from, bs), earlier(l.to, be)
+			lo, hi := later(l.from, bs), earlier(earlier(l.to, be), upto)
 			if !hi.After(lo) {
 				continue
 			}
 			share := hi.Sub(lo).Hours()
 			h.Buckets[i].BoxHours.BySize[l.size] = round2(h.Buckets[i].BoxHours.BySize[l.size] + share)
-			h.Buckets[i].MemUsed += int64(mem * share / step.Hours())
+			if h.Buckets[i].MemSamples > 0 {
+				h.Buckets[i].MemUsed += int64(mem * share / step.Hours())
+			}
 		}
 	}
 	for _, j := range done {

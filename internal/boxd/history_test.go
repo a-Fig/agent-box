@@ -275,3 +275,22 @@ func TestHistoryEvictedJob(t *testing.T) {
 		t.Errorf("a later job on the name was marked evicted: %q", j.Evicted)
 	}
 }
+
+// The span before is cut where now falls in this one (#292): at 18:00 a day's previous span ends at
+// 18:00 the day before, so a job at 18:30 then isn't counted against today's 23 hours.
+func TestHistoryPreviousIsCutAtNow(t *testing.T) {
+	h, err := OpenHistory(t.TempDir(), func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit0 := 0
+	for i, at := range []time.Time{t0.Add(-24*time.Hour - 30*time.Minute), t0.Add(-24*time.Hour + 30*time.Minute)} {
+		end := at.Add(time.Minute)
+		j := dash.Job{Key: "a/" + string(rune('1'+i)) + "/x", ID: string(rune('1' + i)), Box: "a", State: dash.JobDone, Exit: &exit0, StartedAt: at, EndedAt: &end}
+		h.Record(record{Type: recJobEnd, At: end, Job: &j})
+	}
+	// The day before runs from 19:00 two days back to 18:00 yesterday: only the first job.
+	if p := h.Range(dash.RangeDay, Live{MemCap: 12 << 30}).Previous; p.ByResult["pass"] != 1 {
+		t.Fatalf("previous: %+v", p)
+	}
+}

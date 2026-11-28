@@ -1345,6 +1345,7 @@
           }
         },
         "memUsed": 228399957,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1391,6 +1392,7 @@
           }
         },
         "memUsed": 3904915451,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1428,6 +1430,7 @@
           }
         },
         "memUsed": 2668402596,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1455,6 +1458,7 @@
           "byRepo": {}
         },
         "memUsed": 941588032,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1496,6 +1500,7 @@
           }
         },
         "memUsed": 1840760397,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1533,6 +1538,7 @@
           }
         },
         "memUsed": 5102559076,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1570,6 +1576,7 @@
           }
         },
         "memUsed": 4931272456,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1606,6 +1613,7 @@
           "byRepo": {}
         },
         "memUsed": 1780590316,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1643,6 +1651,7 @@
           }
         },
         "memUsed": 191910449,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1680,6 +1689,7 @@
           }
         },
         "memUsed": 703963069,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1705,6 +1715,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1742,6 +1753,7 @@
           }
         },
         "memUsed": 134987958,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1767,6 +1779,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1809,6 +1822,7 @@
           }
         },
         "memUsed": 4762492765,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1837,6 +1851,7 @@
           "byRepo": {}
         },
         "memUsed": 2947641423,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1864,6 +1879,7 @@
           "byRepo": {}
         },
         "memUsed": 1880508055,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1889,6 +1905,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1926,6 +1943,7 @@
           }
         },
         "memUsed": 595694985,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -1951,6 +1969,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1988,6 +2007,7 @@
           }
         },
         "memUsed": 932798522,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -2013,6 +2033,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2038,6 +2059,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2065,6 +2087,7 @@
           "byRepo": {}
         },
         "memUsed": 2104533975,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -2090,7 +2113,7 @@
         },
         "boxHours": {
           "bySize": {
-            "medium": 1.39
+            "medium": 0.89
           }
         },
         "refusals": {
@@ -2101,7 +2124,8 @@
             "orbit-android": 287
           }
         },
-        "memUsed": 3285262957,
+        "memUsed": 2029202723,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2118,10 +2142,8 @@
       }
     ],
     "previous": {
-      "byResult": {
-        "cancelled": 1
-      },
-      "boxHours": 0.07,
+      "byResult": {},
+      "boxHours": 0,
       "refused": 0,
       "queued": 0
     }
@@ -2147,6 +2169,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2172,6 +2195,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2197,6 +2221,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2222,6 +2247,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2247,6 +2273,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2300,6 +2327,7 @@
           }
         },
         "memUsed": 492979814,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2338,7 +2366,7 @@
           "bySize": {
             "gpu": 1.04,
             "large": 0.68,
-            "medium": 8.99
+            "medium": 7.28
           }
         },
         "refusals": {
@@ -2351,7 +2379,8 @@
             "sparrow-ml": 1036
           }
         },
-        "memUsed": 1149482520,
+        "memUsed": 975202222,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 3,
@@ -2395,6 +2424,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2420,6 +2450,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2445,6 +2476,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2470,6 +2502,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2495,6 +2528,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2520,6 +2554,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2545,6 +2580,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2570,6 +2606,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2595,6 +2632,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2620,6 +2658,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2645,6 +2684,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2670,6 +2710,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2695,6 +2736,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2720,6 +2762,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2745,6 +2788,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 0,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2770,6 +2814,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2795,6 +2840,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2820,6 +2866,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2845,6 +2892,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2870,6 +2918,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2895,6 +2944,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2920,6 +2970,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2945,6 +2996,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2970,6 +3022,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -2995,6 +3048,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -3020,6 +3074,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -3045,6 +3100,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -3070,6 +3126,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -3123,6 +3180,7 @@
           }
         },
         "memUsed": 674170194,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -3161,7 +3219,7 @@
           "bySize": {
             "gpu": 1.04,
             "large": 0.68,
-            "medium": 8.99
+            "medium": 7.28
           }
         },
         "refusals": {
@@ -3174,7 +3232,8 @@
             "sparrow-ml": 1036
           }
         },
-        "memUsed": 1227767355,
+        "memUsed": 1033564072,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 3,

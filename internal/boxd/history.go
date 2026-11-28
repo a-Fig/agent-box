@@ -585,8 +585,11 @@ func (h *History) Range(rng string, live Live) dash.History {
 		rng = dash.RangeDay
 		start, step, n, _ = dash.Window(rng, now)
 	}
+	// The span before is cut where now falls in this one, so a day that has run for 9 hours is
+	// compared with the 9 hours the day before, not all 24 of them.
+	back := time.Duration(n) * step
 	out := dash.History{Range: rng, Buckets: h.buckets(start, step, n, now),
-		Previous: dash.Total(h.buckets(start.Add(-time.Duration(n)*step), step, n, now))}
+		Previous: dash.Total(h.buckets(start.Add(-back), step, n, now.Add(-back)))}
 	h.mu.Lock()
 	out.Segments = segments(h.modes, start, now, live.Mode)
 	h.mu.Unlock()
@@ -595,8 +598,8 @@ func (h *History) Range(rng string, live Live) dash.History {
 }
 
 // buckets counts jobs, box-hours, refusals and the queue into n buckets of
-// step from start; memory is filled in by fillMemory.
-func (h *History) buckets(start time.Time, step time.Duration, n int, now time.Time) []dash.Bucket {
+// step from start, up to upto; memory is filled in by fillMemory.
+func (h *History) buckets(start time.Time, step time.Duration, n int, upto time.Time) []dash.Bucket {
 	out := make([]dash.Bucket, n)
 	durs := make([]map[string][]float64, n)
 	for i := range out {
@@ -611,7 +614,7 @@ func (h *History) buckets(start time.Time, step time.Duration, n int, now time.T
 		durs[i] = map[string][]float64{}
 	}
 	at := func(t time.Time) int {
-		if t.Before(start) {
+		if t.Before(start) || t.After(upto) {
 			return -1
 		}
 		if i := int(t.Sub(start) / step); i < n {
@@ -642,9 +645,9 @@ func (h *History) buckets(start time.Time, step time.Duration, n int, now time.T
 		if unsetTime(s.start) {
 			continue
 		}
-		to := now
+		to := upto
 		if s.end != nil {
-			to = *s.end
+			to = earlier(*s.end, upto)
 		}
 		for i := range out {
 			bs := out[i].Start
@@ -746,6 +749,7 @@ func (h *History) fillMemory(bs []dash.Bucket, step time.Duration, capNow int64)
 		if sums[i].n > 0 {
 			bs[i].MemUsed = sums[i].sum / sums[i].n
 		}
+		bs[i].MemSamples = int(sums[i].n)
 		bs[i].MemCap = sums[i].cap
 		if bs[i].MemCap == 0 {
 			bs[i].MemCap = capNow

@@ -53,14 +53,28 @@ function label(b, range) {
 }
 
 const STEP = { day: 3600e3, week: 86400e3, month: 86400e3 };
-const PREV = { day: "yesterday", week: "the week before", month: "the 30 days before" };
+const PREV = { day: "the day before", week: "the week before", month: "the 30 days before" };
 
 // A link to Jobs for the jobs that started in bucket b (#292).
 function spanOf(b, range) {
   return { since: new Date(b.start).toISOString(), until: new Date(Date.parse(b.start) + STEP[range]).toISOString() };
 }
-// A mark that opens Jobs: a click or Enter goes to href.
-const go = (href) => ({ class: "hit go", role: "link", onclick: () => (location.hash = href), onkeydown: (e) => e.key === "Enter" && (location.hash = href) });
+// A mark that opens Jobs: a click or Enter goes to href. A tap shows the mark's numbers first
+// (tip.js), as every other mark's does; a second tap on it opens its jobs.
+const go = (href) => ({
+  class: "hit go",
+  role: "link",
+  onclick: (e) => {
+    const m = e.currentTarget;
+    if (e.pointerType === "touch" && !m.hasAttribute("data-armed")) {
+      document.querySelectorAll("[data-armed]").forEach((o) => o.removeAttribute("data-armed"));
+      m.setAttribute("data-armed", "");
+      return;
+    }
+    location.hash = href;
+  },
+  onkeydown: (e) => e.key === "Enter" && (location.hash = href),
+});
 
 function sum(o) {
   return Object.values(o || {}).reduce((a, b) => a + b, 0);
@@ -138,7 +152,14 @@ function memory(buckets, range) {
   const step = (W - left) / buckets.length;
   const x = (i) => left + step * i + step / 2;
   const y = (v) => top + plotH * (1 - v / max);
-  const pts = buckets.map((b, i) => x(i).toFixed(1) + "," + y(b.memUsed).toFixed(1));
+  // A bucket without samples (they are kept 14 days) is a gap in the line, not a fall to 0.
+  const has = (b) => b.memSamples !== 0;
+  const runs = [];
+  buckets.forEach((b, i) => {
+    if (!has(b)) return;
+    if (i === 0 || !has(buckets[i - 1])) runs.push([]);
+    runs[runs.length - 1].push(i);
+  });
   const gib = (v) => (v / GiB).toFixed(v % GiB ? 1 : 0) + "G";
   const kids = [];
   for (let v = 0; v <= max + 1; v += stepGiB * GiB) {
@@ -149,14 +170,18 @@ function memory(buckets, range) {
   } else {
     kids.push(s("text", { x: W, y: top + 2, "text-anchor": "end" }, "cap " + bytes(cap) + " ↑"));
   }
-  kids.push(
-    s("polygon", { points: [x(0).toFixed(1) + "," + (top + plotH), ...pts, x(buckets.length - 1).toFixed(1) + "," + (top + plotH)].join(" "), fill: "var(--s1)", "fill-opacity": 0.14 }),
-    s("polyline", { points: pts.join(" "), fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }),
-  );
+  for (const run of runs) {
+    const pts = run.map((i) => x(i).toFixed(1) + "," + y(buckets[i].memUsed).toFixed(1));
+    const a = x(run[0]).toFixed(1), z = x(run[run.length - 1]).toFixed(1);
+    kids.push(
+      s("polygon", { points: [a + "," + (top + plotH), ...pts, z + "," + (top + plotH)].join(" "), fill: "var(--s1)", "fill-opacity": 0.14 }),
+      run.length > 1 ? s("polyline", { points: pts.join(" "), fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }) : s("circle", { cx: a, cy: y(buckets[run[0]].memUsed).toFixed(1), r: 2, fill: "var(--s1)" }),
+    );
+  }
   const every = Math.ceil(buckets.length / (range === "day" ? 6 : 7));
   buckets.forEach((b, i) => {
     if (i % every === 0) kids.push(s("text", { x: x(i), y: height - 4, "text-anchor": "middle" }, label(b, range)));
-    kids.push(s("rect", tip(label(b, range) + ": " + bytes(b.memUsed) + " of " + bytes(b.memCap), { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
+    kids.push(s("rect", tip(label(b, range) + ": " + (has(b) ? bytes(b.memUsed) + " of " + bytes(b.memCap) : "no samples (they are kept 14 days)"), { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
   });
   return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group", "aria-label": "Memory in use against the cap" }, kids));
 }
@@ -309,9 +334,10 @@ const history = {
     const P = d.previous || { byResult: {}, boxHours: 0, refused: 0, queued: 0 };
     const was = PREV[range];
     // The change against the span before: "+4 vs yesterday".
-    const delta = (now, then, unit = "") => {
+    // One decimal, or whole numbers beside a number shown whole (box-hours from 10 on).
+    const delta = (now, then, unit = "", whole = true) => {
       if (then === 0 && now > 0 && !unit) return "none " + was;
-      const dlt = Math.round((now - then) * 10) / 10;
+      const dlt = whole ? Math.round(now - then) : Math.round((now - then) * 10) / 10;
       return dlt === 0 ? "same as " + was : (dlt > 0 ? "+" : "−") + Math.abs(dlt) + unit + " vs " + was;
     };
     const rateNow = rate(byResult), rateThen = rate(P.byResult || {});
@@ -339,7 +365,7 @@ const history = {
         [
           [jobsN, "jobs", delta(jobsN, sum(P.byResult || {})), "Jobs started in the range that have ended. Running jobs count once they end."],
           [rateNow == null ? "—" : rateNow + "%", "pass rate", rateNow == null || rateThen == null ? (rateThen == null ? "none " + was : "") : delta(rateNow, rateThen, " pts"), "Of the jobs that ended and weren't cancelled, the share that passed."],
-          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours", delta(hours, P.boxHours || 0), "Hours boxes existed, added up over all boxes: two boxes for an hour are 2 box-hours."],
+          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours", delta(hours, P.boxHours || 0, "", hours >= 10), "Hours boxes existed, added up over all boxes: two boxes for an hour are 2 box-hours."],
           [refused, "turned away", delta(refused, P.refused || 0), REFUSED_HINT],
           [queuedN, startedN ? "queued · " + dur(wait) + " wait" : "queued", delta(queuedN, P.queued || 0), QUEUED_HINT + (startedN ? " The wait is the median of those that started." : "")],
         ].map(([v, l, dl, about]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", hint(about, {}, true), l), dl ? h("small", { class: "delta" }, dl) : null)),
@@ -348,7 +374,7 @@ const history = {
         "div",
         { class: "charts" },
         chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel, (k) => MODE_HINTS[k]), h("div", { class: "legend" }, h("span", hint(REFUSED_HINT, {}, true), h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", hint(QUEUED_HINT, {}, true), h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
-        chart("Jobs by result", "Jobs started in " + per + ". Click a bar for its jobs.", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], String, 150, (b) => spanOf(b, range))), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
+        chart("Jobs by result", "Jobs started in " + per + ". Click a bar, or tap it twice, for its jobs.", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], String, 150, (b) => spanOf(b, range))), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
         chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)), undefined, (k) => SIZE_HINTS[k])]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + "." + (range === "month" ? " Samples are kept 14 days." : ""), sized(half, () => memory(B, range))),
         // The ranked bars share one color that is neither a mode's nor a result's.

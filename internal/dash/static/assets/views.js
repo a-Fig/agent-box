@@ -956,12 +956,13 @@ function spanChip() {
   const a = new Date(F.since), b = new Date(F.until);
   const time = (d) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   // A day of History's week or month is a UTC day: the chip names it. An hour shows its times.
-  let what = "Started since " + stamp(a);
-  if (F.until && b - a === 86400e3) what = "Started on " + a.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
-  else if (F.until) what = "Started " + stamp(a) + " – " + (a.toDateString() === b.toDateString() ? time(b) : stamp(b));
+  let what = F.since ? "Started after " + stamp(a) : "Started before " + stamp(b);
+  if (F.since && F.until && b - a === 86400e3) what = "Started on " + a.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }) + " (UTC)";
+  else if (F.since && F.until) what = "Started " + stamp(a) + " – " + (a.toDateString() === b.toDateString() ? time(b) : stamp(b));
   const clear = () => {
     F.since = F.until = "";
     fetchJobs();
+    document.querySelector(".filters input[type=search]")?.focus(); // the button goes with the chip
   };
   chip = { sig, el: h("span", { class: "chip" }, icon("clock"), h("span", null, what), h("button", { class: "icon-btn chip-x", "aria-label": "Clear the time filter", onclick: clear }, icon("x"))) };
   return chip.el;

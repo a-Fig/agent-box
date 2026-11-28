@@ -426,6 +426,7 @@ type Bucket struct {
 	Refusals      RefusalCounts `json:"refusals"`
 	MedianSeconds Medians       `json:"medianSeconds"`
 	MemUsed       int64         `json:"memUsed"`
+	MemSamples    int           `json:"memSamples"` // minute samples behind MemUsed: 0 is no data, not no use
 	MemCap        int64         `json:"memCap"`
 	Queued        QueueCounts   `json:"queued"`
 }
