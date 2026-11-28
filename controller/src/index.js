@@ -1,5 +1,14 @@
 import { Fleet } from "./fleet.js";
-import { HOST_ID_RE, MAX_BODY_BYTES, jsonError, jsonResponse, matchRoute, readLimitedBody } from "./http.js";
+import {
+  HOST_ID_RE,
+  MAX_BODY_BYTES,
+  ROUTE_ROLES,
+  jsonError,
+  jsonResponse,
+  matchRoute,
+  methodNotAllowed,
+  readLimitedBody,
+} from "./http.js";
 
 export { Fleet };
 
@@ -23,6 +32,34 @@ export function constantTimeEqual(a, b) {
     diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
   }
   return diff === 0;
+}
+
+/**
+ * Verifies GitHub's `X-Hub-Signature-256: sha256=<hex>` HMAC over the raw body bytes.
+ * Uses WebCrypto verify, which compares in constant time. Fails closed on an empty secret.
+ * @param {string} secret
+ * @param {Uint8Array} body
+ * @param {string | null} header
+ * @returns {Promise<boolean>}
+ */
+export async function verifyGitHubSignature(secret, body, header) {
+  if (typeof secret !== "string" || secret === "") return false;
+  const m = /^sha256=([0-9a-f]{64})$/i.exec(header ?? "");
+  if (!m) return false;
+  const sig = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) sig[i] = parseInt(m[1].slice(i * 2, i * 2 + 2), 16);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  return crypto.subtle.verify("HMAC", key, sig, body);
+}
+
+function tooLarge() {
+  return jsonError(413, "too_large", "Request body exceeds the 262144-byte limit.");
 }
 
 function extractBearer(request) {
@@ -59,35 +96,49 @@ export default {
     if (!matched) {
       return jsonError(404, "not_found", "Unknown route.");
     }
-    if (request.method !== matched.method) {
-      return jsonError(405, "method_not_allowed", "Method not allowed.", { Allow: matched.method });
+    if (!matched.methods.includes(request.method)) {
+      return methodNotAllowed(matched);
     }
     if (matched.route === "health") {
       return jsonResponse(200, { ok: true, protocol: 1 });
     }
 
-    const requiredRole = matched.route === "host_state" ? "host" : "client";
-    const auth = authorize(request, env, requiredRole);
-    if (!auth.ok) {
-      return auth.response;
-    }
-
-    if (matched.route === "host_state" && !HOST_ID_RE.test(matched.rawId)) {
-      return jsonError(400, "bad_request", "Invalid host ID.");
-    }
-
     const headers = new Headers();
     const contentType = request.headers.get("content-type");
     if (contentType) headers.set("content-type", contentType);
-    headers.set("x-controller-role", auth.role);
-
     let body;
-    if (matched.route === "host_state") {
+
+    if (matched.route === "github_webhook") {
+      // GitHub authenticates with the shared webhook secret, not a bearer token.
+      const secret = env?.GITHUB_WEBHOOK_SECRET;
+      if (typeof secret !== "string" || secret === "") {
+        return jsonError(401, "unauthorized", "Webhook secret is not configured.");
+      }
       const limited = await readLimitedBody(request, MAX_BODY_BYTES);
-      if (limited.tooLarge) {
-        return jsonError(413, "too_large", "Request body exceeds the 262144-byte limit.");
+      if (limited.tooLarge) return tooLarge();
+      if (!(await verifyGitHubSignature(secret, limited.bytes, request.headers.get("x-hub-signature-256")))) {
+        return jsonError(401, "unauthorized", "Missing or invalid webhook signature.");
       }
       body = limited.bytes;
+      headers.set("x-controller-role", "github");
+      for (const name of ["x-github-event", "x-github-delivery"]) {
+        const value = request.headers.get(name);
+        if (value) headers.set(name, value);
+      }
+    } else {
+      const auth = authorize(request, env, ROUTE_ROLES[matched.route]);
+      if (!auth.ok) {
+        return auth.response;
+      }
+      if (matched.route === "host_state" && !HOST_ID_RE.test(matched.rawId)) {
+        return jsonError(400, "bad_request", "Invalid host ID.");
+      }
+      headers.set("x-controller-role", auth.role);
+      if (request.method !== "GET") {
+        const limited = await readLimitedBody(request, MAX_BODY_BYTES);
+        if (limited.tooLarge) return tooLarge();
+        body = limited.bytes;
+      }
     }
 
     const stub = env.FLEET.get(env.FLEET.idFromName("fleet"));

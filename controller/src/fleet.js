@@ -1,9 +1,13 @@
+import { CI, CI_SCHEMA } from "./ci.js";
+import { githubAppFromEnv } from "./github.js";
 import {
   HOST_ID_RE,
   MAX_BODY_BYTES,
+  ROUTE_ROLES,
   jsonError,
   jsonResponse,
   matchRoute,
+  methodNotAllowed,
   readLimitedBody,
   toRFC3339,
 } from "./http.js";
@@ -22,16 +26,18 @@ export class Fleet {
   #sql;
   #now;
   #initialized = false;
+  #ci;
 
   /**
    * @param {{ storage: { sql: { exec: (query: string, ...bindings: unknown[]) => any } } }} ctx
-   * @param {Record<string, unknown>} env
-   * @param {{ now?: () => Date | number | string }} [options]
+   * @param {Record<string, any>} env
+   * @param {{ now?: () => Date | number | string, fetch?: typeof fetch }} [options]
    */
   constructor(ctx, env, options = {}) {
     this.#sql = ctx.storage.sql;
     this.#now = options.now ?? (() => new Date());
-    void env;
+    const now = () => this.#currentDate();
+    this.#ci = new CI(this.#sql, { now, github: githubAppFromEnv(env, { fetch: options.fetch, now }) });
   }
 
   #currentDate() {
@@ -56,6 +62,7 @@ export class Fleet {
         requests INTEGER NOT NULL
       )`
     );
+    for (const ddl of CI_SCHEMA) this.#sql.exec(ddl);
     this.#initialized = true;
   }
 
@@ -78,12 +85,12 @@ export class Fleet {
     if (!matched) {
       return jsonError(404, "not_found", "Unknown route.");
     }
-    if (request.method !== matched.method) {
-      return jsonError(405, "method_not_allowed", "Method not allowed.", { Allow: matched.method });
+    if (!matched.methods.includes(request.method)) {
+      return methodNotAllowed(matched);
     }
 
-    const expectedRole = matched.route === "host_state" ? "host" : "client";
-    if (request.headers.get("x-controller-role") !== expectedRole) {
+    const expectedRole = ROUTE_ROLES[matched.route];
+    if (!expectedRole || request.headers.get("x-controller-role") !== expectedRole) {
       return jsonError(403, "forbidden", "Token lacks permission for this endpoint.");
     }
 
@@ -92,6 +99,10 @@ export class Fleet {
     const nowIso = toRFC3339(now);
     const day = nowIso.slice(0, 10);
     this.#recordUsage(day);
+
+    if (matched.route === "github_webhook" || matched.route.startsWith("ci_")) {
+      return this.#ci.handle(matched, request);
+    }
 
     if (matched.route === "usage") {
       const row = this.#sql.exec("SELECT requests FROM usage WHERE day = ?", day).one();

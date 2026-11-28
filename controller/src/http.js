@@ -38,18 +38,43 @@ export function jsonError(status, error, message, extraHeaders = {}) {
   return jsonResponse(status, { error, message }, extraHeaders);
 }
 
+/** The `x-controller-role` the Worker must vouch for before the Fleet DO serves each route. */
+export const ROUTE_ROLES = {
+  hosts: "client",
+  usage: "client",
+  host_state: "host",
+  ci_config: "host",
+  ci_next: "host",
+  ci_job: "host",
+  github_webhook: "github",
+};
+
 /**
  * Matches a controller-v1 route path.
  * @param {string} pathname
- * @returns {{ route: "health" | "hosts" | "usage" | "host_state", method: string, rawId?: string } | null}
+ * @returns {{ route: string, methods: string[], rawId?: string } | null}
  */
 export function matchRoute(pathname) {
-  if (pathname === "/v1/health") return { route: "health", method: "GET" };
-  if (pathname === "/v1/hosts") return { route: "hosts", method: "GET" };
-  if (pathname === "/v1/usage") return { route: "usage", method: "GET" };
-  const m = /^\/v1\/hosts\/([^/]*)\/state$/.exec(pathname);
-  if (m) return { route: "host_state", method: "PUT", rawId: m[1] };
+  if (pathname === "/v1/health") return { route: "health", methods: ["GET"] };
+  if (pathname === "/v1/hosts") return { route: "hosts", methods: ["GET"] };
+  if (pathname === "/v1/usage") return { route: "usage", methods: ["GET"] };
+  if (pathname === "/v1/github/webhook") return { route: "github_webhook", methods: ["POST"] };
+  if (pathname === "/v1/ci/config") return { route: "ci_config", methods: ["GET", "PUT"] };
+  if (pathname === "/v1/ci/next") return { route: "ci_next", methods: ["GET"] };
+  let m = /^\/v1\/hosts\/([^/]*)\/state$/.exec(pathname);
+  if (m) return { route: "host_state", methods: ["PUT"], rawId: m[1] };
+  m = /^\/v1\/ci\/jobs\/([^/]*)$/.exec(pathname);
+  if (m) return { route: "ci_job", methods: ["PATCH"], rawId: m[1] };
   return null;
+}
+
+/**
+ * Returns the 405 response for a matched route called with the wrong method.
+ * @param {{ methods: string[] }} matched
+ * @returns {Response}
+ */
+export function methodNotAllowed(matched) {
+  return jsonError(405, "method_not_allowed", "Method not allowed.", { Allow: matched.methods.join(", ") });
 }
 
 /**

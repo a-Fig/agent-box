@@ -46,6 +46,7 @@ Non-2xx JSON responses use the same error envelope as `runner-v1`:
 | `401` | `unauthorized` | Missing or invalid `Authorization: Bearer` token | [`error-unauthorized.json`](protocol/controller-v1/error-unauthorized.json) |
 | `403` | `forbidden` | Token lacks permission for this endpoint (e.g. client token on host write) | — |
 | `404` | `not_found` | Unknown route | — |
+| `409` | `conflict` | CI job update for a job that is no longer running ([`controller/README.md`](../controller/README.md#github-ci-279)) | — |
 | `413` | `too_large` | Request body exceeds `262144` bytes (`256 KiB`) | [`error-too-large.json`](protocol/controller-v1/error-too-large.json) |
 
 ## Endpoints
