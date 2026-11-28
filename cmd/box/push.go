@@ -514,12 +514,15 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 }
 
 func (a *App) startWatchOnHost(info jobMeta, job string, host fleetHost, gpu, throwaway, queued bool) bool {
+	if host.Kind != "" {
+		return false
+	}
 	locator := locateJobHost(host)
 	return a.startWatchRecord(info, job, locator, gpu, throwaway, queued)
 }
 
 func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, throwaway, queued bool) bool {
-	if !a.canPush() {
+	if !a.canPush() || (host != nil && host.Kind != "") {
 		return false
 	}
 	id, err := parseJobID(job)

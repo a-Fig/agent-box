@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -14,6 +15,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,6 +30,14 @@ const (
 	cloudFollowWaitSec = 25
 	cloudMaxBodyBytes  = 1 << 20
 )
+
+// cloudHTTPClient never follows redirects so auth headers from token_file are
+// never forwarded to another host or scheme.
+var cloudHTTPClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 type cloudHost struct {
 	host    fleetHost
@@ -55,13 +65,13 @@ type cloudBudget struct {
 }
 
 type cloudProbeResponse struct {
-	Protocol      int         `json:"protocol"`
-	Sizes         []string    `json:"sizes"`
-	Running       int         `json:"running"`
-	MaxConcurrent int         `json:"maxConcurrent"`
-	Paused        bool        `json:"paused"`
-	MaxTimeoutSec int         `json:"maxTimeoutSec"`
-	Budget        cloudBudget `json:"budget"`
+	Protocol      int          `json:"protocol"`
+	Sizes         []string     `json:"sizes"`
+	Running       int          `json:"running"`
+	MaxConcurrent int          `json:"maxConcurrent"`
+	Paused        bool         `json:"paused"`
+	MaxTimeoutSec int          `json:"maxTimeoutSec"`
+	Budget        *cloudBudget `json:"budget"`
 }
 
 type cloudJobSpec struct {
@@ -130,7 +140,7 @@ func (a *App) newCloudHost(host fleetHost) (*cloudHost, error) {
 	}
 	do := a.HTTP
 	if do == nil {
-		do = http.DefaultClient.Do
+		do = cloudHTTPClient.Do
 	}
 	return &cloudHost{
 		host:    host,
@@ -174,7 +184,15 @@ func (c *cloudHost) doRequest(ctx context.Context, method, reqPath, contentType 
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	return c.do(req)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("cloud runner refused HTTP redirect (%d)", resp.StatusCode)
+	}
+	return resp, nil
 }
 
 func (c *cloudHost) doJSON(ctx context.Context, method, reqPath string, reqBody, out any) error {
@@ -273,11 +291,11 @@ func (c *cloudHost) probe(ctx context.Context) fleetCandidate {
 			Fits: room,
 		})
 	}
-	spent := p.Budget.SpentUSD + p.Budget.RunningUSD
 	switch {
 	case p.Paused:
 		cand.Unavailable = "cloud paused"
-	case p.Budget.CapUSD >= 0 && spent >= p.Budget.CapUSD:
+	case p.Budget != nil && p.Budget.CapUSD > 0 && p.Budget.SpentUSD+p.Budget.RunningUSD >= p.Budget.CapUSD:
+		spent := p.Budget.SpentUSD + p.Budget.RunningUSD
 		cand.Unavailable = fmt.Sprintf("monthly cap reached ($%.2f of $%.2f)", spent, p.Budget.CapUSD)
 	case p.Running >= p.MaxConcurrent:
 		cand.Unavailable = fmt.Sprintf("cloud busy (%d/%d running)", p.Running, p.MaxConcurrent)
@@ -352,21 +370,20 @@ func (c *cloudHost) start(ctx context.Context, o RunOpts, sz mode.Size, prepared
 	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/jobs", mw.FormDataContentType(), pr)
 	pr.Close()
 	hostCopy := c.host
+	unconfirmed := JobResult{Job: pubID.ID, Box: pubID.Box, Host: c.host.Name, Code: 1, Source: prepared.snap.source, fleetHost: &hostCopy}
 	if err != nil {
 		if ctx.Err() != nil {
-			return JobResult{Code: 1}, nil, ctx.Err()
+			return unconfirmed, nil, ctx.Err()
 		}
-		return JobResult{Job: pubID.ID, Box: pubID.Box, Host: c.host.Name, Code: 1, Source: prepared.snap.source, fleetHost: &hostCopy},
-			nil, fmt.Errorf("%s: submission could not be confirmed; check box jobs: %w", hostLabel(c.host), err)
+		return unconfirmed, nil, fmt.Errorf("%s: submission could not be confirmed; check box jobs: %w", hostLabel(c.host), err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, cloudMaxBodyBytes))
 	if err != nil {
 		if ctx.Err() != nil {
-			return JobResult{Code: 1}, nil, ctx.Err()
+			return unconfirmed, nil, ctx.Err()
 		}
-		return JobResult{Job: pubID.ID, Box: pubID.Box, Host: c.host.Name, Code: 1, Source: prepared.snap.source, fleetHost: &hostCopy},
-			nil, fmt.Errorf("%s: submission could not be confirmed; check box jobs: %w", hostLabel(c.host), err)
+		return unconfirmed, nil, fmt.Errorf("%s: submission could not be confirmed; check box jobs: %w", hostLabel(c.host), err)
 	}
 
 	switch resp.StatusCode {
@@ -674,6 +691,154 @@ func (c *cloudHost) pull(ctx context.Context, bareID, relPath string) (io.ReadCl
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, cloudMaxBodyBytes))
 	env := readCloudError(resp.StatusCode, raw)
 	return nil, fmt.Errorf("pull %s from %s: %s", relPath, bareID, env.Message)
+}
+
+func (c *cloudHost) pullToDir(ctx context.Context, bareID, remote, local string) (string, error) {
+	if remote == "" || strings.ContainsAny(remote, "\x00\n") {
+		return "", errors.New("give a remote path")
+	}
+	if isWindowsPath(remote) {
+		return "", fmt.Errorf("remote path %q is a Windows path, not a path in the Linux box (in Git Bash, pass a relative path)", remote)
+	}
+	if local == "" {
+		return "", errors.New("give a local directory")
+	}
+	slash := filepath.ToSlash(remote)
+	if path.IsAbs(slash) {
+		return "", errors.New("cloud pull takes a path relative to the job checkout")
+	}
+	rel := path.Clean(slash)
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("can't pull %s", remote)
+	}
+	name := path.Base(rel)
+	if !localPullName(name) {
+		return "", fmt.Errorf("can't use %q as a local file name", name)
+	}
+	if c.host.Mode == "" || c.host.Mode == cloudModeFunction {
+		return "", errors.New("function-mode cloud jobs keep no files; set mode: sandbox and keep_sec")
+	}
+
+	local, err := filepath.Abs(local)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		return "", err
+	}
+	dest := filepath.Join(local, name)
+	if _, err := os.Lstat(dest); err == nil {
+		return "", fmt.Errorf("%s already exists; remove it or pull into another directory", dest)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	rc, err := c.pull(ctx, bareID, rel)
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+
+	staging, err := os.MkdirTemp(local, ".box-pull-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(staging)
+
+	if err := extractCloudTar(staging, rc, func(msg string) {
+		if c.app != nil {
+			c.app.warn(msg)
+		}
+	}); err != nil {
+		return "", err
+	}
+
+	entries, err := os.ReadDir(staging)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("pull %s from %s: empty archive", rel, bareID)
+	}
+	if len(entries) == 1 && entries[0].Name() == name {
+		got := filepath.Join(staging, name)
+		if !entries[0].IsDir() {
+			if err := os.CopyFS(local, os.DirFS(staging)); err != nil {
+				return "", err
+			}
+			return dest, nil
+		}
+		if err := os.Mkdir(dest, 0o755); err != nil {
+			return "", err
+		}
+		if err := os.CopyFS(dest, os.DirFS(got)); err != nil {
+			return "", errors.Join(err, os.RemoveAll(dest))
+		}
+		return dest, nil
+	}
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.CopyFS(dest, os.DirFS(staging)); err != nil {
+		return "", errors.Join(err, os.RemoveAll(dest))
+	}
+	return dest, nil
+}
+
+func extractCloudTar(staging string, r io.Reader, warn func(string)) error {
+	tr := tar.NewReader(r)
+	var dropped []string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		clean := path.Clean(strings.TrimPrefix(filepath.ToSlash(hdr.Name), "./"))
+		if clean == "." || clean == "" {
+			continue
+		}
+		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("unsafe tar path %q", hdr.Name)
+		}
+		parts := strings.Split(clean, "/")
+		for _, part := range parts {
+			if !localPullName(part) {
+				return fmt.Errorf("can't use %q as a local file name", part)
+			}
+		}
+		target := filepath.Join(staging, filepath.FromSlash(clean))
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg, '\x00':
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			mode := os.FileMode(hdr.Mode) & 0o777
+			if mode == 0 {
+				mode = 0o644
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode|0o600)
+			if err != nil {
+				return err
+			}
+			_, cerr := io.Copy(f, tr)
+			if err := errors.Join(cerr, f.Close()); err != nil {
+				return err
+			}
+		default:
+			dropped = append(dropped, clean)
+		}
+	}
+	if len(dropped) > 0 && warn != nil {
+		warn("box: warning: dropped links and special files: " + strings.Join(dropped, " "))
+	}
+	return nil
 }
 
 func (c *cloudHost) pause(ctx context.Context, paused bool) (bool, error) {

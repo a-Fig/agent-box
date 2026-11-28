@@ -1,10 +1,12 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -149,14 +151,22 @@ func (f *fakeRunnerV1) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.probeHits++
 		running := f.runningCountLocked()
-		resp := cloudProbeResponse{
+		resp := struct {
+			Protocol      int          `json:"protocol"`
+			Sizes         []string     `json:"sizes"`
+			Running       int          `json:"running"`
+			MaxConcurrent int          `json:"maxConcurrent"`
+			Paused        bool         `json:"paused"`
+			MaxTimeoutSec int          `json:"maxTimeoutSec"`
+			Budget        *cloudBudget `json:"budget"`
+		}{
 			Protocol:      1,
 			Sizes:         slices.Clone(f.sizes),
 			Running:       running,
 			MaxConcurrent: f.maxConcurrent,
 			Paused:        f.paused,
 			MaxTimeoutSec: f.maxTimeoutSec,
-			Budget:        f.budget,
+			Budget:        &f.budget,
 		}
 		f.mu.Unlock()
 		f.writeJSON(w, http.StatusOK, resp)
@@ -678,6 +688,32 @@ func TestCloudProbeMappingAndPick(t *testing.T) {
 	if pick := pickFleetHost([]fleetCandidate{cand}, pickRequest{}); pick.Action != pickRefuse || !strings.Contains(pick.Reason, "cloud busy (4/4 running)") {
 		t.Fatalf("busy pick = %+v", pick)
 	}
+
+	// Missing budget (nil) and explicit capUSD <= 0 should not falsely claim cap reached.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing budget", body: `{"protocol":1,"sizes":["medium"],"running":0,"maxConcurrent":2,"paused":false}`},
+		{name: "zero capUSD", body: `{"protocol":1,"sizes":["medium"],"running":0,"maxConcurrent":2,"paused":false,"budget":{"month":"2026-11","spentUSD":0,"runningUSD":0,"capUSD":0}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noBudget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer noBudget.Close()
+			c := &cloudHost{
+				host:    fleetHost{Name: "cloud", Kind: "modal", Endpoint: noBudget.URL, TokenFile: tok, Priority: -1},
+				do:      cloudHTTPClient.Do,
+				headers: map[string]string{},
+			}
+			got := c.probe(context.Background())
+			if !got.Reachable || got.Error != "" || got.Unavailable != "" {
+				t.Fatalf("%s probe = %+v, want reachable and available", tc.name, got)
+			}
+		})
+	}
 }
 
 func cloudDispatchTestApp(t *testing.T, ff *fakeFleet, hosts []fleetHost, httpDo func(*http.Request) (*http.Response, error)) (*App, *bytes.Buffer, *bytes.Buffer, string) {
@@ -990,4 +1026,221 @@ func TestMixedPCAndCloudFleetTieringAndSpillover(t *testing.T) {
 			t.Fatalf("cloud hits = probe:%d start:%d, want 1, 1", srv.probeHits, srv.startHits)
 		}
 	})
+}
+
+func TestCloudRedirectRefusedWithoutForwardingHeaders(t *testing.T) {
+	var targetHits int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/leak", http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	tokPath := filepath.Join(t.TempDir(), "modal.json")
+	if err := os.WriteFile(tokPath, []byte(`{"headers":{"X-Runner-Secret":"top-secret"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := fleetHost{Name: "cloud", Kind: "modal", Endpoint: redirector.URL, TokenFile: tokPath, Mode: "sandbox", Priority: -1}
+
+	a := newApp()
+	a.Out, a.Err = io.Discard, io.Discard
+	// a.HTTP is intentionally nil so newCloudHost uses cloudHTTPClient.
+	ch, err := a.newCloudHost(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cand := ch.probe(context.Background()); cand.Reachable || !strings.Contains(cand.Error, "redirect") {
+		t.Fatalf("probe on 302 = %+v, want unreachable redirect error", cand)
+	}
+	if _, err := ch.pull(context.Background(), "lantern.20261127-150405-a1b2", "out.txt"); err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("pull on 302 err = %v, want redirect error", err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "lantern")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, dir, "init", "-q")
+	write(t, filepath.Join(dir, "a.txt"), "hi\n")
+	gitT(t, dir, "add", "a.txt")
+	gitT(t, dir, "commit", "-q", "-m", "init")
+	snap, err := snapshot(context.Background(), execRunner{}, dir, "20261127-150405-a1b2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+
+	prep := &fleetRun{repo: repo{Top: dir, Name: "lantern"}, ref: "20261127-150405-a1b2", snap: snap}
+	if _, away, err := ch.start(context.Background(), RunOpts{Cmd: []string{"echo"}, Reason: "Redirect safety test."}, pickTestSize(t, "medium"), prep); err == nil || away != nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("start on 302 = away:%v err:%v, want redirect error", away, err)
+	}
+	if targetHits != 0 {
+		t.Fatalf("redirect target received %d requests; auth headers leaked across redirect!", targetHits)
+	}
+}
+
+func TestCloudCancelAndPull(t *testing.T) {
+	srv := newFakeRunnerV1(t)
+	srv.jobDelay = 2 * time.Second
+	srv.mode = "sandbox"
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+
+	fnHost := fleetHost{Name: "fn-cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1}
+	hosts := []fleetHost{fnHost}
+	a, _, _, dir := cloudDispatchTestApp(t, newFakeFleet(t), hosts, srv.doHTTP)
+
+	// Start a slow job and cancel it via CancelAny.
+	r, err := a.Run(context.Background(), RunOpts{
+		Dir:    dir,
+		Cmd:    []string{"sleep", "10"},
+		Wait:   20 * time.Millisecond,
+		Reason: "Test CancelAny on cloud job ID.",
+	})
+	if err != nil || r.State != stateDetached {
+		t.Fatalf("Run = %+v, err=%v", r, err)
+	}
+	removed, cancelled, code, err := a.CancelAny(context.Background(), r.Job)
+	if err != nil || removed || !cancelled || code != 137 {
+		t.Fatalf("CancelAny = removed:%v cancelled:%v code:%d err:%v", removed, cancelled, code, err)
+	}
+
+	// Function-mode pull refuses cleanly without hitting Incus or runner.
+	if _, err := a.Pull(context.Background(), r.Job, "coverage", t.TempDir()); err == nil || !strings.Contains(err.Error(), "function-mode cloud jobs keep no files") {
+		t.Fatalf("function-mode Pull err = %v", err)
+	}
+
+	// Switch hosts.json to sandbox mode and verify Pull extracts tar safely (dropping symlinks).
+	sbHost := fleetHost{Name: "fn-cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "sandbox", Priority: -1}
+	a, _, _, _ = cloudDispatchTestApp(t, newFakeFleet(t), []fleetHost{sbHost}, srv.doHTTP)
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	content := []byte("report-ok\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "coverage/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "coverage/out.txt", Typeflag: tar.TypeReg, Size: int64(len(content)), Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "coverage/link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd", Mode: 0o777}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lookup, err := a.lookupJob(r.Job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	srv.jobs[lookup.id.Bare].fileTar = tarBuf.Bytes()
+	srv.mu.Unlock()
+
+	localDir := t.TempDir()
+	dest, err := a.Pull(context.Background(), r.Job, "coverage", localDir)
+	if err != nil {
+		t.Fatalf("sandbox Pull err = %v", err)
+	}
+	gotBytes, err := os.ReadFile(filepath.Join(dest, "out.txt"))
+	if err != nil || string(gotBytes) != "report-ok\n" {
+		t.Fatalf("pulled file = %q, err=%v", gotBytes, err)
+	}
+	if _, err := os.Lstat(filepath.Join(dest, "link")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("symlink was not dropped: %v", err)
+	}
+
+	// 409 gone from runner surfaces runner's message.
+	srv.mu.Lock()
+	srv.jobs[lookup.id.Bare].fileGone = true
+	srv.mu.Unlock()
+	if _, err := a.Pull(context.Background(), r.Job, "coverage", t.TempDir()); err == nil || !strings.Contains(err.Error(), "Sandbox is no longer kept") {
+		t.Fatalf("gone Pull err = %v", err)
+	}
+}
+
+func TestCloudMCPBoxRunLongJobSetsPushFalse(t *testing.T) {
+	srv := newFakeRunnerV1(t)
+	srv.jobDelay = 150 * time.Millisecond
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+	hosts := []fleetHost{
+		{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1},
+	}
+	a, _, _, dir := cloudDispatchTestApp(t, newFakeFleet(t), hosts, srv.doHTTP)
+	a.Thread = "t3-thread-1"
+	a.Push = &fakePusher{}
+	var spawned int
+	a.Spawn = func(string, string) error {
+		spawned++
+		return nil
+	}
+	a.InlineWait = 25 * time.Millisecond
+
+	params, err := json.Marshal(map[string]any{
+		"name": "box_run",
+		"arguments": map[string]any{
+			"dir":     dir,
+			"command": "go test ./...",
+			"reason":  "Verify long cloud MCP run reports push false without spawning watcher.",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := callTool(context.Background(), a, params, nil)
+	rawSC, err := json.Marshal(res["structuredContent"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sc map[string]any
+	if err := json.Unmarshal(rawSC, &sc); err != nil {
+		t.Fatal(err)
+	}
+	if res["isError"] != false || sc["state"] != stateRunning || sc["push"] != false || sc["exitCode"] != nil || spawned != 0 {
+		t.Fatalf("box_run >InlineWait = %+v, spawned=%d", res, spawned)
+	}
+	jobID, _ := sc["job"].(string)
+	if jobID == "" {
+		t.Fatalf("missing job id in %+v", res)
+	}
+	jobRes, jobData := lookupTool(t, a, jobID, false)
+	if jobRes["isError"] != false || jobData["state"] != stateDone || jobData["exitCode"] != 0.0 {
+		t.Fatalf("box_job follow-up = %+v", jobRes)
+	}
+}
+
+func TestCloudStartContextCancelledMidUploadPreservesJobID(t *testing.T) {
+	srv := newFakeRunnerV1(t)
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+	host := fleetHost{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1}
+	a, _, _, dir := cloudDispatchTestApp(t, newFakeFleet(t), []fleetHost{host}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.HTTP = func(req *http.Request) (*http.Response, error) {
+		cancel()
+		return nil, context.Canceled
+	}
+	ch, err := a.newCloudHost(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := snapshot(context.Background(), execRunner{}, dir, "20261127-150405-a1b2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Dir(snap.bundle))
+
+	wantID := requireQualifiedJobID(t, host, "lantern.20261127-150405-a1b2").ID
+	prep := &fleetRun{repo: repo{Top: dir, Name: "lantern"}, ref: "20261127-150405-a1b2", snap: snap}
+	r, away, err := ch.start(ctx, RunOpts{Cmd: []string{"echo"}, Reason: "Mid-upload cancel preserves job ID."}, pickTestSize(t, "medium"), prep)
+	if !errors.Is(err, context.Canceled) || away != nil || r.Job != wantID {
+		t.Fatalf("start on ctx cancel = r:%+v away:%v err:%v (want Job=%s)", r, away, err, wantID)
+	}
 }

@@ -456,6 +456,9 @@ func (a *App) Pull(ctx context.Context, target, remote, local string) (string, e
 	if err != nil {
 		return "", err
 	}
+	if lookup.cloud != nil {
+		return lookup.cloud.pullToDir(ctx, lookup.id.Bare, remote, local)
+	}
 	return lookup.app.pull(ctx, lookup.id.Box, lookup.id.Bare, remote, local)
 }
 
