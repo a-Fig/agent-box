@@ -34,6 +34,9 @@ type Config struct {
 	ReuseThrowaways bool `json:"reuseThrowaways"`
 	// CoolIdleThrowaways is enabled after clients learn reserved eviction.
 	CoolIdleThrowaways bool `json:"coolIdleThrowaways"`
+	// Priority is this host's scheduling priority reported in /api/state
+	// (higher wins; nil when unset, meaning default 0).
+	Priority *int `json:"priority,omitempty"`
 }
 
 // DefaultListen is the port docs/ui.md picked, so nothing else on the

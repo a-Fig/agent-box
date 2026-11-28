@@ -111,15 +111,15 @@ For multiple hosts, create `agent-box/hosts.json` in your user config directory 
 ```json
 {
   "hosts": [
-    {"name": "primary", "remote": "pc"},
+    {"name": "primary", "remote": "pc", "priority": 10},
     {"name": "overflow", "remote": "spare", "project": "agents", "dashboard_url": "https://spare.example.com"}
   ]
 }
 ```
 
-`project` defaults to `BOX_PROJECT`. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs. A host's queue shows as `unknown` if its dashboard is unavailable.
+`project` defaults to `BOX_PROJECT`. A host owns its scheduling `priority` (default `0`, higher wins) in `/etc/agent-box/boxd.json` and reports it via `/api/state`, so every client agrees on ranking; `boxd`-capable (`agents` project) hosts are always probed together in the initial tier so no client hint can hide a host-reported priority. For hosts without `boxd` (custom-project hosts, or as a fallback when `boxd` is unavailable or omits `priority`), `hosts.json` `priority` sets the fallback priority and orders lower non-`boxd` probe tiers (negative priority alongside `boxd` hosts, or descending priority when no `boxd`-capable host is configured), stopping once a host can start so overflow still starts on a lower-priority host before queueing on a higher-priority one. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs (and `priority` when any host has a non-zero effective priority). A host's queue shows as `unknown` if its dashboard is unavailable.
 
-With a host registry, `box run` and `box_run` prefer a host that can start without waiting on another checkout. Repo affinity and registry order break ties. If no host can start, runs that allow queuing wait on an eligible host. Results name the host and include a qualified job ID for follow-up commands. `box run --host <name>` pins a host for debugging. `--box` uses the default host unless pinned. `BOX_REMOTE` and `BOX_PROJECT` set the default host. An absent or empty registry keeps single-host behavior and bare job IDs.
+With a host registry, `box run` and `box_run` rank hosts by `priority` (higher wins), preferring a host that can start without waiting on another checkout within a tier; repo affinity and registry order break ties. If no host can start, runs that allow queuing wait on an eligible host (ranking by `priority` first). Results name the host and include a qualified job ID for follow-up commands. `box run --host <name>` pins a host for debugging. `--box` uses the default host unless pinned. `BOX_REMOTE` and `BOX_PROJECT` set the default host. An absent or empty registry keeps single-host behavior and bare job IDs.
 
 `box jobs` and `box_job` without an ID list jobs on the default and configured hosts, including waiting jobs and recent runs reported by configured queues. Fleet listings qualify IDs for configured hosts and honor existing bare records on the default host. `box jobs --box` looks up a box on the default host.
 

@@ -140,3 +140,61 @@ func TestFleetStatusKeepsUnregisteredTargetOutOfRegistry(t *testing.T) {
 		t.Fatalf("status = %+v, %v", s, err)
 	}
 }
+
+func TestWriteFleetPriorityDisplay(t *testing.T) {
+	t.Run("omits priority when all hosts have zero priority", func(t *testing.T) {
+		var out strings.Builder
+		writeFleet(&out, []fleetHostStatus{
+			{Name: "primary", Remote: "pc", Project: "agents", Reachable: true, Available: true, Mode: "full", Room: "2 medium", GPU: "free"},
+			{Name: "backup", Remote: "spare", Project: "agents", Error: "connection refused"},
+		})
+		if strings.Contains(out.String(), "priority") {
+			t.Fatalf("unexpected priority output for equal-zero hosts:\n%s", out.String())
+		}
+	})
+
+	t.Run("shows priority when any host has non-zero priority", func(t *testing.T) {
+		var out strings.Builder
+		writeFleet(&out, []fleetHostStatus{
+			{Name: "primary", Remote: "pc", Project: "agents", Priority: 10, Reachable: true, Available: true, Mode: "full", Room: "2 medium", GPU: "free"},
+			{Name: "backup", Remote: "spare", Project: "agents", Priority: 0, Reachable: true, Available: true, Mode: "shared", Room: "1 medium", GPU: "unavailable"},
+			{Name: "offline", Remote: "cold", Project: "agents", Priority: -5, Error: "connection refused"},
+		})
+		want := "hosts: 2 available, 2 of 3 reachable\n" +
+			"  primary (pc/agents): priority 10, full, room 2 medium, GPU free, queue unknown\n" +
+			"  backup (spare/agents): priority 0, shared, room 1 medium, GPU unavailable, queue unknown\n" +
+			"  offline (cold/agents): priority -5, unavailable (connection refused)\n"
+		if out.String() != want {
+			t.Fatalf("writeFleet:\n%s\nwant:\n%s", out.String(), want)
+		}
+	})
+
+	t.Run("probeFleet prefers boxd priority and falls back to config hint", func(t *testing.T) {
+		a := newApp()
+		a.Remote, a.Project = "pc", "agents"
+		a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+			if len(cmd.Args) >= 4 && cmd.Args[2] == "list" {
+				return Result{Stdout: "[]"}, nil
+			}
+			return Result{Code: 1}, nil
+		})
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "pc.example.com" {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"priority":25,"jobs":[]}`))}, nil
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"jobs":[]}`))}, nil
+		}
+		s := a.probeFleet(context.Background(), "", []fleetHost{
+			{Name: "primary", Remote: "pc", Project: "agents", DashboardURL: "https://pc.example.com", Priority: 10},
+			{Name: "backup", Remote: "spare", Project: "agents", DashboardURL: "https://spare.example.com", Priority: 5},
+		}, 0, 2)
+		if len(s.Hosts) != 2 || s.Hosts[0].Priority != 25 || s.Hosts[1].Priority != 5 {
+			t.Fatalf("probeFleet hosts = %+v, want priorities [25 5]", s.Hosts)
+		}
+		var out strings.Builder
+		writeFleet(&out, s.Hosts)
+		if !strings.Contains(out.String(), "primary (pc/agents): priority 25,") || !strings.Contains(out.String(), "backup (spare/agents): priority 5,") {
+			t.Fatalf("writeFleet = %q", out.String())
+		}
+	})
+}

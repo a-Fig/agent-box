@@ -8,14 +8,13 @@ import (
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
-// Fleet target selection (#163).
+// Fleet target selection (#163, #171).
 //
 // Following Borg and Kubernetes (docs/prior-art.md), picking runs in two steps:
 // filter hosts that can start the run now (reachability, mode, room for new
-// allocations, and GPU capability/occupancy), then prefer hosts without
-// checkout contention. Use repo affinity and stable configuration order to
-// break ties. Configurable per-host priority (#171) is a separate
-// issue and is not modeled here.
+// allocations, and GPU capability/occupancy), then rank by configured host
+// priority (higher wins), prefer hosts without checkout contention, and use
+// repo affinity and stable configuration order to break ties.
 //
 // Target filtering (--host pinning, single-host no-registry bypass, and keeping
 // explicit --box on defaultHost unless --host pins elsewhere) lives in
@@ -85,6 +84,7 @@ type pickRequest struct {
 // directly from Incus/boxd probes rather than parsing human status text.
 type fleetCandidate struct {
 	Host             fleetHost
+	Priority         int // effective priority: boxd-reported when present, else Host.Priority
 	Reachable        bool
 	Error            string // non-empty when the probe failed or timed out mid-probe
 	Mode             string // "full", "shared", "mypc", or "" (no tray)
@@ -166,6 +166,7 @@ func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHo
 				Remote:       host.Remote,
 				Project:      host.Project,
 				DashboardURL: resolved.DashboardURL,
+				Priority:     resolved.Priority,
 			})
 		}
 		return out, false, nil
@@ -183,6 +184,7 @@ func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHo
 				Remote:       host.Remote,
 				Project:      host.Project,
 				DashboardURL: resolved.DashboardURL,
+				Priority:     resolved.Priority,
 			}}, false, nil
 		}
 	}
@@ -482,6 +484,9 @@ func canQueueOnHost(c fleetCandidate, why string, sz mode.Size) (bool, string) {
 }
 
 func betterStart(a, b hostEval) bool {
+	if a.candidate.Priority != b.candidate.Priority {
+		return a.candidate.Priority > b.candidate.Priority
+	}
 	// A running job holds the checkout lock on an otherwise reusable box.
 	aBusy, bBusy := a.startAff == affinityRepoBusy, b.startAff == affinityRepoBusy
 	if aBusy != bBusy {
@@ -495,12 +500,16 @@ func betterStart(a, b hostEval) bool {
 
 // betterQueue orders queue-eligible hosts (all verified as BoxdAvailable on
 // mode.Project):
-//  1. active wait (room or GPU) before My PC (owner-paused wait)
-//  2. known queue depth before unknown depth
-//  3. shorter queue depth when both hosts reported one
-//  4. higher repo affinity
-//  5. stable configuration order
+//  1. higher effective host priority
+//  2. active wait (room or GPU) before My PC (owner-paused wait)
+//  3. known queue depth before unknown depth
+//  4. shorter queue depth when both hosts reported one
+//  5. higher repo affinity
+//  6. stable configuration order
 func betterQueue(a, b hostEval) bool {
+	if a.candidate.Priority != b.candidate.Priority {
+		return a.candidate.Priority > b.candidate.Priority
+	}
 	aActive := a.queueWhy != refusedMyPC
 	bActive := b.queueWhy != refusedMyPC
 	if aActive != bActive {

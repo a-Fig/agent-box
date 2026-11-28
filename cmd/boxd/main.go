@@ -72,7 +72,7 @@ func main() {
 		v.Since = &start
 		ver = &v
 	}
-	w := &boxd.Watcher{Version: ver, Queue: queue, Whois: boxd.TailscaleWhois,
+	w := &boxd.Watcher{Version: ver, Queue: queue, Priority: cfg.Priority, Whois: boxd.TailscaleWhois,
 		Incus: boxd.NewSocket(*socket, mode.Project), Hist: hist, Now: time.Now,
 		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, HasGPU: hasGPU, Logf: log.Printf,
 	}

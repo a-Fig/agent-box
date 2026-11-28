@@ -1,13 +1,98 @@
 package main
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
+
+// probeFleetTiers probes hosts in tiers and stops right after the first tier
+// where pickFleetHost returns pickStart and no unprobed lower tier could
+// outrank or tie-break the selected candidate (nextTierPriority < winner.Priority).
+// Any unprobed lower-priority hosts are returned in rest.
+//
+// All boxd-capable hosts (Project == mode.Project) are always probed together in
+// the initial tier (alongside any non-boxd hosts with Priority >= 0) so a
+// client's hosts.json hint never hides a host-reported boxd priority. Only
+// non-boxd hosts are deferred into lower tiers ordered by Priority descending.
+func (a *App) probeFleetTiers(ctx context.Context, existing []fleetCandidate, targets []fleetHost, req pickRequest, repoOrigin string) (cands []fleetCandidate, rest []fleetHost) {
+	cands = slices.Clone(existing)
+	tiers := fleetPriorityTiers(targets)
+	for i, tier := range tiers {
+		cands = append(cands, a.probeFleetCandidates(ctx, tier, req, repoOrigin)...)
+		if pick := pickFleetHost(cands, req); pick.Action == pickStart {
+			var remHosts []fleetHost
+			for _, rem := range tiers[i+1:] {
+				remHosts = append(remHosts, rem...)
+			}
+			if !needsLowerTierProbe(pick, cands, remHosts) {
+				return cands, remHosts
+			}
+		}
+	}
+	return cands, nil
+}
+
+func needsLowerTierProbe(pick fleetPick, cands []fleetCandidate, rest []fleetHost) bool {
+	if len(rest) == 0 {
+		return false
+	}
+	if pick.Action != pickStart {
+		return true
+	}
+	return rest[0].Priority >= findCandidate(cands, pick.Host).Priority
+}
+
+func fleetPriorityTiers(targets []fleetHost) [][]fleetHost {
+	if len(targets) == 0 {
+		return nil
+	}
+	hasBoxd := false
+	for _, host := range targets {
+		if host.Project == mode.Project {
+			hasBoxd = true
+			break
+		}
+	}
+
+	var tier0, deferred []fleetHost
+	if hasBoxd {
+		for _, host := range targets {
+			if host.Project == mode.Project || host.Priority >= 0 {
+				tier0 = append(tier0, host)
+			} else {
+				deferred = append(deferred, host)
+			}
+		}
+	} else {
+		deferred = targets
+	}
+
+	var tiers [][]fleetHost
+	if len(tier0) > 0 {
+		tiers = append(tiers, tier0)
+	}
+	if len(deferred) > 0 {
+		ordered := slices.Clone(deferred)
+		slices.SortStableFunc(ordered, func(a, b fleetHost) int {
+			return cmp.Compare(b.Priority, a.Priority)
+		})
+		start := 0
+		for i := 1; i < len(ordered); i++ {
+			if ordered[i].Priority != ordered[start].Priority {
+				tiers = append(tiers, ordered[start:i])
+				start = i
+			}
+		}
+		tiers = append(tiers, ordered[start:])
+	}
+	return tiers
+}
 
 // probeFleetCandidates inspects each resolved target host concurrently within
 // fleetProbeTimeout (5s) and returns typed fleetCandidate facts in targets order.
@@ -60,6 +145,7 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 	if p.report.Reachable && hostCtx.Err() != nil {
 		return fleetCandidate{
 			Host:      host,
+			Priority:  host.Priority,
 			Reachable: true,
 			Error:     hostCtx.Err().Error(),
 			Mode:      p.report.Mode,
@@ -67,6 +153,7 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 	}
 	c := fleetCandidate{
 		Host:             host,
+		Priority:         host.Priority,
 		Reachable:        p.report.Reachable,
 		Error:            p.report.Error,
 		Mode:             p.report.Mode,
@@ -82,9 +169,13 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 
 	// Optional boxd probes (mode.Project "agents" only). A failure or timeout
 	// here leaves the already-verified Incus start capacity usable.
-	if queued, queueCapable := hostApp.fleetBoxdState(hostCtx, host.DashboardURL); queueCapable {
+	queued, queueCapable, hostPrio := hostApp.fleetBoxdState(hostCtx, host.DashboardURL)
+	if queueCapable {
 		c.BoxdAvailable = true
 		c.Queued = queued
+	}
+	if hostPrio != nil {
+		c.Priority = *hostPrio
 	}
 	if wantsPooledThrowaway(req, sz, p.report.RepoBox, p.repoBoxThrowaway, targetBox) &&
 		repoKey != "" &&

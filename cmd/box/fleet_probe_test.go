@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -545,4 +546,206 @@ func TestProbeFleetCandidatePooledThrowawayRequiresIdleAndPoolEnabled(t *testing
 			}
 		})
 	}
+}
+
+func TestProbeFleetTiers(t *testing.T) {
+	openKeys := map[string]string{mode.ProjectModeKey: "full", "limits.instances": "4", gpuKey: "block"}
+	fullKeys := map[string]string{mode.ProjectModeKey: "full", "limits.instances": "1", gpuKey: "block"}
+
+	newProbeApp := func(t *testing.T, hostKeys map[string]map[string]string, insts map[string]string) (*App, *[]string) {
+		t.Helper()
+		var mu sync.Mutex
+		var probed []string
+		recorded := map[string]bool{}
+		a := newApp()
+		a.Now = func() time.Time { return time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC) }
+		a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+			if len(cmd.Args) >= 4 && cmd.Args[2] == "list" {
+				remote, _, _ := strings.Cut(cmd.Args[3], ":")
+				mu.Lock()
+				if !recorded[remote] {
+					recorded[remote] = true
+					probed = append(probed, remote)
+				}
+				mu.Unlock()
+				out, ok := insts[remote]
+				if !ok {
+					out = "[]"
+				}
+				return Result{Stdout: out}, nil
+			}
+			if len(cmd.Args) >= 5 && cmd.Args[2] == "project" {
+				remote, _, _ := strings.Cut(cmd.Args[4], ":")
+				if res, ok := respondHealthyProject(cmd, hostKeys[remote], "{}"); ok {
+					return res, nil
+				}
+			}
+			return Result{Code: 1}, nil
+		})
+		a.HTTP = func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"jobs":[]}`))}, nil
+		}
+		return a, &probed
+	}
+
+	t.Run("boxd-capable hosts are always probed together regardless of hosts.json hints", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-alpha": openKeys,
+			"r-beta":  openKeys,
+		}, nil)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "alpha.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":0,"jobs":[]}`))}, nil
+			case "beta.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":25,"jobs":[]}`))}, nil
+			}
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		targets := []fleetHost{
+			{Name: "alpha", Remote: "r-alpha", Project: mode.Project, DashboardURL: "https://alpha.example.com", Priority: 10},
+			{Name: "beta", Remote: "r-beta", Project: mode.Project, DashboardURL: "https://beta.example.com", Priority: 0},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
+		if len(cands) != 2 || len(rest) != 0 || len(*probed) != 2 {
+			t.Fatalf("boxd-capable cands=%d rest=%d probed=%v, want both probed together", len(cands), len(rest), *probed)
+		}
+		if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "beta" {
+			t.Fatalf("pick = %+v, want beta (boxd priority 25)", pick)
+		}
+	})
+
+	t.Run("stops after top non-boxd tier when top tier can start", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-high": openKeys,
+			"r-mid":  openKeys,
+			"r-low":  openKeys,
+		}, nil)
+		targets := []fleetHost{
+			{Name: "low", Remote: "r-low", Project: "work", Priority: 0},
+			{Name: "high", Remote: "r-high", Project: "work", Priority: 10},
+			{Name: "mid", Remote: "r-mid", Project: "work", Priority: 5},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
+		if !slices.Equal(*probed, []string{"r-high"}) {
+			t.Fatalf("probed = %v, want [r-high]", *probed)
+		}
+		if len(cands) != 1 || cands[0].Host.Name != "high" {
+			t.Fatalf("cands = %+v, want [high]", cands)
+		}
+		if len(rest) != 2 || rest[0].Name != "mid" || rest[1].Name != "low" {
+			t.Fatalf("rest = %+v, want [mid, low]", rest)
+		}
+	})
+
+	t.Run("defers negative-priority non-boxd hosts below boxd tier", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-boxd": openKeys,
+			"r-low":  openKeys,
+		}, nil)
+		targets := []fleetHost{
+			{Name: "low", Remote: "r-low", Project: "work", Priority: -1},
+			{Name: "boxd", Remote: "r-boxd", Project: mode.Project, Priority: 0},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
+		if !slices.Equal(*probed, []string{"r-boxd"}) || len(cands) != 1 || len(rest) != 1 || rest[0].Name != "low" {
+			t.Fatalf("probed=%v cands=%+v rest=%+v, want [r-boxd] and rest=[low]", *probed, cands, rest)
+		}
+	})
+
+	t.Run("probes deferred non-boxd tier when startable boxd host reports lower negative priority", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-boxd": openKeys,
+			"r-low":  openKeys,
+			"r-sunk": openKeys,
+		}, nil)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "boxd.example.com" {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":-10,"jobs":[]}`))}, nil
+			}
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		targets := []fleetHost{
+			{Name: "boxd", Remote: "r-boxd", Project: mode.Project, DashboardURL: "https://boxd.example.com", Priority: 0},
+			{Name: "low", Remote: "r-low", Project: "work", Priority: -1},
+			{Name: "sunk", Remote: "r-sunk", Project: "work", Priority: -5},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
+		if !slices.Equal(*probed, []string{"r-boxd", "r-low"}) || len(rest) != 1 || rest[0].Name != "sunk" {
+			t.Fatalf("probed=%v rest=%+v, want [r-boxd r-low] and rest=[sunk]", *probed, rest)
+		}
+		if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "low" {
+			t.Fatalf("pick = %+v, want low (-1 beats boxd -10)", pick)
+		}
+	})
+
+	t.Run("probes lower non-boxd tier when higher tier cannot start and stops at first startable tier", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-high": fullKeys,
+			"r-mid":  openKeys,
+			"r-low":  openKeys,
+		}, map[string]string{
+			"r-high": `[{"name":"busy","status":"Running","config":{"user.box.size":"medium"}}]`,
+		})
+		targets := []fleetHost{
+			{Name: "high", Remote: "r-high", Project: "work", Priority: 10},
+			{Name: "mid", Remote: "r-mid", Project: "work", Priority: 5},
+			{Name: "low", Remote: "r-low", Project: "work", Priority: 0},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{Queue: true}, "")
+		if !slices.Equal(*probed, []string{"r-high", "r-mid"}) {
+			t.Fatalf("probed = %v, want [r-high r-mid]", *probed)
+		}
+		if len(cands) != 2 || len(rest) != 1 || rest[0].Name != "low" {
+			t.Fatalf("cands=%d rest=%+v, want 2 cands and [low]", len(cands), rest)
+		}
+		if pick := pickFleetHost(cands, pickRequest{Queue: true}); pick.Action != pickStart || pick.Host.Name != "mid" {
+			t.Fatalf("pick = %+v, want start on mid", pick)
+		}
+	})
+
+	t.Run("equal priority hosts probe in one tier with empty rest", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r1": openKeys,
+			"r2": openKeys,
+		}, nil)
+		targets := []fleetHost{
+			{Name: "one", Remote: "r1", Project: mode.Project},
+			{Name: "two", Remote: "r2", Project: mode.Project},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
+		if len(cands) != 2 || len(rest) != 0 || len(*probed) != 2 {
+			t.Fatalf("equal priority cands=%d rest=%d probed=%v", len(cands), len(rest), *probed)
+		}
+	})
+
+	t.Run("boxd-reported priority overrides hosts.json hint even without queue capability", func(t *testing.T) {
+		a, _ := newProbeApp(t, map[string]map[string]string{
+			"r1": openKeys,
+			"r2": openKeys,
+			"r3": openKeys,
+		}, nil)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "one.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":false,"priority":0,"jobs":[]}`))}, nil
+			case "two.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":20,"jobs":[]}`))}, nil
+			default:
+				return nil, fmt.Errorf("boxd down")
+			}
+		}
+		targets := []fleetHost{
+			{Name: "one", Remote: "r1", Project: mode.Project, DashboardURL: "https://one.example.com", Priority: 15},
+			{Name: "two", Remote: "r2", Project: mode.Project, DashboardURL: "https://two.example.com", Priority: 15},
+			{Name: "three", Remote: "r3", Project: mode.Project, DashboardURL: "https://three.example.com", Priority: 15},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
+		if len(rest) != 0 || cands[0].Priority != 0 || cands[1].Priority != 20 || cands[2].Priority != 15 {
+			t.Fatalf("cands=%+v rest=%+v, want priorities [0 20 15]", cands, rest)
+		}
+		if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "two" {
+			t.Fatalf("pick = %+v, want two (boxd priority 20)", pick)
+		}
+	})
 }

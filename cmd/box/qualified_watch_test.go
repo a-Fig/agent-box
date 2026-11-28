@@ -41,10 +41,21 @@ func TestQualifiedWatchRestartsOnSavedHosts(t *testing.T) {
 		host fleetHost
 	}{{westID, west}, {eastID, east}} {
 		rec, err := a.readWatchRecord(tc.id)
-		want := jobLocator{Name: tc.host.Name, Remote: tc.host.Remote, Project: tc.host.Project, DashboardURL: tc.host.DashboardURL}
+		want := jobLocator{Name: tc.host.Name, Remote: tc.host.Remote, Project: tc.host.Project, DashboardURL: tc.host.DashboardURL, Priority: tc.host.Priority}
 		if err != nil || rec.Host == nil || *rec.Host != want || rec.Thread != "thread-owner" {
 			t.Fatalf("record for %s = %+v, %v", tc.id, rec, err)
 		}
+	}
+
+	// Priority propagates cleanly through locateJobHost -> watchHost.
+	prioHost := west
+	prioHost.Priority = 12
+	idObj, err := parseJobID(westID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := (jobRecord{Host: locateJobHost(prioHost)}).watchHost(idObj); err != nil || got != prioHost {
+		t.Fatalf("watchHost priority round-trip = %+v, %v; want %+v", got, err, prioHost)
 	}
 
 	// West is removed, East's dashboard changes, and the launcher inherits
