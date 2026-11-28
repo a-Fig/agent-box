@@ -1081,6 +1081,45 @@ func TestFleetRunBoxdAuthoritativePriority(t *testing.T) {
 				r, err, alpha.listCalls, len(alpha.startJobs), beta.listCalls, len(beta.startJobs), out.String())
 		}
 	})
+
+	t.Run("negative boxd priority probes deferred higher-priority non-boxd tier and launches there", func(t *testing.T) {
+		boxdLow := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(-10), execStdout: "boxd-low\n"}
+		workHigher := &fakeFleetHost{remote: "r2", project: "work", mode: "full", execStdout: "work-higher\n"}
+		ff := newFakeFleet(t, boxdLow, workHigher)
+		ff.dashHosts["https://boxd.example.com"] = boxdLow
+
+		hosts := []fleetHost{
+			{Name: "boxd-low", Remote: "r1", Project: mode.Project, DashboardURL: "https://boxd.example.com", Priority: 0},
+			{Name: "work-higher", Remote: "r2", Project: "work", Priority: -1},
+		}
+		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Deferred -1 custom host must beat startable -10 boxd host."})
+		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "work-higher" || workHigher.listCalls == 0 || len(boxdLow.startJobs) != 0 || len(workHigher.startJobs) != 1 {
+			t.Fatalf("negative boxd fallback = %+v, %v (work list=%d start=%d; boxd start=%d)\n%s",
+				r, err, workHigher.listCalls, len(workHigher.startJobs), len(boxdLow.startJobs), out.String())
+		}
+	})
+
+	t.Run("turn-away fallback to negative boxd host also probes higher-priority deferred non-boxd tier", func(t *testing.T) {
+		boxdTop := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(10), refuseLaunch: memoryRefusal}
+		boxdLow := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(-10), execStdout: "boxd-low\n"}
+		workHigher := &fakeFleetHost{remote: "r3", project: "work", mode: "full", execStdout: "work-higher\n"}
+		ff := newFakeFleet(t, boxdTop, boxdLow, workHigher)
+		ff.dashHosts["https://top.example.com"] = boxdTop
+		ff.dashHosts["https://low.example.com"] = boxdLow
+
+		hosts := []fleetHost{
+			{Name: "boxd-top", Remote: "r1", Project: mode.Project, DashboardURL: "https://top.example.com"},
+			{Name: "boxd-low", Remote: "r2", Project: mode.Project, DashboardURL: "https://low.example.com"},
+			{Name: "work-higher", Remote: "r3", Project: "work", Priority: -1},
+		}
+		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "After boxd-top turns away, -1 deferred host must beat -10 boxd host."})
+		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "work-higher" || workHigher.listCalls == 0 || len(boxdLow.startJobs) != 0 || len(workHigher.startJobs) != 1 {
+			t.Fatalf("turn-away deferred fallback = %+v, %v (work list=%d start=%d; low start=%d)\n%s",
+				r, err, workHigher.listCalls, len(workHigher.startJobs), len(boxdLow.startJobs), out.String())
+		}
+	})
 }
 
 func TestFleetRunThreeTierProbeAndLaunchOrder(t *testing.T) {

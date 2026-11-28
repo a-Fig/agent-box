@@ -84,7 +84,7 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 	var lastLimits []string
 	for {
 		pick := pickFleetHost(candidates, pickReq)
-		if pick.Action != pickStart && len(rest) > 0 && ctx.Err() == nil {
+		if needsLowerTierProbe(pick, candidates, rest) && ctx.Err() == nil {
 			more, nextRest := a.probeFleetTiers(ctx, rest, pickReq, info.Repo)
 			candidates = append(candidates, more...)
 			rest = nextRest
