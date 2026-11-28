@@ -8,7 +8,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/a-Fig/agent-box/internal/controller"
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
 )
@@ -31,11 +34,16 @@ type StatusReport struct {
 	Room        string     `json:"room"` // like "1 large, or 2 medium, or 4 small"; "none (disk: 205GiB of 210GiB allocated)"; "no limit"
 	// GPU is "free", "free, but no room ...", "in use: job X",
 	// "unavailable: ..." (My PC) or gpuNone.
-	GPU     string            `json:"gpu"`
-	Repo    string            `json:"repo,omitempty"`    // when run in a git repo
-	RepoBox *RepoBox          `json:"repoBox,omitempty"` // the repo's own box, when it exists
-	Update  string            `json:"update,omitempty"`  // a newer stable release is out than this box
-	Hosts   []fleetHostStatus `json:"hosts,omitempty"`
+	GPU             string                    `json:"gpu"`
+	Repo            string                    `json:"repo,omitempty"`    // when run in a git repo
+	RepoBox         *RepoBox                  `json:"repoBox,omitempty"` // the repo's own box, when it exists
+	Update          string                    `json:"update,omitempty"`  // a newer stable release is out than this box
+	Hosts           []fleetHostStatus         `json:"hosts,omitempty"`
+	LastSeen        *time.Time                `json:"lastSeen,omitempty"`
+	LastState       *dash.State               `json:"lastState,omitempty"`
+	LastStateStale  bool                      `json:"lastStateStale,omitempty"`
+	ControllerUsage *controller.UsageResponse `json:"controllerUsage,omitempty"`
+	now             time.Time
 }
 
 // SizeRoom is one box size, what a box of it gets now, and how many more
@@ -584,10 +592,16 @@ func writeStatus(w io.Writer, s StatusReport) {
 		fmt.Fprintf(w, "selected host %s: ", s.Remote)
 	}
 	fmt.Fprintln(w, s.Advice)
+	if !s.Reachable && s.LastSeen != nil && s.LastState != nil && len(s.Hosts) == 0 {
+		fmt.Fprintf(w, "%s: %s\n", s.Remote, formatControllerCachedSummary(*s.LastSeen, s.LastStateStale, *s.LastState, s.now))
+	}
 	if s.Update != "" {
 		fmt.Fprintln(w, s.Update)
 	}
 	if !s.Reachable || s.Error != "" {
+		if s.ControllerUsage != nil {
+			fmt.Fprintln(w, formatControllerUsage(*s.ControllerUsage))
+		}
 		return
 	}
 	m := s.Mode
@@ -621,5 +635,8 @@ func writeStatus(w io.Writer, s StatusReport) {
 		}
 	case s.Repo != "":
 		fmt.Fprintf(w, "repo box: %s (not created yet)\n", s.Repo)
+	}
+	if s.ControllerUsage != nil {
+		fmt.Fprintln(w, formatControllerUsage(*s.ControllerUsage))
 	}
 }
