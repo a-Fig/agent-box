@@ -543,6 +543,16 @@ func (a *App) CancelAny(ctx context.Context, job string) (removed, cancelled boo
 	if err != nil {
 		return false, false, 0, err
 	}
+	if lookup.cloud != nil {
+		res, err := lookup.cloud.cancel(ctx, lookup.id.Bare)
+		if err != nil {
+			return false, false, 0, err
+		}
+		if res.Cancelled {
+			lookup.app.markNotified(lookup.id.ID, "cancel")
+		}
+		return false, res.Cancelled, res.Exit, nil
+	}
 	target, id := lookup.app, lookup.id
 	if id.hostTag != "" || target.wasQueued(id.ID) {
 		removed, err = target.cancelQueuedOrStarted(ctx, id.Bare)

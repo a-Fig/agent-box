@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,9 @@ func (a *App) runDispatch(ctx context.Context, o RunOpts, sz mode.Size) (JobResu
 	if err != nil {
 		return JobResult{Code: 2}, err
 	}
+	if o.Box != "" && len(targets) == 1 && targets[0].Kind != "" {
+		return JobResult{Code: 2}, errors.New("--box needs an Incus host")
+	}
 	if bypassFleet {
 		r, _, err := a.runOnHost(ctx, o, sz, nil, nil)
 		return r, err
@@ -46,6 +50,9 @@ func (a *App) runDispatch(ctx context.Context, o RunOpts, sz mode.Size) (JobResu
 }
 
 func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []fleetHost) (JobResult, error) {
+	if o.Box != "" && len(targets) == 1 && targets[0].Kind != "" {
+		return JobResult{Code: 2}, errors.New("--box needs an Incus host")
+	}
 	rp, err := openRepo(ctx, a.R, o.Dir)
 	if err != nil {
 		return JobResult{Code: 1}, err
@@ -100,7 +107,11 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 			switch {
 			case len(candidates) == 1:
 				reporter = a.jobHostApp(candidates[0].Host)
-				detail = reporter.capacityHint(ctx, sz, o.Box, pick.Limits)
+				if candidates[0].Host.Kind == "" {
+					detail = reporter.capacityHint(ctx, sz, o.Box, pick.Limits)
+				} else if len(pick.Limits) != 0 {
+					detail = &capacityDetail{Limits: pick.Limits}
+				}
 			case lastCapacityHost != nil:
 				reporter = lastCapacityHost
 				detail = reporter.capacityHint(ctx, sz, o.Box, lastLimits)
@@ -133,7 +144,22 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		candidate := findCandidate(candidates, selected)
 		hostApp := a.jobHostApp(selected)
 		if pick.Action == pickStart {
-			r, away, err := hostApp.runOnHost(ctx, o, sz, &selected, &prepared)
+			var r JobResult
+			var away *turnAwayInfo
+			var err error
+			if selected.Kind != "" {
+				if o.Box != "" {
+					return JobResult{Code: 2}, errors.New("--box needs an Incus host")
+				}
+				var ch *cloudHost
+				ch, err = hostApp.newCloudHost(selected)
+				if err != nil {
+					return JobResult{Code: 1}, err
+				}
+				r, away, err = ch.start(ctx, o, sz, &prepared)
+			} else {
+				r, away, err = hostApp.runOnHost(ctx, o, sz, &selected, &prepared)
+			}
 			if away == nil || ctx.Err() != nil {
 				return r, err
 			}

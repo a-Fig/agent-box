@@ -19,9 +19,10 @@ import (
 const stoppedPageWithTailBudget = time.Second
 
 type jobLookup struct {
-	app  *App
-	id   jobID
-	host string
+	app   *App
+	id    jobID
+	host  string
+	cloud *cloudHost
 }
 
 func (a *App) lookupJob(raw string) (jobLookup, error) {
@@ -40,20 +41,28 @@ func (a *App) lookupJob(raw string) (jobLookup, error) {
 	if err != nil {
 		return jobLookup{}, err
 	}
-	return jobLookup{app: a.jobHostApp(host), id: id, host: host.Name}, nil
+	scoped := a.jobHostApp(host)
+	var ch *cloudHost
+	if host.Kind != "" {
+		ch, err = scoped.newCloudHost(host)
+		if err != nil {
+			return jobLookup{}, err
+		}
+	}
+	return jobLookup{app: scoped, id: id, host: host.Name, cloud: ch}, nil
 }
 
 func (a *App) jobHostApp(host fleetHost) *App {
 	scoped := *a
 	scoped.Remote, scoped.Project, scoped.dashboardURL = host.Remote, host.Project, host.DashboardURL
 	scoped.jobHostName = host.Name
-	scoped.boxdDisabled = host.Project != mode.Project
+	scoped.boxdDisabled = host.Kind != "" || host.Project != mode.Project
 	return &scoped
 }
 
 // A job from another client can be queued without a local marker.
 func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
-	if l.app.Project != mode.Project || l.app.boxdDisabled {
+	if l.cloud != nil || l.app.Project != mode.Project || l.app.boxdDisabled {
 		return dash.Job{}, false, nil
 	}
 	local := l.app.wasQueued(l.id.ID)
@@ -68,12 +77,34 @@ func (l jobLookup) queued(ctx context.Context) (dash.Job, bool, error) {
 }
 
 func (l jobLookup) job(ctx context.Context, wait time.Duration) (JobResult, error) {
+	if l.cloud != nil {
+		r, err := l.cloud.follow(ctx, l.id, wait, l.app.savedJobSource(l.id))
+		r.Host = l.host
+		return r, err
+	}
 	r, err := l.app.job(ctx, l.id, wait, nil)
 	r.Host = l.host
 	return r, err
 }
 
 func (l jobLookup) page(ctx context.Context, offset, limit int64) (Page, *jobEnd, error) {
+	if l.cloud != nil {
+		p, err := l.cloud.page(ctx, l.id.Bare, offset, limit)
+		if err == nil {
+			p.Job, p.Host = l.id.ID, l.host
+			if p.Source == nil {
+				p.Source = l.app.savedJobSource(l.id)
+			}
+			return p, nil, nil
+		}
+		if offset < 0 || limit < 0 || offset > math.MaxInt64-maxPage {
+			return Page{}, nil, err
+		}
+		if end, ok := l.app.endedElsewhere(ctx, l.id); ok {
+			return Page{}, &end, err
+		}
+		return Page{}, nil, err
+	}
 	p, err := l.app.LogPage(ctx, l.id.Bare, offset, limit)
 	if err == nil {
 		p.Job, p.Host = l.id.ID, l.host

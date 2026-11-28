@@ -106,18 +106,19 @@ Job results and completion notices show the source HEAD, whether the synced tree
 
 `BOX_REMOTE`, `BOX_PROJECT` and `BOX_IMAGE` override `pc`, `agents` and `agent-base`.
 
-For multiple hosts, create `agent-box/hosts.json` in your user config directory (`%APPDATA%` on Windows, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `~/Library/Application Support` on macOS). Each remote must already be configured in Incus.
+For multiple hosts, create `agent-box/hosts.json` in your user config directory (`%APPDATA%` on Windows, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `~/Library/Application Support` on macOS). Incus remotes must already be configured in Incus.
 
 ```json
 {
   "hosts": [
     {"name": "primary", "remote": "pc", "priority": 10},
-    {"name": "overflow", "remote": "spare", "project": "agents", "dashboard_url": "https://spare.example.com"}
+    {"name": "overflow", "remote": "spare", "project": "agents", "dashboard_url": "https://spare.example.com"},
+    {"name": "cloud", "kind": "modal", "endpoint": "https://runner.example.com", "token_file": "modal-token.json", "mode": "function"}
   ]
 }
 ```
 
-`project` defaults to `BOX_PROJECT`. A host owns its scheduling `priority` (default `0`, higher wins) in `/etc/agent-box/boxd.json` and reports it via `/api/state`, so every client agrees on ranking; `boxd`-capable (`agents` project) hosts are always probed together in the initial tier so no client hint can hide a host-reported priority. For hosts without `boxd` (custom-project hosts, or as a fallback when `boxd` is unavailable or omits `priority`), `hosts.json` `priority` sets the fallback priority and orders lower non-`boxd` probe tiers (negative priority alongside `boxd` hosts, or descending priority when no `boxd`-capable host is configured), stopping once a host can start so overflow still starts on a lower-priority host before queueing on a higher-priority one. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs (and `priority` when any host has a non-zero effective priority). A host's queue shows as `unknown` if its dashboard is unavailable.
+`project` defaults to `BOX_PROJECT`. A host owns its scheduling `priority` (default `0`, higher wins) in `/etc/agent-box/boxd.json` and reports it via `/api/state`, so every client agrees on ranking; `boxd`-capable (`agents` project) hosts are always probed together in the initial tier so no client hint can hide a host-reported priority. For hosts without `boxd` (custom-project hosts, cloud hosts, or as a fallback when `boxd` is unavailable or omits `priority`), `hosts.json` `priority` sets the fallback priority and orders lower non-`boxd` probe tiers (negative priority alongside `boxd` hosts, or descending priority when no `boxd`-capable host is configured), stopping once a host can start so overflow still starts on a lower-priority host before queueing on a higher-priority one. Cloud hosts set `"kind": "modal"`, `endpoint` (`https://`, or `http://` on loopback for tests), `token_file` (JSON `{"headers": {...}}`, resolved relative to the `agent-box` config dir), and optional `mode` (`"function"` default, or `"sandbox"`), with `remote` and `project` omitted and `priority` defaulting to `-1` so owned hardware runs before metered cloud overflow. Without `dashboard_url`, `box` looks for the dashboard at the remote's hostname. `box hosts`, `box status`, and `box_status` show each host's reachability, mode, room, GPU, and queued jobs (and `priority` when any host has a non-zero effective priority). A host's queue shows as `unknown` if its dashboard is unavailable.
 
 With a host registry, `box run` and `box_run` rank hosts by `priority` (higher wins), preferring a host that can start without waiting on another checkout within a tier; repo affinity and registry order break ties. If no host can start, runs that allow queuing wait on an eligible host (ranking by `priority` first). Results name the host and include a qualified job ID for follow-up commands. `box run --host <name>` pins a host for debugging. `--box` uses the default host unless pinned. `BOX_REMOTE` and `BOX_PROJECT` set the default host. An absent or empty registry keeps single-host behavior and bare job IDs.
 
