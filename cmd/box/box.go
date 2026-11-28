@@ -976,6 +976,9 @@ type RunOpts struct {
 	// Queue hands a run that can't start now to boxd's queue instead of
 	// refusing it (queue.go). box_run sets it when the result can be pushed.
 	Queue bool
+	// CloudOnly restricts the run to cloud hosts in hosts.json, never Incus
+	// (box ci worker sets it for cloud workers, whose jobs may be fork PRs).
+	CloudOnly bool
 }
 
 // exitTimeout is the exit code of a command the box killed at its timeout,

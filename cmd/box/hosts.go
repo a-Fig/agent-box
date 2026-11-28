@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/a-Fig/agent-box/internal/controller"
 )
 
 const (
@@ -25,6 +27,7 @@ type fleetHost struct {
 	Endpoint     string `json:"endpoint,omitempty"`
 	TokenFile    string `json:"token_file,omitempty"`
 	Mode         string `json:"mode,omitempty"`
+	ControllerID string `json:"controller_id,omitempty"`
 }
 
 type rawFleetHost struct {
@@ -37,6 +40,7 @@ type rawFleetHost struct {
 	Endpoint     string `json:"endpoint,omitempty"`
 	TokenFile    string `json:"token_file,omitempty"`
 	Mode         string `json:"mode,omitempty"`
+	ControllerID string `json:"controller_id,omitempty"`
 }
 
 // configuredHosts reads agent-box/hosts.json in the user's config directory.
@@ -76,6 +80,7 @@ func (a *App) configuredHosts() ([]fleetHost, error) {
 			Endpoint:     strings.TrimSpace(raw.Endpoint),
 			TokenFile:    strings.TrimSpace(raw.TokenFile),
 			Mode:         strings.TrimSpace(raw.Mode),
+			ControllerID: strings.TrimSpace(raw.ControllerID),
 		}
 		if host.Kind == "" {
 			if host.Name == "" || host.Remote == "" {
@@ -117,6 +122,9 @@ func (a *App) configuredHosts() ([]fleetHost, error) {
 				// Cost-safety default: overflow cloud hosts never beat owned priority-0 hardware unless configured.
 				host.Priority = -1
 			}
+		}
+		if host.ControllerID != "" && !controller.ValidHostID(host.ControllerID) {
+			return nil, fmt.Errorf("%s: host %d controller_id %q must match ^[a-z0-9-]{1,40}$", path, i+1, host.ControllerID)
 		}
 		if names[host.Name] {
 			return nil, fmt.Errorf("%s: duplicate host name %q", path, host.Name)

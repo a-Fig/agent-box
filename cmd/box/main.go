@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
@@ -35,6 +36,9 @@ const usage = `usage:
                                             copy a file or directory from a box into local-dir
   box cloud pause|resume|stop [--host name]
                                             pause or resume a cloud runner, or pause and stop all jobs
+  box ci worker [--url U] [--token-file F] [--host-class home|cloud] [--worker id]
+          [--poll 45s] [--cache-dir D] [--repo-base-url U] [--once]
+                                            run GitHub CI jobs from the fleet controller in boxes
   box new [name] [--ttl 2h] [--size S | --gpu] [--reason "why"]
                                             launch a box with a positive TTL
   box rm <name>                             delete a box
@@ -85,6 +89,14 @@ qualified job ID. If no host can start now, it looks for a queue.
 --host pins a host for debugging. --box uses the default host unless pinned.
 Cloud runs print a cost line and support box pull only in sandbox mode;
 box cloud pause|resume|stop controls a cloud runner immediately.
+box ci worker claims jobs from the controller's CI queue (HOST_TOKEN from
+--token-file or boxd.json's controller block), checks the commit out of a bare
+cache, and runs .agent-box/ci.json through box run in a throwaway box:
+  {"command": "go test ./...", "size": "medium", "timeout": "10m"}
+command is a shell string or an argv array; size and timeout (default 30m)
+are optional. It reports done, failed or cancelled with the exit code. A home
+worker gets only "any" jobs and refuses cloud-only ones (fork PRs); a cloud
+worker runs every job on hosts.json's cloud hosts only.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
@@ -112,7 +124,7 @@ func (e envFlags) Set(s string) error {
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, newApp(), os.Args[1:], os.Stdin))
 }
@@ -336,6 +348,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "cloud":
 		return runCloud(ctx, a, fs, args[1:])
+	case "ci":
+		return runCIWorker(ctx, a, fs, args[1:])
 	case "join":
 		leave := fs.Bool("leave", false, "unregister box and remove the skill")
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {

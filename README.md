@@ -70,6 +70,7 @@ box jobs [--box agent-box]            # jobs, newest first: running, done (exit 
 box cancel <id>                       # stop a job and everything it started (exit 130)
 box pull <id> coverage ./out          # copy /work/<repo>/coverage into ./out/coverage
 box cloud pause|resume|stop [--host cloud]  # pause/resume a cloud runner, or pause and stop all jobs
+box ci worker --token-file host.token # run GitHub CI jobs from the controller in boxes (see below)
 box new scratch --ttl 2h --size small # launch a box (sets user.expires and its size)
 box ls                                # boxes, status, expiry
 box rm scratch
@@ -126,6 +127,23 @@ With a host registry, `box run` and `box_run` rank hosts by `priority` (higher w
 `box jobs` and `box_job` without an ID list jobs on the default and configured hosts, including cloud hosts and waiting jobs and recent runs reported by configured queues. Fleet listings qualify IDs for configured hosts and honor existing bare records on the default host. `box jobs --box` looks up a box on the default host.
 
 When capacity blocks a run, the CLI and MCP report the limiting resource and whether it queued or was refused. A suggested smaller size is an estimate for the selected host. A queued run keeps the requested size and GPU requirement.
+
+### Optional fleet controller (offline status fallback)
+
+To show last-known host state when a host is unreachable, configure an optional `controller-v1` server:
+
+- **Host (`boxd.json`):** add `"controller": {"url": "https://...", "token_file": "/etc/agent-box/controller-host.token", "id": "pc"}` (`id` defaults to `machineId` sanitized to `^[a-z0-9-]{1,40}$`; single-host setups without `hosts.json` should set `"id": "pc"` matching `BOX_REMOTE` so offline fallback matches by default). Missing or unreadable `token_file` disables publishing with a warning without blocking `boxd`.
+- **Client (`agent-box/controller.json`):** add `{"url": "https://...", "token_file": "/path/to/client.token"}` (`https://`, or loopback `http://` for tests). In `hosts.json`, set `"controller_id"` on a host if its controller ID differs from `"name"`. When all hosts are reachable, `box status` makes zero controller requests.
+
+### GitHub CI (`box ci worker`)
+
+The controller turns GitHub webhooks into a CI queue (`controller/README.md`); `box ci worker` runs it. It polls `GET /v1/ci/next` (every `--poll`, default 45s) with the controller's `HOST_TOKEN` from `--token-file` (or `boxd.json`'s `controller` block; the URL can come from `--url`, `boxd.json` or `controller.json`), fetches the claimed commit into a bare cache under `--cache-dir`, checks it out in a temporary detached worktree, and runs the repo's `.agent-box/ci.json` through `box run` in a throwaway box, never on the worker's machine:
+
+```json
+{"command": "go test ./...", "size": "medium", "timeout": "10m"}
+```
+
+`command` is a shell string or an argv array; `size` (default medium) and `timeout` (default `30m`, at most `6h`) are optional. A missing or invalid file fails the job without running anything. The worker reports `done` (exit 0), `failed` or `cancelled` with the exit code and a short summary, which becomes the commit's `agent-box` Check Run. `--host-class home` (default) gets only `any` jobs and refuses a cloud-only one (a fork PR) outright; `--host-class cloud` gets both and runs every job on `hosts.json`'s cloud hosts only. The worker's `git` must be able to fetch `--repo-base-url/owner/name.git` (default `https://github.com`; a credential helper for private repos).
 
 ## Website previews
 

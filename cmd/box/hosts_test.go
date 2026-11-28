@@ -43,12 +43,12 @@ func TestConfiguredHostsFile(t *testing.T) {
 		{
 			name: "multiple hosts in file order",
 			data: `{"hosts":[
-				{"name":"primary","remote":"pc","project":"primary-project","dashboard_url":"https://example.com:8443/dashboard","priority":10},
+				{"name":"primary","remote":"pc","project":"primary-project","dashboard_url":"https://example.com:8443/dashboard","priority":10,"controller_id":"gaming-pc"},
 				{"name":"backup","remote":"spare"},
 				{"name":"archive","remote":"cold","priority":-5}
 			]}`,
 			want: []fleetHost{
-				{Name: "primary", Remote: "pc", Project: "primary-project", DashboardURL: "https://example.com:8443/dashboard", Priority: 10},
+				{Name: "primary", Remote: "pc", Project: "primary-project", DashboardURL: "https://example.com:8443/dashboard", Priority: 10, ControllerID: "gaming-pc"},
 				{Name: "backup", Remote: "spare", Project: "existing-project", Priority: 0},
 				{Name: "archive", Remote: "cold", Project: "existing-project", Priority: -5},
 			},
@@ -64,6 +64,7 @@ func TestConfiguredHostsFile(t *testing.T) {
 				{Name: "primary-dash", Remote: "pc", Project: "existing-project", DashboardURL: "https://example.com", Priority: 5},
 			},
 		},
+		{name: "invalid controller_id", data: `{"hosts":[{"name":"primary","remote":"pc","controller_id":"BAD_ID"}]}`, wantErr: "host 1 controller_id"},
 		{name: "empty host list", data: `{"hosts":[]}`},
 		{name: "malformed JSON", data: `{"hosts":`, wantErr: "parse"},
 		{name: "missing name", data: `{"hosts":[{"name":" ","remote":"pc"}]}`, wantErr: "host 1 requires a name and remote"},
