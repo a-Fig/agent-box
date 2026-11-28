@@ -30,6 +30,7 @@ jobs:
         with:
           node-version: "22"
       - run: node --test site/test/files.test.mjs
+      - run: node --test controller/test/*.test.mjs
 
   test-linux:
     runs-on: ubuntu-latest

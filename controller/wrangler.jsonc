@@ -1,0 +1,22 @@
+// Cloudflare Worker + SQLite Durable Object controller for agent-box (controller-v1).
+// Set HOST_TOKEN and CLIENT_TOKEN via `wrangler secret put` before deploying.
+{
+  "name": "agent-box-controller",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FLEET",
+        "class_name": "Fleet"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Fleet"]
+    }
+  ]
+}
