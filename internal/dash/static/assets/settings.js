@@ -78,7 +78,7 @@ const settings = {
       h(
         "div",
         { class: "page" },
-        h("div", { class: "page-head" }, h("h2", null, "Settings"), h("p", null, "How the dashboard looks. Changes save as you make them; what each host reports about itself is on its page under Fleet.")),
+        h("div", { class: "page-head" }, h("p", null, "How the dashboard looks. Changes save as you make them; what each host reports about itself is on its page under Fleet.")),
         section("Appearance", null, group([row("Theme", "Dim is the default. Saved in this browser only, so each device keeps its own.", themeSwitch())])),
       ),
     );

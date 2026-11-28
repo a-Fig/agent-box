@@ -256,7 +256,7 @@ const history = {
       ),
     );
     const d = H.data[H.range];
-    const head = h("div", { class: "page-head machine-head" }, h("div", null, h("h2", null, "History"), h("p", null, "What agents used the PC for, and what My PC cost them.")), seg);
+    const head = h("div", { class: "page-head machine-head" }, h("p", null, "What agents used the PC for, and what My PC cost them."), seg);
     let body;
     if (!d && H.loading[H.range]) body = empty("retry", "Loading history…", null);
     else if (!d && H.error[H.range]) body = empty("alert", "Couldn't load the history", H.error[H.range], h("button", { class: "btn btn-sm btn-outline", onclick: () => load(H.range, true) }, "Try again"));

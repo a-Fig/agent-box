@@ -470,12 +470,42 @@ function banners(m) {
   return out;
 }
 
+// A running job's log shows its last lines, folded to three so several jobs fit on a screen (#293);
+// More opens it to twelve, and the job's page has the whole log.
+const TAIL_FOLDED = 3;
+const TAIL_OPEN = 12;
+const tailsOpen = new Set();
+
 function runningRow(j) {
+  const open = tailsOpen.has(j.key);
+  const lines = lastLines(j.tail, TAIL_OPEN).split("\n").length;
   return h(
     "div",
     null,
     h("a", { class: "row row-link", href: jobLink(j), "data-key": "run-" + j.key }, h("div", { class: "row-grid" }, h("div", null, reasonEl(j), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j)))),
-    j.tail ? h("pre", { class: "log log-short", "data-stick": "1", "data-key": "tail-" + j.key }, lastLines(j.tail, 12)) : null,
+    j.tail
+      ? h(
+          "div",
+          { class: "tail" },
+          h("pre", { class: "log " + (open ? "log-short" : "log-folded"), "data-stick": "1", "data-key": "tail-" + j.key }, lastLines(j.tail, open ? TAIL_OPEN : TAIL_FOLDED)),
+          lines > TAIL_FOLDED
+            ? h(
+                "button",
+                {
+                  class: "btn btn-xs btn-outline tail-more",
+                  type: "button",
+                  "aria-expanded": open ? "true" : "false",
+                  "data-key": "tail-more-" + j.key,
+                  onclick: () => {
+                    open ? tailsOpen.delete(j.key) : tailsOpen.add(j.key);
+                    changed();
+                  },
+                },
+                open ? "Less" : "More",
+              )
+            : null,
+        )
+      : null,
   );
 }
 
@@ -733,7 +763,7 @@ const boxes = {
       h(
         "div",
         { class: "page" },
-        h("div", { class: "page-head" }, h("h2", null, "Boxes"), h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs. Open one to see its jobs.")),
+        h("div", { class: "page-head" }, h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs. Open one to see its jobs.")),
         bx.length ? h("div", { class: "group" }, bx.map((b) => boxRow(b, true))) : empty("box", "No boxes", "Agents make them with box run or box new. Nothing is using the PC now."),
       ),
     );
@@ -832,7 +862,7 @@ const jobs = {
     this.filters = h("div", { class: "filters" });
     this.search = h("label", { class: "field search" }, icon("search"), search);
     this.listEl = h("div", { class: "section" });
-    el.replaceChildren(h("div", { class: "page" }, h("div", { class: "page-head" }, h("h2", null, "Jobs"), h("p", null, "What agents ran on boxes, and why.")), h("div", { class: "section" }, this.filters, this.listEl)));
+    el.replaceChildren(h("div", { class: "page" }, h("div", { class: "page-head" }, h("p", null, "What agents ran on boxes, and why.")), h("div", { class: "section" }, this.filters, this.listEl)));
     fetchJobs();
     this.update(el);
   },
