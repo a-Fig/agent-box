@@ -80,6 +80,21 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 	if p := h.Finished(Filter{Q: "", Result: "fail"}); len(p.Jobs) != 1 {
 		t.Fatalf("fail filter: %+v", p)
 	}
+	// Since and Until keep the jobs that started in [Since, Until): a span History opens.
+	if p := h.Finished(Filter{Since: t0.Add(-2 * time.Hour), Until: t0.Add(-90 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "1" {
+		t.Fatalf("since/until: %+v", p)
+	}
+	if p := h.Finished(Filter{Since: t0.Add(-90 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
+		t.Fatalf("since: %+v", p)
+	}
+	// A month is 30 daily buckets; job 3, 40 days back, counts in the month before it.
+	if m := h.Range(dash.RangeMonth, Live{MemCap: 12 << 30}); m.Range != dash.RangeMonth || len(m.Buckets) != 30 ||
+		m.Previous.ByResult["pass"] != 1 || m.Buckets[29].Jobs.ByResult["pass"] != 1 {
+		t.Fatalf("month: %d buckets, previous %+v", len(m.Buckets), m.Previous)
+	}
+	if r.Previous.ByResult["pass"] != 0 || r.Previous.BoxHours != 0 || dash.Total(r.Buckets).ByResult["fail"] != 1 {
+		t.Fatalf("day's previous: %+v", r.Previous)
+	}
 	// Jobs 1 and 2 were recorded before jobs carried their box's UID: a box asks for them by the
 	// time rule, from dash.BoxJobSkew before it was made.
 	boxA := dash.Box{Name: "a", UID: "u-a", CreatedAt: t0.Add(-90*time.Minute + time.Minute)}

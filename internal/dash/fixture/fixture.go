@@ -30,6 +30,7 @@ type Scenario struct {
 	Jobs  dash.JobsPage `json:"jobs"` // GET /api/jobs with no filter: every finished job
 	Day   dash.History  `json:"day"`
 	Week  dash.History  `json:"week"`
+	Month dash.History  `json:"month"`
 	// Logs holds the log so far of each job whose box still exists, by key.
 	Logs map[string]string `json:"logs"`
 }
@@ -526,6 +527,7 @@ func (w *world) finish(name, about string) Scenario {
 		Jobs:  dash.JobsPage{Jobs: done},
 		Day:   w.historyFor(dash.RangeDay, done),
 		Week:  w.historyFor(dash.RangeWeek, done),
+		Month: w.historyFor(dash.RangeMonth, done),
 		Logs:  w.logs,
 	}
 }
@@ -534,15 +536,18 @@ func (w *world) hasBox(name string) bool {
 	return slices.ContainsFunc(w.boxes, func(b dash.Box) bool { return b.Name == name })
 }
 
-// historyFor buckets the finished jobs, box lives, refusals and samples.
+// historyFor is a range's history, with the totals of the span before it.
 func (w *world) historyFor(rng string, done []dash.Job) dash.History {
-	step, n := time.Hour, 24
-	start := w.now.Truncate(time.Hour).Add(-23 * time.Hour)
-	if rng == dash.RangeWeek {
-		step, n = 24*time.Hour, 7
-		start = w.now.Truncate(24 * time.Hour).Add(-6 * 24 * time.Hour)
-	}
-	h := dash.History{Range: rng, Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
+	start, step, n, _ := dash.Window(rng, w.now)
+	h := w.span(start, step, n, done)
+	h.Range = rng
+	h.Previous = dash.Total(w.span(start.Add(-time.Duration(n)*step), step, n, done).Buckets)
+	return h
+}
+
+// span buckets the finished jobs, box lives, refusals and samples.
+func (w *world) span(start time.Time, step time.Duration, n int, done []dash.Job) dash.History {
+	h := dash.History{Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
 	durs := make([]map[string][]float64, n)
 	for i := range h.Buckets {
 		h.Buckets[i] = dash.Bucket{

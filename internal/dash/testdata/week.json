@@ -8280,7 +8280,17 @@
         "end": "2026-11-24T17:30:00Z",
         "mode": "shared"
       }
-    ]
+    ],
+    "previous": {
+      "byResult": {
+        "cancelled": 3,
+        "fail": 6,
+        "pass": 20
+      },
+      "boxHours": 22.67,
+      "refused": 8,
+      "queued": 7
+    }
   },
   "week": {
     "range": "week",
@@ -8335,7 +8345,7 @@
             "tidepool": 231
           }
         },
-        "memUsed": 2499509713,
+        "memUsed": 2444403087,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -8395,7 +8405,7 @@
             "tidepool": 386
           }
         },
-        "memUsed": 2125053266,
+        "memUsed": 2301450688,
         "memCap": 12884901888,
         "queued": {
           "jobs": 3,
@@ -8456,7 +8466,7 @@
             "tidepool": 393
           }
         },
-        "memUsed": 2074982626,
+        "memUsed": 1932241467,
         "memCap": 12884901888,
         "queued": {
           "jobs": 8,
@@ -8518,7 +8528,7 @@
             "tidepool": 281
           }
         },
-        "memUsed": 1845581572,
+        "memUsed": 1711840965,
         "memCap": 12884901888,
         "queued": {
           "jobs": 2,
@@ -8578,7 +8588,7 @@
             "tidepool": 174
           }
         },
-        "memUsed": 2225512728,
+        "memUsed": 2118787695,
         "memCap": 12884901888,
         "queued": {
           "jobs": 9,
@@ -8641,7 +8651,7 @@
             "tidepool": 292
           }
         },
-        "memUsed": 2427934836,
+        "memUsed": 2318890863,
         "memCap": 12884901888,
         "queued": {
           "jobs": 9,
@@ -8701,7 +8711,7 @@
             "tidepool": 317
           }
         },
-        "memUsed": 2208369901,
+        "memUsed": 2216158398,
         "memCap": 12884901888,
         "queued": {
           "jobs": 6,
@@ -8841,7 +8851,1190 @@
         "end": "2026-11-24T17:30:00Z",
         "mode": "shared"
       }
-    ]
+    ],
+    "previous": {
+      "byResult": {
+        "cancelled": 1,
+        "fail": 1,
+        "pass": 8
+      },
+      "boxHours": 2.15,
+      "refused": 0,
+      "queued": 3
+    }
+  },
+  "month": {
+    "range": "month",
+    "buckets": [
+      {
+        "start": "2026-10-26T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-27T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-28T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-29T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-30T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-31T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-01T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-02T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-03T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-04T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-05T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-06T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-07T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-08T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-09T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-10T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-11T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-12T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-13T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-14T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-15T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-16T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-17T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 1,
+            "fail": 1,
+            "pass": 8
+          },
+          "byKind": {
+            "build": 3,
+            "go-test": 1,
+            "gpu": 2,
+            "gradle": 3,
+            "js-test": 1
+          },
+          "byRepo": {
+            "lantern": 3,
+            "orbit-android": 3,
+            "sparrow-ml": 2,
+            "tidepool": 2
+          },
+          "byAgent": {
+            "amber-fox": 3,
+            "brisk-heron": 2,
+            "quiet-otter": 3,
+            "sparrow-wt-2": 1,
+            "still-pine": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.86,
+            "large": 0.99,
+            "medium": 0.24,
+            "small": 0.06
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 497,
+            "orbit-android": 641,
+            "sparrow-ml": 1485,
+            "tidepool": 335
+          }
+        },
+        "memUsed": 329336756,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 3,
+          "started": 2,
+          "medianWaitSeconds": 935
+        }
+      },
+      {
+        "start": "2026-11-18T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 1,
+            "fail": 3,
+            "pass": 24
+          },
+          "byKind": {
+            "build": 3,
+            "go-build": 3,
+            "go-test": 4,
+            "gpu": 3,
+            "gradle": 9,
+            "js-test": 4,
+            "py-test": 2
+          },
+          "byRepo": {
+            "lantern": 7,
+            "orbit-android": 9,
+            "sparrow-ml": 5,
+            "tidepool": 7
+          },
+          "byAgent": {
+            "amber-fox": 9,
+            "brisk-heron": 7,
+            "quiet-otter": 7,
+            "sparrow-wt-2": 2,
+            "still-pine": 3
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 1.28,
+            "large": 0.69,
+            "medium": 22.54,
+            "small": 0.17
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 244,
+            "orbit-android": 418,
+            "sparrow-ml": 959,
+            "tidepool": 231
+          }
+        },
+        "memUsed": 2360779363,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 1,
+          "started": 2,
+          "medianWaitSeconds": 513
+        }
+      },
+      {
+        "start": "2026-11-19T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 3,
+            "pass": 24
+          },
+          "byKind": {
+            "build": 3,
+            "go-build": 1,
+            "go-test": 5,
+            "gpu": 7,
+            "gradle": 5,
+            "js-test": 3,
+            "py-test": 3
+          },
+          "byRepo": {
+            "lantern": 8,
+            "orbit-android": 5,
+            "sparrow-ml": 10,
+            "tidepool": 4
+          },
+          "byAgent": {
+            "amber-fox": 5,
+            "brisk-heron": 4,
+            "quiet-otter": 8,
+            "sparrow-wt-2": 4,
+            "still-pine": 6
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 2.7,
+            "large": 1.44,
+            "medium": 17.14,
+            "small": 0.04
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "gpu-busy": 1,
+            "mypc": 2
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 267,
+            "orbit-android": 604,
+            "sparrow-ml": 1094,
+            "tidepool": 386
+          }
+        },
+        "memUsed": 2451099905,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 3,
+          "started": 3,
+          "medianWaitSeconds": 994
+        }
+      },
+      {
+        "start": "2026-11-20T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 1,
+            "fail": 3,
+            "lost": 1,
+            "pass": 22
+          },
+          "byKind": {
+            "build": 5,
+            "go-build": 2,
+            "go-test": 5,
+            "gpu": 2,
+            "gradle": 6,
+            "js-test": 5,
+            "py-test": 2
+          },
+          "byRepo": {
+            "lantern": 8,
+            "orbit-android": 6,
+            "sparrow-ml": 4,
+            "tidepool": 9
+          },
+          "byAgent": {
+            "amber-fox": 6,
+            "brisk-heron": 9,
+            "quiet-otter": 8,
+            "still-pine": 4
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.82,
+            "large": 1.67,
+            "medium": 18.41,
+            "small": 0.23
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "full": 1,
+            "mypc": 3
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 294,
+            "orbit-android": 613,
+            "sparrow-ml": 918,
+            "tidepool": 393
+          }
+        },
+        "memUsed": 2149073234,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 8,
+          "started": 8,
+          "medianWaitSeconds": 606
+        }
+      },
+      {
+        "start": "2026-11-21T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 1,
+            "fail": 5,
+            "lost": 1,
+            "pass": 22
+          },
+          "byKind": {
+            "build": 7,
+            "go-test": 6,
+            "gpu": 1,
+            "gradle": 6,
+            "js-test": 6,
+            "py-test": 3
+          },
+          "byRepo": {
+            "lantern": 7,
+            "orbit-android": 6,
+            "sparrow-ml": 4,
+            "tidepool": 12
+          },
+          "byAgent": {
+            "amber-fox": 6,
+            "brisk-heron": 12,
+            "quiet-otter": 7,
+            "sparrow-wt-2": 1,
+            "still-pine": 3
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.4,
+            "large": 1.28,
+            "medium": 15.29,
+            "small": 0.36
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "full": 1,
+            "gpu-busy": 1,
+            "mypc": 5
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 195,
+            "orbit-android": 415,
+            "sparrow-ml": 500,
+            "tidepool": 281
+          }
+        },
+        "memUsed": 1698116577,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 516
+        }
+      },
+      {
+        "start": "2026-11-22T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 2,
+            "fail": 5,
+            "pass": 18
+          },
+          "byKind": {
+            "build": 4,
+            "go-test": 3,
+            "gpu": 1,
+            "gradle": 10,
+            "js-test": 2,
+            "py-test": 5
+          },
+          "byRepo": {
+            "lantern": 5,
+            "orbit-android": 10,
+            "sparrow-ml": 6,
+            "tidepool": 4
+          },
+          "byAgent": {
+            "amber-fox": 10,
+            "brisk-heron": 4,
+            "quiet-otter": 5,
+            "sparrow-wt-2": 2,
+            "still-pine": 4
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.55,
+            "large": 0.9,
+            "medium": 22.15,
+            "small": 0.1
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "full": 1,
+            "mypc": 5
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 446,
+            "orbit-android": 380,
+            "sparrow-ml": 367,
+            "tidepool": 174
+          }
+        },
+        "memUsed": 2258121340,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 9,
+          "started": 9,
+          "medianWaitSeconds": 748
+        }
+      },
+      {
+        "start": "2026-11-23T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 2,
+            "fail": 7,
+            "lost": 1,
+            "pass": 25
+          },
+          "byKind": {
+            "build": 4,
+            "go-build": 3,
+            "go-test": 6,
+            "gpu": 5,
+            "gradle": 9,
+            "js-test": 4,
+            "py-test": 4
+          },
+          "byRepo": {
+            "lantern": 11,
+            "orbit-android": 9,
+            "sparrow-ml": 9,
+            "tidepool": 6
+          },
+          "byAgent": {
+            "amber-fox": 9,
+            "brisk-heron": 6,
+            "quiet-otter": 11,
+            "sparrow-wt-2": 4,
+            "still-pine": 5
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 1.98,
+            "large": 0.95,
+            "medium": 20.62,
+            "small": 0.08
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "full": 1,
+            "gpu-busy": 1,
+            "mypc": 4
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 360,
+            "orbit-android": 369,
+            "sparrow-ml": 708,
+            "tidepool": 292
+          }
+        },
+        "memUsed": 2456929683,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 9,
+          "started": 9,
+          "medianWaitSeconds": 554
+        }
+      },
+      {
+        "start": "2026-11-24T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 3,
+            "lost": 1,
+            "pass": 16
+          },
+          "byKind": {
+            "build": 1,
+            "go-build": 3,
+            "go-test": 3,
+            "gpu": 1,
+            "gradle": 5,
+            "js-test": 5,
+            "py-test": 2
+          },
+          "byRepo": {
+            "lantern": 7,
+            "orbit-android": 5,
+            "sparrow-ml": 3,
+            "tidepool": 5
+          },
+          "byAgent": {
+            "amber-fox": 5,
+            "brisk-heron": 5,
+            "quiet-otter": 7,
+            "sparrow-wt-2": 1,
+            "still-pine": 2
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 0.32,
+            "large": 0.94,
+            "medium": 21.92
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "full": 2,
+            "mypc": 3
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 274,
+            "orbit-android": 464,
+            "sparrow-ml": 589,
+            "tidepool": 317
+          }
+        },
+        "memUsed": 2386373991,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 6,
+          "started": 6,
+          "medianWaitSeconds": 432
+        }
+      }
+    ],
+    "segments": [
+      {
+        "start": "2026-11-17T17:30:00Z",
+        "end": "2026-11-18T03:20:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-18T03:20:00Z",
+        "end": "2026-11-18T16:25:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-18T16:25:00Z",
+        "end": "2026-11-19T03:37:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-19T03:37:00Z",
+        "end": "2026-11-19T16:19:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-19T16:19:00Z",
+        "end": "2026-11-19T20:00:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-19T20:00:00Z",
+        "end": "2026-11-19T21:00:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-19T21:00:00Z",
+        "end": "2026-11-20T03:08:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-20T03:08:00Z",
+        "end": "2026-11-20T05:43:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-20T05:43:00Z",
+        "end": "2026-11-20T16:09:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-20T16:09:00Z",
+        "end": "2026-11-21T03:40:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-21T03:40:00Z",
+        "end": "2026-11-21T05:04:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-21T05:04:00Z",
+        "end": "2026-11-21T16:07:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-21T16:07:00Z",
+        "end": "2026-11-21T20:00:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-21T20:00:00Z",
+        "end": "2026-11-21T21:00:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-21T21:00:00Z",
+        "end": "2026-11-22T03:06:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-22T03:06:00Z",
+        "end": "2026-11-22T05:36:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-22T05:36:00Z",
+        "end": "2026-11-22T16:14:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-22T16:14:00Z",
+        "end": "2026-11-22T20:00:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-22T20:00:00Z",
+        "end": "2026-11-22T21:00:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-22T21:00:00Z",
+        "end": "2026-11-23T03:01:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-23T03:01:00Z",
+        "end": "2026-11-23T05:42:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-23T05:42:00Z",
+        "end": "2026-11-23T16:35:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-23T16:35:00Z",
+        "end": "2026-11-24T03:47:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-24T03:47:00Z",
+        "end": "2026-11-24T05:59:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-24T05:59:00Z",
+        "end": "2026-11-24T16:25:00Z",
+        "mode": "full"
+      },
+      {
+        "start": "2026-11-24T16:25:00Z",
+        "end": "2026-11-24T17:30:00Z",
+        "mode": "shared"
+      }
+    ],
+    "previous": {
+      "byResult": {},
+      "boxHours": 0,
+      "refused": 0,
+      "queued": 0
+    }
   },
   "logs": {
     "lantern/20261118-045608-f547/2026-11-18T04:56:08Z": "$ go build ./cmd/... \u0026\u0026 GOOS=windows go build ./cmd/...\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\ngithub.com/acme/lantern/internal/wire\ngithub.com/acme/lantern/internal/cache\ngithub.com/acme/lantern/internal/store\ngithub.com/acme/lantern/internal/sync\ngithub.com/acme/lantern/internal/api\ngithub.com/acme/lantern/internal/config\ngithub.com/acme/lantern/internal/metrics\ngithub.com/acme/lantern/cmd/lantern\n",

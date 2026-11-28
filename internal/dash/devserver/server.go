@@ -179,6 +179,20 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		}
 		before = &dash.Job{Key: v, StartedAt: t}
 	}
+	var since, until *time.Time
+	for _, p := range []struct {
+		name string
+		t    **time.Time
+	}{{"since", &since}, {"until", &until}} {
+		if v := q.Get(p.name); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, p.name+" must be an RFC 3339 time")
+				return
+			}
+			*p.t = &t
+		}
+	}
 	if v := q.Get("result"); v != "" && !slices.Contains(dash.Results, v) {
 		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "result must be one of "+strings.Join(dash.Results, ", "))
 		return
@@ -210,6 +224,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 			q.Get("kind") != "" && q.Get("kind") != j.Kind,
 			q.Get("machine") != "" && q.Get("machine") != j.Machine,
 			q.Get("result") != "" && q.Get("result") != j.Result(),
+			since != nil && j.StartedAt.Before(*since), until != nil && !j.StartedAt.Before(*until),
 			box.UID != "" && !j.RanOn(box),
 			before != nil && newest(*before, j) >= 0,
 			text != "" && !matchesText(text, j.Reason, j.Command, j.Branch):
@@ -319,8 +334,10 @@ func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.sc.Day)
 	case dash.RangeWeek:
 		writeJSON(w, http.StatusOK, s.sc.Week)
+	case dash.RangeMonth:
+		writeJSON(w, http.StatusOK, s.sc.Month)
 	default:
-		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "range must be day or week")
+		writeErr(w, http.StatusBadRequest, dash.CodeBadRequest, "range must be day, week or month")
 	}
 }
 
@@ -519,7 +536,7 @@ func (s *server) handleRefusal(r *http.Request, body []byte) (int, any, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, h := range []*dash.History{&s.sc.Day, &s.sc.Week} {
+	for _, h := range []*dash.History{&s.sc.Day, &s.sc.Week, &s.sc.Month} {
 		if n := len(h.Buckets); n > 0 {
 			h.Buckets[n-1].Refusals.ByWhy[b.Why]++
 		}

@@ -47,8 +47,20 @@ const tip = (text, props) => ({ ...props, tabindex: -1, "data-tip": text, "aria-
 
 function label(b, range) {
   const d = new Date(b.start);
-  return range === "day" ? d.toLocaleTimeString(undefined, { hour: "numeric" }) : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", timeZone: "UTC" }); // a week's days are UTC days
+  if (range === "day") return d.toLocaleTimeString(undefined, { hour: "numeric" });
+  // A week's and a month's days are UTC days.
+  return d.toLocaleDateString(undefined, range === "week" ? { weekday: "short", day: "numeric", timeZone: "UTC" } : { month: "short", day: "numeric", timeZone: "UTC" });
 }
+
+const STEP = { day: 3600e3, week: 86400e3, month: 86400e3 };
+const PREV = { day: "yesterday", week: "the week before", month: "the 30 days before" };
+
+// A link to Jobs for the jobs that started in bucket b (#292).
+function spanOf(b, range) {
+  return { since: new Date(b.start).toISOString(), until: new Date(Date.parse(b.start) + STEP[range]).toISOString() };
+}
+// A mark that opens Jobs: a click or Enter goes to href.
+const go = (href) => ({ class: "hit go", role: "link", onclick: () => (location.hash = href), onkeydown: (e) => e.key === "Enter" && (location.hash = href) });
 
 function sum(o) {
   return Object.values(o || {}).reduce((a, b) => a + b, 0);
@@ -62,7 +74,8 @@ function nice(max) {
 }
 
 // Stacked columns, one per bucket; keys in a fixed order so a color always means one thing.
-function columns(buckets, range, get, keys, color, fmt = String, height = 150) {
+// With link, each column opens Jobs: link(b) gives its filters.
+function columns(buckets, range, get, keys, color, fmt = String, height = 150, link = null) {
   const top = 8, bottom = 18, left = 30;
   const plotH = height - top - bottom;
   const max = nice(Math.max(0, ...buckets.map((b) => keys.reduce((a, k) => a + (get(b)[k] || 0), 0))));
@@ -89,7 +102,9 @@ function columns(buckets, range, get, keys, color, fmt = String, height = 150) {
       y -= hgt;
     });
     if (i % every === 0) kids.push(s("text", { x: x + bw / 2, y: height - 4, "text-anchor": "middle" }, label(b, range)));
-    kids.push(s("rect", tip(lines.length > 1 ? lines.join("\n") : lines[0] + ": none", { class: "hit", x: left + step * i, y: top, width: step, height: plotH })));
+    const any = lines.length > 1;
+    const props = link && any ? go(jobsHref(link(b))) : { class: "hit" };
+    kids.push(s("rect", tip(any ? lines.join("\n") + (link ? "\nOpen these jobs" : "") : lines[0] + ": none", { ...props, x: left + step * i, y: top, width: step, height: plotH })));
   });
   return rove(s("svg", { viewBox: `0 0 ${W} ${height}`, role: "group" }, kids));
 }
@@ -195,8 +210,8 @@ function timeline(d, range) {
 }
 
 // Totals as horizontal bars, biggest first, labelled with their value. With filter, each bar
-// with a name links to Jobs filtered to it (filter(k) gives the filters, and what the link says).
-// Jobs has no time filter, so it lists all of them, not only this range's.
+// with a name links to Jobs filtered to it and to the range (filter(k) gives the filters, and
+// what the link says).
 function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "", filter = null) {
   entries = entries.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return h("p", { class: "row-empty" }, "Nothing in this range.");
@@ -241,12 +256,13 @@ const history = {
       "div",
       { class: "segmented", role: "radiogroup", "aria-label": "Range" },
       [
-        ["day", "Day"],
-        ["week", "Week"],
-      ].map(([id, l]) =>
+        ["day", "Day", "The last 24 hours, an hour per bar."],
+        ["week", "Week", "The last 7 days, a day per bar, midnight to midnight UTC."],
+        ["month", "30 days", "The last 30 days, a day per bar, midnight to midnight UTC. Memory samples are kept 14 days."],
+      ].map(([id, l, about]) =>
         h(
           "button",
-          hint(id === "day" ? "The last 24 hours, an hour per bar." : "The last 7 days, a day per bar, midnight to midnight UTC.", {
+          hint(about, {
             role: "radio",
             "aria-checked": H.range === id ? "true" : "false",
             onclick: () => {
@@ -285,7 +301,22 @@ const history = {
     const queuedN = B.reduce((a, b) => a + (b.queued?.jobs || 0), 0);
     const startedN = B.reduce((a, b) => a + (b.queued?.started || 0), 0);
     const wait = startedN ? B.reduce((a, b) => a + (b.queued?.medianWaitSeconds || 0) * (b.queued?.started || 0), 0) / startedN : 0;
-    const passRate = jobsN ? Math.round(((byResult.pass || 0) / Math.max(1, jobsN - (byResult.cancelled || 0))) * 100) + "%" : "—";
+    // Of the jobs not cancelled, the share that passed, in whole percent; null with none.
+    const rate = (r) => {
+      const n = sum(r) - (r.cancelled || 0);
+      return n > 0 ? Math.round(((r.pass || 0) / n) * 100) : null;
+    };
+    const P = d.previous || { byResult: {}, boxHours: 0, refused: 0, queued: 0 };
+    const was = PREV[range];
+    // The change against the span before: "+4 vs yesterday".
+    const delta = (now, then, unit = "") => {
+      if (then === 0 && now > 0 && !unit) return "none " + was;
+      const dlt = Math.round((now - then) * 10) / 10;
+      return dlt === 0 ? "same as " + was : (dlt > 0 ? "+" : "−") + Math.abs(dlt) + unit + " vs " + was;
+    };
+    const rateNow = rate(byResult), rateThen = rate(P.byResult || {});
+    // Jobs opened from this page are the range's: from its first bucket on.
+    const since = new Date(B[0].start).toISOString();
     // The median per repo over the range: each bucket's median weighted by its jobs, which is
     // close enough to read from and needs no second call.
     const med = {};
@@ -304,26 +335,27 @@ const history = {
       h(
         "div",
         { class: "stats" },
+        // Short labels and a big number; under each, the change against the span before (#292).
         [
-          [jobsN, "jobs"],
-          [passRate, "passed, of those not cancelled"],
-          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours", "Hours boxes existed, added up over all boxes: two boxes for an hour are 2 box-hours."],
-          [refused, "runs turned away", REFUSED_HINT],
-          [queuedN, startedN ? "runs queued; median wait " + dur(wait) : "runs queued", QUEUED_HINT],
-        ].map(([v, l, tip]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", tip ? hint(tip, {}, true) : null, l))),
+          [jobsN, "jobs", delta(jobsN, sum(P.byResult || {})), "Jobs started in the range that have ended. Running jobs count once they end."],
+          [rateNow == null ? "—" : rateNow + "%", "pass rate", rateNow == null || rateThen == null ? (rateThen == null ? "none " + was : "") : delta(rateNow, rateThen, " pts"), "Of the jobs that ended and weren't cancelled, the share that passed."],
+          [hours.toFixed(hours < 10 ? 1 : 0), "box-hours", delta(hours, P.boxHours || 0), "Hours boxes existed, added up over all boxes: two boxes for an hour are 2 box-hours."],
+          [refused, "turned away", delta(refused, P.refused || 0), REFUSED_HINT],
+          [queuedN, startedN ? "queued · " + dur(wait) + " wait" : "queued", delta(queuedN, P.queued || 0), QUEUED_HINT + (startedN ? " The wait is the median of those that started." : "")],
+        ].map(([v, l, dl, about]) => h("div", { class: "group stat" }, h("b", null, String(v)), h("span", hint(about, {}, true), l), dl ? h("small", { class: "delta" }, dl) : null)),
       ),
       h(
         "div",
         { class: "charts" },
         chart("Mode", "The PC's mode, and the runs it turned away or queued in each " + (range === "day" ? "hour" : "day") + ".", [sized(wide, () => timeline(d, range)), legend(modeKeys, (k) => MODE_COLORS[k], modeLabel, (k) => MODE_HINTS[k]), h("div", { class: "legend" }, h("span", hint(REFUSED_HINT, {}, true), h("i", { "data-bg": "var(--s8)" }), "Runs refused (hover for why)"), h("span", hint(QUEUED_HINT, {}, true), h("i", { "data-bg": "var(--s7)" }), "Runs queued (hover for waits)"))], true),
-        chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
+        chart("Jobs by result", "Jobs started in " + per + ". Click a bar for its jobs.", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], String, 150, (b) => spanOf(b, range))), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
         chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)), undefined, (k) => SIZE_HINTS[k])]),
-        chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),
+        chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + "." + (range === "month" ? " Samples are kept 14 days." : ""), sized(half, () => memory(B, range))),
         // The ranked bars share one color that is neither a mode's nor a result's.
-        chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), () => "var(--s7)", String, 6, "", (k) => ({ f: { kind: k }, say: "Open every " + k + " job" }))),
-        chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)", (k) => ({ f: { repo: k }, say: "Open every job in " + k }))),
-        chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s7)", String, 6, "(no repo)", (k) => ({ f: { repo: k }, say: "Open every job in " + k }))),
-        chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s7)", String, 6, "unknown agent", (k) => ({ f: { agent: k }, say: "Open every job " + k + " ran" }))),
+        chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), () => "var(--s7)", String, 6, "", (k) => ({ f: { kind: k, since }, say: "Open these jobs" }))),
+        chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)", (k) => ({ f: { repo: k, since }, say: "Open these jobs" }))),
+        chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s7)", String, 6, "(no repo)", (k) => ({ f: { repo: k, since }, say: "Open these jobs" }))),
+        chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s7)", String, 6, "unknown agent", (k) => ({ f: { agent: k, since }, say: "Open these jobs" }))),
       ),
       h("p", { class: "muted", "data-now": clock.now() }, H.loading[range] ? "Refreshing…" : (range === "day" ? "Each bar is an hour. " : "Each bar is a day, midnight to midnight UTC. ") + (H.at[range] ? "Loaded " + new Date(H.at[range]).toLocaleTimeString() + "." : "")),
     ];

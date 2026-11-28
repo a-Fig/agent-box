@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -447,16 +448,67 @@ type Segment struct {
 
 // Ranges of GET /api/history.
 const (
-	RangeDay  = "day"
-	RangeWeek = "week"
+	RangeDay   = "day"
+	RangeWeek  = "week"
+	RangeMonth = "month"
 )
 
-// History is GET /api/history?range=day|week: 24 hourly buckets or 7 daily
-// ones, oldest first, the last one holding now.
+// Ranges lists them in display order.
+var Ranges = []string{RangeDay, RangeWeek, RangeMonth}
+
+// Window is a range's buckets ending with the one holding now: 24 hours,
+// or 7 or 30 UTC days. ok is false for a range that isn't one of Ranges.
+func Window(rng string, now time.Time) (start time.Time, step time.Duration, n int, ok bool) {
+	now = now.UTC()
+	switch rng {
+	case RangeDay:
+		step, n = time.Hour, 24
+	case RangeWeek:
+		step, n = 24*time.Hour, 7
+	case RangeMonth:
+		step, n = 24*time.Hour, 30
+	default:
+		return time.Time{}, 0, 0, false
+	}
+	return now.Truncate(step).Add(-time.Duration(n-1) * step), step, n, true
+}
+
+// History is GET /api/history?range=day|week|month: 24 hourly buckets, or 7
+// or 30 daily ones, oldest first, the last one holding now. Previous adds up
+// the same span just before it, for the page's "vs yesterday" (#292).
 type History struct {
 	Range    string    `json:"range"`
 	Buckets  []Bucket  `json:"buckets"`
 	Segments []Segment `json:"segments"`
+	Previous Totals    `json:"previous"`
+}
+
+// Totals adds up a span of buckets: jobs by result (a running job has none
+// yet, so it isn't counted), box-hours, runs refused and runs queued.
+type Totals struct {
+	ByResult map[string]int `json:"byResult"`
+	BoxHours float64        `json:"boxHours"`
+	Refused  int            `json:"refused"`
+	Queued   int            `json:"queued"`
+}
+
+// Total adds up bs.
+func Total(bs []Bucket) Totals {
+	t := Totals{ByResult: map[string]int{}}
+	for _, b := range bs {
+		for r, n := range b.Jobs.ByResult {
+			t.ByResult[r] += n
+		}
+		for _, h := range b.BoxHours.BySize {
+			t.BoxHours += h
+		}
+		for _, n := range b.Refusals.ByWhy {
+			t.Refused += n
+		}
+		t.Queued += b.Queued.Jobs
+	}
+	t.BoxHours = math.Round(t.BoxHours*100) / 100
+	return t
 }
 
 // Why a run was turned away with exit 75: RefusalBody.Why and the key of a
