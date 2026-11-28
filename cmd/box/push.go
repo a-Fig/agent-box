@@ -205,6 +205,7 @@ type jobLocator struct {
 	Endpoint     string `json:"endpoint,omitempty"`
 	TokenFile    string `json:"token_file,omitempty"`
 	Mode         string `json:"mode,omitempty"`
+	ControllerID string `json:"controller_id,omitempty"`
 }
 
 func locateJobHost(h fleetHost) *jobLocator {
@@ -218,6 +219,7 @@ func locateJobHost(h fleetHost) *jobLocator {
 		Endpoint:     h.Endpoint,
 		TokenFile:    h.TokenFile,
 		Mode:         h.Mode,
+		ControllerID: h.ControllerID,
 	}
 }
 
@@ -242,6 +244,7 @@ func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 		Endpoint:     rec.Host.Endpoint,
 		TokenFile:    rec.Host.TokenFile,
 		Mode:         rec.Host.Mode,
+		ControllerID: rec.Host.ControllerID,
 	}
 	tag, err := jobHostTag(host)
 	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
