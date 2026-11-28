@@ -242,7 +242,7 @@ func TestSetupModalDryRun(t *testing.T) {
 		filepath.Join(dir, "modal-token.json") + " (mode 0600)",
 		`PUT <URL from modal deploy>/v1/config {"capUSD":25,"maxConcurrent":4,"maxTimeoutSec":3600,"mode":"sandbox"}`,
 		`+       "kind": "modal",`, `+       "priority": -1,`, `+       "mode": "sandbox",`,
-		`+       "remote": "pc",`, `+       "project": "agents",`,
+		`+       "remote": "pc"`, `+       "project": "agents",`,
 		"workspace spend limit",
 	} {
 		if !strings.Contains(s, want) {
