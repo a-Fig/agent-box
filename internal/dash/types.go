@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Modes a machine can be in, as the tray writes user.agent-box.mode.
@@ -81,10 +83,10 @@ type Machine struct {
 	WSLMemory     int64        `json:"wslMemory"` // bytes the distro's VM holds now
 	Boxd          *Version     `json:"boxd"`      // the boxd serving this; null if its build has no commit
 	Tray          *Version     `json:"tray"`      // the enforcer's build, user.agent-box.tray-version; null: unknown
-	Config        Config       `json:"config"`    // how this host is set up, for the Settings page
+	Config        Config       `json:"config"`    // how this host is set up, for its host page
 }
 
-// Config is how a host is set up, read-only: what the Settings page shows of it. The sizes and
+// Config is how a host is set up, read-only: what its host page shows of it. The sizes and
 // durations are boxd's own constants, the caps are Machine.Caps. Nothing here is written from the
 // page: the tray owns the mode and its CPUs, the project holds the caps.
 type Config struct {
@@ -511,6 +513,24 @@ type JobEndedBody struct {
 // set until the tray applies it.
 type ModeBody struct {
 	Mode string `json:"mode"`
+}
+
+// NameBody is POST /api/machine/name: the host's new name on the page (#291). Empty goes back
+// to the name boxd's config gives it. The reply is the Machine.
+type NameBody struct {
+	Name string `json:"name"`
+}
+
+// MaxMachineName is the most characters a host's name may have.
+const MaxMachineName = 40
+
+// ValidMachineName says whether a trimmed name may be a host's: at most MaxMachineName characters,
+// with no control characters (one line) and no format characters, such as a bidi override that
+// would turn the text around it backwards wherever the name is shown.
+func ValidMachineName(name string) bool {
+	return utf8.RuneCountInString(name) <= MaxMachineName && !strings.ContainsFunc(name, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	})
 }
 
 // BoxBody names which box a control is for: the box of the path's name made at CreatedAt.

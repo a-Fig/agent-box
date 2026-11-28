@@ -639,6 +639,9 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 			m.Tray = &tv
 		}
 	}
+	if v := cfg[ProjectNameKey]; v != "" {
+		m.Name = v
+	}
 	if v := cfg[mode.ProjectModeRequestKey]; v != "" {
 		var r dash.ModeRequest
 		if json.Unmarshal([]byte(v), &r) == nil && r.Mode != "" {

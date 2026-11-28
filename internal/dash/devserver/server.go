@@ -30,6 +30,7 @@ type server struct {
 	plan    map[string]time.Time // when each running job will end
 	tick    int
 	applyAt time.Time // when the tray picks up a mode request
+	name    string    // the fixture's own name for the machine, which a rename to "" goes back to
 }
 
 // newest orders finished jobs as /api/jobs pages them: by startedAt, then key, newest first.
@@ -353,6 +354,31 @@ func (s *server) handleMode(r *http.Request, body []byte) (int, any, error) {
 	}
 	s.publish(dash.EventMachine, *m)
 	return http.StatusAccepted, *m, nil
+}
+
+// handleName renames the machine, as boxd's POST /api/machine/name: a label on the page, checked
+// as boxd checks it, and "" goes back to the fixture's name.
+func (s *server) handleName(r *http.Request, body []byte) (int, any, error) {
+	var b dash.NameBody
+	if err := decode(body, &b); err != nil {
+		return 0, nil, err
+	}
+	name := strings.TrimSpace(b.Name)
+	if !dash.ValidMachineName(name) {
+		return 0, nil, fail(http.StatusBadRequest, dash.CodeBadRequest, "a name is at most %d characters, on one line", dash.MaxMachineName)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.machine()
+	if s.name == "" {
+		s.name = m.Name
+	}
+	m.Name = name
+	if name == "" {
+		m.Name = s.name
+	}
+	s.publish(dash.EventMachine, *m)
+	return http.StatusOK, *m, nil
 }
 
 func (s *server) handleCancel(r *http.Request, body []byte) (int, any, error) {

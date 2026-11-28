@@ -80,6 +80,11 @@ An issue's labels say where it stands without opening it.
 
 - **One kind**: `bug`, `Feature`, `Task` (ops, docs, housekeeping) or `question`, which is an
   open design question rather than a missing answer.
+- **One or two areas** (`area: <name>`): `area: cli` (`box` CLI, digest, git sync), `area: mcp`
+  (MCP tools, notifications, harness integration), `area: boxd` (daemon, queue, reaper, sizing,
+  lifecycle), `area: dashboard` (web UI), `area: tray` (Windows tray, modes, gaming yield, WSL
+  memory), `area: fleet` (multi-host, guest hosts, cloud backends), `area: provision` (setup,
+  WSL2/Incus, base image, installers), `area: docs` (docs, site, guides, benchmarks).
 - **One priority**, from whichever of two scales says more about it: when (`priority: now`,
   `soon`, `future`, `maybe never`) or how much it matters (`priority: low`, `med`, `high`,
   `xhigh`). A closed issue keeps the priority it had.
