@@ -11,119 +11,11 @@ import {
 export const DAILY_LIMIT = 100000;
 export const STALE_MS = 180 * 1000;
 
+const RFC3339_RE = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
-function skipWs(src, i) {
-  while (i < src.length) {
-    const c = src.charCodeAt(i);
-    if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return i;
-}
-
-function scanStringEnd(src, start) {
-  let i = start + 1;
-  while (i < src.length) {
-    const c = src.charCodeAt(i);
-    if (c === 0x22) return i + 1;
-    if (c === 0x5c) {
-      if (i + 1 >= src.length) throw new SyntaxError("Unterminated escape");
-      i += 2;
-      continue;
-    }
-    i++;
-  }
-  throw new SyntaxError("Unterminated string");
-}
-
-function scanCompositeEnd(src, start) {
-  const stack = [src.charCodeAt(start) === 0x7b ? 0x7d : 0x5d];
-  let i = start + 1;
-  while (i < src.length) {
-    const c = src.charCodeAt(i);
-    if (c === 0x22) {
-      i = scanStringEnd(src, i);
-      continue;
-    }
-    if (c === 0x7b) {
-      stack.push(0x7d);
-    } else if (c === 0x5b) {
-      stack.push(0x5d);
-    } else if (c === 0x7d || c === 0x5d) {
-      if (stack.pop() !== c) throw new SyntaxError("Mismatched bracket");
-      if (stack.length === 0) return i + 1;
-    }
-    i++;
-  }
-  throw new SyntaxError("Unterminated JSON container");
-}
-
-function scanValueEnd(src, start) {
-  if (start >= src.length) throw new SyntaxError("Unexpected end of JSON");
-  const c = src.charCodeAt(start);
-  if (c === 0x22) return scanStringEnd(src, start);
-  if (c === 0x7b || c === 0x5b) return scanCompositeEnd(src, start);
-  let i = start;
-  while (i < src.length) {
-    const ch = src.charCodeAt(i);
-    if (ch === 0x2c || ch === 0x7d || ch === 0x5d || ch === 0x20 || ch === 0x09 || ch === 0x0a || ch === 0x0d) {
-      break;
-    }
-    i++;
-  }
-  if (i === start) throw new SyntaxError("Missing JSON value");
-  return i;
-}
-
-/**
- * Parses top-level PUT /v1/hosts/{id}/state envelope without parsing the `state` object.
- * @param {string} raw
- * @returns {{ id?: unknown, name?: unknown, seq?: unknown, sentAt?: unknown, stateRaw?: string }}
- */
-export function parseStateEnvelope(raw) {
-  let pos = skipWs(raw, 0);
-  if (raw.charCodeAt(pos) !== 0x7b) throw new SyntaxError("Expected JSON object");
-  pos = skipWs(raw, pos + 1);
-  const out = {};
-  if (raw.charCodeAt(pos) === 0x7d) {
-    pos = skipWs(raw, pos + 1);
-    if (pos !== raw.length) throw new SyntaxError("Trailing JSON content");
-    return out;
-  }
-  while (true) {
-    if (raw.charCodeAt(pos) !== 0x22) throw new SyntaxError("Expected string key");
-    const keyEnd = scanStringEnd(raw, pos);
-    const key = JSON.parse(raw.slice(pos, keyEnd));
-    pos = skipWs(raw, keyEnd);
-    if (raw.charCodeAt(pos) !== 0x3a) throw new SyntaxError("Expected ':'");
-    const valStart = skipWs(raw, pos + 1);
-    const valEnd = scanValueEnd(raw, valStart);
-    if (key === "state") {
-      if (raw.charCodeAt(valStart) !== 0x7b) {
-        throw new SyntaxError("Expected state object");
-      }
-      out.stateRaw = raw.slice(valStart, valEnd);
-    } else if (key === "id" || key === "name" || key === "seq" || key === "sentAt") {
-      out[key] = JSON.parse(raw.slice(valStart, valEnd));
-    }
-    pos = skipWs(raw, valEnd);
-    const sep = raw.charCodeAt(pos);
-    if (sep === 0x2c) {
-      pos = skipWs(raw, pos + 1);
-      continue;
-    }
-    if (sep === 0x7d) {
-      pos = skipWs(raw, pos + 1);
-      break;
-    }
-    throw new SyntaxError("Expected ',' or '}'");
-  }
-  if (pos !== raw.length) throw new SyntaxError("Trailing JSON content");
-  return out;
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export class Fleet {
@@ -191,8 +83,7 @@ export class Fleet {
     }
 
     const expectedRole = matched.route === "host_state" ? "host" : "client";
-    const callerRole = request.headers.get("x-controller-role");
-    if (callerRole !== null && callerRole !== expectedRole) {
+    if (request.headers.get("x-controller-role") !== expectedRole) {
       return jsonError(403, "forbidden", "Token lacks permission for this endpoint.");
     }
 
@@ -233,25 +124,24 @@ export class Fleet {
         return jsonError(413, "too_large", "Request body exceeds the 262144-byte limit.");
       }
 
-      let raw;
-      let envBody;
+      let body;
       try {
-        raw = utf8Decoder.decode(limited.bytes);
-        envBody = parseStateEnvelope(raw);
+        body = JSON.parse(utf8Decoder.decode(limited.bytes));
       } catch {
         return jsonError(400, "bad_request", "Malformed JSON request body.");
       }
 
       if (
-        envBody.id !== hostId ||
-        typeof envBody.name !== "string" ||
-        envBody.name.length === 0 ||
-        typeof envBody.seq !== "number" ||
-        !Number.isInteger(envBody.seq) ||
-        envBody.seq < 0 ||
-        typeof envBody.sentAt !== "string" ||
-        Number.isNaN(Date.parse(envBody.sentAt)) ||
-        typeof envBody.stateRaw !== "string"
+        !isPlainObject(body) ||
+        body.id !== hostId ||
+        typeof body.name !== "string" ||
+        body.name.length === 0 ||
+        !Number.isSafeInteger(body.seq) ||
+        body.seq < 0 ||
+        typeof body.sentAt !== "string" ||
+        !RFC3339_RE.test(body.sentAt) ||
+        !Number.isFinite(Date.parse(body.sentAt)) ||
+        !isPlainObject(body.state)
       ) {
         return jsonError(400, "bad_request", "Missing or invalid state envelope fields.");
       }
@@ -265,9 +155,9 @@ export class Fleet {
            state = excluded.state,
            seen_at = excluded.seen_at`,
         hostId,
-        envBody.name,
-        envBody.seq,
-        envBody.stateRaw,
+        body.name,
+        body.seq,
+        JSON.stringify(body.state),
         nowIso
       );
       return new Response(null, { status: 204 });

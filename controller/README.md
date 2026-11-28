@@ -5,7 +5,7 @@ Cloudflare Worker + SQLite Durable Object implementing the [`controller-v1`](../
 ## Layout
 
 - `src/index.js`: Worker entrypoint (`GET /v1/health`, bearer auth, route/ID/body-size validation, raw streaming to `FLEET` Durable Object).
-- `src/fleet.js`: `Fleet` SQLite Durable Object (`hosts` and `usage` tables, zero-parse `state` storage and embedding).
+- `src/fleet.js`: `Fleet` SQLite Durable Object (`hosts` and `usage` tables, validates the 256 KiB-capped payload once via `JSON.parse`, stores serialized `state`, and embeds it directly on reads).
 - `wrangler.jsonc`: Worker and `FLEET` SQLite Durable Object migration config (no D1, KV, or R2).
 
 ## Local Tests
