@@ -16,17 +16,21 @@ import (
 const fleetProbeTimeout = 5 * time.Second
 
 type fleetHostStatus struct {
-	Name      string     `json:"name"`
-	Remote    string     `json:"remote"`
-	Project   string     `json:"project"`
-	Reachable bool       `json:"reachable"`
-	Available bool       `json:"available"`
-	Error     string     `json:"error,omitempty"`
-	Mode      string     `json:"mode"`
-	Room      string     `json:"room"`
-	Sizes     []SizeRoom `json:"sizes"`
-	GPU       string     `json:"gpu"`
-	Queued    *int       `json:"queued,omitempty"`
+	Name           string      `json:"name"`
+	Remote         string      `json:"remote"`
+	Project        string      `json:"project"`
+	Reachable      bool        `json:"reachable"`
+	Available      bool        `json:"available"`
+	Error          string      `json:"error,omitempty"`
+	Mode           string      `json:"mode"`
+	Room           string      `json:"room"`
+	Sizes          []SizeRoom  `json:"sizes"`
+	GPU            string      `json:"gpu"`
+	Queued         *int        `json:"queued,omitempty"`
+	LastSeen       *time.Time  `json:"lastSeen,omitempty"`
+	LastState      *dash.State `json:"lastState,omitempty"`
+	LastStateStale bool        `json:"lastStateStale,omitempty"`
+	now            time.Time
 }
 
 // fleetStatus reports fleet capacity while retaining the default host's
@@ -37,7 +41,9 @@ func (a *App) fleetStatus(ctx context.Context, dir string, listOnly bool) (Statu
 		return StatusReport{}, err
 	}
 	if len(hosts) == 0 && !listOnly {
-		return a.Status(ctx, dir), nil
+		s := a.Status(ctx, dir)
+		a.enrichControllerStatus(ctx, nil, nil, &s, -1, false)
+		return s, nil
 	}
 	visible := max(len(hosts), 1)
 	selected := -1
@@ -51,10 +57,14 @@ func (a *App) fleetStatus(ctx context.Context, dir string, listOnly bool) (Statu
 		selected = len(hosts)
 		hosts = append(hosts, fleetHost{Name: a.Remote, Remote: a.Remote, Project: a.Project})
 	}
-	return a.probeFleet(ctx, dir, hosts, selected, visible), nil
+	return a.probeFleetWithMode(ctx, dir, hosts, selected, visible, listOnly), nil
 }
 
 func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, selected, visible int) StatusReport {
+	return a.probeFleetWithMode(ctx, dir, hosts, selected, visible, false)
+}
+
+func (a *App) probeFleetWithMode(ctx context.Context, dir string, hosts []fleetHost, selected, visible int, listOnly bool) StatusReport {
 	var wg sync.WaitGroup
 	var current StatusReport
 	var warnings []string
@@ -100,6 +110,7 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 	for _, message := range warnings {
 		a.warn(message)
 	}
+	a.enrichControllerStatus(ctx, hosts, rows, &current, selected, listOnly)
 	current.Hosts = rows
 	return current
 }
@@ -158,7 +169,11 @@ func writeFleet(w io.Writer, hosts []fleetHostStatus) {
 	for _, host := range hosts {
 		fmt.Fprintf(w, "  %s (%s/%s)", host.Name, host.Remote, host.Project)
 		if !host.Reachable {
-			fmt.Fprintf(w, ": unavailable (%s)\n", host.Error)
+			if host.LastSeen != nil && host.LastState != nil {
+				fmt.Fprintf(w, ": %s\n", formatControllerCachedSummary(*host.LastSeen, host.LastStateStale, *host.LastState, host.now))
+			} else {
+				fmt.Fprintf(w, ": unavailable (%s)\n", host.Error)
+			}
 			continue
 		}
 		mode, queue := host.Mode, "unknown"

@@ -125,6 +125,13 @@ With a host registry, `box run` and `box_run` prefer a host that can start witho
 
 When capacity blocks a run, the CLI and MCP report the limiting resource and whether it queued or was refused. A suggested smaller size is an estimate for the selected host. A queued run keeps the requested size and GPU requirement.
 
+### Optional fleet controller (offline status fallback)
+
+To show last-known host state when a host is unreachable, configure an optional `controller-v1` server:
+
+- **Host (`boxd.json`):** add `"controller": {"url": "https://...", "token_file": "/etc/agent-box/controller-host.token", "id": "pc"}` (`id` defaults to `machineId` sanitized to `^[a-z0-9-]{1,40}$`). Missing or unreadable `token_file` disables publishing with a warning without blocking `boxd`.
+- **Client (`agent-box/controller.json`):** add `{"url": "https://...", "token_file": "/path/to/client.token"}` (`https://`, or loopback `http://` for tests). In `hosts.json`, set `"controller_id"` on a host if its controller ID differs from `"name"`. When all hosts are reachable, `box status` does not query `/v1/hosts`.
+
 ## Website previews
 
 Run the preview command from a trusted checkout of `main`, with `gh` and Wrangler signed in. Pass the PR number while staying on `main`. The command prints a public preview link and a link pinned to this deployment.

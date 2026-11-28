@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/a-Fig/agent-box/internal/controller"
 )
 
 type fleetHost struct {
@@ -14,6 +16,7 @@ type fleetHost struct {
 	Remote       string `json:"remote"`
 	Project      string `json:"project"`
 	DashboardURL string `json:"dashboard_url"`
+	ControllerID string `json:"controller_id,omitempty"`
 }
 
 // configuredHosts reads agent-box/hosts.json in the user's config directory.
@@ -44,8 +47,12 @@ func (a *App) configuredHosts() ([]fleetHost, error) {
 		host := &config.Hosts[i]
 		host.Name = strings.TrimSpace(host.Name)
 		host.Remote = strings.TrimSpace(host.Remote)
+		host.ControllerID = strings.TrimSpace(host.ControllerID)
 		if host.Name == "" || host.Remote == "" {
 			return nil, fmt.Errorf("%s: host %d requires a name and remote", path, i+1)
+		}
+		if host.ControllerID != "" && !controller.ValidHostID(host.ControllerID) {
+			return nil, fmt.Errorf("%s: host %d controller_id %q must match ^[a-z0-9-]{1,40}$", path, i+1, host.ControllerID)
 		}
 		if names[host.Name] {
 			return nil, fmt.Errorf("%s: duplicate host name %q", path, host.Name)

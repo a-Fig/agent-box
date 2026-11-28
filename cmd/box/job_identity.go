@@ -87,6 +87,9 @@ func resolveJobHost(hostTag string, defaultHost fleetHost, hosts []fleetHost) (f
 		} else if host.DashboardURL != "" && strings.TrimRight(match.DashboardURL, "/") != strings.TrimRight(host.DashboardURL, "/") {
 			return fleetHost{}, fmt.Errorf("conflicting dashboard URLs for job host %s/%s", host.Remote, host.Project)
 		}
+		if match.ControllerID == "" {
+			match.ControllerID = host.ControllerID
+		}
 	}
 	if match.Remote != "" {
 		return match, nil
