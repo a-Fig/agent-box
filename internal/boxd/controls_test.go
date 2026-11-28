@@ -367,3 +367,47 @@ func TestMachineConfigGPUAndCaps(t *testing.T) {
 		}
 	}
 }
+
+// A host's name is a label the page sets (#291): written to one project key, read back on every
+// poll, and unset to go back to the config's name.
+func TestRenameMachine(t *testing.T) {
+	r := newQueueRig(t, map[string]string{"user.agent-box.mode": "full"})
+	if code, b := r.post("/api/machine/name", `{"name":"`+strings.Repeat("x", dash.MaxMachineName+1)+`"}`); code != 400 {
+		t.Fatalf("too long: %d %s", code, b)
+	}
+	if code, b := r.post("/api/machine/name", `{"name":"two\nlines"}`); code != 400 {
+		t.Fatalf("control character: %d %s", code, b)
+	}
+	code, b := r.post("/api/machine/name", `{"name":"  Tower  "}`)
+	var m dash.Machine
+	json.Unmarshal(b, &m)
+	if code != 200 || m.Name != "Tower" || m.ID != r.w.MachineID {
+		t.Fatalf("rename: %d %s", code, b)
+	}
+	if last := r.f.cli[len(r.f.cli)-1]; last != "project set agents user.agent-box.name=Tower" {
+		t.Fatalf("rename ran %s", last)
+	}
+	// What the project holds is the name on every poll.
+	r.f.set(func() { r.f.cfg[ProjectNameKey] = "Tower" })
+	r.poll()
+	if got := r.w.State().Machines[0].Name; got != "Tower" {
+		t.Fatalf("polled name %q", got)
+	}
+	code, b = r.post("/api/machine/name", `{"name":""}`)
+	json.Unmarshal(b, &m)
+	if code != 200 || m.Name != r.w.MachineName {
+		t.Fatalf("clear: %d %s", code, b)
+	}
+	if last := r.f.cli[len(r.f.cli)-1]; last != "project unset agents user.agent-box.name" {
+		t.Fatalf("clear ran %s", last)
+	}
+	var acts []string
+	for _, rec := range readEvents(t, r.dir+"/history") {
+		if rec.Type == recControl {
+			acts = append(acts, rec.Control.Action)
+		}
+	}
+	if strings.Join(acts, ",") != `rename "Tower",rename ""` {
+		t.Fatalf("controls recorded: %v", acts)
+	}
+}

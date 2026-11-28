@@ -510,6 +510,15 @@ type ModeBody struct {
 	Mode string `json:"mode"`
 }
 
+// NameBody is POST /api/machine/name: the host's new name on the page (#291). Empty goes back
+// to the name boxd's config gives it. The reply is the Machine.
+type NameBody struct {
+	Name string `json:"name"`
+}
+
+// MaxMachineName is the most characters a host's name may have.
+const MaxMachineName = 40
+
 // BoxBody names which box a control is for: the box of the path's name made at CreatedAt.
 // Names are reused, so a page that saw an older box of the name must not act on a newer one;
 // boxd compares CreatedAt with the box's own and answers 409 CodeGone when they differ.

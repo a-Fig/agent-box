@@ -5,12 +5,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/jobrun"
@@ -25,6 +29,7 @@ const controlTimeout = 20 * time.Second
 
 func (s *Server) controlRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/mode", control(http.HandlerFunc(s.mode)))
+	mux.Handle("POST /api/machine/name", control(http.HandlerFunc(s.rename)))
 	mux.Handle("POST /api/jobs/{key}/cancel", control(http.HandlerFunc(s.cancelJob)))
 	mux.Handle("POST /api/boxes/{name}/delete", control(http.HandlerFunc(s.deleteBox)))
 	mux.Handle("POST /api/boxes/{name}/extend", control(http.HandlerFunc(s.extendBox)))
@@ -188,6 +193,26 @@ func (s *Server) mode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, m)
 }
 
+// rename names the host on the page (#291). Agents and box address it by its ID, so a name is
+// only a label.
+func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
+	var b dash.NameBody
+	if !decode(w, r, &b) {
+		return
+	}
+	name := strings.TrimSpace(b.Name)
+	if utf8.RuneCountInString(name) > dash.MaxMachineName || strings.ContainsFunc(name, unicode.IsControl) {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, fmt.Sprintf("a name is at most %d characters, on one line", dash.MaxMachineName))
+		return
+	}
+	m, err := s.W.RenameMachine(r.Context(), name, s.device(r))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, dash.CodeIncus, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	j, err := s.W.CancelJob(r.Context(), r.PathValue("key"), s.device(r))
 	writeControl(w, err, func() { writeJSON(w, 200, j) })
@@ -279,6 +304,36 @@ func (w *Watcher) RequestMode(ctx context.Context, req dash.ModeRequest) (dash.M
 	defer w.mu.Unlock()
 	w.record(record{Type: recControl, At: req.At, Control: &controlRec{Action: "mode " + req.Mode, Target: w.MachineID, By: req.By}})
 	w.machine.ModeRequested = &req
+	w.emit(dash.Event{Name: dash.EventMachine, Data: w.machine})
+	return w.machine, nil
+}
+
+// ProjectNameKey is the host's name on the page, set from the page (#291). Unset, the page shows
+// the config's machineName.
+const ProjectNameKey = "user.agent-box.name"
+
+// RenameMachine writes the host's name, or unsets it for "", and announces the machine with it.
+func (w *Watcher) RenameMachine(ctx context.Context, name, by string) (dash.Machine, error) {
+	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
+	defer cancel()
+	args := []string{"project", "unset", mode.Project, ProjectNameKey}
+	if name != "" {
+		args = []string{"project", "set", mode.Project, ProjectNameKey + "=" + name}
+	}
+	// The tray writes the project's keys every few seconds (jobrun.RetryETag).
+	if err := jobrun.RetryETag(ctx, func() error {
+		_, err := w.Incus.CLI(ctx, "", args...)
+		return err
+	}); err != nil {
+		return dash.Machine{}, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.record(record{Type: recControl, At: w.Now().UTC(), Control: &controlRec{Action: "rename " + strconv.Quote(name), Target: w.MachineID, By: by}})
+	w.machine.Name = name
+	if name == "" {
+		w.machine.Name = w.MachineName
+	}
 	w.emit(dash.Event{Name: dash.EventMachine, Data: w.machine})
 	return w.machine, nil
 }

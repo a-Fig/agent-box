@@ -97,6 +97,7 @@ func (s *server) routes() http.Handler {
 	api("GET /api/jobs/{key}/log", s.handleLog)
 	api("GET /api/history", s.handleHistory)
 	api("POST /api/mode", s.control(s.handleMode))
+	api("POST /api/machine/name", s.control(s.handleName))
 	api("POST /api/jobs/{key}/cancel", s.control(s.handleCancel))
 	api("POST /api/boxes/{name}/delete", s.control(s.handleDelete))
 	api("POST /api/boxes/{name}/extend", s.control(s.handleExtend))

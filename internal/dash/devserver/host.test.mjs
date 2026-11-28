@@ -163,3 +163,35 @@ test("the foot's notice opens the host only once its builds are out of step past
   await notice.click();
   await page.getByRole("heading", { name: "Builds", exact: true }).waitFor();
 });
+
+test("a host is renamed from its page, and an empty name goes back to the host's own", async (t) => {
+  const { page, state } = await hostPage(t);
+  const m = state.machines[0];
+  let sent;
+  await page.route("**/api/machine/name", async (route) => {
+    sent = route.request().postDataJSON();
+    const name = sent.name.trim() || m.name;
+    await route.fulfill({ json: { ...m, name } });
+  });
+  await page.getByRole("button", { name: "Rename " + m.name }).click();
+  const field = page.getByRole("textbox", { name: "Host name" });
+  assert.equal(await field.evaluate((el) => el === document.activeElement), true);
+  await field.fill("Tower");
+  // A redraw while typing keeps the field, what is in it, and the focus.
+  await event(page, "machine", m);
+  assert.equal(await field.inputValue(), "Tower");
+  assert.equal(await field.evaluate((el) => el === document.activeElement), true);
+  await field.press("Enter");
+  await page.getByRole("heading", { name: "Tower", exact: true, level: 2 }).waitFor();
+  assert.deepEqual(sent, { name: "Tower" });
+  await page.locator(".side-host").filter({ hasText: "Tower" }).waitFor();
+
+  await page.getByRole("button", { name: "Rename Tower" }).click();
+  await field.fill("");
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("heading", { name: m.name, exact: true, level: 2 }).waitFor();
+
+  await page.getByRole("button", { name: "Rename " + m.name }).click();
+  await field.press("Escape");
+  assert.equal(await field.count(), 0);
+});
