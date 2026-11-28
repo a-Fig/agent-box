@@ -1,0 +1,8 @@
+{
+  "offset": 1842,
+  "data": "ok  \tgithub.com/acme/lantern/internal/store\t4.120s\nok  \tgithub.com/acme/lantern/internal/sync\t2.845s\nPASS\n",
+  "eof": true,
+  "paused": false,
+  "stopped": true,
+  "logBytes": 1842
+}
