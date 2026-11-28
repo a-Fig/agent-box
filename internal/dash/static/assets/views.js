@@ -4,6 +4,7 @@
 
 import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl } from "./dom.js";
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
+import { fleetLine } from "./use.js";
 import { hint, hideTip } from "./tip.js";
 
 export { overview, boxes, jobs, jobsHref, modeDot, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
@@ -751,7 +752,7 @@ const overview = {
         "div",
         { class: "page" },
         ms.flatMap(banners),
-        ms.length ? section("Fleet", ms.length > 1 ? plural(ms.length, "host") : null, ms.map((m) => machineCard(m, true))) : null,
+        ms.length ? section("Fleet", ms.length > 1 ? plural(ms.length, "host") : null, fleetLine(ms), ms.map((m) => machineCard(m, true))) : null,
         section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map((j) => runningRow(j)) : h("p", { class: "row-empty" }, "Nothing is running. Agents start jobs with box run; they show here as they start."))),
         q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes. One is made when an agent first runs something here."))),

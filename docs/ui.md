@@ -98,6 +98,9 @@ answers, the window goes to it (2026-11-24).
 **Overview**, the first screen, answering "what's happening on my PC right now":
 - each machine (today the PC; later guest hosts, #8): its mode (Full, Shared or My PC), a mode
   request waiting to be applied, what fits now (`box status`'s room), the caps against what is allocated, and whether the tray is alive;
+- the fleet in one line: its CPUs and memory, what boxes use of them, and what is open to agents
+  (#294). A host's page splits each of its CPUs, memory and GPU into Windows and apps, WSL, boxes,
+  promised to boxes, open to agents and kept for the owner;
 - each box: name, repo, size, state, memory and CPU use, and its expiry;
 - running jobs: command, agent, repo and branch, how long they have run, and a live log tail.
 
@@ -374,7 +377,11 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - **`Machine`:** `{id, name, reachable, mode, modeRequested: {mode, at, by} | null,
   trayLastSeen, enforcer: tray|headless|"", caps: {cpu,
   memory, instances, disk}, allocated: {cpu, memory, instances, disk}, room: {small, medium, large,
-  gpu}, wslMemory, boxd: Version | null, tray: Version | null}`.
+  gpu}, wslMemory, boxd: Version | null, tray: Version | null, host: HostUsage | null}`.
+  `HostUsage` is `{at, cpus, cpuPct, memTotal, memUsed, gpu: {name, memTotal, memUsed, pct} | absent}`:
+  the whole machine as Windows sees it, which boxd can't from inside WSL. The active enforcer reads
+  it (memory and CPU from Windows, the GPU from `nvidia-smi`) and writes it with its heartbeat to
+  `user.agent-box.host-usage`, every 30s (#294). `null` from a tray older than that.
   `Version` is `{commit, time, modified, tag, since}`, the commit and release a binary was built
   from (`internal/version`). `boxd` is the serving boxd's; `tray` is `user.agent-box.tray-version`,
   which the active enforcer writes when it starts enforcing. `since` is when boxd first saw that build

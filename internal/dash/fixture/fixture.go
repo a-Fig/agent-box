@@ -180,6 +180,9 @@ func newWorld(name string, now time.Time) *world {
 			WSLMemory: 3 << 30,
 			Boxd:      &v, Tray: &v,
 			Config: hostConfig(true),
+			// The whole PC as the tray reads it (#294): a 32-thread desktop with 32GiB and a 10GiB GPU.
+			Host: &dash.HostUsage{At: seen, CPUs: 32, CPUPct: 38, MemTotal: 32 << 30, MemUsed: 17 << 30,
+				GPU: &dash.GPUUsage{Name: "NVIDIA GeForce RTX 3080", MemTotal: 10 << 30, MemUsed: 1800 << 20, Pct: 6}},
 		},
 		logs:  map[string]string{},
 		since: now.Add(-24 * time.Hour),
@@ -480,6 +483,15 @@ func (w *world) finish(name, about string) Scenario {
 		used += b.MemUsed
 	}
 	m.WSLMemory = max(m.WSLMemory, used+900<<20)
+	if m.Host != nil {
+		// Windows counts the WSL VM in its own use: the owner's apps take 11GiB beside it.
+		h := *m.Host
+		h.MemUsed = m.WSLMemory + 11<<30
+		if m.TrayLastSeen != nil {
+			h.At = *m.TrayLastSeen // the enforcer reads it with its heartbeat
+		}
+		m.Host = &h
+	}
 
 	var live, queue, done []dash.Job
 	for _, j := range w.jobs {
