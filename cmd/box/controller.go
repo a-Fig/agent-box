@@ -73,7 +73,13 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (a *App) controllerClient() *controller.Client {
 	cfg, token, err := configuredController()
-	if err != nil || cfg == nil {
+	if err != nil {
+		if a.Warn != nil || a.Err != nil {
+			a.warn(fmt.Sprintf("box: controller config: %v", err))
+		}
+		return nil
+	}
+	if cfg == nil {
 		return nil
 	}
 	hc := &http.Client{Timeout: controllerTimeout}
@@ -100,7 +106,7 @@ func (a *App) enrichControllerStatus(ctx context.Context, hosts []fleetHost, row
 			break
 		}
 	}
-	if !anyUnreachable && listOnly {
+	if !anyUnreachable {
 		return
 	}
 
@@ -113,11 +119,9 @@ func (a *App) enrichControllerStatus(ctx context.Context, hosts []fleetHost, row
 	var usageErr error
 
 	var wg sync.WaitGroup
-	if anyUnreachable {
-		wg.Go(func() {
-			hostsResp, hostsErr = client.Hosts(cctx)
-		})
-	}
+	wg.Go(func() {
+		hostsResp, hostsErr = client.Hosts(cctx)
+	})
 	if !listOnly && current != nil {
 		wg.Go(func() {
 			usageResp, usageErr = client.Usage(cctx)

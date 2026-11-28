@@ -68,18 +68,15 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Fatal("bad JSON accepted")
 	}
 
-	// Optional controller defaults and validation.
+	// Optional controller defaults without failing LoadConfig on controller typos
+	// (so boxd still boots and NewPublisherFromConfig warns and skips).
 	os.WriteFile(p, []byte(`{"machineId":"Gaming_PC","controller":{"url":"https://ctrl.example.com","token_file":"/etc/agent-box/ctrl.token"}}`), 0o644)
 	c, err = LoadConfig(p)
 	if err != nil || c.Controller == nil || c.Controller.ID != "gaming-pc" {
 		t.Fatalf("controller config defaults = %+v, %v", c.Controller, err)
 	}
-	os.WriteFile(p, []byte(`{"controller":{"url":"http://ctrl.example.com"}}`), 0o644)
-	if _, err := LoadConfig(p); err == nil {
-		t.Fatal("non-loopback http controller.url accepted")
-	}
-	os.WriteFile(p, []byte(`{"controller":{"url":"https://ctrl.example.com","id":"BAD_ID"}}`), 0o644)
-	if _, err := LoadConfig(p); err == nil {
-		t.Fatal("invalid controller.id accepted")
+	os.WriteFile(p, []byte(`{"controller":{"url":"http://ctrl.example.com","id":"BAD_ID"}}`), 0o644)
+	if c, err := LoadConfig(p); err != nil || c.Controller == nil || c.Controller.ID != "BAD_ID" {
+		t.Fatalf("LoadConfig with controller typo = %+v, %v", c.Controller, err)
 	}
 }

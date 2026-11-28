@@ -162,9 +162,32 @@ func TestNewPublisherFromConfig(t *testing.T) {
 		t.Fatalf("empty token_file = %v, logs=%v", pub, logs)
 	}
 
-	// Valid token_file returns configured Publisher with sanitized host ID.
+	// Invalid controller.url or controller.id warns and returns nil so boxd still boots.
 	valid := filepath.Join(t.TempDir(), "host.token")
 	os.WriteFile(valid, []byte("secret-token\n"), 0o600)
+	logs = nil
+	pub = NewPublisherFromConfig(Config{
+		Controller: &ControllerConfig{
+			URL:       "http://ctrl.example.com",
+			TokenFile: valid,
+		},
+	}, w, logf)
+	if pub != nil || len(logs) != 1 || !strings.Contains(logs[0], "controller.url") {
+		t.Fatalf("invalid controller.url = %v, logs=%v", pub, logs)
+	}
+	logs = nil
+	pub = NewPublisherFromConfig(Config{
+		Controller: &ControllerConfig{
+			URL:       "https://ctrl.example.com",
+			TokenFile: valid,
+			ID:        "BAD_ID",
+		},
+	}, w, logf)
+	if pub != nil || len(logs) != 1 || !strings.Contains(logs[0], "controller.id") {
+		t.Fatalf("invalid controller.id = %v, logs=%v", pub, logs)
+	}
+
+	// Valid token_file returns configured Publisher with sanitized host ID.
 	logs = nil
 	pub = NewPublisherFromConfig(Config{
 		MachineID:   "Gaming_PC",

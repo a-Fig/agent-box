@@ -82,15 +82,8 @@ func LoadConfig(path string) (Config, error) {
 		c.Controller.ID = strings.TrimSpace(c.Controller.ID)
 		if c.Controller.URL == "" && c.Controller.TokenFile == "" && c.Controller.ID == "" {
 			c.Controller = nil
-		} else if c.Controller.URL != "" {
-			if !controller.ValidControllerURL(c.Controller.URL) {
-				return c, fmt.Errorf("%s: controller.url must be https:// or loopback http://", path)
-			}
-			if c.Controller.ID == "" {
-				c.Controller.ID = controller.SanitizeHostID(c.MachineID)
-			} else if !controller.ValidHostID(c.Controller.ID) {
-				return c, fmt.Errorf("%s: controller.id %q must match ^[a-z0-9-]{1,40}$", path, c.Controller.ID)
-			}
+		} else if c.Controller.URL != "" && c.Controller.ID == "" {
+			c.Controller.ID = controller.SanitizeHostID(c.MachineID)
 		}
 	}
 	return c, nil

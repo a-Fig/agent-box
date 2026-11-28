@@ -35,9 +35,10 @@ type Publisher struct {
 	seq int64
 }
 
-// NewPublisherFromConfig builds a Publisher when cfg.Controller is configured
+// NewPublisherFromConfig builds a Publisher when cfg.Controller is valid
 // and its token_file can be read. Unconfigured controllers return nil silently;
-// missing or unreadable token files log a warning and return nil so boxd still boots.
+// invalid controller settings or missing/unreadable token files log a warning
+// and return nil so boxd never fails to boot.
 func NewPublisherFromConfig(cfg Config, w *Watcher, logf func(string, ...any)) *Publisher {
 	if cfg.Controller == nil || cfg.Controller.URL == "" {
 		return nil
@@ -46,6 +47,17 @@ func NewPublisherFromConfig(cfg Config, w *Watcher, logf func(string, ...any)) *
 		if logf != nil {
 			logf(format, args...)
 		}
+	}
+	if !controller.ValidControllerURL(cfg.Controller.URL) {
+		log("boxd: WARNING: controller.url must be https:// or loopback http://; publisher disabled")
+		return nil
+	}
+	hostID := strings.TrimSpace(cfg.Controller.ID)
+	if hostID == "" {
+		hostID = controller.SanitizeHostID(cfg.MachineID)
+	} else if !controller.ValidHostID(hostID) {
+		log("boxd: WARNING: controller.id %q must match ^[a-z0-9-]{1,40}$; publisher disabled", hostID)
+		return nil
 	}
 	if cfg.Controller.TokenFile == "" {
 		log("boxd: WARNING: controller configured without token_file; publisher disabled")
@@ -60,10 +72,6 @@ func NewPublisherFromConfig(cfg Config, w *Watcher, logf func(string, ...any)) *
 	if token == "" {
 		log("boxd: WARNING: controller token_file %s is empty; publisher disabled", cfg.Controller.TokenFile)
 		return nil
-	}
-	hostID := cfg.Controller.ID
-	if hostID == "" {
-		hostID = controller.SanitizeHostID(cfg.MachineID)
 	}
 	return &Publisher{
 		Watcher:  w,

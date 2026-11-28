@@ -126,7 +126,7 @@ func TestConfiguredControllerValidation(t *testing.T) {
 	}
 }
 
-func TestControllerReachableMakesZeroHostsCallsAndFormatsUsage(t *testing.T) {
+func TestControllerReachableMakesZeroControllerCalls(t *testing.T) {
 	now := time.Date(2026, 11, 27, 15, 50, 0, 0, time.UTC)
 	cc := &countedController{
 		handler: &controller.MemServer{
@@ -142,17 +142,105 @@ func TestControllerReachableMakesZeroHostsCallsAndFormatsUsage(t *testing.T) {
 
 	a, _ := testApp(&fakePC{t: t, mode: "shared"})
 	s, err := a.fleetStatus(context.Background(), "", false)
-	if err != nil || !s.Reachable || s.ControllerUsage == nil {
+	if err != nil || !s.Reachable || s.ControllerUsage != nil {
 		t.Fatalf("fleetStatus() = %+v, %v", s, err)
 	}
 	hostsCalls, usageCalls := cc.counts()
-	if hostsCalls != 0 || usageCalls != 1 {
-		t.Fatalf("controller calls = hosts:%d usage:%d, want hosts:0 usage:1", hostsCalls, usageCalls)
+	if hostsCalls != 0 || usageCalls != 0 {
+		t.Fatalf("controller calls = hosts:%d usage:%d, want hosts:0 usage:0", hostsCalls, usageCalls)
 	}
 	var out strings.Builder
 	writeStatus(&out, s)
-	if !strings.Contains(out.String(), "controller: 1 of 100,000 requests today") {
-		t.Fatalf("status output missing usage line:\n%s", out.String())
+	if strings.Contains(out.String(), "controller:") {
+		t.Fatalf("unexpected controller usage line when all hosts reachable:\n%s", out.String())
+	}
+}
+
+func TestControllerFetchesHostsAndUsageConcurrentlyWhenUnreachable(t *testing.T) {
+	now := time.Date(2026, 11, 27, 15, 45, 0, 0, time.UTC)
+	ms := &controller.MemServer{
+		HostToken:   "host-tok",
+		ClientToken: "client-tok",
+		Now:         func() time.Time { return now },
+	}
+
+	// Barrier proves /v1/hosts and /v1/usage execute concurrently: sequential
+	// calls would block on the barrier until context timeout.
+	bothArrived := make(chan struct{})
+	var arrivedMu sync.Mutex
+	seen := map[string]bool{}
+	barrierHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/hosts" || r.URL.Path == "/v1/usage" {
+			arrivedMu.Lock()
+			seen[r.URL.Path] = true
+			if seen["/v1/hosts"] && seen["/v1/usage"] {
+				select {
+				case <-bothArrived:
+				default:
+					close(bothArrived)
+				}
+			}
+			arrivedMu.Unlock()
+			select {
+			case <-bothArrived:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		ms.ServeHTTP(w, r)
+	})
+	srv := httptest.NewServer(barrierHandler)
+	defer srv.Close()
+
+	hostClient := &controller.Client{URL: srv.URL, Token: "host-tok"}
+	if err := hostClient.PutState(context.Background(), "pc", controller.PutStateRequest{
+		ID:     "pc",
+		Name:   "PC",
+		Seq:    1,
+		SentAt: now.Add(-5 * time.Minute),
+		State: dash.State{
+			Machines: []dash.Machine{{ID: "pc", Mode: dash.ModeShared}},
+			Now:      now.Add(-5 * time.Minute),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeControllerConfig(t, srv.URL, "client-tok")
+
+	a := newApp()
+	a.R = fleetTestRunner(func(_ context.Context, _ Cmd) (Result, error) {
+		return Result{Code: 1, Stderr: "connection refused"}, nil
+	})
+	s, err := a.fleetStatus(context.Background(), "", false)
+	if err != nil || s.Reachable || s.LastSeen == nil || s.ControllerUsage == nil {
+		t.Fatalf("concurrent unreachable fallback = %+v, err=%v", s, err)
+	}
+	var out strings.Builder
+	writeStatus(&out, s)
+	if !strings.Contains(out.String(), "requests today") {
+		t.Fatalf("missing controller usage line:\n%s", out.String())
+	}
+}
+
+func TestControllerBrokenConfigWarnsAndContinues(t *testing.T) {
+	dir := setTestConfigDir(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "controller.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var warnings []string
+	a, _ := testApp(&fakePC{t: t, mode: "shared"})
+	a.Warn = func(msg string) { warnings = append(warnings, msg) }
+	s, err := a.fleetStatus(context.Background(), "", false)
+	if err != nil || !s.Reachable {
+		t.Fatalf("fleetStatus() with broken controller.json = %+v, %v", s, err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "controller config") {
+		t.Fatalf("warnings = %v, want controller config warning", warnings)
 	}
 }
 
