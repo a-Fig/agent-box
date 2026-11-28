@@ -119,6 +119,26 @@ export function webhookTrigger(event, p) {
   return { ignored: `event ${event || "(none)"} not handled` };
 }
 
+/** The Check Run PATCH body for a claimed job's state. */
+function checkRunUpdate(row) {
+  if (row.state === "running") return { status: "in_progress", started_at: row.updated_at };
+  const r = row.result ? JSON.parse(row.result) : {};
+  const title =
+    row.state === "done"
+      ? "Passed"
+      : row.state === "cancelled"
+        ? "Cancelled"
+        : `Failed${r.exitCode != null ? ` (exit ${r.exitCode})` : ""}`;
+  const summary = (r.summary || `agent-box job ${row.id} ${row.state} on ${row.claimed_by}.`).slice(0, SUMMARY_MAX);
+  return {
+    status: "completed",
+    conclusion: CONCLUSIONS[row.state],
+    completed_at: row.updated_at,
+    ...(r.url ? { details_url: r.url } : {}),
+    output: { title, summary },
+  };
+}
+
 function jobView(row) {
   return {
     id: row.id,
@@ -245,8 +265,8 @@ export class CI {
       // only kind that is ever cloud-only.
       const prev = this.#sql
         .exec(
-          "SELECT pr, host_class FROM ci_jobs WHERE repo = ? AND sha = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-          t.repo,
+          "SELECT pr, host_class FROM ci_jobs WHERE LOWER(repo) = ? AND sha = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+          t.repo.toLowerCase(),
           t.sha
         )
         .toArray()[0];
@@ -285,10 +305,12 @@ export class CI {
     }
 
     // A push to a PR branch also fires pull_request.synchronize: one run per commit is enough.
+    // The check and the insert run with no await between, so concurrent deliveries can't both
+    // pass the check; the Check Run is created after the row exists.
     const existing = this.#sql
       .exec(
-        "SELECT id FROM ci_jobs WHERE repo = ? AND sha = ? AND state IN ('queued', 'running') LIMIT 1",
-        t.repo,
+        "SELECT id FROM ci_jobs WHERE LOWER(repo) = ? AND sha = ? AND state IN ('queued', 'running') LIMIT 1",
+        t.repo.toLowerCase(),
         t.sha
       )
       .toArray()[0];
@@ -296,6 +318,18 @@ export class CI {
 
     const nowIso = this.#nowIso();
     const id = crypto.randomUUID();
+    this.#sql.exec(
+      `INSERT INTO ci_jobs (id, repo, sha, pr, check_run_id, installation_id, host_class, state, claimed_by, result, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, 'queued', NULL, NULL, ?, ?)`,
+      id,
+      t.repo,
+      t.sha,
+      pr ?? null,
+      config.installationId,
+      hostClass,
+      nowIso,
+      nowIso
+    );
     let checkRunId = null;
     if (this.#github) {
       try {
@@ -310,19 +344,13 @@ export class CI {
         console.error(`ci: creating check run for ${t.repo}@${t.sha} failed:`, err);
       }
     }
-    this.#sql.exec(
-      `INSERT INTO ci_jobs (id, repo, sha, pr, check_run_id, installation_id, host_class, state, claimed_by, result, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, NULL, ?, ?)`,
-      id,
-      t.repo,
-      t.sha,
-      pr ?? null,
-      checkRunId,
-      config.installationId,
-      hostClass,
-      nowIso,
-      nowIso
-    );
+    if (checkRunId !== null) {
+      this.#sql.exec("UPDATE ci_jobs SET check_run_id = ? WHERE id = ?", checkRunId, id);
+      // A worker may have claimed (or even finished) the job while the Check Run was being
+      // created; those updates were skipped for want of an ID, so catch the Check Run up.
+      const row = this.#sql.exec("SELECT * FROM ci_jobs WHERE id = ?", id).toArray()[0];
+      if (row && row.state !== "queued") await this.#updateCheckRun(row);
+    }
     return jsonResponse(200, { ok: true, queued: true, job: { id, hostClass, checkRunId } });
   }
 
@@ -347,10 +375,11 @@ export class CI {
     return jsonResponse(200, { ok: true, refused: true, reason, checkRunId });
   }
 
-  async #updateCheckRun(row, payload) {
+  /** Brings a job's Check Run to its current state: in_progress while running, completed after. */
+  async #updateCheckRun(row) {
     if (!this.#github || row.check_run_id == null) return;
     try {
-      await this.#github.updateCheckRun(row.installation_id, row.repo, row.check_run_id, payload);
+      await this.#github.updateCheckRun(row.installation_id, row.repo, row.check_run_id, checkRunUpdate(row));
     } catch (err) {
       console.error(`ci: updating check run ${row.check_run_id} for job ${row.id} failed:`, err);
     }
@@ -381,7 +410,7 @@ export class CI {
       row.id
     );
     const claimed = { ...row, state: "running", claimed_by: worker, updated_at: nowIso };
-    await this.#updateCheckRun(claimed, { status: "in_progress", started_at: nowIso });
+    await this.#updateCheckRun(claimed);
     return jsonResponse(200, { job: jobView(claimed) });
   }
 
@@ -423,18 +452,7 @@ export class CI {
       id
     );
     const updated = { ...row, state: b.state, result: JSON.stringify(result), updated_at: nowIso };
-
-    const conclusion = CONCLUSIONS[b.state];
-    const title =
-      b.state === "done" ? "Passed" : b.state === "cancelled" ? "Cancelled" : `Failed${b.exitCode != null ? ` (exit ${b.exitCode})` : ""}`;
-    const summary = (b.summary || `agent-box job ${id} ${b.state} on ${b.worker}.`).slice(0, SUMMARY_MAX);
-    await this.#updateCheckRun(updated, {
-      status: "completed",
-      conclusion,
-      completed_at: nowIso,
-      ...(b.url ? { details_url: b.url } : {}),
-      output: { title, summary },
-    });
+    await this.#updateCheckRun(updated);
     return jsonResponse(200, { job: jobView(updated) });
   }
 }

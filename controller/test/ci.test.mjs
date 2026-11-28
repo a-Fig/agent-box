@@ -31,6 +31,7 @@ function makeFakeGitHub(clock) {
   const calls = [];
   let tokens = 0;
   let checkRuns = 0;
+  const state = { hold: null }; // a promise that, while set, stalls Check Run creation
   async function fakeFetch(url, init = {}) {
     const u = new URL(url);
     const call = {
@@ -47,6 +48,7 @@ function makeFakeGitHub(clock) {
       return json(201, { token: `ghs_test_${tokens}`, expires_at: new Date(clock.now.getTime() + 3600_000).toISOString() });
     }
     if (call.method === "POST" && /^\/repos\/[^/]+\/[^/]+\/check-runs$/.test(call.path)) {
+      if (state.hold) await state.hold;
       return json(201, { id: 1000 + ++checkRuns });
     }
     const m = /^\/repos\/[^/]+\/[^/]+\/check-runs\/(\d+)$/.exec(call.path);
@@ -56,6 +58,7 @@ function makeFakeGitHub(clock) {
   return {
     fetch: fakeFetch,
     calls,
+    state,
     checkRunCalls: () => calls.filter((c) => c.path.includes("/check-runs")),
     tokenCalls: () => calls.filter((c) => c.path.endsWith("/access_tokens")),
   };
@@ -503,6 +506,58 @@ test("without GitHub App credentials jobs still queue and no GitHub calls are ma
     const done = await api(h, "PATCH", `/v1/ci/jobs/${job.id}`, { body: { worker: "pc", state: "done", exitCode: 0 } });
     assert.equal(done.status, 200);
     assert.equal(h.gh.calls.length, 0);
+  } finally {
+    h.close();
+  }
+});
+
+test("concurrent push + pull_request.synchronize for one commit queue one job and one Check Run", async () => {
+  const h = makeHarness();
+  try {
+    await putConfig(h);
+    let release;
+    h.gh.state.hold = new Promise((r) => (release = r));
+    const deliveries = [
+      deliver(h, "push", pushPayload()),
+      deliver(h, "pull_request", prPayload({ action: "synchronize" })),
+    ];
+    while (!h.gh.calls.some((c) => c.method === "POST" && c.path.endsWith("/check-runs"))) {
+      await new Promise((r) => setImmediate(r));
+    }
+
+    // While the Check Run is still being created, a worker claims and finishes the job.
+    const { job } = await (await next(h, "home", "pc")).json();
+    assert.equal(job.checkRunId, null);
+    const done = await api(h, "PATCH", `/v1/ci/jobs/${job.id}`, { body: { worker: "pc", state: "done", exitCode: 0 } });
+    assert.equal(done.status, 200);
+
+    release();
+    const bodies = await Promise.all(deliveries.map(async (p) => (await p).json()));
+    assert.equal(bodies.filter((b) => b.queued === true).length, 1);
+    assert.equal(bodies.filter((b) => b.queued === false && b.existing === job.id).length, 1);
+
+    const runs = h.gh.checkRunCalls();
+    assert.equal(runs.filter((c) => c.method === "POST").length, 1, "exactly one Check Run");
+    // The Check Run created late is caught up to the job's final state.
+    const last = runs.at(-1);
+    assert.equal(last.method, "PATCH");
+    assert.equal(last.body.status, "completed");
+    assert.equal(last.body.conclusion, "success");
+    assert.equal((await next(h, "cloud")).status, 204);
+  } finally {
+    h.close();
+  }
+});
+
+test("job lookups ignore repo-name case, like ci_config", async () => {
+  const h = makeHarness();
+  try {
+    await putConfig(h);
+    const first = await (await deliver(h, "push", pushPayload())).json();
+    assert.equal(first.queued, true);
+    const shouted = pushPayload({ repo: REPO.toUpperCase() });
+    const again = await (await deliver(h, "push", shouted)).json();
+    assert.deepEqual(again, { ok: true, queued: false, existing: first.job.id });
   } finally {
     h.close();
   }

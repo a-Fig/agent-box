@@ -11,12 +11,12 @@ _Status: frozen v1 contract (2026-11-27), tracking #276, #277, #278, and #280._
 - **Protocol version:** `1` (reported by `GET /v1/health`).
 - **Timestamps:** RFC 3339 UTC (`Z` suffix), matching [`internal/dash/types.go`](../internal/dash/types.go).
 - **Host IDs:** `id` must match `^[a-z0-9-]{1,40}$`.
-- **Body size limit:** `PUT /v1/hosts/{id}/state` rejects bodies over `256 KiB` (`262144` bytes) with `413`.
+- **Body size limit:** every request with a body (`PUT /v1/hosts/{id}/state`, `POST /v1/github/webhook`, `PUT /v1/ci/config`, `PATCH /v1/ci/jobs/{id}`) is rejected with `413` over `256 KiB` (`262144` bytes).
 - **Zero-parse storage:** The Durable Object stores the `state` JSON text raw in SQLite without parsing `dash.State` fields inside the Worker, keeping request handling under the 10 ms Cloudflare Worker CPU cap.
 
 ## Authentication
 
-Endpoints other than `GET /v1/health` require:
+Endpoints other than `GET /v1/health` and `POST /v1/github/webhook` (which GitHub signs instead, see [CI endpoints](#ci-endpoints-279)) require:
 
 ```http
 Authorization: Bearer <token>
@@ -24,7 +24,7 @@ Authorization: Bearer <token>
 
 Tokens are validated with constant-time comparison:
 
-- **`HOST_TOKEN`**: authorizes host state writes (`PUT /v1/hosts/{id}/state`).
+- **`HOST_TOKEN`**: authorizes host state writes (`PUT /v1/hosts/{id}/state`) and the CI endpoints (`GET`/`PUT /v1/ci/config`, `GET /v1/ci/next`, `PATCH /v1/ci/jobs/{id}`).
 - **`CLIENT_TOKEN`**: authorizes client reads (`GET /v1/hosts`, `GET /v1/usage`).
 
 A missing or invalid token receives `401` (`unauthorized`); presenting a token without the required role (e.g. `CLIENT_TOKEN` on `PUT`) receives `403` (`forbidden`).
@@ -46,7 +46,7 @@ Non-2xx JSON responses use the same error envelope as `runner-v1`:
 | `401` | `unauthorized` | Missing or invalid `Authorization: Bearer` token | [`error-unauthorized.json`](protocol/controller-v1/error-unauthorized.json) |
 | `403` | `forbidden` | Token lacks permission for this endpoint (e.g. client token on host write) | — |
 | `404` | `not_found` | Unknown route | — |
-| `409` | `conflict` | CI job update for a job that is no longer running ([`controller/README.md`](../controller/README.md#github-ci-279)) | — |
+| `409` | `conflict` | CI job update for a job that is no longer running | — |
 | `413` | `too_large` | Request body exceeds `262144` bytes (`256 KiB`) | [`error-too-large.json`](protocol/controller-v1/error-too-large.json) |
 
 ## Endpoints
@@ -96,6 +96,18 @@ Returns daily controller request usage against the free-tier budget.
   - `day` (`string`): UTC date `YYYY-MM-DD`
   - `requests` (`int`): requests counted today
   - `limit` (`int`): daily request ceiling (e.g. `100000`)
+
+### CI endpoints (#279)
+
+GitHub webhook ingest and the CI job queue. The guards and config fields are described in [`controller/README.md`](../controller/README.md#github-ci-279).
+
+| Endpoint | Auth | Request | Response |
+| --- | --- | --- | --- |
+| `POST /v1/github/webhook` | `X-Hub-Signature-256` HMAC over the raw body with `GITHUB_WEBHOOK_SECRET` (`401` if unset or wrong) | GitHub `push`, `pull_request`, `check_suite` events; deduplicated on `X-GitHub-Delivery` | `200` with `queued`, `refused` (+ `reason`), `ignored` (+ `reason`) or `duplicate` |
+| `GET /v1/ci/config` | `HOST_TOKEN` | — | `200 {"repos":[config…]}` |
+| `PUT /v1/ci/config` | `HOST_TOKEN` | `{"repo","authors","allowPublic","cloudOnlyForForks","installationId"}` | `200 {"ok":true,"config":{…}}` |
+| `GET /v1/ci/next?worker=<id>&hostClass=home\|cloud` | `HOST_TOKEN` | — | `200 {"job":{…}}` (claimed, now `running`) or `204`; `home` only gets `any` jobs |
+| `PATCH /v1/ci/jobs/{id}` | `HOST_TOKEN` | `{"worker","state":"done\|failed\|cancelled","exitCode"?,"summary"?,"url"?}` | `200 {"job":{…}}`; `403` if another worker claimed it, `409` once it is finished |
 
 ## Push & Read Cadence
 
