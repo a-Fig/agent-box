@@ -159,6 +159,103 @@ def sandbox_entry_key(job_id: str) -> str:
     return f"sandbox:{job_id}"
 
 
+def cancelled_entry_key(job_id: str) -> str:
+    """Return the immutable Dict tombstone key set when a job is cancelled."""
+    return f"cancelled:{job_id}"
+
+
+def build_subprocess_kwargs(
+    euid: int,
+    user: str = "agent",
+    group: str = "agent",
+) -> dict[str, Any]:
+    """Return subprocess.Popen kwargs that drop privileges when running as root."""
+    kwargs: dict[str, Any] = {"start_new_session": True}
+    if euid == 0:
+        kwargs["user"] = user
+        kwargs["group"] = group
+    return kwargs
+
+
+# Executed via `python3 -c` inside a Sandbox (and directly in unit tests) for TOCTOU-free tar export.
+# Exit codes: 0=ok (base64 tar on stdout), 2=symlink escape / illegal path, 3=not found.
+SANDBOX_TAR_SCRIPT = (
+    "import base64, errno, io, os, stat, sys, tarfile\n"
+    "O_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)\n"
+    "O_DIRECTORY = getattr(os, 'O_DIRECTORY', 0)\n"
+    "def _open_rel(root_fd, parts):\n"
+    "    cur_fd = os.dup(root_fd)\n"
+    "    try:\n"
+    "        for i, part in enumerate(parts):\n"
+    "            if part in ('', '.'):\n"
+    "                continue\n"
+    "            if part == '..':\n"
+    "                raise PermissionError('traversal')\n"
+    "            flags = os.O_RDONLY | O_NOFOLLOW\n"
+    "            if i < len(parts) - 1:\n"
+    "                flags |= O_DIRECTORY\n"
+    "            nxt = os.open(part, flags, dir_fd=cur_fd)\n"
+    "            os.close(cur_fd)\n"
+    "            cur_fd = nxt\n"
+    "        return cur_fd\n"
+    "    except Exception:\n"
+    "        os.close(cur_fd)\n"
+    "        raise\n"
+    "def _add_fd(tf, fd, arc_path):\n"
+    "    st = os.fstat(fd)\n"
+    "    if stat.S_ISDIR(st.st_mode):\n"
+    "        try:\n"
+    "            names = sorted(os.listdir(fd))\n"
+    "            ti = tarfile.TarInfo(name=arc_path)\n"
+    "            ti.type = tarfile.DIRTYPE\n"
+    "            ti.mode = stat.S_IMODE(st.st_mode)\n"
+    "            ti.mtime = int(st.st_mtime)\n"
+    "            tf.addfile(ti)\n"
+    "            for name in names:\n"
+    "                try:\n"
+    "                    child_fd = os.open(name, os.O_RDONLY | O_NOFOLLOW, dir_fd=fd)\n"
+    "                except OSError as exc:\n"
+    "                    if exc.errno in (errno.ELOOP, errno.ENOENT):\n"
+    "                        continue\n"
+    "                    raise\n"
+    "                child_arc = name if arc_path == '.' else f'{arc_path}/{name}'\n"
+    "                _add_fd(tf, child_fd, child_arc)\n"
+    "        finally:\n"
+    "            os.close(fd)\n"
+    "    elif stat.S_ISREG(st.st_mode):\n"
+    "        ti = tarfile.TarInfo(name=arc_path)\n"
+    "        ti.size = st.st_size\n"
+    "        ti.mode = stat.S_IMODE(st.st_mode)\n"
+    "        ti.mtime = int(st.st_mtime)\n"
+    "        with os.fdopen(fd, 'rb') as fh:\n"
+    "            tf.addfile(ti, fh)\n"
+    "    else:\n"
+    "        os.close(fd)\n"
+    "try:\n"
+    "    root_fd = os.open(sys.argv[1], os.O_RDONLY | O_DIRECTORY)\n"
+    "except OSError:\n"
+    "    sys.exit(3)\n"
+    "rel = sys.argv[2]\n"
+    "parts = [] if rel == '.' else [p for p in rel.split('/') if p not in ('', '.')]\n"
+    "try:\n"
+    "    target_fd = _open_rel(root_fd, parts)\n"
+    "except PermissionError:\n"
+    "    os.close(root_fd)\n"
+    "    sys.exit(2)\n"
+    "except OSError as exc:\n"
+    "    os.close(root_fd)\n"
+    "    if exc.errno == errno.ELOOP:\n"
+    "        sys.exit(2)\n"
+    "    sys.exit(3)\n"
+    "os.close(root_fd)\n"
+    "buf = io.BytesIO()\n"
+    "arc = '.' if not parts else '/'.join(parts)\n"
+    "with tarfile.open(fileobj=buf, mode='w', dereference=False) as tf:\n"
+    "    _add_fd(tf, target_fd, arc)\n"
+    "sys.stdout.write(base64.b64encode(buf.getvalue()).decode('ascii'))\n"
+)
+
+
 def error_envelope(code: str, message: str) -> dict[str, str]:
     """Build a uniform runner-v1 error response payload."""
     return {"error": code, "message": message}
@@ -187,6 +284,9 @@ def _is_finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+_INT_QUERY_RE = re.compile(r"^-?[0-9]+$")
+
+
 def parse_int_query(
     raw: str | None,
     name: str,
@@ -195,13 +295,15 @@ def parse_int_query(
     min_value: int = 0,
     max_value: int | None = None,
 ) -> int:
-    """Parse an integer query parameter or raise ValueError for 400 invalid responses."""
-    if raw is None or raw == "":
+    """Parse an integer query parameter or raise ValueError for 400 invalid responses.
+
+    Missing (`None`) yields `default`; explicit empty (`""`) raises `ValueError`.
+    """
+    if raw is None:
         return default
-    try:
-        val = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
+    if not isinstance(raw, str) or not _INT_QUERY_RE.match(raw):
+        raise ValueError(f"{name} must be an integer.")
+    val = int(raw)
     if val < min_value:
         raise ValueError(f"{name} must be >= {min_value}.")
     if max_value is not None:
@@ -891,6 +993,20 @@ def transition_job(
     return job
 
 
+def apply_cancellation_tombstone(
+    rec: Mapping[str, Any],
+    cancelled: bool,
+) -> dict[str, Any]:
+    """Ensure an immutable cancellation tombstone overrides any racing worker status."""
+    out = dict(rec)
+    if cancelled and out.get("state") != "cancelled":
+        out["state"] = "cancelled"
+        out["exit"] = 137
+        if out.get("endedAt") is None:
+            out["endedAt"] = format_rfc3339(utc_now())
+    return out
+
+
 def snapshot_dict_state(
     store: Mapping[str, Any],
     *,
@@ -900,12 +1016,18 @@ def snapshot_dict_state(
     """Build a read-only state snapshot from the backing Dict and optional Volume cost ledger."""
     jobs: dict[str, dict[str, Any]] = {}
     costs: dict[str, float] = {}
+    cancelled_ids: set[str] = set()
     for k, v in store.items():
         if isinstance(k, str):
-            if k.startswith("job:") and isinstance(v, Mapping):
+            if k.startswith("cancelled:") and v:
+                cancelled_ids.add(k[len("cancelled:") :])
+            elif k.startswith("job:") and isinstance(v, Mapping):
                 jobs[k[4:]] = dict(v)
             elif k.startswith("cost:") and _is_finite_number(v):
                 costs[k] = float(v)
+    for jid in cancelled_ids:
+        if jid in jobs:
+            jobs[jid] = apply_cancellation_tombstone(jobs[jid], True)
     if costs_root is not None:
         month = month_key(now)
         for k, v in read_monthly_costs(costs_root, month).items():

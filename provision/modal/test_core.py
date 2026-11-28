@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -61,7 +62,9 @@ class StdlibAndStaticSafetyTest(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(route_handlers), 10)
 
-        # Ensure sandbox creation never mounts the shared writable /jobs volume.
+        # Ensure sandbox creation never mounts the shared writable /jobs volume and never uses Sandbox.open.
+        self.assertNotIn("sb.open(", src)
+        self.assertNotIn(".open(\"/tmp/", src)
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
@@ -388,7 +391,7 @@ class ValidationAndLifecycleTest(unittest.TestCase):
             self.assertFalse(ok)
             self.assertEqual((status, err), (400, "invalid"))
 
-    def test_clean_env_strips_modal_credentials(self) -> None:
+    def test_clean_env_and_privilege_drop_kwargs(self) -> None:
         host_env = {
             "PATH": "/usr/local/bin:/usr/bin",
             "HOME": "/root",
@@ -403,6 +406,34 @@ class ValidationAndLifecycleTest(unittest.TestCase):
         self.assertEqual(cleaned["CGO_ENABLED"], "1")
         for secret_key in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "MODAL_IDENTITY_TOKEN", "AWS_SECRET_ACCESS_KEY"):
             self.assertNotIn(secret_key, cleaned)
+
+        self.assertEqual(
+            core.build_subprocess_kwargs(0),
+            {"start_new_session": True, "user": "agent", "group": "agent"},
+        )
+        self.assertEqual(
+            core.build_subprocess_kwargs(1000),
+            {"start_new_session": True},
+        )
+
+    def test_cancellation_tombstone_overrides_racing_worker_write(self) -> None:
+        now = datetime(2026, 11, 27, 16, 0, 0, tzinfo=timezone.utc)
+        store = {
+            "config": dict(core.DEFAULT_CONFIG),
+            core.cancelled_entry_key("a.20261127-150000-0001"): True,
+            core.job_entry_key("a.20261127-150000-0001"): {
+                "id": "a.20261127-150000-0001",
+                "state": "done",
+                "exit": 0,
+                "mode": "function",
+                "startedAt": "2026-11-27T15:00:00Z",
+                "endedAt": "2026-11-27T15:01:00Z",
+            },
+        }
+        snap = core.snapshot_dict_state(store, now=now)
+        rec = snap["jobs"]["a.20261127-150000-0001"]
+        self.assertEqual(rec["state"], "cancelled")
+        self.assertEqual(rec["exit"], 137)
 
     def test_admission_includes_running_job_accrued_spend(self) -> None:
         now = datetime(2026, 11, 27, 16, 0, 0, tzinfo=timezone.utc)
@@ -481,7 +512,11 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
         self.assertEqual(core.parse_int_query(None, "limit", 20, min_value=1, max_value=200), 20)
         self.assertEqual(core.parse_int_query("500", "limit", 20, min_value=1, max_value=200), 200)
         self.assertEqual(core.parse_int_query("0", "offset", 0, min_value=0), 0)
-        for bad in ("abc", "1.5", "-1"):
+        # Empty query values (?offset=, ?limit=, ?wait=) must reject with ValueError (400 invalid).
+        for param_name, min_val in (("offset", 0), ("limit", 1), ("wait", 0)):
+            with self.assertRaises(ValueError):
+                core.parse_int_query("", param_name, 0, min_value=min_val)
+        for bad in ("abc", "1.5", "-1", "1_0", " 1"):
             with self.assertRaises(ValueError):
                 core.parse_int_query(bad, "offset", 0, min_value=0)
 
@@ -534,6 +569,73 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
                 core.sanitize_rel_path("escape", root=root)
             with self.assertRaises(ValueError):
                 core.create_safe_tar_bytes(root, "escape")
+
+    @unittest.skipIf(os.name == "nt", "dir_fd/O_NOFOLLOW requires POSIX")
+    def test_actual_sandbox_tar_script_toctou_free(self) -> None:
+        """Execute the actual SANDBOX_TAR_SCRIPT used by agent_box_runner against a real tree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "work"
+            outside = Path(tmp) / "outside.txt"
+            root.mkdir()
+            outside.write_text("secret", encoding="utf-8")
+            (root / "nested").mkdir()
+            (root / "nested" / "out.txt").write_text("hello\n", encoding="utf-8")
+            (root / "-rf").write_text("dash-file", encoding="utf-8")
+            os.symlink(outside, root / "escape-link")
+            os.symlink(outside, root / "nested" / "inner-escape")
+
+            # Regular nested file succeeds.
+            res = subprocess.run(
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "nested/out.txt"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            with tarfile.open(fileobj=io.BytesIO(base64.b64decode(res.stdout)), mode="r:") as tf:
+                self.assertEqual(tf.getnames(), ["nested/out.txt"])
+                self.assertEqual(tf.extractfile("nested/out.txt").read(), b"hello\n")
+
+            # Leading-dash filename archives safely without flag injection.
+            res_dash = subprocess.run(
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "-rf"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res_dash.returncode, 0, res_dash.stderr)
+            with tarfile.open(fileobj=io.BytesIO(base64.b64decode(res_dash.stdout)), mode="r:") as tf:
+                self.assertEqual(tf.getnames(), ["-rf"])
+
+            # Directory walk drops symlink children rather than following them.
+            res_dir = subprocess.run(
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "nested"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res_dir.returncode, 0, res_dir.stderr)
+            with tarfile.open(fileobj=io.BytesIO(base64.b64decode(res_dir.stdout)), mode="r:") as tf:
+                self.assertEqual(tf.getnames(), ["nested", "nested/out.txt"])
+
+            # Direct symlink or traversal exits with code 2 (400 invalid).
+            for bad_rel in ("escape-link", "nested/inner-escape", "../outside.txt"):
+                res_bad = subprocess.run(
+                    [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), bad_rel],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(res_bad.returncode, 2, (bad_rel, res_bad.returncode, res_bad.stderr))
+
+            # Missing file exits with code 3 (404 not_found).
+            res_missing = subprocess.run(
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "does-not-exist"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res_missing.returncode, 3)
 
 
 class ConfigUpdateTest(unittest.TestCase):

@@ -5,7 +5,7 @@ Modal ASGI web endpoint (`requires_proxy_auth=True`) backed by:
   - 1x Modal Functions per size (`small`, `medium`, `large`, `gpu`) with preemption retries
   - 3x Modal Sandboxes (opt-in `mode: "sandbox"`, isolated without `/jobs` volume mount)
   - `modal.Volume("agent-box-jobs")` for git bundles, streaming job logs, and monthly cost ledgers
-  - `modal.Dict("agent-box-state")` for live job metadata, config, and pause flag
+  - `modal.Dict("agent-box-state")` for live job metadata, config, pause flag, and cancel tombstones
 """
 
 import asyncio
@@ -54,30 +54,17 @@ jobs_volume = modal.Volume.from_name(JOBS_VOLUME_NAME, create_if_missing=True)
 state_dict = modal.Dict.from_name(STATE_DICT_NAME, create_if_missing=True)
 _ADMISSION_LOCK = asyncio.Lock()
 
-# Atomic single-process Python script run inside a Sandbox for /v1/jobs/{id}/file?path=rel.
-_SANDBOX_TAR_SCRIPT = (
-    "import base64, io, os, sys, tarfile\n"
-    "root = os.path.realpath(sys.argv[1])\n"
-    "rel = sys.argv[2]\n"
-    "raw_target = root if rel == '.' else os.path.join(root, *rel.split('/'))\n"
-    "if not os.path.lexists(raw_target):\n"
-    "    sys.exit(3)\n"
-    "target = os.path.realpath(raw_target)\n"
-    "if target != root and not target.startswith(root + os.sep):\n"
-    "    sys.exit(2)\n"
-    "if not os.path.exists(target):\n"
-    "    sys.exit(3)\n"
-    "def _filter(ti):\n"
-    "    if ti.issym():\n"
-    "        parent = os.path.dirname(os.path.join(root, ti.name))\n"
-    "        dest = os.path.realpath(os.path.join(parent, ti.linkname))\n"
-    "        if dest != root and not dest.startswith(root + os.sep):\n"
-    "            return None\n"
-    "    return ti\n"
-    "buf = io.BytesIO()\n"
-    "with tarfile.open(fileobj=buf, mode='w', dereference=False) as tf:\n"
-    "    tf.add(target, arcname=rel, recursive=True, filter=_filter)\n"
-    "sys.stdout.write(base64.b64encode(buf.getvalue()).decode('ascii'))\n"
+# Executed via `sb.exec("python3", "-c", ...)` to read raw binary log bytes across Modal's text stdout.
+_SANDBOX_LOG_READ_SCRIPT = (
+    "import base64, os, sys\n"
+    "path, off = sys.argv[1], int(sys.argv[2])\n"
+    "if not os.path.exists(path):\n"
+    "    sys.exit(0)\n"
+    "with open(path, 'rb') as f:\n"
+    "    f.seek(off)\n"
+    "    data = f.read(1048576)\n"
+    "if data:\n"
+    "    sys.stdout.write(base64.b64encode(data).decode('ascii'))\n"
 )
 
 base_image = (
@@ -103,6 +90,8 @@ base_image = (
         f"curl -fsSL https://deb.nodesource.com/setup_{NODE_MAJOR}.x | bash - && apt-get install -y -qq nodejs",
         # uv matching provision/agent-base.yaml.
         "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh",
+        # Unprivileged user for Function mode so untrusted jobs cannot tamper with /jobs.
+        "id -u agent >/dev/null 2>&1 || useradd -m -s /bin/bash agent",
     )
     .pip_install("fastapi[standard]", "python-multipart")
     .env(
@@ -135,25 +124,41 @@ def _read_tail_and_size(log_file: Path) -> tuple[int, str]:
     return len(data), core.compute_tail(data)
 
 
-def _record_monthly_cost(job_id: str, job: dict[str, Any]) -> None:
-    """Persist settled job spend to both the durable Volume ledger and Dict cache."""
+def _record_monthly_cost_best_effort(job_id: str, job: dict[str, Any]) -> None:
+    """Persist settled job spend to the Volume ledger and Dict cache without failing state changes."""
     cost_usd = float((job.get("cost") or {}).get("usd", 0.0))
     ts = core.parse_rfc3339(job.get("endedAt")) or core.utc_now()
     month = core.month_key(ts)
-    core.write_cost_record(
-        COSTS_DIR,
-        month,
-        job_id,
-        cost_usd,
-        settled_at=core.format_rfc3339(ts),
-    )
-    jobs_volume.commit()
-    state_dict[core.cost_entry_key(month, job_id)] = cost_usd
+    try:
+        core.write_cost_record(
+            COSTS_DIR,
+            month,
+            job_id,
+            cost_usd,
+            settled_at=core.format_rfc3339(ts),
+        )
+        jobs_volume.commit()
+    except Exception as exc:
+        print(f"[box] warning: failed to commit cost ledger for {job_id}: {exc}", file=sys.stderr)
+    try:
+        state_dict[core.cost_entry_key(month, job_id)] = cost_usd
+    except Exception as exc:
+        print(f"[box] warning: failed to update Dict cost cache for {job_id}: {exc}", file=sys.stderr)
 
 
 def _is_cancelled(job_id: str) -> bool:
+    if state_dict.get(core.cancelled_entry_key(job_id)):
+        return True
     rec = state_dict.get(core.job_entry_key(job_id))
     return isinstance(rec, dict) and rec.get("state") == "cancelled"
+
+
+def _save_job_if_not_cancelled(job_id: str, rec: dict[str, Any]) -> bool:
+    """Persist `rec` only if no cancellation tombstone exists; return False when aborted."""
+    if state_dict.get(core.cancelled_entry_key(job_id)):
+        return False
+    state_dict[core.job_entry_key(job_id)] = rec
+    return True
 
 
 def _prepare_command(cmd: list[str]) -> list[str]:
@@ -163,12 +168,18 @@ def _prepare_command(cmd: list[str]) -> list[str]:
 
 
 def _mark_job_lost(job_id: str, message: str, *, log_file: Path | None = None) -> None:
-    """Ensure a failed spawn or unexpected worker crash never leaves a job active."""
+    """Persist `lost` status first so a Volume failure can never strand an active job."""
+    if state_dict.get(core.cancelled_entry_key(job_id)):
+        return
     key = core.job_entry_key(job_id)
     rec = state_dict.get(key)
     if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
         return
-    log_bytes, tail = _read_tail_and_size(log_file) if log_file else (rec.get("logBytes", 0), rec.get("tail", ""))
+    log_bytes, tail = (
+        _read_tail_and_size(log_file)
+        if log_file and log_file.exists()
+        else (rec.get("logBytes", 0), rec.get("tail", ""))
+    )
     core.transition_job(
         rec,
         "lost",
@@ -177,25 +188,51 @@ def _mark_job_lost(job_id: str, message: str, *, log_file: Path | None = None) -
         tail=tail,
         error_message=message,
     )
-    _record_monthly_cost(job_id, rec)
-    state_dict[key] = rec
+    if _save_job_if_not_cancelled(job_id, rec):
+        _record_monthly_cost_best_effort(job_id, rec)
+
+
+def _restrict_jobs_mount() -> None:
+    """Ensure /jobs is unreadable by the unprivileged `agent` user in Function containers."""
+    if os.geteuid() == 0 and os.path.isdir(JOBS_MOUNT):
+        try:
+            os.chmod(JOBS_MOUNT, 0o700)
+        except OSError:
+            pass
 
 
 def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
-    """Copy bundle to an isolated temp dir, unpack, and stream output to job.log."""
+    """Copy bundle to an isolated temp dir, drop privileges, and stream output to job.log."""
     log_file = _log_path(job_id)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     volume_bundle = _bundle_path(job_id)
 
-    with tempfile.TemporaryDirectory(prefix="agent-box-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix=f"agent-box-{job_id}-") as tmpdir:
         tmp_path = Path(tmpdir)
         isolated_bundle = tmp_path / "repo.bundle"
         shutil.copyfile(volume_bundle, isolated_bundle)
 
-        workdir = tmp_path / "work" / rec["repo"]
+        work_parent = tmp_path / "work"
+        workdir = work_parent / rec["repo"]
         workdir.mkdir(parents=True, exist_ok=True)
-        clean_env = core.build_clean_env(os.environ, rec.get("env"))
 
+        euid = os.geteuid()
+        if euid == 0:
+            for p in (tmp_path, isolated_bundle, work_parent, workdir):
+                shutil.chown(p, user="agent", group="agent")
+            os.chmod(tmp_path, 0o700)
+            os.chmod(isolated_bundle, 0o600)
+            os.chmod(work_parent, 0o700)
+            os.chmod(workdir, 0o700)
+
+        clean_env = core.build_clean_env(os.environ, rec.get("env"))
+        if euid == 0:
+            user_env = rec.get("env") or {}
+            clean_env["HOME"] = user_env.get("HOME", "/home/agent")
+            clean_env["USER"] = "agent"
+            clean_env["GOPATH"] = user_env.get("GOPATH", "/home/agent/go")
+
+        popen_kwargs = core.build_subprocess_kwargs(euid)
         unpack_script = (
             f"git init -q {shlex.quote(str(workdir))} && "
             f"git -C {shlex.quote(str(workdir))} fetch -q {shlex.quote(str(isolated_bundle))} "
@@ -208,6 +245,7 @@ def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            **popen_kwargs,
         )
         isolated_bundle.unlink(missing_ok=True)
         if unpack.returncode != 0:
@@ -222,7 +260,7 @@ def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
             env=clean_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            **popen_kwargs,
         )
 
         def _drain() -> None:
@@ -259,7 +297,7 @@ def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
                 if isinstance(cur, dict) and cur.get("state") == "running":
                     cur["logBytes"] = log_bytes
                     cur["tail"] = tail
-                    state_dict[core.job_entry_key(job_id)] = cur
+                    _save_job_if_not_cancelled(job_id, cur)
                 last_commit = now_mono
             time.sleep(0.5)
 
@@ -287,7 +325,12 @@ def _run_function_job(job_id: str) -> None:
     log_file = _log_path(job_id)
     completed = False
     try:
+        _restrict_jobs_mount()
         jobs_volume.reload()
+        if _is_cancelled(job_id):
+            completed = True
+            return
+
         key = core.job_entry_key(job_id)
         rec = state_dict.get(key)
         if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
@@ -306,11 +349,16 @@ def _run_function_job(job_id: str) -> None:
             jobs_volume.commit()
         else:
             core.transition_job(rec, "running", now=core.utc_now(), attempt=1)
-        state_dict[key] = rec
+        if not _save_job_if_not_cancelled(job_id, rec):
+            completed = True
+            return
 
         exit_code = _execute_in_workspace(job_id, rec)
         log_bytes, tail = _read_tail_and_size(log_file)
 
+        if _is_cancelled(job_id):
+            completed = True
+            return
         latest = state_dict.get(key)
         if not isinstance(latest, dict) or latest.get("state") in core.TERMINAL_STATES:
             completed = True
@@ -327,13 +375,17 @@ def _run_function_job(job_id: str) -> None:
             log_bytes=log_bytes,
             tail=tail,
         )
-        _record_monthly_cost(job_id, latest)
-        state_dict[key] = latest
+        if _save_job_if_not_cancelled(job_id, latest):
+            _record_monthly_cost_best_effort(job_id, latest)
         completed = True
     except Exception as exc:
-        with log_file.open("ab") as fh:
-            fh.write(f"\n[box] worker error: {exc}\n".encode("utf-8", errors="replace"))
-        jobs_volume.commit()
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with log_file.open("ab") as fh:
+                fh.write(f"\n[box] worker error: {exc}\n".encode("utf-8", errors="replace"))
+            jobs_volume.commit()
+        except Exception:
+            pass
         _mark_job_lost(job_id, str(exc), log_file=log_file)
         completed = True
         raise
@@ -399,22 +451,40 @@ FUNCTION_BY_SIZE = {
 }
 
 
+def _upload_bundle_to_sandbox(sb: Any, bundle_bytes: bytes) -> None:
+    """Stream bundle bytes into /tmp/repo.bundle inside the Sandbox via exec stdin (modal>=1.6)."""
+    proc = sb.exec("sh", "-c", "cat > /tmp/repo.bundle")
+    chunk_size = 65536
+    for idx in range(0, len(bundle_bytes), chunk_size):
+        proc.stdin.write(bundle_bytes[idx : idx + chunk_size])
+    proc.stdin.write_eof()
+    if hasattr(proc.stdin, "drain"):
+        res = proc.stdin.drain()
+        if inspect.isawaitable(res):
+            pass
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"bundle upload into sandbox failed with exit code {rc}")
+
+
 def _drain_sandbox_log(sb: Any, remote_log: str, local_log: Path, offset: int) -> int:
-    """Read newly appended raw bytes from the sandbox's binary log file into local_log."""
-    try:
-        with sb.open(remote_log, "rb") as rf:
-            rf.seek(offset)
-            chunk = rf.read()
-    except Exception:
-        return offset
-    if not chunk:
-        return offset
-    data = chunk.encode("utf-8", errors="replace") if isinstance(chunk, str) else bytes(chunk)
-    if data:
+    """Read newly appended raw bytes from the sandbox log via base64 stdout (lossless UTF-8/binary)."""
+    while True:
+        try:
+            proc = sb.exec("python3", "-c", _SANDBOX_LOG_READ_SCRIPT, remote_log, str(offset))
+            encoded = "".join(c.decode("ascii") if isinstance(c, bytes) else c for c in proc.stdout)
+            if proc.wait() != 0 or not encoded:
+                return offset
+            data = base64.b64decode(encoded)
+        except Exception:
+            return offset
+        if not data:
+            return offset
         with local_log.open("ab") as lf:
             lf.write(data)
-        return offset + len(data)
-    return offset
+        offset += len(data)
+        if len(data) < 1048576:
+            return offset
 
 
 @app.function(
@@ -435,6 +505,10 @@ def run_sandbox_job(job_id: str) -> None:
 
     try:
         jobs_volume.reload()
+        if _is_cancelled(job_id):
+            completed = True
+            return
+
         rec = state_dict.get(key)
         if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
             completed = True
@@ -462,11 +536,13 @@ def run_sandbox_job(job_id: str) -> None:
         state_dict[core.sandbox_entry_key(job_id)] = sb.object_id
         rec["sandboxId"] = sb.object_id
         core.transition_job(rec, "running", now=core.utc_now(), attempt=1)
-        state_dict[key] = rec
+        if not _save_job_if_not_cancelled(job_id, rec):
+            sb.terminate()
+            completed = True
+            return
 
         bundle_bytes = _bundle_path(job_id).read_bytes()
-        with sb.open("/tmp/repo.bundle", "wb") as bf:
-            bf.write(bundle_bytes)
+        _upload_bundle_to_sandbox(sb, bundle_bytes)
 
         workdir = f"/work/{rec['repo']}"
         remote_log = "/tmp/agent-box-job.log"
@@ -512,7 +588,7 @@ def run_sandbox_job(job_id: str) -> None:
                 if isinstance(cur, dict) and cur.get("state") == "running":
                     cur["logBytes"] = log_bytes
                     cur["tail"] = tail
-                    state_dict[key] = cur
+                    _save_job_if_not_cancelled(job_id, cur)
                 last_commit = now_mono
             time.sleep(1.0)
 
@@ -530,28 +606,28 @@ def run_sandbox_job(job_id: str) -> None:
         jobs_volume.commit()
 
         log_bytes, tail = _read_tail_and_size(log_file)
-        latest = state_dict.get(key)
-        if isinstance(latest, dict) and latest.get("state") not in core.TERMINAL_STATES:
-            final_state = "cancelled" if cancelled else "done"
-            effective_keep = 0 if (cancelled or timed_out) else keep_sec
-            core.transition_job(
-                latest,
-                final_state,
-                now=core.utc_now(),
-                exit_code=exit_code,
-                log_bytes=log_bytes,
-                tail=tail,
-                keep_sec=effective_keep,
-            )
-            if effective_keep == 0:
-                _record_monthly_cost(job_id, latest)
-            state_dict[key] = latest
+        effective_keep = 0
+        if not _is_cancelled(job_id):
+            latest = state_dict.get(key)
+            if isinstance(latest, dict) and latest.get("state") not in core.TERMINAL_STATES:
+                final_state = "cancelled" if cancelled else "done"
+                effective_keep = 0 if (cancelled or timed_out) else keep_sec
+                core.transition_job(
+                    latest,
+                    final_state,
+                    now=core.utc_now(),
+                    exit_code=exit_code,
+                    log_bytes=log_bytes,
+                    tail=tail,
+                    keep_sec=effective_keep,
+                )
+                if _save_job_if_not_cancelled(job_id, latest) and effective_keep == 0:
+                    _record_monthly_cost_best_effort(job_id, latest)
 
         # Hold the sandbox for keepSec, then settle total sandbox lifetime cost before terminating.
-        cost_settled = effective_keep == 0 or cancelled or timed_out
-        if keep_sec > 0 and not cancelled and not timed_out:
+        if effective_keep > 0 and not _is_cancelled(job_id):
             try:
-                deadline = time.monotonic() + keep_sec
+                deadline = time.monotonic() + effective_keep
                 while time.monotonic() < deadline:
                     if _is_cancelled(job_id):
                         break
@@ -559,7 +635,7 @@ def run_sandbox_job(job_id: str) -> None:
             finally:
                 settled_at = core.utc_now()
                 latest = state_dict.get(key)
-                if isinstance(latest, dict):
+                if isinstance(latest, dict) and not _is_cancelled(job_id):
                     started = core.parse_rfc3339(latest.get("startedAt"))
                     total_dur = max(0.0, (settled_at - started).total_seconds()) if started else 0.0
                     latest["cost"] = core.estimate_job_cost(
@@ -569,23 +645,20 @@ def run_sandbox_job(job_id: str) -> None:
                         latest.get("gpuType", DEPLOYED_GPU_TYPE),
                     )
                     latest["keepUntil"] = core.format_rfc3339(settled_at)
-                    state_dict[key] = latest
-                    month = core.month_key(settled_at)
-                    core.write_cost_record(
-                        COSTS_DIR,
-                        month,
-                        job_id,
-                        float(latest["cost"]["usd"]),
-                        settled_at=core.format_rfc3339(settled_at),
-                    )
-                    jobs_volume.commit()
-                    state_dict[core.cost_entry_key(month, job_id)] = float(latest["cost"]["usd"])
-                cost_settled = True
+                    if _save_job_if_not_cancelled(job_id, latest):
+                        _record_monthly_cost_best_effort(
+                            job_id,
+                            {**latest, "endedAt": core.format_rfc3339(settled_at)},
+                        )
         completed = True
     except Exception as exc:
-        with log_file.open("ab") as fh:
-            fh.write(f"\n[box] sandbox error: {exc}\n".encode("utf-8", errors="replace"))
-        jobs_volume.commit()
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with log_file.open("ab") as fh:
+                fh.write(f"\n[box] sandbox error: {exc}\n".encode("utf-8", errors="replace"))
+            jobs_volume.commit()
+        except Exception:
+            pass
         _mark_job_lost(job_id, str(exc), log_file=log_file)
         completed = True
         raise
@@ -618,12 +691,20 @@ class ModalBackend:
     """Modal-backed storage and job execution adapter for app_factory."""
 
     def load_state(self) -> dict[str, Any]:
-        jobs_volume.reload()
-        return core.snapshot_dict_state(state_dict, costs_root=COSTS_DIR)
+        try:
+            jobs_volume.reload()
+            costs_root: str | None = COSTS_DIR
+        except Exception as exc:
+            print(f"[box] warning: Volume reload failed during load_state: {exc}", file=sys.stderr)
+            costs_root = COSTS_DIR if os.path.isdir(COSTS_DIR) else None
+        return core.snapshot_dict_state(state_dict, costs_root=costs_root)
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         rec = state_dict.get(core.job_entry_key(job_id))
-        return rec if isinstance(rec, dict) else None
+        if not isinstance(rec, dict):
+            return None
+        cancelled = bool(state_dict.get(core.cancelled_entry_key(job_id)))
+        return core.apply_cancellation_tombstone(rec, cancelled)
 
     def save_job(self, job_id: str, rec: dict[str, Any]) -> None:
         state_dict[core.job_entry_key(job_id)] = rec
@@ -662,10 +743,12 @@ class ModalBackend:
         return log_file.read_bytes() if log_file.exists() else b""
 
     def cancel_job(self, job_id: str, rec: dict[str, Any]) -> None:
+        # Write tombstone + cancelled state and terminate backing compute BEFORE best-effort Volume spend.
+        state_dict[core.cancelled_entry_key(job_id)] = True
         core.transition_job(rec, "cancelled", now=core.utc_now(), exit_code=137)
-        _record_monthly_cost(job_id, rec)
         state_dict[core.job_entry_key(job_id)] = rec
         _cancel_backing_execution(job_id, rec)
+        _record_monthly_cost_best_effort(job_id, rec)
 
     def pull_sandbox_tar(self, rec: dict[str, Any], rel: str) -> tuple[int, str, bytes]:
         sb_id = state_dict.get(core.sandbox_entry_key(rec["id"])) or rec.get("sandboxId")
@@ -673,7 +756,7 @@ class ModalBackend:
             return 409, "gone", b""
         workdir = f"/work/{rec['repo']}"
         sb = modal.Sandbox.from_id(sb_id)
-        proc = sb.exec("python3", "-c", _SANDBOX_TAR_SCRIPT, workdir, rel)
+        proc = sb.exec("python3", "-c", core.SANDBOX_TAR_SCRIPT, workdir, rel)
         encoded = "".join(c.decode("ascii") if isinstance(c, bytes) else c for c in proc.stdout)
         rc = proc.wait()
         if rc == 2:
