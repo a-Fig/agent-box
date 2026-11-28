@@ -105,7 +105,7 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 				Mode: s.Mode, Room: s.Room, Sizes: s.Sizes, GPU: s.GPU,
 			}
 			if s.Reachable && s.Error == "" {
-				queued, _, hostPrio := app.fleetBoxdState(hostCtx, host.DashboardURL)
+				queued, _, hostPrio, _ := app.fleetBoxdState(hostCtx, host.DashboardURL)
 				row.Queued = queued
 				if hostPrio != nil {
 					row.Priority = *hostPrio
@@ -139,6 +139,9 @@ func (a *App) probeCloudStatus(ctx context.Context, host fleetHost) fleetHostSta
 		return row
 	}
 	cand, p := ch.probeStatus(ctx)
+	if cand.Reachable && cand.Error == "" {
+		a.reportCloudUsage(ctx, host, p)
+	}
 	row.Reachable = cand.Reachable
 	row.Error = cand.Error
 	row.Mode = cand.Mode
@@ -163,9 +166,10 @@ func (a *App) probeCloudStatus(ctx context.Context, host fleetHost) fleetHostSta
 }
 
 type fleetBoxdSnapshot struct {
-	Queue    bool       `json:"queue"`
-	Priority *int       `json:"priority,omitempty"`
-	Jobs     []dash.Job `json:"jobs"`
+	Queue       bool       `json:"queue"`
+	Priority    *int       `json:"priority,omitempty"`
+	Jobs        []dash.Job `json:"jobs"`
+	CloudPaused bool       `json:"cloudPaused"`
 }
 
 func (a *App) readFleetBoxdState(ctx context.Context, dashboardURL string) (fleetBoxdSnapshot, bool) {
@@ -184,10 +188,12 @@ func (a *App) readFleetBoxdState(ctx context.Context, dashboardURL string) (flee
 	return state, true
 }
 
-func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool, priority *int) {
+// fleetBoxdState reads a boxd host's queue depth, queue capability and priority, and whether its
+// page has cloud launches paused (dash.State.CloudPaused).
+func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool, priority *int, cloudPaused bool) {
 	state, ok := a.readFleetBoxdState(ctx, dashboardURL)
 	if !ok {
-		return nil, false, nil
+		return nil, false, nil, false
 	}
 	n := 0
 	for _, job := range state.Jobs {
@@ -195,7 +201,7 @@ func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *
 			n++
 		}
 	}
-	return &n, state.Queue, state.Priority
+	return &n, state.Queue, state.Priority, state.CloudPaused
 }
 
 func writeFleet(w io.Writer, hosts []fleetHostStatus) {

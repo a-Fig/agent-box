@@ -108,12 +108,25 @@ the jobs it ran before, each linked to its page (#184, 2026-11-25).
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
 
-**Settings** (2026-11-26, #158, #250) holds the browser's theme and shows each host's boxd and tray
-builds, mode and enforcer, sizes, caps, expiry times and GPU availability. **Check for updates**
-compares the running builds with the latest stable release on GitHub. It downloads release
-metadata only. The latest release reads as unknown until the first check succeeds. Boxd keeps
-the last successful result in memory, so it starts fresh after a restart. `Machine.Config` carries
-the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
+**The sidebar** (#286, 2026-11-27) lists the pages used every day (Overview, Boxes, Jobs,
+History), then **Fleet**: each host as a link to its page, with a line of state (its mode, a
+pending request, headless, or nothing enforcing). Every host is a PC today; cloud hosts
+(Cloudflare Workers #277, Modal #278) will join the same list, and `hostKind` in `host.js` is the
+one place that knows the kinds. Its foot, as Murmur's, holds the connection and the Settings
+button, and a notice that opens a host's page when its builds have been out of step past the
+2-hour warning. A release that is only out gets no notice: both builds install it within the hour.
+
+**A host's page** (`#fleet/<id>`, #289) holds everything the page knows about one host: its
+name, which the pencil beside it changes (#291), the mode switch, caps and room (the card
+Overview shows), its running jobs, queue and boxes, its boxd and tray builds with **Check for updates**, the enforcer, box sizes, caps, expiry times and GPU
+availability. Check for updates compares the running builds with the latest stable release on
+GitHub. It downloads release metadata only. The latest release reads as unknown until the first
+check succeeds. Boxd keeps the last successful result in memory, so it starts fresh after a
+restart. `Machine.Config` carries the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
+`internal/dash/devserver/host.test.mjs` checks it in a browser against the devserver.
+
+**Settings** (2026-11-26, #158; trimmed by #290) holds only what can be changed here: the theme,
+saved in this browser.
 
 **History**: charts over a day or a week:
 - jobs per day by result;
@@ -132,6 +145,7 @@ The same set everywhere, since everywhere is the same page.
 | Control | What `boxd` does |
 |---|---|
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
+| Rename a host | writes `user.agent-box.name` on the project, or unsets it for an empty name, which goes back to `machineName` in `boxd.json` (#291). At most 40 characters on one line, with no format characters such as bidi overrides. Only a label: agents and `box` address the host by its ID |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
 | Delete a box | `incus delete --force`. The page confirms only when a job on that box is starting, running or paused, or ended within the last 2 minutes (#247); otherwise the first click deletes. boxd rechecks on an unconfirmed request and refuses with the warning when work appeared after the page's last update |
 | Extend a box | adds 1h, 4h or 24h to `user.expires` and holds the box until then (`user.box.hold-until`): a job's end or a launch short of room won't take that time (#198) |
@@ -327,7 +341,8 @@ JSON over HTTPS, on the same origin as the page.
 The page polls nothing. It opens one `GET /api/events` server-sent-events stream.
 - The first event is `state`, the full `/api/state`.
 - After that, each event carries one whole object, which replaces the old one: `machine`, `box`,
-  `job`, `box-gone`, `job-gone` and `updates`.
+  `job`, `box-gone`, `job-gone`, `updates` and `cloud` (`{cloud, cloudPaused, controller}`, all three
+  at once).
 - On reconnect the page starts over from `state`. There is no replay. If `/api/state` fails too, the
   page shows "PC unreachable" and tries again every 10s.
 - A running job's `job` events carry its `tail`, so Overview's log tails are live without a call.
@@ -338,7 +353,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 | Method and path | Returns or does |
 |---|---|
-| `GET /api/state` | `{machines, boxes, jobs, updates, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. `updates` is `{latest, checkedAt}`. Before the first successful check, `checkedAt` is omitted. An empty `latest` after a successful check means there is no stable release. |
+| `GET /api/state` | `{machines, boxes, jobs, updates, cloud, cloudPaused, controller, now}`, the three cloud fields left out while empty. `jobs` holds the running, paused and queued jobs plus the last 50 finished. `updates` is `{latest, checkedAt}`. Before the first successful check, `checkedAt` is omitted. An empty `latest` after a successful check means there is no stable release. |
 | `GET /api/events` | SSE, as above |
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&uid=&created=&q=&before=&limit=` | `{jobs, more, last}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` with `machine`, `uid` and `created` (its `createdAt`) one box: its jobs as above, and `last`, the one of them that ended last (400 without all four), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
@@ -350,6 +365,8 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
+| `POST /api/cloud/usage` | from `box`, as a best effort (2s): `{host?, controller?}`, a cloud host's last probe (`CloudHost` without `reportedAt`/`reportedBy`, which boxd sets) or the controller's `{day, requests, limit}`. 204, or 400 past 32 hosts. Kept in memory only, so a restart of boxd forgets them until the next probe. |
+| `POST /api/cloud/pause` | `{paused}`. 200 with `{cloud, cloudPaused, controller}`. While `cloudPaused`, `box` reads it from the `/api/state` it already fetches when probing the fleet and starts no new cloud job ("cloud paused from the dashboard"); running jobs go on, and `box cloud stop` stops them. In memory too: a restart of boxd resumes. |
 | `POST /api/updates/check` | `{}`. Queries GitHub for the latest stable release (read-only, coalescing concurrent clicks), updates `State.updates`, broadcasts `updates` over SSE, and answers 200 with `{latest, checkedAt}` (or 502 `update-check` on lookup failure). |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
 | `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
@@ -364,7 +381,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   `Version` is `{commit, time, modified, tag, since}`, the commit and release a binary was built
   from (`internal/version`). `boxd` is the serving boxd's; `tray` is `user.agent-box.tray-version`,
   which the active enforcer writes when it starts enforcing. `since` is when boxd first saw that build
-  run: its own start, or when the tray's key took its value. The sidebar's foot shows both, with a
+  run: its own start, or when the tray's key took its value. The host's page shows both, with a
   note when they differ: on 2026-11-25 the PC twice ran a boxd hours older than the repo, and nothing
   showed it. Both update hourly to the latest stable release, so the note says which one updates
   ("tray updates at its hourly check"), and it turns to a warning only when the two have differed
@@ -382,6 +399,11 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   `startedAt` is `queuedAt`, `position` is its place from 1, and `why` is one of the refusal causes;
   every change to either comes as a `job` event. When it starts, `job-gone` takes its waiting key and
   the running job comes under its own key with the same box and ID.
+- **`CloudHost`:** `{name, kind, mode: function|sandbox, paused, running, maxConcurrent, budget:
+  {month, spentUSD, runningUSD, capUSD, creditUSD, warnAt} | null, reportedAt, reportedBy}`, a cloud
+  runner's probe as `box` reported it (`paused` is the runner's own, `box cloud pause`). Its page is
+  `#fleet/cloud/<name>`: spend (settled plus running) against the cap, amber from `warnAt`, red at
+  the cap, and the page's pause.
 
 ### The contract and the devserver
 
@@ -397,7 +419,9 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   - headless: nobody logged on, the headless enforcer holding Full, a mode request waiting for the
     tray;
   - a lost job;
-  - a week of history.
+  - a week of history;
+  - cloud: the PC in My PC and four Modal hosts, well under, past the warning, at the cap, and paused
+    on the runner, with the controller's requests.
 - **The devserver** is `internal/dash/devserver`, like Murmur's `internal/web/devserver`. It serves
   the page with a chosen fixture, replays SSE events on a timer, and fakes the controls. The page is
   built against it, so the page and `boxd` are built at the same time.

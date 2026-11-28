@@ -5,10 +5,12 @@
 
 import { h, icon, tickTimes } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
-import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog, MODE_HINTS } from "./views.js";
+import { overview, boxes, jobs, jobDetail, modeLabel, modeDot, checkDialog, MODE_HINTS } from "./views.js";
 import { history } from "./history.js";
 import { settings, themeSwitch } from "./settings.js";
-import { versions } from "./versions.js";
+import { drift } from "./versions.js";
+import { host, hostKind, hostLink } from "./host.js";
+import { cloudStatus, cloudLink, cloudLine } from "./cloud.js";
 import { syncTip, hint } from "./tip.js";
 
 const root = document.getElementById("root");
@@ -19,14 +21,24 @@ const VIEWS = {
   boxes: { title: "Boxes", icon: "box", view: boxes },
   jobs: { title: "Jobs", icon: "list", view: jobs },
   history: { title: "History", icon: "chart", view: history },
-  settings: { title: "Settings", icon: "gear", view: settings },
 };
+// Reached from the sidebar's foot (#287) and from a host in Fleet (#288), not from the nav list.
+const PAGES = { ...VIEWS, settings: { title: "Settings", view: settings } };
 
-// Routes: #overview, #boxes, #jobs, #jobs/<key>, #history.
+// Routes: #overview, #boxes, #jobs, #jobs?<filters> (read once by Jobs), #jobs/<key>, #history,
+// #settings, #fleet/<host id>.
 function route() {
-  const [name, ...rest] = location.hash.slice(1).split("/");
-  if (name === "jobs" && rest.length) return { name: "jobs", key: decodeURIComponent(rest.join("/")) };
-  return { name: VIEWS[name] ? name : "overview" };
+  const [name, ...rest] = location.hash.slice(1).split("?")[0].split("/");
+  // A hand-typed hash can hold a bad escape, which decodeURIComponent throws on: it opens Overview.
+  const key = () => {
+    try {
+      return decodeURIComponent(rest.join("/"));
+    } catch {
+      return null;
+    }
+  };
+  if ((name === "jobs" || name === "fleet") && rest.length && key() != null) return { name, key: key() };
+  return { name: PAGES[name] ? name : "overview" };
 }
 
 let shell = null; // { el, side, content, title, mounted }
@@ -49,18 +61,72 @@ function sidebar(r) {
           h("li", null, h("a", { class: "menu-button", href: "#" + id, "data-key": "nav-" + id, "aria-current": r.name === id ? "page" : null, onclick: () => setDrawer(false) }, icon(v.icon), h("span", { class: "label" }, v.title), counts[id] ? h("span", { class: "menu-count" }, String(counts[id])) : null)),
         ),
       ),
-      S.machines.size ? h("p", { class: "group-label" }, "Machines") : null,
-      [...S.machines.values()].map((m) =>
-        h(
-          "div",
-          hint(modeLabel(m.mode) + ": " + MODE_HINTS[m.mode] + " Change the mode on Overview.", { class: "side-machine" }, "machine-" + m.name),
-          h("span", { class: "side-machine-name" }, h("span", { class: "dot " + (m.mode === "mypc" ? "dot-off" : "dot-on") }), m.name),
-          h("span", { class: "side-machine-line" }, modeLabel(m.mode), m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) + " pending" : ""),
-          trayAlive(m) ? (m.enforcer === "headless" ? h("span", { class: "side-machine-line" }, "Headless: nobody logged on") : null) : h("span", { class: "side-machine-line" }, "Nothing enforcing"),
-        ),
-      ),
+      S.machines.size || S.cloud.size ? h("p", { class: "group-label" }, "Fleet") : null,
+      S.machines.size || S.cloud.size ? h("ul", { class: "sidebar-menu" }, [...S.machines.values()].map((m) => h("li", null, fleetRow(m, r))), [...S.cloud.values()].map((c) => h("li", null, cloudRow(c, r)))) : null,
     ),
-    h("div", { class: "sidebar-foot" }, h("span", hint(S.conn === "live" ? "Connected: the page updates by itself as things change on the PC." : "The page lost its connection to the PC and is trying again; what it shows may be out of date.", { class: "conn" }, "conn"), h("span", { class: "dot " + (S.conn === "live" ? "dot-on" : "dot-bad") }), S.conn === "live" ? "Live" : "Reconnecting…"), [...S.machines.values()].map((m) => versions(m, S.machines.size > 1))),
+    foot(r),
+  );
+}
+
+// A host in the sidebar's Fleet (#288): what it is, its name, and one line of state; a link to
+// its page. A row says what kind of host it is, so cloud hosts can sit beside the PCs later.
+function fleetRow(m, r) {
+  const alive = trayAlive(m);
+  const req = m.modeRequested;
+  const state = !m.reachable ? "Not answering" : !alive ? "Nothing enforcing" : modeLabel(m.mode) + (req ? " → " + modeLabel(req.mode) : "") + (m.enforcer === "headless" ? " · headless" : "");
+  // The same dots as Overview's card: hollow when the host doesn't answer, red when it answers but
+  // nothing applies its mode.
+  const dot = !m.reachable ? "dot-off" : !alive ? "dot-bad" : modeDot(m.mode);
+  // The hint says what the line says.
+  const about = !m.reachable
+    ? "The host isn't answering: it may be asleep or off."
+    : !alive
+      ? "Nothing applies the mode on this host, so mode changes wait."
+      : req
+        ? "Switching to " + modeLabel(req.mode) + ", asked from " + req.by + "."
+        : (MODE_HINTS[m.mode] || "") + (m.enforcer === "headless" ? " Nobody is logged on, so the headless enforcer applies it." : "");
+  return h(
+    "a",
+    hint(hostKind(m).label + ": " + about, { class: "menu-button side-host", href: hostLink(m), "data-key": "host-" + m.id, "aria-current": r.name === "fleet" && r.key === m.id ? "page" : null, onclick: () => setDrawer(false) }, "inner"),
+    icon(hostKind(m).icon),
+    h("span", { class: "label side-host-text" }, h("span", { class: "side-host-name truncate" }, m.name), h("span", { class: "side-host-line" }, h("span", { class: "dot " + dot }), state)),
+  );
+}
+
+// A cloud host in the sidebar's Fleet (#280): the same row, with its spend for the line. Its key is
+// cloud/<name>, which no PC's ID can be.
+function cloudRow(c, r) {
+  const st = cloudStatus(c);
+  return h(
+    "a",
+    hint(hostKind(c).label + ": " + st.why, { class: "menu-button side-host", href: cloudLink(c), "data-key": "host-cloud-" + c.name, "aria-current": r.name === "fleet" && r.key === "cloud/" + c.name ? "page" : null, onclick: () => setDrawer(false) }, "inner"),
+    icon(hostKind(c).icon),
+    h("span", { class: "label side-host-text" }, h("span", { class: "side-host-name truncate" }, c.name), h("span", { class: "side-host-line truncate" }, h("span", { class: "dot " + st.dot }), cloudLine(c))),
+  );
+}
+
+// The sidebar's foot, as Murmur's (#287): a notice when a host's builds have been out of step past
+// the time both update by themselves (drift's warning), then the connection and the Settings
+// button. A release that is merely out isn't a notice: both install it within the hour. The builds
+// themselves are on each host's page.
+function foot(r) {
+  const notes = [...S.machines.values()]
+    .map((m) => {
+      const d = drift(m.boxd, m.tray, trayAlive(m));
+      return d?.warn && h("a", hint(d.why, { class: "side-notice", href: hostLink(m), "data-key": "notice-" + m.id, onclick: () => setDrawer(false) }, "inner"), icon("alert"), h("span", { class: "side-notice-text" }, h("span", null, "Builds out of step"), S.machines.size > 1 ? h("span", { class: "side-notice-host truncate" }, m.name) : null));
+    })
+    .filter(Boolean);
+  const live = S.conn === "live";
+  return h(
+    "div",
+    { class: "sidebar-foot" },
+    notes,
+    h(
+      "div",
+      { class: "foot-row" },
+      h("span", hint(live ? "Connected: the page updates by itself as things change on the PC." : "The page lost its connection to the PC and is trying again; what it shows may be out of date.", { class: "conn" }, "conn"), h("span", { class: "dot " + (live ? "dot-on" : "dot-bad") }), live ? "Live" : "Reconnecting…"),
+      h("a", { class: "icon-btn foot-settings", href: "#settings", title: "Settings", "aria-label": "Settings", "aria-current": r.name === "settings" ? "page" : null, "data-key": "nav-settings", onclick: () => setDrawer(false) }, icon("gear")),
+    ),
   );
 }
 
@@ -160,7 +226,10 @@ function draw() {
     return;
   }
   const r = route();
-  const v = r.key ? jobDetail : VIEWS[r.name].view;
+  // A host's page has its name as its heading (with the rename), so the top bar says where it is:
+  // Fleet. Every other page's name is said once, in the top bar (#293).
+  const page = r.name === "fleet" ? { title: "Fleet", doc: S.machines.get(r.key)?.name || (r.key.startsWith("cloud/") ? r.key.slice(6) : "Host"), view: host } : r.key ? { title: "Job", view: jobDetail } : PAGES[r.name];
+  const v = page.view;
   if (!shell) {
     const content = h("main", { class: "content", id: "content", tabindex: "-1" });
     const title = h("h1", null);
@@ -175,9 +244,9 @@ function draw() {
   const scrim = shell.el.querySelector(".drawer-scrim");
   if (drawer && !scrim) shell.el.append(h("div", { class: "drawer-scrim", onclick: () => setDrawer(false) }));
   if (!drawer) scrim?.remove();
-  const name = r.key ? "job" : r.name;
-  shell.title.textContent = r.key ? "Job" : VIEWS[r.name].title;
-  document.title = (r.key ? "Job" : VIEWS[r.name].title) + " · agent-box";
+  const name = r.name === "fleet" ? "fleet" : r.key ? "job" : r.name;
+  shell.title.textContent = page.title;
+  document.title = (page.doc || page.title) + " · agent-box";
   if (!current || current.name !== name || current.key !== r.key) {
     current?.view.leave?.();
     current = { name, key: r.key, view: v };

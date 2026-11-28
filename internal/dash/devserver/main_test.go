@@ -497,3 +497,31 @@ func TestUpdatesCheck(t *testing.T) {
 		t.Fatalf("fail mode: %d %q", status, e.Code)
 	}
 }
+
+// The cloud controls answer as boxd's do (internal/boxd/cloud.go).
+func TestCloud(t *testing.T) {
+	_, ts := start(t, "cloud")
+	if code, e, _ := call(t, ts, "POST", "/api/cloud/pause", `{"paused":true}`, false); code != 403 || e.Code != dash.CodeForbidden {
+		t.Errorf("pause without the header: %d %q", code, e.Code)
+	}
+	code, _, body := call(t, ts, "POST", "/api/cloud/pause", `{"paused":true}`, true)
+	var c dash.CloudState
+	if code != 200 || json.Unmarshal(body, &c) != nil || !c.CloudPaused || len(c.Cloud) != 4 {
+		t.Errorf("pause: %d %s", code, body)
+	}
+	if code, e, _ := call(t, ts, "POST", "/api/cloud/usage", `{"host":{"name":"modal","kind":"modal","mode":"vm"}}`, true); code != 400 || e.Code != dash.CodeBadRequest {
+		t.Errorf("bad usage: %d %q", code, e.Code)
+	}
+	if code, _, body := call(t, ts, "POST", "/api/cloud/usage", `{"host":{"name":"modal","kind":"modal","running":4,"maxConcurrent":4}}`, true); code != 204 {
+		t.Errorf("usage: %d %s", code, body)
+	}
+	code, _, body = call(t, ts, "GET", "/api/state", "", false)
+	var st dash.State
+	if code != 200 || json.Unmarshal(body, &st) != nil || !st.CloudPaused || st.Controller == nil {
+		t.Fatalf("state: %d %s", code, body)
+	}
+	i := slices.IndexFunc(st.Cloud, func(c dash.CloudHost) bool { return c.Name == "modal" })
+	if i < 0 || st.Cloud[i].Running != 4 || st.Cloud[i].ReportedBy != "devserver" || len(st.Cloud) != 4 {
+		t.Errorf("after the report: %+v", st.Cloud)
+	}
+}

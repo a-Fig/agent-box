@@ -68,8 +68,11 @@ type Watcher struct {
 	lastMode     *modeRec
 	sampled      time.Time
 	subs         map[chan dash.Event]struct{}
-	idleStopping string          // box selected by the idle stop worker
-	deleting     map[string]bool // dashboard deletes in flight
+	idleStopping string                    // box selected by the idle stop worker
+	deleting     map[string]bool           // dashboard deletes in flight
+	cloud        map[string]dash.CloudHost // cloud host name -> its last report (cloud.go)
+	cloudPaused  bool                      // the page's cloud pause switch
+	controller   *dash.ControllerUsage     // the fleet controller's last reported usage
 }
 
 type cpuMark struct {
@@ -639,6 +642,9 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 			m.Tray = &tv
 		}
 	}
+	if v := cfg[ProjectNameKey]; v != "" {
+		m.Name = v
+	}
 	if v := cfg[mode.ProjectModeRequestKey]; v != "" {
 		var r dash.ModeRequest
 		if json.Unmarshal([]byte(v), &r) == nil && r.Mode != "" {
@@ -763,6 +769,8 @@ func (w *Watcher) state() dash.State {
 	slices.SortFunc(s.Jobs, func(a, b dash.Job) int { return b.StartedAt.Compare(a.StartedAt) })
 	s.Jobs = append(s.Jobs, w.queuedJobs()...)
 	s.Jobs = append(s.Jobs, w.Hist.Finished(Filter{Limit: dash.FinishedInState}).Jobs...)
+	c := w.cloudState()
+	s.Cloud, s.CloudPaused, s.Controller = c.Cloud, c.CloudPaused, c.Controller
 	return s
 }
 

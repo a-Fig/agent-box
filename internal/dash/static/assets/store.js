@@ -5,7 +5,7 @@
 
 import { clock } from "./dom.js";
 
-export { S, api, post, applyUpdates, start, retryNow, changed, setChanged, toast, jobsOf, machineOf, boxOf, trayAlive, RETRY_MS };
+export { S, api, post, applyUpdates, applyCloud, start, retryNow, changed, setChanged, toast, jobsOf, machineOf, boxOf, trayAlive, RETRY_MS };
 
 const RETRY_MS = 10000;
 const TRAY_STALE_MS = 90000; // dash.TrayStaleAfter
@@ -19,6 +19,9 @@ const S = {
   gen: 0, // counts snapshots (a reconnect replaces the jobs, so what was fetched before may be stale)
   jobs: new Map(), // by key: running, paused and the last finished, from the state and events
   updates: null, // { latest, checkedAt } from boxd's last stable release check, or null
+  cloud: new Map(), // cloud hosts by name, as box last reported them (dash.CloudHost)
+  cloudPaused: false, // the page's pause on cloud launches
+  controller: null, // the fleet controller's requests today (dash.ControllerUsage), or null
   toast: null,
 };
 
@@ -78,8 +81,16 @@ function applyState(st) {
   S.boxes = new Map((st.boxes || []).map((b) => [b.machine + "/" + b.name, b]));
   S.jobs = new Map((st.jobs || []).map((j) => [j.key, j]));
   applyUpdates(st.updates);
+  applyCloud(st);
   S.gen++;
   S.conn = "live";
+}
+
+// The cloud fields of a state, an EventCloud or POST /api/cloud/pause's reply (dash.CloudState).
+function applyCloud(c) {
+  S.cloud = new Map((c.cloud || []).map((x) => [x.name, x]));
+  S.cloudPaused = !!c.cloudPaused;
+  S.controller = c.controller || null;
 }
 
 let es = null;
@@ -134,6 +145,7 @@ function openStream() {
   on("job", (j) => S.jobs.set(j.key, j));
   on("job-gone", (j) => S.jobs.delete(j.key));
   on("updates", applyUpdates);
+  on("cloud", applyCloud);
   // On a drop the page starts over from the state, after a breath, so a stream that keeps
   // failing doesn't spin.
   es.onerror = () => {

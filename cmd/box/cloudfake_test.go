@@ -1735,3 +1735,137 @@ func TestCloudPauseResumeStopCLI(t *testing.T) {
 		}
 	})
 }
+
+// usagePosts records box's best-effort POSTs to boxd's /api/cloud/usage.
+type usagePosts struct {
+	mu        sync.Mutex
+	bodies    []dash.CloudUsageBody
+	deadlines []time.Duration
+	err       error
+}
+
+func (u *usagePosts) post(ctx context.Context, url string, body []byte) error {
+	if !strings.HasSuffix(url, "/api/cloud/usage") {
+		return nil
+	}
+	var b dash.CloudUsageBody
+	if err := json.Unmarshal(body, &b); err != nil {
+		return err
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.bodies = append(u.bodies, b)
+	if d, ok := ctx.Deadline(); ok {
+		u.deadlines = append(u.deadlines, time.Until(d))
+	}
+	return u.err
+}
+
+func (u *usagePosts) got() []dash.CloudUsageBody {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return slices.Clone(u.bodies)
+}
+
+func TestCloudUsageReportedToBoxdBestEffort(t *testing.T) {
+	srv := newFakeRunnerV1(t)
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+	hosts := []fleetHost{{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "sandbox", Priority: -1}}
+	a, _, _, dir := cloudDispatchTestApp(t, newFakeFleet(t), hosts, srv.doHTTP)
+	posts := &usagePosts{err: errors.New("boxd is down")}
+	a.Post, a.dashboardURL = posts.post, "https://pc.example.com"
+
+	// A failing boxd changes nothing about the run: the probe's report and the job end's are
+	// both sent, and the job still passes.
+	r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"go", "test"}, Reason: "Usage reports after a probe and a job end."})
+	if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "cloud" {
+		t.Fatalf("Run = %+v, err=%v", r, err)
+	}
+	got := posts.got()
+	if len(got) != 2 {
+		t.Fatalf("usage posts = %d, want 2 (probe, job end)", len(got))
+	}
+	for _, b := range got {
+		h := b.Host
+		if h == nil || h.Name != "cloud" || h.Kind != "modal" || h.Mode != "sandbox" || h.MaxConcurrent != 4 ||
+			h.Budget == nil || h.Budget.CapUSD != 25 || h.Budget.CreditUSD != 30 || h.Budget.WarnAt != 0.75 || b.Validate() != nil {
+			t.Fatalf("usage body = %+v (host %+v)", b, h)
+		}
+	}
+	for _, d := range posts.deadlines {
+		if d <= 0 || d > cloudUsageTimeout {
+			t.Fatalf("usage post deadline %v, want within %v", d, cloudUsageTimeout)
+		}
+	}
+	if len(posts.deadlines) != 2 {
+		t.Fatalf("usage posts without a deadline: %v", posts.deadlines)
+	}
+
+	// No boxd to post to: nothing is sent and the probe is unchanged.
+	a.Post = nil
+	srv.mu.Lock()
+	hits := srv.probeHits
+	srv.mu.Unlock()
+	ch, _ := a.newCloudHost(hosts[0])
+	ch.reportUsage(context.Background())
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if srv.probeHits != hits {
+		t.Fatal("reportUsage probed the runner with nowhere to report")
+	}
+}
+
+func TestCloudPausedFromDashboardSkipsCloud(t *testing.T) {
+	ctx := context.Background()
+	srv := newFakeRunnerV1(t)
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+	pc := &fakeFleetHost{remote: "pc", project: mode.Project, mode: "mypc", queueCapable: true, cloudPaused: true}
+	ff := newFakeFleet(t, pc)
+	ff.dashHosts["https://pc.example.com"] = pc
+	hosts := []fleetHost{
+		{Name: "pc", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"},
+		{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1},
+	}
+	a, _, errOut, dir := cloudDispatchTestApp(t, ff, hosts, func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.String(), srv.endpoint()) {
+			return srv.doHTTP(req)
+		}
+		return ff.httpDo(req)
+	})
+	r, err := a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"go", "test"}, Reason: "Cloud paused from the page must not launch."})
+	srv.mu.Lock()
+	starts := srv.startHits
+	srv.mu.Unlock()
+	if starts != 0 || r.Host == "cloud" {
+		t.Fatalf("Run = %+v, err=%v: cloud started %d jobs while paused from the dashboard", r, err, starts)
+	}
+	if !strings.Contains(errOut.String(), dashboardCloudPaused) {
+		t.Fatalf("stderr %q doesn't say the cloud is paused from the dashboard", errOut.String())
+	}
+
+	// Resumed, the same fleet spills over to the cloud.
+	pc.mu.Lock()
+	pc.cloudPaused = false
+	pc.mu.Unlock()
+	r, err = a.Run(ctx, RunOpts{Dir: dir, Cmd: []string{"go", "test"}, Reason: "Cloud resumed from the page launches again."})
+	if err != nil || r.Host != "cloud" || r.Code != 0 {
+		t.Fatalf("resumed Run = %+v, err=%v", r, err)
+	}
+}
+
+func TestApplyDashboardCloudPause(t *testing.T) {
+	cands := []fleetCandidate{
+		{Host: fleetHost{Name: "pc"}, Reachable: true},
+		{Host: fleetHost{Name: "cloud", Kind: "modal"}, Reachable: true},
+		{Host: fleetHost{Name: "down", Kind: "modal"}, Error: "timeout"},
+	}
+	applyDashboardCloudPause(cands)
+	if cands[1].Unavailable != "" {
+		t.Fatal("no boxd reported a pause, but the cloud is marked")
+	}
+	cands[0].CloudPaused = true
+	applyDashboardCloudPause(cands)
+	if cands[0].Unavailable != "" || cands[1].Unavailable != dashboardCloudPaused || cands[2].Unavailable != "" {
+		t.Fatalf("after pause: %+v", cands)
+	}
+}

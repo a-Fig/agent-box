@@ -6,7 +6,7 @@ import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 import { hint, hideTip } from "./tip.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, MODE_HINTS, RESULT_HINTS };
+export { overview, boxes, jobs, jobsHref, modeDot, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
 
 const MODES = [
   ["full", "Full"],
@@ -391,7 +391,9 @@ function enforcerName(m) {
   return m.enforcer === "headless" ? "headless enforcer" : "tray";
 }
 
-function machineCard(m) {
+// On Overview (linked) the name opens the host's page; the host's page has its name as its
+// heading, so its card leaves the name out.
+function machineCard(m, linked = false) {
   const now = clock.now();
   const alive = trayAlive(m);
   const headless = alive && m.enforcer === "headless";
@@ -405,7 +407,7 @@ function machineCard(m) {
       return control("mode-" + m.id + "-" + id, hint(tip, { "aria-pressed": !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }), label, pending ? h("span", { class: "muted" }, "· pending") : null);
     }),
   );
-  const state = h("span", { class: "badge " + (m.mode === "mypc" ? "" : "badge-on") }, modeLabel(m.mode));
+  const state = h("span", { class: "badge " + modeBadge(m.mode) }, modeLabel(m.mode));
   const enforcerBadge = headless ? h("span", hint("Nobody is logged on to the PC, so the headless enforcer, a background task, applies the mode. The tray takes over at logon.", { class: "badge badge-outline" }, true), "headless") : null;
   let note = null;
   if (req) {
@@ -434,7 +436,7 @@ function machineCard(m) {
     h(
       "div",
       { class: "row" },
-      h("div", { class: "machine-head" }, h("span", { class: "machine-name" }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name), state, enforcerBadge, switcher),
+      h("div", { class: "machine-head" }, linked && h("a", { class: "machine-name", href: "#fleet/" + encodeURIComponent(m.id), "data-key": "card-" + m.id }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name, icon("chevron", "machine-chev")), state, enforcerBadge, switcher),
       note,
     ),
     h("div", { class: "row" }, h("div", { class: "meters" }, meter("CPUs", m.allocated.cpu, m.caps.cpu, n, "CPUs the boxes hold, each counted at its size's Full share, of the most all boxes together may have."), meter("Memory", m.allocated.memory, m.caps.memory, bytes, "Memory the boxes may use, by their sizes, of the most all boxes together may have. A new box starts only if its size fits."), meter("Boxes", m.allocated.instances, m.caps.instances, n, "Boxes that exist, of the most allowed at once."), meter("Disk", m.allocated.disk, m.caps.disk, bytes, "Disk the boxes and the image they start from use, of the most allowed for all of them."))),
@@ -468,12 +470,60 @@ function banners(m) {
   return out;
 }
 
-function runningRow(j) {
+// A running job's log shows its last lines, folded to three so several jobs fit on a screen (#293).
+// More opens every job's log to twelve, Less folds them again, and this browser remembers which;
+// the job's page has the whole log. A box opened on Boxes (fold false) always shows twelve: the
+// owner opened it to see what it is doing.
+const TAIL_FOLDED = 3;
+const TAIL_OPEN = 12;
+const TAILS_KEY = "agent-box:tails";
+let tailsOpen = false;
+try {
+  tailsOpen = localStorage.getItem(TAILS_KEY) === "open";
+} catch {}
+
+function setTails(open) {
+  tailsOpen = open;
+  try {
+    localStorage.setItem(TAILS_KEY, open ? "open" : "folded");
+  } catch {}
+  changed();
+}
+
+function runningRow(j, fold = true) {
+  const open = !fold || tailsOpen;
+  const lines = lastLines(j.tail, TAIL_OPEN).split("\n").length;
+  const pre = h("pre", { class: "log " + (open ? "log-open" : "log-folded"), id: "tail-" + j.key, "data-stick": "1", "data-key": "tail-" + j.key }, lastLines(j.tail, open ? TAIL_OPEN : TAIL_FOLDED));
   return h(
     "div",
     null,
     h("a", { class: "row row-link", href: jobLink(j), "data-key": "run-" + j.key }, h("div", { class: "row-grid" }, h("div", null, reasonEl(j), h("code", { class: "cmd" }, j.command), jobMeta(j)), h("div", { class: "row-control" }, jobBadge(j)))),
-    j.tail ? h("pre", { class: "log log-short", "data-stick": "1", "data-key": "tail-" + j.key }, lastLines(j.tail, 12)) : null,
+    j.tail
+      ? h(
+          "div",
+          { class: "tail" },
+          pre,
+          fold && lines > TAIL_FOLDED
+            ? h(
+                "div",
+                { class: "tail-foot" },
+                h(
+                  "button",
+                  {
+                    class: "btn btn-xs btn-ghost tail-more",
+                    type: "button",
+                    "aria-expanded": open ? "true" : "false",
+                    "aria-controls": pre.id,
+                    "aria-label": (open ? "Show less of the log of " : "Show more of the log of ") + (j.reason || j.command),
+                    "data-key": "tail-more-" + j.key,
+                    onclick: () => setTails(!open),
+                  },
+                  open ? "Less" : "More",
+                ),
+              )
+            : null,
+        )
+      : null,
   );
 }
 
@@ -656,7 +706,7 @@ function boxDetail(b, job) {
   // stream has, or the last job boxd named before (kept through a reconnect's reload).
   const known = load?.state === "ok" || !!load?.last || [...S.jobs.values()].some((j) => ended(j) && ranOn(j, b));
   let now;
-  if (job) now = runningRow(job);
+  if (job) now = runningRow(job, false);
   else if (!known) {
     const why = load?.state === "error" ? " Its job history couldn't load, so since when isn't known." : "";
     now = h("p", { class: "box-idle" }, h("span", { class: "dot dot-off" }), h("span", null, "Idle." + why));
@@ -701,8 +751,8 @@ const overview = {
         "div",
         { class: "page" },
         ms.flatMap(banners),
-        ms.length ? section(ms.length > 1 ? "Machines" : "Machine", null, ms.map(machineCard)) : null,
-        section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map(runningRow) : h("p", { class: "row-empty" }, "Nothing is running. Agents start jobs with box run; they show here as they start."))),
+        ms.length ? section("Fleet", ms.length > 1 ? plural(ms.length, "host") : null, ms.map((m) => machineCard(m, true))) : null,
+        section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map((j) => runningRow(j)) : h("p", { class: "row-empty" }, "Nothing is running. Agents start jobs with box run; they show here as they start."))),
         q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes. One is made when an agent first runs something here."))),
         done.length ? section("Recently finished", h("a", { href: "#jobs" }, "All jobs →"), h("div", { class: "group" }, done.map(finishedRow))) : null,
@@ -731,7 +781,7 @@ const boxes = {
       h(
         "div",
         { class: "page" },
-        h("div", { class: "page-head" }, h("h2", null, "Boxes"), h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs. Open one to see its jobs.")),
+        h("div", { class: "page-head" }, h("p", null, "Linux boxes on the PC that agents run their tests and builds in. A box is deleted when it expires; extend one an agent still needs. Open one to see its jobs.")),
         bx.length ? h("div", { class: "group" }, bx.map((b) => boxRow(b, true))) : empty("box", "No boxes", "Agents make them with box run or box new. Nothing is using the PC now."),
       ),
     );
@@ -819,6 +869,7 @@ function options(label, key, values) {
 
 const jobs = {
   mount(el) {
+    filtersFromHash();
     let t = 0;
     const search = h("input", { type: "search", placeholder: "Search reasons, commands, branches", "aria-label": "Search jobs", value: F.q });
     search.addEventListener("input", () => {
@@ -830,7 +881,7 @@ const jobs = {
     this.filters = h("div", { class: "filters" });
     this.search = h("label", { class: "field search" }, icon("search"), search);
     this.listEl = h("div", { class: "section" });
-    el.replaceChildren(h("div", { class: "page" }, h("div", { class: "page-head" }, h("h2", null, "Jobs"), h("p", null, "What agents ran on boxes, and why.")), h("div", { class: "section" }, this.filters, this.listEl)));
+    el.replaceChildren(h("div", { class: "page" }, h("div", { class: "page-head" }, h("p", null, "What agents ran on boxes, and why.")), h("div", { class: "section" }, this.filters, this.listEl)));
     fetchJobs();
     this.update(el);
   },
@@ -868,6 +919,28 @@ const jobs = {
     this.listEl.replaceChildren(...kids);
   },
 };
+
+// A mode's badge and dot: its own color, the same on every page (#292).
+function modeBadge(mode) {
+  return mode === "full" ? "badge-full" : mode === "shared" ? "badge-shared" : "";
+}
+function modeDot(mode) {
+  return mode === "full" ? "dot-full" : mode === "shared" ? "dot-shared" : "dot-mypc";
+}
+
+// A link to Jobs filtered to f (History's bars): #jobs?kind=go-test. The filters ride in the link,
+// so a new tab or a copied link opens them too; Jobs reads them once and drops them from the
+// address, as its own selects aren't kept there.
+function jobsHref(f) {
+  return "#jobs?" + new URLSearchParams(f);
+}
+function filtersFromHash() {
+  const q = location.hash.split("?")[1];
+  if (q == null) return;
+  const p = new URLSearchParams(q);
+  for (const k of Object.keys(F)) F[k] = p.get(k) || "";
+  history.replaceState(null, "", location.pathname + location.search + "#jobs");
+}
 
 function clearFilters() {
   for (const k of Object.keys(F)) F[k] = "";

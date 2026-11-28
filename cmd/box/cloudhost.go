@@ -595,6 +595,7 @@ func (c *cloudHost) follow(ctx context.Context, pubID jobID, wait time.Duration,
 					Cost:       r.Cost,
 					Locator:    &jobLocator{Name: c.host.Name, Kind: c.host.Kind, Endpoint: c.host.Endpoint, Mode: c.host.Mode},
 				})
+				c.reportUsage(ctx)
 			}
 			return r, nil
 		case "lost":

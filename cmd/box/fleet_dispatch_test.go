@@ -39,6 +39,7 @@ type fakeFleetHost struct {
 	preStartError  string
 	lateBox        *instance
 	priority       *int
+	cloudPaused    bool
 	onBundle       func() // during bundle upload, with mu held
 
 	mu          sync.Mutex
@@ -259,7 +260,7 @@ func (ff *fakeFleet) httpDo(req *http.Request) (*http.Response, error) {
 	h.boxdHits++
 	switch {
 	case req.Method == http.MethodGet && req.URL.Path == "/api/state":
-		body, _ := json.Marshal(fleetBoxdSnapshot{Queue: h.queueCapable, Priority: h.priority, Jobs: append([]dash.Job{}, h.queuedJobs...)})
+		body, _ := json.Marshal(fleetBoxdSnapshot{Queue: h.queueCapable, Priority: h.priority, Jobs: append([]dash.Job{}, h.queuedJobs...), CloudPaused: h.cloudPaused})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	case req.Method == http.MethodPost && req.URL.Path == "/api/queue":
 		mr, err := req.MultipartReader()
