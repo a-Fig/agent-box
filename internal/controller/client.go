@@ -116,7 +116,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, auth bool, req
 		return &APIError{Status: resp.StatusCode, Message: strings.TrimSpace(string(respBytes))}
 	}
 
-	if dst != nil {
+	if dst != nil && resp.StatusCode != http.StatusNoContent {
 		if err := json.Unmarshal(respBytes, dst); err != nil {
 			return fmt.Errorf("controller: decode %s %s: %w", method, path, err)
 		}

@@ -27,6 +27,8 @@ type MemServer struct {
 	hosts    map[string]storedHost
 	usageDay string
 	requests int
+	ciJobs   []*CIJob
+	ciSeq    int
 }
 
 type storedHost struct {
@@ -88,6 +90,21 @@ func (s *MemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handlePutState(w, r, id, now)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/ci/next":
+		if !s.authorize(w, r, s.HostToken, s.ClientToken) {
+			return
+		}
+		s.handleCINext(w, r, now)
+	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/v1/ci/jobs/"):
+		if !s.authorize(w, r, s.HostToken, s.ClientToken) {
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/v1/ci/jobs/")
+		if strings.Contains(id, "/") {
+			writeError(w, http.StatusNotFound, "not_found", "Unknown route.")
+			return
+		}
+		s.handleCIPatch(w, r, id, now)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "Unknown route.")
 	}

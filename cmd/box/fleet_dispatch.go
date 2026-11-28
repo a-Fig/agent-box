@@ -39,6 +39,13 @@ func (a *App) runDispatch(ctx context.Context, o RunOpts, sz mode.Size) (JobResu
 	if err != nil {
 		return JobResult{Code: 2}, err
 	}
+	if o.CloudOnly {
+		targets, err = cloudOnlyTargets(targets, bypassFleet, o.Box)
+		if err != nil {
+			return JobResult{Code: 2}, err
+		}
+		return a.runFleet(ctx, o, sz, targets)
+	}
 	if o.Box != "" && len(targets) == 1 && targets[0].Kind != "" {
 		return JobResult{Code: 2}, errors.New("--box needs an Incus host")
 	}
@@ -47,6 +54,26 @@ func (a *App) runDispatch(ctx context.Context, o RunOpts, sz mode.Size) (JobResu
 		return r, err
 	}
 	return a.runFleet(ctx, o, sz, targets)
+}
+
+// cloudOnlyTargets keeps only the cloud hosts of resolved fleet targets. A
+// bypassed fleet means the default Incus host, so it has none.
+func cloudOnlyTargets(targets []fleetHost, bypassFleet bool, box string) ([]fleetHost, error) {
+	if box != "" {
+		return nil, errors.New("a cloud-only run can't use --box")
+	}
+	var cloud []fleetHost
+	if !bypassFleet {
+		for _, t := range targets {
+			if t.Kind != "" {
+				cloud = append(cloud, t)
+			}
+		}
+	}
+	if len(cloud) == 0 {
+		return nil, errors.New("a cloud-only run needs a cloud host in hosts.json, and none is configured (or --host pins an Incus host)")
+	}
+	return cloud, nil
 }
 
 func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []fleetHost) (JobResult, error) {
