@@ -87,7 +87,7 @@ func apiStatus(err error, status int) bool {
 func TestValidRepoAndSHA(t *testing.T) {
 	for repo, want := range map[string]bool{
 		"a-Fig/agent-box": true, "o/n.js": true, "my_org/repo.v2": true,
-		"../x": false, "x/..": false, "./x": false, "a/b/c": false, "a": false, "a/": false,
+		"../x": false, "x/..": false, ".../x": false, "x/...": false, ".x/y.": true, "./x": false, "a/b/c": false, "a": false, "a/": false,
 		`a\b/c`: false, "a/b c": false, "": false, "o/" + strings.Repeat("n", 101): false,
 	} {
 		if got := ValidRepo(repo); got != want {

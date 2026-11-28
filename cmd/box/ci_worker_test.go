@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/a-Fig/agent-box/internal/controller"
 	"github.com/a-Fig/agent-box/internal/mode"
@@ -46,6 +47,8 @@ type ciTest struct {
 	cloud    *fakeRunnerV1
 	base     string
 	cacheDir string
+	// afterCloud, if set, sees each cloud runner request once it is answered.
+	afterCloud func(*http.Request)
 }
 
 // newCITest sets up a controller, a PC (priority 10) and optionally a cloud
@@ -69,7 +72,11 @@ func newCITest(t *testing.T, withCloud bool) *ciTest {
 		case strings.HasPrefix(u, ct.srv.URL):
 			return http.DefaultTransport.RoundTrip(req)
 		case ct.cloud != nil && strings.HasPrefix(u, ct.cloud.endpoint()):
-			return ct.cloud.doHTTP(req)
+			resp, err := ct.cloud.doHTTP(req)
+			if ct.afterCloud != nil {
+				ct.afterCloud(req)
+			}
+			return resp, err
 		}
 		return ff.httpDo(req)
 	})
@@ -301,6 +308,7 @@ func TestCIWorkerFlagsAndAuth(t *testing.T) {
 		}
 	}
 
+	hostsTestPath(t) // a fresh config dir: no real controller.json can supply a URL
 	missing := filepath.Join(t.TempDir(), "boxd.json")
 	if _, _, err := ciControllerAuth(ct.srv.URL, "", missing); err == nil || !strings.Contains(err.Error(), "--token-file") {
 		t.Fatalf("no token: %v", err)
@@ -321,4 +329,64 @@ func TestBoundSummary(t *testing.T) {
 	if len(got) > ciSummaryMax || !strings.HasSuffix(got, "TAIL") || !strings.HasPrefix(got, "aaa") {
 		t.Fatalf("boundSummary: len %d, ends %q", len(got), got[len(got)-8:])
 	}
+}
+
+// A fork can commit .agent-box as a symlink to a directory outside the
+// checkout; the worker must not read (or run) the ci.json it points at.
+func TestCIWorkerRefusesSymlinkedConfigDir(t *testing.T) {
+	ct := newCITest(t, false)
+	outside := t.TempDir()
+	write(t, filepath.Join(outside, "ci.json"), `{"command": "echo OUTSIDE_SECRET"}`)
+
+	src := filepath.Join(t.TempDir(), "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, src, "init", "-q")
+	write(t, filepath.Join(src, "main.go"), "package main\n")
+	write(t, filepath.Join(src, "target"), outside)
+	blob := gitT(t, src, "hash-object", "-w", "target")
+	os.Remove(filepath.Join(src, "target"))
+	gitT(t, src, "add", "main.go")
+	gitT(t, src, "update-index", "--add", "--cacheinfo", "120000,"+blob+",.agent-box")
+	gitT(t, src, "commit", "-q", "-m", "symlinked config dir")
+	sha := gitT(t, src, "rev-parse", "HEAD")
+	bare := filepath.Join(ct.base, "a-Fig", "lantern.git")
+	os.MkdirAll(filepath.Dir(bare), 0o755)
+	gitT(t, src, "clone", "-q", "--bare", src, bare)
+	gitT(t, bare, "config", "uploadpack.allowAnySHA1InWant", "true")
+
+	id := ct.ms.EnqueueCIJob("a-Fig/lantern", sha, controller.JobClassAny, nil)
+	ct.worker(controller.HostClassHome, "pc-1").loop(context.Background(), true)
+	j := ct.job(t, id)
+	if j.State != controller.CIFailed || exitCode(j) != nil || strings.Contains(summary(j), "OUTSIDE_SECRET") {
+		t.Fatalf("job = %+v, summary %q", j, summary(j))
+	}
+	if len(ct.pc.startJobs) != 0 {
+		t.Fatalf("PC ran %q", ct.pc.startJobs)
+	}
+	ct.noWorktreesLeft(t)
+}
+
+func TestCIWorkerReportsCancelledWhenStopped(t *testing.T) {
+	ct := newCITest(t, true)
+	ct.cloud.jobDelay = time.Hour
+	sha := ciSourceRepo(t, ct.base, "a-Fig/lantern", `{"command": "go test ./..."}`)
+	id := ct.ms.EnqueueCIJob("a-Fig/lantern", sha, controller.JobClassAny, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Stop the worker (as SIGTERM would) once the cloud job has started.
+	ct.afterCloud = func(req *http.Request) {
+		if req.Method == http.MethodPost && req.URL.Path == "/v1/jobs" {
+			cancel()
+		}
+	}
+	if code := ct.worker(controller.HostClassCloud, "modal-1").loop(ctx, false); code != 0 {
+		t.Fatalf("loop = %d", code)
+	}
+	j := ct.job(t, id)
+	if j.State != controller.CICancelled || !strings.Contains(summary(j), "stopped before the job finished") {
+		t.Fatalf("job = %+v, summary %q", j, summary(j))
+	}
+	ct.noWorktreesLeft(t)
 }

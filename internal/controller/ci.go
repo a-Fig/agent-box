@@ -80,13 +80,14 @@ var (
 )
 
 // ValidRepo reports whether repo is a GitHub owner/name the controller accepts,
-// with neither part "." or ".." (so it is safe as two path components).
+// with neither part all dots (so it is safe as two path components).
 func ValidRepo(repo string) bool {
 	if !repoRE.MatchString(repo) {
 		return false
 	}
 	owner, name, _ := strings.Cut(repo, "/")
-	return owner != "." && owner != ".." && name != "." && name != ".."
+	// All-dot parts ("." , "..", "...") are path tricks, and Windows strips trailing dots.
+	return strings.Trim(owner, ".") != "" && strings.Trim(name, ".") != ""
 }
 
 // ValidSHA reports whether sha is a full lowercase hex commit ID (SHA-1 or SHA-256).

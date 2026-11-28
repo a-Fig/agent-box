@@ -295,7 +295,11 @@ func (w *ciWorker) execute(ctx context.Context, job *controller.CIJob) (string, 
 	}
 	switch {
 	case err != nil:
-		return controller.CIFailed, &code, fmt.Sprintf("%s failed to run: %v%s", head, err, body)
+		exit := &code
+		if code == 0 { // nothing ran, so there is no exit code to report
+			exit = nil
+		}
+		return controller.CIFailed, exit, fmt.Sprintf("%s failed to run: %v%s", head, err, body)
 	case r.State == statePaused || r.State == stateQueued:
 		return controller.CIFailed, &code, fmt.Sprintf("%s didn't run (no room on the fleet; exit %d).%s", head, code, body)
 	case code == 0:
@@ -366,23 +370,30 @@ func (w *ciWorker) checkout(ctx context.Context, repoName, sha string) (string, 
 // readCIConfig reads and checks <dir>/.agent-box/ci.json.
 func readCIConfig(dir string) (ciConfig, RunOpts, error) {
 	var cfg ciConfig
-	p := filepath.Join(dir, filepath.FromSlash(ciConfigPath))
-	fi, err := os.Lstat(p)
+	// The checkout is untrusted (a fork PR's), so the file is opened through
+	// os.Root: a symlinked .agent-box or ci.json can't reach outside it.
+	root, err := os.OpenRoot(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		return cfg, RunOpts{}, errors.New("the checkout can't be opened")
+	}
+	defer root.Close()
+	f, err := root.Open(ciConfigPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			return cfg, RunOpts{}, errors.New("the file is missing")
 		}
-		return cfg, RunOpts{}, errors.New("the file can't be read")
+		return cfg, RunOpts{}, errors.New("the file can't be read inside the checkout")
 	}
-	if !fi.Mode().IsRegular() {
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
 		return cfg, RunOpts{}, errors.New("it must be a regular file")
 	}
-	if fi.Size() > ciConfigMax {
-		return cfg, RunOpts{}, fmt.Errorf("it is over %d bytes", ciConfigMax)
-	}
-	data, err := os.ReadFile(p)
+	data, err := io.ReadAll(io.LimitReader(f, ciConfigMax+1))
 	if err != nil {
 		return cfg, RunOpts{}, errors.New("the file can't be read")
+	}
+	if len(data) > ciConfigMax {
+		return cfg, RunOpts{}, fmt.Errorf("it is over %d bytes", ciConfigMax)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
