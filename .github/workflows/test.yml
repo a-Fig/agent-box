@@ -82,6 +82,10 @@ jobs:
           ab = yaml.safe_load(open('provision/agent-base.yaml'))
           assert (ab.get('config') or {}).get('cloud-init.user-data'), 'agent-base.yaml must carry the image build cloud-init (#194)'
           PY
+      - name: modal runner
+        run: |
+          python3 -m py_compile provision/modal/*.py && python3 -m unittest discover -s provision/modal -p 'test_*.py'
+          sh -n provision/modal/smoke.sh
 
   # gofmt runs on Linux only: a Windows checkout of LF files can confuse it.
   test-windows:
