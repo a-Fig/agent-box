@@ -1,0 +1,7 @@
+{
+  "capUSD": 25,
+  "maxConcurrent": 4,
+  "maxTimeoutSec": 3600,
+  "keepSec": 900,
+  "mode": "function"
+}

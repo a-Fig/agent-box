@@ -1,0 +1,24 @@
+{
+  "id": "lantern.20261127-150405-a1b2",
+  "state": "done",
+  "exit": 0,
+  "attempt": 1,
+  "startedAt": "2026-11-27T15:04:08Z",
+  "endedAt": "2026-11-27T15:05:12Z",
+  "logBytes": 1842,
+  "tail": "ok  \tgithub.com/acme/lantern/internal/store\t4.120s\nok  \tgithub.com/acme/lantern/internal/sync\t2.845s\nPASS\n",
+  "mode": "function",
+  "cost": {
+    "usd": 0.012,
+    "cpuSec": 64.0,
+    "gpuSec": 0
+  },
+  "budget": {
+    "month": "2026-11",
+    "spentUSD": 3.132,
+    "runningUSD": 0.04,
+    "capUSD": 25,
+    "creditUSD": 30,
+    "warnAt": 0.75
+  }
+}

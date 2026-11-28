@@ -1,0 +1,21 @@
+{
+  "protocol": 1,
+  "sizes": [
+    "small",
+    "medium",
+    "large",
+    "gpu"
+  ],
+  "running": 2,
+  "maxConcurrent": 4,
+  "paused": false,
+  "maxTimeoutSec": 3600,
+  "budget": {
+    "month": "2026-11",
+    "spentUSD": 3.12,
+    "runningUSD": 0.04,
+    "capUSD": 25,
+    "creditUSD": 30,
+    "warnAt": 0.75
+  }
+}
