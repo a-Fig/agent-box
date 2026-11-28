@@ -38,6 +38,7 @@ type fakeFleetHost struct {
 	queueError     string
 	preStartError  string
 	lateBox        *instance
+	priority       *int
 	onBundle       func() // during bundle upload, with mu held
 
 	mu          sync.Mutex
@@ -258,7 +259,7 @@ func (ff *fakeFleet) httpDo(req *http.Request) (*http.Response, error) {
 	h.boxdHits++
 	switch {
 	case req.Method == http.MethodGet && req.URL.Path == "/api/state":
-		body, _ := json.Marshal(fleetBoxdSnapshot{Queue: h.queueCapable, Jobs: append([]dash.Job{}, h.queuedJobs...)})
+		body, _ := json.Marshal(fleetBoxdSnapshot{Queue: h.queueCapable, Priority: h.priority, Jobs: append([]dash.Job{}, h.queuedJobs...)})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	case req.Method == http.MethodPost && req.URL.Path == "/api/queue":
 		mr, err := req.MultipartReader()
@@ -1031,6 +1032,139 @@ func TestFleetRunTieredFallbackOnTurnAway(t *testing.T) {
 		}
 		if low.listCalls == 0 {
 			t.Fatalf("expected lower tier to be probed before queueing on higher tier")
+		}
+	})
+}
+
+func TestFleetRunBoxdAuthoritativePriority(t *testing.T) {
+	t.Run("two clients with empty hosts.json priority rank hosts by boxd-reported priority", func(t *testing.T) {
+		alpha := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(5), execStdout: "alpha\n"}
+		beta := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(20), execStdout: "beta\n"}
+		ff := newFakeFleet(t, alpha, beta)
+		ff.dashHosts["https://alpha.example.com"] = alpha
+		ff.dashHosts["https://beta.example.com"] = beta
+
+		// Client 1 lists alpha then beta (both omitting priority).
+		a1, out1, dir1 := fleetDispatchTestApp(t, ff, []fleetHost{
+			{Name: "alpha", Remote: "r1", Project: mode.Project, DashboardURL: "https://alpha.example.com"},
+			{Name: "beta", Remote: "r2", Project: mode.Project, DashboardURL: "https://beta.example.com"},
+		})
+		r1, err := a1.Run(context.Background(), RunOpts{Dir: dir1, Cmd: []string{"echo ok"}, New: true, Reason: "Client 1 agrees on boxd-reported host priority."})
+		if err != nil || r1.Host != "beta" {
+			t.Fatalf("client 1 run = %+v, %v\n%s", r1, err, out1.String())
+		}
+
+		// Client 2 lists beta then alpha (also omitting priority).
+		a2, out2, dir2 := fleetDispatchTestApp(t, ff, []fleetHost{
+			{Name: "beta", Remote: "r2", Project: mode.Project, DashboardURL: "https://beta.example.com"},
+			{Name: "alpha", Remote: "r1", Project: mode.Project, DashboardURL: "https://alpha.example.com"},
+		})
+		r2, err := a2.Run(context.Background(), RunOpts{Dir: dir2, Cmd: []string{"echo ok"}, New: true, Reason: "Client 2 agrees on boxd-reported host priority."})
+		if err != nil || r2.Host != "beta" {
+			t.Fatalf("client 2 run = %+v, %v\n%s", r2, err, out2.String())
+		}
+	})
+
+	t.Run("boxd-reported priority overrides stale hosts.json hint once probed", func(t *testing.T) {
+		alpha := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(0), execStdout: "alpha\n"}
+		beta := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(25), execStdout: "beta\n"}
+		ff := newFakeFleet(t, alpha, beta)
+		ff.dashHosts["https://alpha.example.com"] = alpha
+		ff.dashHosts["https://beta.example.com"] = beta
+
+		// Stale client config puts both in the same tier (hint 10), even though
+		// boxd reports 0 on alpha and 25 on beta.
+		hosts := []fleetHost{
+			{Name: "alpha", Remote: "r1", Project: mode.Project, DashboardURL: "https://alpha.example.com", Priority: 10},
+			{Name: "beta", Remote: "r2", Project: mode.Project, DashboardURL: "https://beta.example.com", Priority: 10},
+		}
+		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Verify boxd priority overrides stale hosts.json hint."})
+		if err != nil || r.Host != "beta" || len(alpha.startJobs) != 0 || len(beta.startJobs) != 1 {
+			t.Fatalf("override run = %+v, %v (alpha=%d beta=%d)\n%s", r, err, len(alpha.startJobs), len(beta.startJobs), out.String())
+		}
+	})
+}
+
+func TestFleetRunThreeTierProbeAndLaunchOrder(t *testing.T) {
+	recordingApp := func(t *testing.T, t1, t2, t3 *fakeFleetHost) (*App, *[]string, *[]string, *int, *bytes.Buffer, string) {
+		t.Helper()
+		ff := newFakeFleet(t, t1, t2, t3)
+		ff.dashHosts["https://t1.example.com"] = t1
+		ff.dashHosts["https://t2.example.com"] = t2
+		ff.dashHosts["https://t3.example.com"] = t3
+		hosts := []fleetHost{
+			{Name: "tier3", Remote: "r3", Project: mode.Project, DashboardURL: "https://t3.example.com", Priority: 0},
+			{Name: "tier1", Remote: "r1", Project: mode.Project, DashboardURL: "https://t1.example.com", Priority: 20},
+			{Name: "tier2", Remote: "r2", Project: mode.Project, DashboardURL: "https://t2.example.com", Priority: 10},
+		}
+		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+		var mu sync.Mutex
+		var probeOrder, launchOrder []string
+		seenProbe := map[string]bool{}
+		var t3ListCallsAtT2Launch int
+		a.R = lookupRunner(func(ctx context.Context, cmd Cmd) (Result, error) {
+			if cmd.Name == "incus" && len(cmd.Args) >= 4 {
+				switch cmd.Args[2] {
+				case "list":
+					remote, _, _ := strings.Cut(cmd.Args[3], ":")
+					mu.Lock()
+					if !seenProbe[remote] {
+						seenProbe[remote] = true
+						probeOrder = append(probeOrder, remote)
+					}
+					mu.Unlock()
+				case "launch":
+					remote, _, _ := strings.Cut(cmd.Args[4], ":")
+					mu.Lock()
+					launchOrder = append(launchOrder, remote)
+					if remote == "r2" {
+						t3.mu.Lock()
+						t3ListCallsAtT2Launch = t3.listCalls
+						t3.mu.Unlock()
+					}
+					mu.Unlock()
+				}
+			}
+			return ff.Run(ctx, cmd)
+		})
+		return a, &probeOrder, &launchOrder, &t3ListCallsAtT2Launch, out, dir
+	}
+
+	t.Run("stops before tier 3 when tier 2 can start", func(t *testing.T) {
+		t1 := &fakeFleetHost{
+			remote: "r1", project: mode.Project, mode: "full", queueCapable: true,
+			keys:  map[string]string{"limits.instances": "1"},
+			insts: []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}},
+		}
+		t2 := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, execStdout: "tier2-ok\n"}
+		t3 := &fakeFleetHost{remote: "r3", project: mode.Project, mode: "full", queueCapable: true, execStdout: "tier3-ok\n"}
+
+		a, probeOrder, launchOrder, _, out, dir := recordingApp(t, t1, t2, t3)
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Tier 2 start must not probe tier 3."})
+		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "tier2" {
+			t.Fatalf("run = %+v, %v\n%s", r, err, out.String())
+		}
+		if !slices.Equal(*probeOrder, []string{"r1", "r2"}) || !slices.Equal(*launchOrder, []string{"r2"}) || t3.listCalls != 0 {
+			t.Fatalf("probeOrder=%v launchOrder=%v t3.listCalls=%d, want [r1 r2], [r2], 0", *probeOrder, *launchOrder, t3.listCalls)
+		}
+	})
+
+	t.Run("probes and launches tier 3 only after tier 1 and tier 2 both turn away", func(t *testing.T) {
+		t1 := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, refuseLaunch: memoryRefusal}
+		t2 := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, refuseLaunch: memoryRefusal}
+		t3 := &fakeFleetHost{remote: "r3", project: mode.Project, mode: "full", queueCapable: true, execStdout: "tier3-ok\n"}
+
+		a, probeOrder, launchOrder, t3AtT2, out, dir := recordingApp(t, t1, t2, t3)
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Queue: true, Reason: "Three-tier fallback after tier 1 and tier 2 turn away."})
+		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "tier3" {
+			t.Fatalf("run = %+v, %v\n%s", r, err, out.String())
+		}
+		if *t3AtT2 != 0 {
+			t.Fatalf("tier 3 was probed (%d times) before tier 2 turned away", *t3AtT2)
+		}
+		if !slices.Equal(*probeOrder, []string{"r1", "r2", "r3"}) || !slices.Equal(*launchOrder, []string{"r1", "r2", "r3"}) {
+			t.Fatalf("probeOrder=%v launchOrder=%v, want [r1 r2 r3] and [r1 r2 r3]", *probeOrder, *launchOrder)
 		}
 	})
 }

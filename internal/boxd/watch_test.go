@@ -649,18 +649,26 @@ func TestAPI(t *testing.T) {
 		return resp.StatusCode
 	}
 	var st dash.State
-	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 || st.Queue {
-		t.Fatalf("state %+v (want Queue=false when W.Queue is nil)", st)
+	if get("/api/state", &st) != 200 || len(st.Jobs) != 1 || st.Queue || st.Priority != nil {
+		t.Fatalf("state %+v (want Queue=false and Priority=nil when unset)", st)
 	}
 	q, err := OpenQueue(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	w.Queue = q
-	if get("/api/state", &st) != 200 || !st.Queue {
-		t.Fatalf("state with queue = %+v, want Queue=true", st)
+	prio := 10
+	w.Priority = &prio
+	if get("/api/state", &st) != 200 || !st.Queue || st.Priority == nil || *st.Priority != 10 {
+		t.Fatalf("state with queue+priority = %+v, want Queue=true and Priority=10", st)
+	}
+	zero := 0
+	w.Priority = &zero
+	if get("/api/state", &st) != 200 || st.Priority == nil || *st.Priority != 0 {
+		t.Fatalf("state with explicit zero priority = %+v, want Priority=0", st)
 	}
 	w.Queue = nil
+	w.Priority = nil
 	key := url.PathEscape(st.Jobs[0].Key)
 	var chunk dash.LogChunk
 	if code := get("/api/jobs/"+key+"/log?offset=0", &chunk); code != 200 || chunk.EOF || len(chunk.Data) > dash.MaxLogChunk ||

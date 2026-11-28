@@ -37,6 +37,9 @@ type Watcher struct {
 	Logf        func(format string, args ...any)
 	// Queue is the waiting jobs (docs/queue.md); nil runs without one.
 	Queue *Queue
+	// Priority is this host's scheduling priority reported in /api/state
+	// (higher wins; nil when unset).
+	Priority *int
 	// Whois names the device at a tailnet address, for the history; nil uses
 	// the login.
 	Whois func(ctx context.Context, ip string) string
@@ -744,7 +747,12 @@ func (w *Watcher) State() dash.State {
 
 func (w *Watcher) state() dash.State {
 	w.init()
-	s := dash.State{Machines: []dash.Machine{w.machine}, Boxes: []dash.Box{}, Jobs: []dash.Job{}, Queue: w.Queue != nil, Now: w.Now().UTC()}
+	var prio *int
+	if w.Priority != nil {
+		v := *w.Priority
+		prio = &v
+	}
+	s := dash.State{Machines: []dash.Machine{w.machine}, Boxes: []dash.Box{}, Jobs: []dash.Job{}, Queue: w.Queue != nil, Priority: prio, Now: w.Now().UTC()}
 	for _, b := range w.boxes {
 		s.Boxes = append(s.Boxes, b)
 	}

@@ -650,4 +650,34 @@ func TestProbeFleetTiers(t *testing.T) {
 			t.Fatalf("equal priority cands=%d rest=%d probed=%v", len(cands), len(rest), *probed)
 		}
 	})
+
+	t.Run("boxd-reported priority overrides hosts.json hint even without queue capability", func(t *testing.T) {
+		a, _ := newProbeApp(t, map[string]map[string]string{
+			"r1": openKeys,
+			"r2": openKeys,
+			"r3": openKeys,
+		}, nil)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "one.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":false,"priority":0,"jobs":[]}`))}, nil
+			case "two.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":20,"jobs":[]}`))}, nil
+			default:
+				return nil, fmt.Errorf("boxd down")
+			}
+		}
+		targets := []fleetHost{
+			{Name: "one", Remote: "r1", Project: mode.Project, DashboardURL: "https://one.example.com", Priority: 15},
+			{Name: "two", Remote: "r2", Project: mode.Project, DashboardURL: "https://two.example.com", Priority: 15},
+			{Name: "three", Remote: "r3", Project: mode.Project, DashboardURL: "https://three.example.com", Priority: 15},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		if len(rest) != 0 || cands[0].Priority != 0 || cands[1].Priority != 20 || cands[2].Priority != 15 {
+			t.Fatalf("cands=%+v rest=%+v, want priorities [0 20 15]", cands, rest)
+		}
+		if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "two" {
+			t.Fatalf("pick = %+v, want two (boxd priority 20)", pick)
+		}
+	})
 }

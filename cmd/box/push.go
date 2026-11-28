@@ -200,10 +200,11 @@ type jobLocator struct {
 	Remote       string `json:"remote"`
 	Project      string `json:"project"`
 	DashboardURL string `json:"dashboard_url,omitempty"`
+	Priority     int    `json:"priority,omitempty"`
 }
 
 func locateJobHost(h fleetHost) *jobLocator {
-	return &jobLocator{Name: h.Name, Remote: h.Remote, Project: h.Project, DashboardURL: h.DashboardURL}
+	return &jobLocator{Name: h.Name, Remote: h.Remote, Project: h.Project, DashboardURL: h.DashboardURL, Priority: h.Priority}
 }
 
 func (rec jobRecord) noticeJob() string {
@@ -217,7 +218,7 @@ func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 	if rec.Host == nil {
 		return fleetHost{}, fmt.Errorf("no saved host for qualified job %s", id.ID)
 	}
-	host := fleetHost{Name: rec.Host.Name, Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL}
+	host := fleetHost{Name: rec.Host.Name, Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL, Priority: rec.Host.Priority}
 	tag, err := jobHostTag(host)
 	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
 		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)

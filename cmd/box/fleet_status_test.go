@@ -169,18 +169,32 @@ func TestWriteFleetPriorityDisplay(t *testing.T) {
 		}
 	})
 
-	t.Run("probeFleet propagates host priority", func(t *testing.T) {
+	t.Run("probeFleet prefers boxd priority and falls back to config hint", func(t *testing.T) {
 		a := newApp()
 		a.Remote, a.Project = "pc", "agents"
 		a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
-			if strings.Join(cmd.Args, " ") == "--project agents list pc: --format json" {
+			if len(cmd.Args) >= 4 && cmd.Args[2] == "list" {
 				return Result{Stdout: "[]"}, nil
 			}
 			return Result{Code: 1}, nil
 		})
-		s := a.probeFleet(context.Background(), "", []fleetHost{{Name: "primary", Remote: "pc", Project: "agents", Priority: 10}}, 0, 1)
-		if len(s.Hosts) != 1 || s.Hosts[0].Priority != 10 {
-			t.Fatalf("probeFleet hosts = %+v, want priority 10", s.Hosts)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "pc.example.com" {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"priority":25,"jobs":[]}`))}, nil
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"jobs":[]}`))}, nil
+		}
+		s := a.probeFleet(context.Background(), "", []fleetHost{
+			{Name: "primary", Remote: "pc", Project: "agents", DashboardURL: "https://pc.example.com", Priority: 10},
+			{Name: "backup", Remote: "spare", Project: "agents", DashboardURL: "https://spare.example.com", Priority: 5},
+		}, 0, 2)
+		if len(s.Hosts) != 2 || s.Hosts[0].Priority != 25 || s.Hosts[1].Priority != 5 {
+			t.Fatalf("probeFleet hosts = %+v, want priorities [25 5]", s.Hosts)
+		}
+		var out strings.Builder
+		writeFleet(&out, s.Hosts)
+		if !strings.Contains(out.String(), "primary (pc/agents): priority 25,") || !strings.Contains(out.String(), "backup (spare/agents): priority 5,") {
+			t.Fatalf("writeFleet = %q", out.String())
 		}
 	})
 }

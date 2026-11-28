@@ -56,12 +56,20 @@ func TestLoadConfigDefaults(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "boxd.json")
 	os.WriteFile(p, []byte(`{"owners":["a@b.c"]}`), 0o644)
 	c, err := LoadConfig(p)
-	if err != nil || c.Listen != DefaultListen || len(c.Owners) != 1 || c.HistoryDir == "" || c.CoolIdleThrowaways {
+	if err != nil || c.Listen != DefaultListen || len(c.Owners) != 1 || c.HistoryDir == "" || c.CoolIdleThrowaways || c.Priority != nil {
 		t.Fatalf("%+v %v", c, err)
 	}
-	os.WriteFile(p, []byte(`{"coolIdleThrowaways":true}`), 0o644)
-	if c, err := LoadConfig(p); err != nil || !c.CoolIdleThrowaways || c.ReuseThrowaways {
-		t.Fatalf("cooling opt-in without pooling = %+v, %v", c, err)
+	os.WriteFile(p, []byte(`{"coolIdleThrowaways":true,"priority":10}`), 0o644)
+	if c, err := LoadConfig(p); err != nil || !c.CoolIdleThrowaways || c.ReuseThrowaways || c.Priority == nil || *c.Priority != 10 {
+		t.Fatalf("cooling opt-in + priority = %+v, %v", c, err)
+	}
+	os.WriteFile(p, []byte(`{"priority":0}`), 0o644)
+	if c, err := LoadConfig(p); err != nil || c.Priority == nil || *c.Priority != 0 {
+		t.Fatalf("explicit zero priority = %+v, %v", c, err)
+	}
+	os.WriteFile(p, []byte(`{"priority":-5}`), 0o644)
+	if c, err := LoadConfig(p); err != nil || c.Priority == nil || *c.Priority != -5 {
+		t.Fatalf("negative priority = %+v, %v", c, err)
 	}
 	os.WriteFile(p, []byte(`{`), 0o644)
 	if _, err := LoadConfig(p); err == nil {

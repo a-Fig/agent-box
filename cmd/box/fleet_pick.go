@@ -84,6 +84,7 @@ type pickRequest struct {
 // directly from Incus/boxd probes rather than parsing human status text.
 type fleetCandidate struct {
 	Host             fleetHost
+	Priority         int // effective priority: boxd-reported when present, else Host.Priority
 	Reachable        bool
 	Error            string // non-empty when the probe failed or timed out mid-probe
 	Mode             string // "full", "shared", "mypc", or "" (no tray)
@@ -483,8 +484,8 @@ func canQueueOnHost(c fleetCandidate, why string, sz mode.Size) (bool, string) {
 }
 
 func betterStart(a, b hostEval) bool {
-	if a.candidate.Host.Priority != b.candidate.Host.Priority {
-		return a.candidate.Host.Priority > b.candidate.Host.Priority
+	if a.candidate.Priority != b.candidate.Priority {
+		return a.candidate.Priority > b.candidate.Priority
 	}
 	// A running job holds the checkout lock on an otherwise reusable box.
 	aBusy, bBusy := a.startAff == affinityRepoBusy, b.startAff == affinityRepoBusy
@@ -499,15 +500,15 @@ func betterStart(a, b hostEval) bool {
 
 // betterQueue orders queue-eligible hosts (all verified as BoxdAvailable on
 // mode.Project):
-//  1. higher configured host priority
+//  1. higher effective host priority
 //  2. active wait (room or GPU) before My PC (owner-paused wait)
 //  3. known queue depth before unknown depth
 //  4. shorter queue depth when both hosts reported one
 //  5. higher repo affinity
 //  6. stable configuration order
 func betterQueue(a, b hostEval) bool {
-	if a.candidate.Host.Priority != b.candidate.Host.Priority {
-		return a.candidate.Host.Priority > b.candidate.Host.Priority
+	if a.candidate.Priority != b.candidate.Priority {
+		return a.candidate.Priority > b.candidate.Priority
 	}
 	aActive := a.queueWhy != refusedMyPC
 	bActive := b.queueWhy != refusedMyPC

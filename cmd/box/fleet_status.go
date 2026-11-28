@@ -92,7 +92,11 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 				Mode: s.Mode, Room: s.Room, Sizes: s.Sizes, GPU: s.GPU,
 			}
 			if s.Reachable && s.Error == "" {
-				row.Queued = app.fleetQueueLength(hostCtx, host.DashboardURL)
+				queued, _, hostPrio := app.fleetBoxdState(hostCtx, host.DashboardURL)
+				row.Queued = queued
+				if hostPrio != nil {
+					row.Priority = *hostPrio
+				}
 			}
 			rows[i] = row
 		})
@@ -106,8 +110,9 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 }
 
 type fleetBoxdSnapshot struct {
-	Queue bool       `json:"queue"`
-	Jobs  []dash.Job `json:"jobs"`
+	Queue    bool       `json:"queue"`
+	Priority *int       `json:"priority,omitempty"`
+	Jobs     []dash.Job `json:"jobs"`
 }
 
 func (a *App) readFleetBoxdState(ctx context.Context, dashboardURL string) (fleetBoxdSnapshot, bool) {
@@ -126,10 +131,10 @@ func (a *App) readFleetBoxdState(ctx context.Context, dashboardURL string) (flee
 	return state, true
 }
 
-func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool) {
+func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *int, queueCapable bool, priority *int) {
 	state, ok := a.readFleetBoxdState(ctx, dashboardURL)
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
 	n := 0
 	for _, job := range state.Jobs {
@@ -137,12 +142,7 @@ func (a *App) fleetBoxdState(ctx context.Context, dashboardURL string) (queued *
 			n++
 		}
 	}
-	return &n, state.Queue
-}
-
-func (a *App) fleetQueueLength(ctx context.Context, dashboardURL string) *int {
-	queued, _ := a.fleetBoxdState(ctx, dashboardURL)
-	return queued
+	return &n, state.Queue, state.Priority
 }
 
 func writeFleet(w io.Writer, hosts []fleetHostStatus) {

@@ -690,11 +690,11 @@ func TestPickFleetHostResolvedSingleAndExplicitBoxGuard(t *testing.T) {
 func TestPickFleetHostPriority(t *testing.T) {
 	t.Run("higher priority beats warm repo affinity and idle preference", func(t *testing.T) {
 		lowWarm := readyHost("low-warm", "r1", mode.Project)
-		lowWarm.Host.Priority = 0
+		lowWarm.Priority = 0
 		lowWarm.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
 		highBusy := readyHost("high-busy", "r2", mode.Project)
-		highBusy.Host.Priority = 10
+		highBusy.Priority = 10
 		highBusy.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running", Running: []JobInfo{{Job: "repo.1"}}}
 
 		pick := pickFleetHost([]fleetCandidate{lowWarm, highBusy}, pickRequest{Repo: "repo"})
@@ -703,11 +703,26 @@ func TestPickFleetHostPriority(t *testing.T) {
 		}
 	})
 
+	t.Run("candidate priority overrides stale host config priority", func(t *testing.T) {
+		staleHigh := readyHost("stale-high", "r1", mode.Project)
+		staleHigh.Host.Priority = 10
+		staleHigh.Priority = 0
+
+		authoritativeMid := readyHost("authoritative-mid", "r2", mode.Project)
+		authoritativeMid.Host.Priority = 0
+		authoritativeMid.Priority = 5
+
+		pick := pickFleetHost([]fleetCandidate{staleHigh, authoritativeMid}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "authoritative-mid" {
+			t.Fatalf("pick = %+v, want start on authoritative-mid", pick)
+		}
+	})
+
 	t.Run("equal priority preserves warm affinity and config order", func(t *testing.T) {
 		coldFirst := readyHost("cold-first", "r1", mode.Project)
-		coldFirst.Host.Priority = 5
+		coldFirst.Priority = 5
 		warmSecond := readyHost("warm-second", "r2", mode.Project)
-		warmSecond.Host.Priority = 5
+		warmSecond.Priority = 5
 		warmSecond.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
 		pick := pickFleetHost([]fleetCandidate{coldFirst, warmSecond}, pickRequest{Repo: "repo"})
@@ -716,7 +731,7 @@ func TestPickFleetHostPriority(t *testing.T) {
 		}
 
 		coldSecond := readyHost("cold-second", "r3", mode.Project)
-		coldSecond.Host.Priority = 5
+		coldSecond.Priority = 5
 		pick = pickFleetHost([]fleetCandidate{coldFirst, coldSecond}, pickRequest{Repo: "repo"})
 		if pick.Action != pickStart || pick.Host.Name != "cold-first" {
 			t.Fatalf("equal priority tie pick = %+v, want cold-first", pick)
@@ -725,12 +740,12 @@ func TestPickFleetHostPriority(t *testing.T) {
 
 	t.Run("queue prefers higher priority over shorter queue or active mode", func(t *testing.T) {
 		lowShort := readyHost("low-short", "r1", mode.Project)
-		lowShort.Host.Priority = 0
+		lowShort.Priority = 0
 		lowShort.Sizes = testCPUSizes(0, 0, 0)
 		lowShort.Queued = intPtr(0)
 
 		highLongMyPC := readyHost("high-long-mypc", "r2", mode.Project)
-		highLongMyPC.Host.Priority = 10
+		highLongMyPC.Priority = 10
 		highLongMyPC.Mode = string(mode.MyPC)
 		highLongMyPC.Queued = intPtr(5)
 
@@ -742,12 +757,12 @@ func TestPickFleetHostPriority(t *testing.T) {
 
 	t.Run("starting on lower-priority host beats queueing on higher-priority host", func(t *testing.T) {
 		highFull := readyHost("high-full", "r1", mode.Project)
-		highFull.Host.Priority = 10
+		highFull.Priority = 10
 		highFull.Sizes = testCPUSizes(0, 0, 0)
 		highFull.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
 
 		lowOpen := readyHost("low-open", "r2", mode.Project)
-		lowOpen.Host.Priority = 0
+		lowOpen.Priority = 0
 
 		pick := pickFleetHost([]fleetCandidate{highFull, lowOpen}, pickRequest{Repo: "repo", New: true, Queue: true})
 		if pick.Action != pickStart || pick.Host.Name != "low-open" {

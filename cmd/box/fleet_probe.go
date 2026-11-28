@@ -99,6 +99,7 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 	if p.report.Reachable && hostCtx.Err() != nil {
 		return fleetCandidate{
 			Host:      host,
+			Priority:  host.Priority,
 			Reachable: true,
 			Error:     hostCtx.Err().Error(),
 			Mode:      p.report.Mode,
@@ -106,6 +107,7 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 	}
 	c := fleetCandidate{
 		Host:             host,
+		Priority:         host.Priority,
 		Reachable:        p.report.Reachable,
 		Error:            p.report.Error,
 		Mode:             p.report.Mode,
@@ -121,9 +123,13 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 
 	// Optional boxd probes (mode.Project "agents" only). A failure or timeout
 	// here leaves the already-verified Incus start capacity usable.
-	if queued, queueCapable := hostApp.fleetBoxdState(hostCtx, host.DashboardURL); queueCapable {
+	queued, queueCapable, hostPrio := hostApp.fleetBoxdState(hostCtx, host.DashboardURL)
+	if queueCapable {
 		c.BoxdAvailable = true
 		c.Queued = queued
+	}
+	if hostPrio != nil {
+		c.Priority = *hostPrio
 	}
 	if wantsPooledThrowaway(req, sz, p.report.RepoBox, p.repoBoxThrowaway, targetBox) &&
 		repoKey != "" &&
