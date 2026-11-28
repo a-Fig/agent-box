@@ -80,6 +80,21 @@ func TestHistoryRangeAndPrune(t *testing.T) {
 	if p := h.Finished(Filter{Q: "", Result: "fail"}); len(p.Jobs) != 1 {
 		t.Fatalf("fail filter: %+v", p)
 	}
+	// Since and Until keep the jobs that started in [Since, Until): a span History opens.
+	if p := h.Finished(Filter{Since: t0.Add(-2 * time.Hour), Until: t0.Add(-90 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "1" {
+		t.Fatalf("since/until: %+v", p)
+	}
+	if p := h.Finished(Filter{Since: t0.Add(-90 * time.Minute)}); len(p.Jobs) != 1 || p.Jobs[0].ID != "2" {
+		t.Fatalf("since: %+v", p)
+	}
+	// A month is 30 daily buckets; job 3, 40 days back, counts in the month before it.
+	if m := h.Range(dash.RangeMonth, Live{MemCap: 12 << 30}); m.Range != dash.RangeMonth || len(m.Buckets) != 30 ||
+		m.Previous.ByResult["pass"] != 1 || m.Buckets[29].Jobs.ByResult["pass"] != 1 {
+		t.Fatalf("month: %d buckets, previous %+v", len(m.Buckets), m.Previous)
+	}
+	if r.Previous.ByResult["pass"] != 0 || r.Previous.BoxHours != 0 || dash.Total(r.Buckets).ByResult["fail"] != 1 {
+		t.Fatalf("day's previous: %+v", r.Previous)
+	}
 	// Jobs 1 and 2 were recorded before jobs carried their box's UID: a box asks for them by the
 	// time rule, from dash.BoxJobSkew before it was made.
 	boxA := dash.Box{Name: "a", UID: "u-a", CreatedAt: t0.Add(-90*time.Minute + time.Minute)}
@@ -258,5 +273,24 @@ func TestHistoryEvictedJob(t *testing.T) {
 	}
 	if j, _ := h.JobByID("b", "2"); j.Evicted != "" {
 		t.Errorf("a later job on the name was marked evicted: %q", j.Evicted)
+	}
+}
+
+// The span before is cut where now falls in this one (#292): at 18:00 a day's previous span ends at
+// 18:00 the day before, so a job at 18:30 then isn't counted against today's 23 hours.
+func TestHistoryPreviousIsCutAtNow(t *testing.T) {
+	h, err := OpenHistory(t.TempDir(), func() time.Time { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit0 := 0
+	for i, at := range []time.Time{t0.Add(-24*time.Hour - 30*time.Minute), t0.Add(-24*time.Hour + 30*time.Minute)} {
+		end := at.Add(time.Minute)
+		j := dash.Job{Key: "a/" + string(rune('1'+i)) + "/x", ID: string(rune('1' + i)), Box: "a", State: dash.JobDone, Exit: &exit0, StartedAt: at, EndedAt: &end}
+		h.Record(record{Type: recJobEnd, At: end, Job: &j})
+	}
+	// The day before runs from 19:00 two days back to 18:00 yesterday: only the first job.
+	if p := h.Range(dash.RangeDay, Live{MemCap: 12 << 30}).Previous; p.ByResult["pass"] != 1 {
+		t.Fatalf("previous: %+v", p)
 	}
 }

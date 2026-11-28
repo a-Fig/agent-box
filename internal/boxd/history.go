@@ -475,6 +475,9 @@ func (h *History) LastMode() *modeRec {
 // Filter is GET /api/jobs's query.
 type Filter struct {
 	Repo, Agent, Kind, Machine, Result, Q string
+	// Since and Until, when set, keep the jobs that started in [Since, Until):
+	// a span of History's, opened from its charts (#292).
+	Since, Until time.Time
 	// Box, when its UID is set, keeps the jobs that ran on that one box
 	// (dash.Job.RanOn), not those of another box of its name, and asks for
 	// the page's Last.
@@ -501,6 +504,9 @@ func (f Filter) match(j *dash.Job) bool {
 	if (f.Agent != "" && f.Agent != j.Agent.Session) || (f.Kind != "" && f.Kind != j.Kind) ||
 		(f.Machine != "" && f.Machine != j.Machine) || (f.Result != "" && f.Result != j.Result()) ||
 		(f.Box.UID != "" && !j.RanOn(f.Box)) {
+		return false
+	}
+	if (!f.Since.IsZero() && j.StartedAt.Before(f.Since)) || (!f.Until.IsZero() && !j.StartedAt.Before(f.Until)) {
 		return false
 	}
 	if f.Before != nil && newest(*f.Before, *j) >= 0 {
@@ -570,20 +576,34 @@ type Live struct {
 	MemCap int64
 }
 
-// Range builds GET /api/history: 24 hourly buckets or 7 daily ones ending
-// with the one holding now.
+// Range builds GET /api/history: the range's buckets (dash.Window) ending
+// with the one holding now, and the totals of the same span before them.
 func (h *History) Range(rng string, live Live) dash.History {
 	now := h.now().UTC()
-	step, n := time.Hour, 24
-	start := now.Truncate(time.Hour).Add(-23 * time.Hour)
-	if rng == dash.RangeWeek {
-		step, n = 24*time.Hour, 7
-		start = now.Truncate(24 * time.Hour).Add(-6 * 24 * time.Hour)
+	start, step, n, ok := dash.Window(rng, now)
+	if !ok {
+		rng = dash.RangeDay
+		start, step, n, _ = dash.Window(rng, now)
 	}
-	out := dash.History{Range: rng, Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
+	// The span before is cut where now falls in this one, so a day that has run for 9 hours is
+	// compared with the 9 hours the day before, not all 24 of them.
+	back := time.Duration(n) * step
+	out := dash.History{Range: rng, Buckets: h.buckets(start, step, n, now),
+		Previous: dash.Total(h.buckets(start.Add(-back), step, n, now.Add(-back)))}
+	h.mu.Lock()
+	out.Segments = segments(h.modes, start, now, live.Mode)
+	h.mu.Unlock()
+	h.fillMemory(out.Buckets, step, live.MemCap)
+	return out
+}
+
+// buckets counts jobs, box-hours, refusals and the queue into n buckets of
+// step from start, up to upto; memory is filled in by fillMemory.
+func (h *History) buckets(start time.Time, step time.Duration, n int, upto time.Time) []dash.Bucket {
+	out := make([]dash.Bucket, n)
 	durs := make([]map[string][]float64, n)
-	for i := range out.Buckets {
-		out.Buckets[i] = dash.Bucket{
+	for i := range out {
+		out[i] = dash.Bucket{
 			Start: start.Add(time.Duration(i) * step),
 			Jobs: dash.JobCounts{ByResult: map[string]int{}, ByKind: map[string]int{}, ByRepo: map[string]int{},
 				ByAgent: map[string]int{}},
@@ -594,7 +614,7 @@ func (h *History) Range(rng string, live Live) dash.History {
 		durs[i] = map[string][]float64{}
 	}
 	at := func(t time.Time) int {
-		if t.Before(start) {
+		if t.Before(start) || t.After(upto) {
 			return -1
 		}
 		if i := int(t.Sub(start) / step); i < n {
@@ -609,7 +629,7 @@ func (h *History) Range(rng string, live Live) dash.History {
 		if i < 0 {
 			continue
 		}
-		b := &out.Buckets[i]
+		b := &out[i]
 		if r := j.Result(); r != "" {
 			b.Jobs.ByResult[r]++
 		}
@@ -625,26 +645,26 @@ func (h *History) Range(rng string, live Live) dash.History {
 		if unsetTime(s.start) {
 			continue
 		}
-		to := now
+		to := upto
 		if s.end != nil {
-			to = *s.end
+			to = earlier(*s.end, upto)
 		}
-		for i := range out.Buckets {
-			bs := out.Buckets[i].Start
+		for i := range out {
+			bs := out[i].Start
 			lo, hi := later(s.start, bs), earlier(to, bs.Add(step))
 			if hi.After(lo) {
-				out.Buckets[i].BoxHours.BySize[s.rec.Size] = round2(out.Buckets[i].BoxHours.BySize[s.rec.Size] + hi.Sub(lo).Hours())
+				out[i].BoxHours.BySize[s.rec.Size] = round2(out[i].BoxHours.BySize[s.rec.Size] + hi.Sub(lo).Hours())
 			}
 		}
 	}
 	for _, r := range h.refusals {
 		if i := at(r.at); i >= 0 {
-			out.Buckets[i].Refusals.ByWhy[r.why]++
+			out[i].Refusals.ByWhy[r.why]++
 		}
 	}
 	for _, t := range h.queueAdd {
 		if i := at(t); i >= 0 {
-			out.Buckets[i].Queued.Jobs++
+			out[i].Queued.Jobs++
 		}
 	}
 	waits := make([][]float64, n)
@@ -655,18 +675,16 @@ func (h *History) Range(rng string, live Live) dash.History {
 	}
 	for i, ws := range waits {
 		if len(ws) > 0 {
-			out.Buckets[i].Queued.Started, out.Buckets[i].Queued.MedianWaitSeconds = len(ws), median(ws)
+			out[i].Queued.Started, out[i].Queued.MedianWaitSeconds = len(ws), median(ws)
 		}
 	}
-	out.Segments = segments(h.modes, start, now, live.Mode)
 	h.mu.Unlock()
 
 	for i, byRepo := range durs {
 		for r, ds := range byRepo {
-			out.Buckets[i].MedianSeconds.ByRepo[r] = median(ds)
+			out[i].MedianSeconds.ByRepo[r] = median(ds)
 		}
 	}
-	h.fillMemory(out.Buckets, step, live.MemCap)
 	return out
 }
 
@@ -731,6 +749,7 @@ func (h *History) fillMemory(bs []dash.Bucket, step time.Duration, capNow int64)
 		if sums[i].n > 0 {
 			bs[i].MemUsed = sums[i].sum / sums[i].n
 		}
+		bs[i].MemSamples = int(sums[i].n)
 		bs[i].MemCap = sums[i].cap
 		if bs[i].MemCap == 0 {
 			bs[i].MemCap = capNow

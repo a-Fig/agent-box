@@ -1542,6 +1542,39 @@ a.hbar:hover .truncate {
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
+/* The change against the span before (#292): small and quiet, as more jobs is neither good nor bad. */
+.stat .delta {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+/* A chart mark that opens Jobs. */
+.chart rect.go {
+  cursor: pointer;
+}
+/* Jobs' time filter, from History: what it keeps and a button that clears it. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 0.25rem 0 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: var(--control-radius);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.chip > svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--muted-foreground);
+}
+.chip-x {
+  width: 1.5rem;
+  height: 1.5rem;
+}
 
 /* Empty, loading and unreachable. */
 .empty {

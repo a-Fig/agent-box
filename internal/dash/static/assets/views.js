@@ -792,7 +792,9 @@ const boxes = {
 // the state's own jobs (running and the last 50) are merged in, so a job that just ended shows
 // before the next fetch.
 
-const F = { q: "", repo: "", agent: "", kind: "", machine: "", result: "" };
+// since and until (ISO times) keep the jobs that started in [since, until): a span History's
+// charts open (#292). They have no select; a chip shows them and clears them.
+const F = { q: "", repo: "", agent: "", kind: "", machine: "", result: "", since: "", until: "" };
 const list = { jobs: [], more: false, loading: false, error: "", seq: 0 };
 
 // Search folds case as the server does (Go's strings.ToLower): each code point by Unicode's
@@ -812,6 +814,8 @@ function matches(j) {
   if (F.kind && j.kind !== F.kind) return false;
   if (F.machine && j.machine !== F.machine) return false;
   if (F.result && result(j) !== F.result) return false;
+  const t = Date.parse(j.startedAt);
+  if ((F.since && !(t >= Date.parse(F.since))) || (F.until && !(t < Date.parse(F.until)))) return false;
   return true;
 }
 
@@ -895,6 +899,7 @@ const jobs = {
       options("Kind", "kind", KINDS),
       S.machines.size > 1 ? options("Machine", "machine", [...S.machines.keys()]) : null,
       options("Result", "result", RESULTS),
+      spanChip(),
     ].filter(Boolean);
     // Only when they change, so a held-open select or the focused search stays put.
     if (fs.some((f, i) => this.filters.children[i] !== f) || fs.length !== this.filters.children.length) this.filters.replaceChildren(...fs);
@@ -940,6 +945,27 @@ function filtersFromHash() {
   const p = new URLSearchParams(q);
   for (const k of Object.keys(F)) F[k] = p.get(k) || "";
   history.replaceState(null, "", location.pathname + location.search + "#jobs");
+}
+
+// The time span's chip, built once per span so the filter row isn't redrawn under a held select.
+let chip = null;
+function spanChip() {
+  if (!F.since && !F.until) return (chip = null);
+  const sig = F.since + "|" + F.until;
+  if (chip?.sig === sig) return chip.el;
+  const a = new Date(F.since), b = new Date(F.until);
+  const time = (d) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  // A day of History's week or month is a UTC day: the chip names it. An hour shows its times.
+  let what = F.since ? "Started after " + stamp(a) : "Started before " + stamp(b);
+  if (F.since && F.until && b - a === 86400e3) what = "Started on " + a.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }) + " (UTC)";
+  else if (F.since && F.until) what = "Started " + stamp(a) + " – " + (a.toDateString() === b.toDateString() ? time(b) : stamp(b));
+  const clear = () => {
+    F.since = F.until = "";
+    fetchJobs();
+    document.querySelector(".filters input[type=search]")?.focus(); // the button goes with the chip
+  };
+  chip = { sig, el: h("span", { class: "chip" }, icon("clock"), h("span", null, what), h("button", { class: "icon-btn chip-x", "aria-label": "Clear the time filter", onclick: clear }, icon("x"))) };
+  return chip.el;
 }
 
 function clearFilters() {

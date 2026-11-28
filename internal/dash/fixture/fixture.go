@@ -30,6 +30,7 @@ type Scenario struct {
 	Jobs  dash.JobsPage `json:"jobs"` // GET /api/jobs with no filter: every finished job
 	Day   dash.History  `json:"day"`
 	Week  dash.History  `json:"week"`
+	Month dash.History  `json:"month"`
 	// Logs holds the log so far of each job whose box still exists, by key.
 	Logs map[string]string `json:"logs"`
 }
@@ -526,6 +527,7 @@ func (w *world) finish(name, about string) Scenario {
 		Jobs:  dash.JobsPage{Jobs: done},
 		Day:   w.historyFor(dash.RangeDay, done),
 		Week:  w.historyFor(dash.RangeWeek, done),
+		Month: w.historyFor(dash.RangeMonth, done),
 		Logs:  w.logs,
 	}
 }
@@ -534,15 +536,20 @@ func (w *world) hasBox(name string) bool {
 	return slices.ContainsFunc(w.boxes, func(b dash.Box) bool { return b.Name == name })
 }
 
-// historyFor buckets the finished jobs, box lives, refusals and samples.
+// historyFor is a range's history, with the totals of the span before it.
 func (w *world) historyFor(rng string, done []dash.Job) dash.History {
-	step, n := time.Hour, 24
-	start := w.now.Truncate(time.Hour).Add(-23 * time.Hour)
-	if rng == dash.RangeWeek {
-		step, n = 24*time.Hour, 7
-		start = w.now.Truncate(24 * time.Hour).Add(-6 * 24 * time.Hour)
-	}
-	h := dash.History{Range: rng, Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
+	start, step, n, _ := dash.Window(rng, w.now)
+	h := w.span(start, step, n, w.now, done)
+	h.Range = rng
+	back := time.Duration(n) * step
+	h.Previous = dash.Total(w.span(start.Add(-back), step, n, w.now.Add(-back), done).Buckets)
+	return h
+}
+
+// span buckets the finished jobs, box lives, refusals and samples up to upto. Memory samples
+// are kept boxd.SampleDays, as boxd keeps them; older buckets have none.
+func (w *world) span(start time.Time, step time.Duration, n int, upto time.Time, done []dash.Job) dash.History {
+	h := dash.History{Buckets: make([]dash.Bucket, n), Segments: []dash.Segment{}}
 	durs := make([]map[string][]float64, n)
 	for i := range h.Buckets {
 		h.Buckets[i] = dash.Bucket{
@@ -554,10 +561,13 @@ func (w *world) historyFor(rng string, done []dash.Job) dash.History {
 			MedianSeconds: dash.Medians{ByRepo: map[string]float64{}},
 			MemCap:        w.machine.Caps.Memory,
 		}
+		if b := &h.Buckets[i]; !b.Start.Before(w.now.Add(-boxd.SampleDays * 24 * time.Hour).Truncate(24 * time.Hour)) {
+			b.MemSamples = int(step.Minutes())
+		}
 		durs[i] = map[string][]float64{}
 	}
 	at := func(t time.Time) int {
-		if t.Before(start) {
+		if t.Before(start) || t.After(upto) {
 			return -1
 		}
 		i := int(t.Sub(start) / step)
@@ -604,13 +614,15 @@ func (w *world) historyFor(rng string, done []dash.Job) dash.History {
 		for i := range h.Buckets {
 			bs := h.Buckets[i].Start
 			be := bs.Add(step)
-			lo, hi := later(l.from, bs), earlier(l.to, be)
+			lo, hi := later(l.from, bs), earlier(earlier(l.to, be), upto)
 			if !hi.After(lo) {
 				continue
 			}
 			share := hi.Sub(lo).Hours()
 			h.Buckets[i].BoxHours.BySize[l.size] = round2(h.Buckets[i].BoxHours.BySize[l.size] + share)
-			h.Buckets[i].MemUsed += int64(mem * share / step.Hours())
+			if h.Buckets[i].MemSamples > 0 {
+				h.Buckets[i].MemUsed += int64(mem * share / step.Hours())
+			}
 		}
 	}
 	for _, j := range done {

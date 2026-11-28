@@ -1037,6 +1037,7 @@
           "byRepo": {}
         },
         "memUsed": 2655612743,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1074,6 +1075,7 @@
           }
         },
         "memUsed": 3255756106,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1111,6 +1113,7 @@
           }
         },
         "memUsed": 2554465598,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -1148,6 +1151,7 @@
           }
         },
         "memUsed": 5499603797,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1175,6 +1179,7 @@
           "byRepo": {}
         },
         "memUsed": 4222882584,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1213,6 +1218,7 @@
           }
         },
         "memUsed": 461631459,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1240,6 +1246,7 @@
           "byRepo": {}
         },
         "memUsed": 396860501,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1277,6 +1284,7 @@
           }
         },
         "memUsed": 743934903,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1302,6 +1310,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1343,6 +1352,7 @@
           }
         },
         "memUsed": 1593182022,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1368,6 +1378,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1405,6 +1416,7 @@
           }
         },
         "memUsed": 198835675,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1432,6 +1444,7 @@
           "byRepo": {}
         },
         "memUsed": 341073929,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1469,6 +1482,7 @@
           }
         },
         "memUsed": 1874744861,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1496,6 +1510,7 @@
           "byRepo": {}
         },
         "memUsed": 1912462879,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1523,6 +1538,7 @@
           "byRepo": {}
         },
         "memUsed": 302275382,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1548,6 +1564,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1573,6 +1590,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1598,6 +1616,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1635,6 +1654,7 @@
           }
         },
         "memUsed": 1771464218,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1662,6 +1682,7 @@
           "byRepo": {}
         },
         "memUsed": 2466075478,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1700,6 +1721,7 @@
           }
         },
         "memUsed": 1120305639,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1748,6 +1770,7 @@
           }
         },
         "memUsed": 5875584122,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -1767,7 +1790,7 @@
           "bySize": {
             "gpu": 0.37,
             "large": 0.5,
-            "medium": 2
+            "medium": 1
           }
         },
         "refusals": {
@@ -1776,7 +1799,8 @@
         "medianSeconds": {
           "byRepo": {}
         },
-        "memUsed": 9542333308,
+        "memUsed": 7372825437,
+        "memSamples": 60,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1801,7 +1825,13 @@
         "end": "2026-11-24T17:30:00Z",
         "mode": "shared"
       }
-    ]
+    ],
+    "previous": {
+      "byResult": {},
+      "boxHours": 0,
+      "refused": 0,
+      "queued": 0
+    }
   },
   "week": {
     "range": "week",
@@ -1824,6 +1854,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1849,6 +1880,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1874,6 +1906,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1899,6 +1932,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1924,6 +1958,7 @@
           "byRepo": {}
         },
         "memUsed": 0,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 0,
@@ -1970,7 +2005,8 @@
             "tidepool": 332
           }
         },
-        "memUsed": 667824704,
+        "memUsed": 723959833,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 2,
@@ -2013,7 +2049,7 @@
           "bySize": {
             "gpu": 1.59,
             "large": 0.95,
-            "medium": 8.72
+            "medium": 5.87
           }
         },
         "refusals": {
@@ -2029,7 +2065,8 @@
             "tidepool": 198
           }
         },
-        "memUsed": 1271839997,
+        "memUsed": 1051996333,
+        "memSamples": 1440,
         "memCap": 12884901888,
         "queued": {
           "jobs": 1,
@@ -2054,7 +2091,877 @@
         "end": "2026-11-24T17:30:00Z",
         "mode": "shared"
       }
-    ]
+    ],
+    "previous": {
+      "byResult": {},
+      "boxHours": 0,
+      "refused": 0,
+      "queued": 0
+    }
+  },
+  "month": {
+    "range": "month",
+    "buckets": [
+      {
+        "start": "2026-10-26T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-27T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-28T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-29T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-30T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-10-31T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-01T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-02T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-03T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-04T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-05T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-06T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-07T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-08T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-09T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 0,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-10T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-11T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-12T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-13T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-14T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-15T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-16T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-17T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-18T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-19T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-20T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-21T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-22T00:00:00Z",
+        "jobs": {
+          "byResult": {},
+          "byKind": {},
+          "byRepo": {},
+          "byAgent": {}
+        },
+        "boxHours": {
+          "bySize": {}
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {}
+        },
+        "memUsed": 0,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 0,
+          "started": 0,
+          "medianWaitSeconds": 0
+        }
+      },
+      {
+        "start": "2026-11-23T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "fail": 2,
+            "pass": 3
+          },
+          "byKind": {
+            "go-test": 1,
+            "gradle": 2,
+            "js-test": 2
+          },
+          "byRepo": {
+            "lantern": 1,
+            "orbit-android": 2,
+            "tidepool": 2
+          },
+          "byAgent": {
+            "amber-fox": 2,
+            "brisk-heron": 2,
+            "quiet-otter": 1
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "large": 0.06,
+            "medium": 7.32
+          }
+        },
+        "refusals": {
+          "byWhy": {}
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 416,
+            "orbit-android": 450,
+            "tidepool": 332
+          }
+        },
+        "memUsed": 644174999,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 2,
+          "started": 2,
+          "medianWaitSeconds": 293
+        }
+      },
+      {
+        "start": "2026-11-24T00:00:00Z",
+        "jobs": {
+          "byResult": {
+            "cancelled": 1,
+            "fail": 1,
+            "lost": 1,
+            "pass": 7
+          },
+          "byKind": {
+            "build": 1,
+            "go-build": 1,
+            "gpu": 3,
+            "gradle": 1,
+            "js-test": 1,
+            "py-test": 3
+          },
+          "byRepo": {
+            "lantern": 2,
+            "orbit-android": 1,
+            "sparrow-ml": 6,
+            "tidepool": 1
+          },
+          "byAgent": {
+            "amber-fox": 1,
+            "brisk-heron": 1,
+            "quiet-otter": 2,
+            "sparrow-wt-2": 4,
+            "still-pine": 2
+          }
+        },
+        "boxHours": {
+          "bySize": {
+            "gpu": 1.59,
+            "large": 0.95,
+            "medium": 5.87
+          }
+        },
+        "refusals": {
+          "byWhy": {
+            "mypc": 1
+          }
+        },
+        "medianSeconds": {
+          "byRepo": {
+            "lantern": 367,
+            "orbit-android": 438,
+            "sparrow-ml": 665,
+            "tidepool": 198
+          }
+        },
+        "memUsed": 995864987,
+        "memSamples": 1440,
+        "memCap": 12884901888,
+        "queued": {
+          "jobs": 1,
+          "started": 1,
+          "medianWaitSeconds": 132
+        }
+      }
+    ],
+    "segments": [
+      {
+        "start": "2026-11-23T17:30:00Z",
+        "end": "2026-11-24T16:40:00Z",
+        "mode": "shared"
+      },
+      {
+        "start": "2026-11-24T16:40:00Z",
+        "end": "2026-11-24T17:10:00Z",
+        "mode": "mypc"
+      },
+      {
+        "start": "2026-11-24T17:10:00Z",
+        "end": "2026-11-24T17:30:00Z",
+        "mode": "shared"
+      }
+    ],
+    "previous": {
+      "byResult": {},
+      "boxHours": 0,
+      "refused": 0,
+      "queued": 0
+    }
   },
   "logs": {
     "orbit-android/20261123-192708-b543/2026-11-23T19:27:08Z": "$ ./gradlew lint assembleRelease\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\n\u003e Task :app:compileDebugKotlin\n\u003e Task :app:processDebugResources\n\u003e Task :core:testDebugUnitTest\n\u003e Task :app:testDebugUnitTest\n\u003e Task :sync:testDebugUnitTest\nBUILD SUCCESSFUL in 7m 12s\n",

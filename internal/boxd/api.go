@@ -120,6 +120,19 @@ func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Box = b
 	}
+	for _, p := range []struct {
+		name string
+		t    *time.Time
+	}{{"since", &f.Since}, {"until", &f.Until}} {
+		if v := q.Get(p.name); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, dash.CodeBadRequest, p.name+" must be an RFC 3339 time")
+				return
+			}
+			*p.t = t
+		}
+	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v[strings.LastIndex(v, "/")+1:])
 		if err != nil {
@@ -299,8 +312,8 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	if rng == "" {
 		rng = dash.RangeDay
 	}
-	if rng != dash.RangeDay && rng != dash.RangeWeek {
-		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "range is day or week")
+	if !slices.Contains(dash.Ranges, rng) {
+		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, "range is day, week or month")
 		return
 	}
 	writeJSON(w, 200, s.W.Hist.Range(rng, s.W.Live()))
