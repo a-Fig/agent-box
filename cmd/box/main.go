@@ -35,6 +35,10 @@ const usage = `usage:
                                             copy a file or directory from a box into local-dir
   box cloud pause|resume|stop [--host name]
                                             pause or resume a cloud runner, or pause and stop all jobs
+  box setup modal --token-in <file|-> [--cap 25] [--max-concurrent 4] [--max-timeout 1h]
+          [--mode function|sandbox] [--name modal] [--endpoint URL] [--dry-run]
+                                            deploy the Modal cloud runner, cap its spend, add it to hosts.json
+  box setup cloudflare [--dry-run]          deploy the free fleet controller, write controller.json
   box new [name] [--ttl 2h] [--size S | --gpu] [--reason "why"]
                                             launch a box with a positive TTL
   box rm <name>                             delete a box
@@ -85,6 +89,9 @@ qualified job ID. If no host can start now, it looks for a queue.
 --host pins a host for debugging. --box uses the default host unless pinned.
 Cloud runs print a cost line and support box pull only in sandbox mode;
 box cloud pause|resume|stop controls a cloud runner immediately.
+box setup is for people, not agents: it explains what each service costs,
+deploys it with your modal or wrangler login, and reads secrets only from a
+file or stdin. --dry-run prints the plan and config changes. See docs/cloud.md.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
@@ -336,6 +343,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		return 0
 	case "cloud":
 		return runCloud(ctx, a, fs, args[1:])
+	case "setup":
+		return runSetup(ctx, a, args[1:], stdin)
 	case "join":
 		leave := fs.Bool("leave", false, "unregister box and remove the skill")
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {

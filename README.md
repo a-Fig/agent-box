@@ -127,6 +127,19 @@ With a host registry, `box run` and `box_run` rank hosts by `priority` (higher w
 
 When capacity blocks a run, the CLI and MCP report the limiting resource and whether it queued or was refused. A suggested smaller size is an estimate for the selected host. A queued run keeps the requested size and GPU requirement.
 
+### Cloud overflow and fleet controller setup
+
+Two optional cloud pieces, each set up by one command that explains what stays free first;
+[docs/cloud.md](docs/cloud.md) has the costs, the budget guardrails and both walkthroughs.
+
+```sh
+box setup modal --token-in modal-token.txt   # Modal runner as overflow: $25/mo cap, priority -1
+box setup cloudflare                         # free Workers controller for offline host status
+```
+
+`--dry-run` prints every step and the exact `hosts.json` or `controller.json` change without
+running `modal` or `wrangler`. Secrets are read only from a file or stdin, never from flags.
+
 ### Optional fleet controller (offline status fallback)
 
 To show last-known host state when a host is unreachable, configure an optional `controller-v1` server:
