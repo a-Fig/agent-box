@@ -5,7 +5,7 @@
 
 import { h, icon, tickTimes } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
-import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog, MODE_HINTS } from "./views.js";
+import { overview, boxes, jobs, jobDetail, modeLabel, modeDot, checkDialog, MODE_HINTS } from "./views.js";
 import { history } from "./history.js";
 import { settings, themeSwitch } from "./settings.js";
 import { drift } from "./versions.js";
@@ -24,9 +24,10 @@ const VIEWS = {
 // Reached from the sidebar's foot (#287) and from a host in Fleet (#288), not from the nav list.
 const PAGES = { ...VIEWS, settings: { title: "Settings", view: settings } };
 
-// Routes: #overview, #boxes, #jobs, #jobs/<key>, #history, #settings, #fleet/<host id>.
+// Routes: #overview, #boxes, #jobs, #jobs?<filters> (read once by Jobs), #jobs/<key>, #history,
+// #settings, #fleet/<host id>.
 function route() {
-  const [name, ...rest] = location.hash.slice(1).split("/");
+  const [name, ...rest] = location.hash.slice(1).split("?")[0].split("/");
   // A hand-typed hash can hold a bad escape, which decodeURIComponent throws on: it opens Overview.
   const key = () => {
     try {
@@ -74,7 +75,7 @@ function fleetRow(m, r) {
   const state = !m.reachable ? "Not answering" : !alive ? "Nothing enforcing" : modeLabel(m.mode) + (req ? " → " + modeLabel(req.mode) : "") + (m.enforcer === "headless" ? " · headless" : "");
   // The same dots as Overview's card: hollow when the host doesn't answer, red when it answers but
   // nothing applies its mode.
-  const dot = !m.reachable ? "dot-off" : !alive ? "dot-bad" : m.mode === "mypc" ? "dot-off" : "dot-on";
+  const dot = !m.reachable ? "dot-off" : !alive ? "dot-bad" : modeDot(m.mode);
   // The hint says what the line says.
   const about = !m.reachable
     ? "The host isn't answering: it may be asleep or off."
