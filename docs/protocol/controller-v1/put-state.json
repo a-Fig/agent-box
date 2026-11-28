@@ -1,0 +1,184 @@
+{
+  "id": "pc",
+  "name": "Gaming PC",
+  "seq": 42,
+  "sentAt": "2026-11-27T15:50:00Z",
+  "state": {
+    "machines": [
+      {
+        "id": "pc",
+        "name": "Gaming PC",
+        "reachable": true,
+        "mode": "shared",
+        "modeRequested": null,
+        "trayLastSeen": "2026-11-27T15:49:45Z",
+        "enforcer": "tray",
+        "caps": {
+          "cpu": 16,
+          "memory": 12884901888,
+          "instances": 6,
+          "disk": 161061273600
+        },
+        "allocated": {
+          "cpu": 4,
+          "memory": 4294967296,
+          "instances": 1,
+          "disk": 32212254720
+        },
+        "room": {
+          "small": 4,
+          "medium": 2,
+          "large": 1,
+          "gpu": 1
+        },
+        "wslMemory": 5153960755,
+        "boxd": {
+          "commit": "bbe155e7a4cb9c6352646e3c652fadfe8f1d6ea3",
+          "time": "2026-11-27T14:00:00Z",
+          "modified": false
+        },
+        "tray": {
+          "commit": "bbe155e7a4cb9c6352646e3c652fadfe8f1d6ea3",
+          "time": "2026-11-27T14:00:00Z",
+          "modified": false
+        },
+        "config": {
+          "sizes": [
+            {
+              "name": "small",
+              "sharedCpus": 1,
+              "fullCpus": 2,
+              "memory": 2147483648,
+              "disk": 19327352832,
+              "gpu": false
+            },
+            {
+              "name": "medium",
+              "sharedCpus": 2,
+              "fullCpus": 4,
+              "memory": 4294967296,
+              "disk": 32212254720,
+              "gpu": false
+            },
+            {
+              "name": "large",
+              "sharedCpus": 4,
+              "fullCpus": 8,
+              "memory": 8589934592,
+              "disk": 42949672960,
+              "gpu": false
+            },
+            {
+              "name": "gpu",
+              "sharedCpus": 4,
+              "fullCpus": 6,
+              "memory": 8589934592,
+              "disk": 42949672960,
+              "gpu": true
+            }
+          ],
+          "gpu": true,
+          "capped": {
+            "cpu": true,
+            "memory": true,
+            "instances": true,
+            "disk": true
+          },
+          "idleExpiry": 7200,
+          "jobExpiry": 86400,
+          "keptAfterJob": 1800
+        }
+      }
+    ],
+    "boxes": [
+      {
+        "name": "lantern-3c1a",
+        "machine": "pc",
+        "size": "medium",
+        "gpu": false,
+        "state": "running",
+        "throwaway": true,
+        "repo": "https://github.com/acme/lantern",
+        "createdAt": "2026-11-27T15:48:00Z",
+        "uid": "11a84493-4c36-de0d-59fa-0c02a162bd98",
+        "expiresAt": "2026-11-28T15:48:00Z",
+        "memUsed": 1932735283,
+        "memLimit": 4294967296,
+        "cpus": 2,
+        "cpuPct": 76
+      }
+    ],
+    "jobs": [
+      {
+        "key": "lantern-3c1a/20261127-154810-7791/2026-11-27T15:48:10Z",
+        "id": "20261127-154810-7791",
+        "box": "lantern-3c1a",
+        "boxUid": "11a84493-4c36-de0d-59fa-0c02a162bd98",
+        "machine": "pc",
+        "state": "running",
+        "exit": null,
+        "startedAt": "2026-11-27T15:48:10Z",
+        "endedAt": null,
+        "reason": "Full -race suite before opening the PR.",
+        "command": "go test -race ./...",
+        "kind": "go-test",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "feat/resumable-sync",
+        "commit": "c126cb683266f7ff01344f55171d8e28c20a445e",
+        "source": {
+          "commit": "c126cb683266f7ff01344f55171d8e28c20a445e",
+          "dirty": true,
+          "snapshotCommit": "4a5b6c7d8e9f0123456789abcdef0123456789ab"
+        },
+        "agent": {
+          "client": "claude-code",
+          "session": "quiet-otter",
+          "host": "dev-laptop",
+          "worktree": "/home/dev/src/lantern"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "ok  \tgithub.com/acme/lantern/internal/store\t4.120s\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      },
+      {
+        "key": "lantern/20261127-151200-e41b/2026-11-27T15:12:00Z",
+        "id": "20261127-151200-e41b",
+        "box": "lantern",
+        "boxUid": "d0af87b2-0e64-354c-08a1-627c705599c5",
+        "machine": "pc",
+        "state": "done",
+        "exit": 0,
+        "startedAt": "2026-11-27T15:12:00Z",
+        "endedAt": "2026-11-27T15:13:04Z",
+        "reason": "Cross-compiling release binaries.",
+        "command": "go build ./cmd/...",
+        "kind": "go-build",
+        "repo": "https://github.com/acme/lantern",
+        "branch": "main",
+        "commit": "321e22727ee2d6067d71dd058b892d52917e6c73",
+        "source": {
+          "commit": "321e22727ee2d6067d71dd058b892d52917e6c73",
+          "dirty": false,
+          "snapshotCommit": "321e22727ee2d6067d71dd058b892d52917e6c73"
+        },
+        "agent": {
+          "client": "codex",
+          "session": "brisk-heron",
+          "host": "dev-laptop",
+          "worktree": "/home/dev/src/lantern"
+        },
+        "size": "medium",
+        "gpu": false,
+        "tail": "$ go build ./cmd/...\n",
+        "queuedAt": null,
+        "position": 0,
+        "why": ""
+      }
+    ],
+    "queue": true,
+    "now": "2026-11-27T15:50:00Z"
+  }
+}

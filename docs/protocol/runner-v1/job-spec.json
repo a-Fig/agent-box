@@ -1,0 +1,22 @@
+{
+  "id": "lantern.20261127-150405-a1b2",
+  "repo": "lantern",
+  "ref": "20261127-150405-a1b2",
+  "cmd": [
+    "go",
+    "test",
+    "-race",
+    "./..."
+  ],
+  "env": {
+    "CGO_ENABLED": "1"
+  },
+  "timeoutSec": 900,
+  "size": "medium",
+  "reason": "Full -race suite after the transport refactor.",
+  "source": {
+    "commit": "3349138dabc50948cdc4d0cdc99879c774a78b42",
+    "dirty": true,
+    "snapshotCommit": "9f8e7d6c5b4a3210fedcba9876543210abcdef01"
+  }
+}
