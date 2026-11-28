@@ -96,6 +96,7 @@ type fleetCandidate struct {
 	WarmThrowaway    bool     // positive probe evidence of an idle claimable throwaway + enabled pool for this repo and size
 	BoxdAvailable    bool     // positively established boxd queue capability on this host
 	Queued           *int     // optional boxd queue depth when BoxdAvailable is true; nil if depth unknown
+	Unavailable      string   // non-empty when a reachable host refuses new starts (e.g. cloud paused/budget/busy)
 
 	startRefusal *turnAwayInfo // pre-start refusal from a live attempt
 	queueError   string        // queue rejection after probing
@@ -149,24 +150,31 @@ func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHo
 		if explicitBox != "" {
 			return []fleetHost{defaultHost}, true, nil
 		}
-		seen := make(map[[2]string]bool, len(configured))
+		seen := make(map[string]bool, len(configured))
 		out := make([]fleetHost, 0, len(configured))
 		for _, host := range configured {
 			resolved, err := resolveConfiguredTuple(host, configured)
 			if err != nil {
 				return nil, false, err
 			}
-			key := [2]string{host.Remote, host.Project}
-			if seen[key] {
+			tag, err := jobHostTag(host)
+			if err != nil {
+				return nil, false, err
+			}
+			if seen[tag] {
 				continue
 			}
-			seen[key] = true
+			seen[tag] = true
 			out = append(out, fleetHost{
 				Name:         host.Name,
 				Remote:       host.Remote,
 				Project:      host.Project,
 				DashboardURL: resolved.DashboardURL,
 				Priority:     resolved.Priority,
+				Kind:         host.Kind,
+				Endpoint:     host.Endpoint,
+				TokenFile:    resolved.TokenFile,
+				Mode:         resolved.Mode,
 			})
 		}
 		return out, false, nil
@@ -185,6 +193,10 @@ func resolveFleetTargets(defaultHost fleetHost, configured []fleetHost, pinnedHo
 				Project:      host.Project,
 				DashboardURL: resolved.DashboardURL,
 				Priority:     resolved.Priority,
+				Kind:         host.Kind,
+				Endpoint:     host.Endpoint,
+				TokenFile:    resolved.TokenFile,
+				Mode:         resolved.Mode,
 			}}, false, nil
 		}
 	}
@@ -322,6 +334,15 @@ func evaluateCandidate(index int, c fleetCandidate, req pickRequest, sz mode.Siz
 	}
 	if c.startRefusal != nil {
 		ev.markUnavailable(c.startRefusal.why, c.startRefusal.msg, req, sz)
+		return ev
+	}
+	if req.Box != "" && c.Host.Kind != "" {
+		ev.invalid = true
+		ev.markUnavailable("", "--box needs an Incus host", req, sz)
+		return ev
+	}
+	if c.Unavailable != "" {
+		ev.markUnavailable("", c.Unavailable, req, sz)
 		return ev
 	}
 	if c.Mode == string(mode.MyPC) {
@@ -666,6 +687,9 @@ func hostLabel(h fleetHost) string {
 	}
 	if h.Remote != "" {
 		return h.Remote
+	}
+	if h.Endpoint != "" {
+		return h.Endpoint
 	}
 	return "unknown"
 }

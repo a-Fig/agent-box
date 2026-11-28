@@ -32,13 +32,17 @@ func (a *App) probeFleetTiers(ctx context.Context, targets []fleetHost, req pick
 	return cands, nil
 }
 
+func isBoxdHost(host fleetHost) bool {
+	return host.Kind == "" && host.Project == mode.Project
+}
+
 func fleetPriorityTiers(targets []fleetHost) [][]fleetHost {
 	if len(targets) == 0 {
 		return nil
 	}
 	hasBoxd := false
 	for _, host := range targets {
-		if host.Project == mode.Project {
+		if isBoxdHost(host) {
 			hasBoxd = true
 			break
 		}
@@ -47,7 +51,7 @@ func fleetPriorityTiers(targets []fleetHost) [][]fleetHost {
 	var tier0, deferred []fleetHost
 	if hasBoxd {
 		for _, host := range targets {
-			if host.Project == mode.Project || host.Priority >= 0 {
+			if isBoxdHost(host) || host.Priority >= 0 {
 				tier0 = append(tier0, host)
 			} else {
 				deferred = append(deferred, host)
@@ -112,6 +116,13 @@ func (a *App) probeFleetCandidates(ctx context.Context, targets []fleetHost, req
 }
 
 func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickRequest, sz mode.Size, targetBox, repoKey string) fleetCandidate {
+	if host.Kind != "" {
+		c, err := a.newCloudHost(host)
+		if err != nil {
+			return fleetCandidate{Host: host, Priority: host.Priority, Error: err.Error()}
+		}
+		return c.probe(ctx)
+	}
 	hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
 	defer cancel()
 

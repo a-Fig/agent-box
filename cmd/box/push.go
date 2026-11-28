@@ -201,10 +201,24 @@ type jobLocator struct {
 	Project      string `json:"project"`
 	DashboardURL string `json:"dashboard_url,omitempty"`
 	Priority     int    `json:"priority,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	TokenFile    string `json:"token_file,omitempty"`
+	Mode         string `json:"mode,omitempty"`
 }
 
 func locateJobHost(h fleetHost) *jobLocator {
-	return &jobLocator{Name: h.Name, Remote: h.Remote, Project: h.Project, DashboardURL: h.DashboardURL, Priority: h.Priority}
+	return &jobLocator{
+		Name:         h.Name,
+		Remote:       h.Remote,
+		Project:      h.Project,
+		DashboardURL: h.DashboardURL,
+		Priority:     h.Priority,
+		Kind:         h.Kind,
+		Endpoint:     h.Endpoint,
+		TokenFile:    h.TokenFile,
+		Mode:         h.Mode,
+	}
 }
 
 func (rec jobRecord) noticeJob() string {
@@ -218,7 +232,17 @@ func (rec jobRecord) watchHost(id jobID) (fleetHost, error) {
 	if rec.Host == nil {
 		return fleetHost{}, fmt.Errorf("no saved host for qualified job %s", id.ID)
 	}
-	host := fleetHost{Name: rec.Host.Name, Remote: rec.Host.Remote, Project: rec.Host.Project, DashboardURL: rec.Host.DashboardURL, Priority: rec.Host.Priority}
+	host := fleetHost{
+		Name:         rec.Host.Name,
+		Remote:       rec.Host.Remote,
+		Project:      rec.Host.Project,
+		DashboardURL: rec.Host.DashboardURL,
+		Priority:     rec.Host.Priority,
+		Kind:         rec.Host.Kind,
+		Endpoint:     rec.Host.Endpoint,
+		TokenFile:    rec.Host.TokenFile,
+		Mode:         rec.Host.Mode,
+	}
 	tag, err := jobHostTag(host)
 	if err != nil || (id.hostTag != "" && tag != id.hostTag) {
 		return fleetHost{}, fmt.Errorf("saved host does not match job %s", id.ID)
@@ -711,10 +735,10 @@ func (a *App) jobSourceMatchesHost(id jobID, host *jobLocator) bool {
 		return id.hostTag != ""
 	}
 	if id.hostTag != "" {
-		tag, err := jobHostTag(fleetHost{Remote: host.Remote, Project: host.Project})
+		tag, err := jobHostTag(fleetHost{Remote: host.Remote, Project: host.Project, Kind: host.Kind, Endpoint: host.Endpoint})
 		return err == nil && tag == id.hostTag
 	}
-	return host.Remote == a.Remote && host.Project == a.Project
+	return host.Kind == "" && host.Remote == a.Remote && host.Project == a.Project
 }
 
 func (a *App) savedJobSource(id jobID) *dash.SourceRevision {
