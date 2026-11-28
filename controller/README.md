@@ -13,7 +13,7 @@ Cloudflare Worker + SQLite Durable Object implementing the [`controller-v1`](../
 Requires Node 22+ (uses built-in `node:test` and `node:sqlite`, zero `npm ci` dependencies):
 
 ```sh
-node --test controller/test/
+node --test controller/test/*.test.mjs
 ```
 
 ## Deploy
