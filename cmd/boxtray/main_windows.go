@@ -42,6 +42,14 @@ func main() {
 		}
 		os.Exit(installByHand(os.Args[2]))
 	}
+	// Before the mutexes and the log's start line: the window is not a tray or an enforcer.
+	if page, ok, err := parseDashboardArgs(os.Args[1:]); ok {
+		if err != nil {
+			os.Exit(2)
+		}
+		runDashboard(page)
+		return
+	}
 	if headlessRequested(os.Args[1:]) {
 		runHeadless()
 		return
@@ -113,6 +121,11 @@ func main() {
 		logf: lg.Printf,
 		busy: mgr.Releasing,
 	}
+	dash := &dashOpener{res: &dashResolver{
+		explicit: func() string { return loadDashboardURL(cfg) },
+		up:       sensors.HostUp,
+		run:      wslRoot,
+	}}
 	var releases sync.WaitGroup // Release memory runs in flight
 	t, err := newTray(mgr.Chosen, trayActions{
 		pick: func(m mode.Mode) {
@@ -136,11 +149,15 @@ func main() {
 				}, poke, lg.Printf)
 			}()
 		},
+		openDashboard: dash.open,
 	})
 	sl := &statusLog{logf: lg.Printf}
 	report := func(st mode.Status) {
 		sl.observe(st)
 		drop.observe(st)
+		if !st.Down {
+			dash.warm()
+		}
 		if t != nil {
 			t.setStatus(st)
 		}

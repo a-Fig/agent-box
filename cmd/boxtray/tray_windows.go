@@ -49,6 +49,7 @@ const (
 	idModeBase    = 1 // 1..3 select a mode
 	idRelease     = 10
 	idQuit        = 11
+	idDashboard   = 12
 	trayIconID    = 1
 	iconTimerID   = 1
 	className     = "AgentBoxTray"
@@ -107,8 +108,9 @@ type iconInfo struct {
 }
 
 type trayActions struct {
-	pick    func(mode.Mode)
-	release func()
+	pick          func(mode.Mode)
+	release       func()
+	openDashboard func() // returns at once; the lookup and the window start on a goroutine
 }
 
 type tray struct {
@@ -261,6 +263,7 @@ func (t *tray) showMenu() {
 	st := t.status
 	t.mu.Unlock()
 	add(mfGrayed, 0, statusText(st))
+	add(0, idDashboard, "Open dashboard")
 	add(mfSeparator, 0, "")
 	for i, m := range mode.All {
 		var flags uintptr
@@ -284,6 +287,9 @@ func (t *tray) showMenu() {
 	case id >= idModeBase && int(id) < idModeBase+len(mode.All):
 		t.act.pick(mode.All[id-idModeBase])
 		t.modifyIcon()
+	case id == idDashboard:
+		lg.Printf("Open dashboard chosen from the menu")
+		t.act.openDashboard()
 	case id == idRelease:
 		lg.Printf("Release memory chosen from the menu")
 		t.act.release()

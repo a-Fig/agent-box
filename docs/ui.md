@@ -33,7 +33,9 @@ One server, one page, three ways in.
     menu, which carries the AppUserModelID `dev.afig.agentbox` that the window's process takes,
     so the window's taskbar button pins as the shortcut and starts `box app` again
     (`internal/desktop/launcher_windows.go`, ported from Murmur's).
-  - The tray on the PC gets an **Open dashboard** item, which opens the same window (not built, 2026-11-25).
+  - The tray on the PC has an **Open dashboard** item, which opens the same window
+    (`boxtray.exe --dashboard --url <url>`, a process of its own), or the browser if the window
+    can't be made.
   - Any browser on the tailnet, a phone included.
 
 ### Why a server on the PC rather than `box ui` serving from the laptop like `mur ui`
@@ -427,7 +429,11 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 - `setup-host.sh` installs `boxd` and `agent-box-boxd.service`, and writes `boxd.json`. It also
   runs `tailscale serve --bg --https=443 http://127.0.0.1:7766`; port 7766 was chosen so nothing
   else on the distro takes it.
-- The tray's **Open dashboard** item opens `https://agent-box.<tailnet>.ts.net` (not built, 2026-11-25).
+- The tray's **Open dashboard** item opens `https://agent-box.<tailnet>.ts.net`. It asks the
+  distro's Tailscale for that name (`tailscale serve status --json`, then `tailscale status
+  --json`), keeps the last answer so a click after Release memory still opens the window (which
+  waits on its "PC unreachable" screen), and takes `dashboard_url` in `boxtray.json` over both
+  (`cmd/boxtray/dashboard.go`). What goes wrong goes to `boxtray.log`.
 - The laptop's `box ui` and `box app` get that address from the `pc` remote's host name.
 
 ## Order of work
@@ -441,7 +447,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
    the owner check. History is recorded from here on.
 3. **The page**, against the devserver, then live. This runs in parallel with 2.
 4. **The controls,** with the tray's mode request and the tray's heartbeat.
-5. **`box ui`, `box app`,** the tray's **Open dashboard** (not built, 2026-11-25), and the "PC unreachable" screen.
+5. **`box ui`, `box app`,** the tray's **Open dashboard**, and the "PC unreachable" screen.
 6. **The history page and its charts.**
 
 ## Not now
