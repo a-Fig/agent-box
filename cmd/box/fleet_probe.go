@@ -20,7 +20,8 @@ import (
 // the initial tier (alongside any non-boxd hosts with Priority >= 0) so a
 // client's hosts.json hint never hides a host-reported boxd priority. Only
 // non-boxd hosts are deferred into lower tiers ordered by Priority descending.
-func (a *App) probeFleetTiers(ctx context.Context, targets []fleetHost, req pickRequest, repoOrigin string) (cands []fleetCandidate, rest []fleetHost) {
+func (a *App) probeFleetTiers(ctx context.Context, existing []fleetCandidate, targets []fleetHost, req pickRequest, repoOrigin string) (cands []fleetCandidate, rest []fleetHost) {
+	cands = slices.Clone(existing)
 	tiers := fleetPriorityTiers(targets)
 	for i, tier := range tiers {
 		cands = append(cands, a.probeFleetCandidates(ctx, tier, req, repoOrigin)...)

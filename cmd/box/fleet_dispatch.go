@@ -76,7 +76,7 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		Repo:         rp.Name,
 		Queue:        o.Queue,
 	}
-	candidates, rest := a.probeFleetTiers(ctx, targets, pickReq, info.Repo)
+	candidates, rest := a.probeFleetTiers(ctx, nil, targets, pickReq, info.Repo)
 
 	prepared := fleetRun{repo: rp, info: info}
 	defer func() {
@@ -92,9 +92,7 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 	for {
 		pick := pickFleetHost(candidates, pickReq)
 		if needsLowerTierProbe(pick, candidates, rest) && ctx.Err() == nil {
-			more, nextRest := a.probeFleetTiers(ctx, rest, pickReq, info.Repo)
-			candidates = append(candidates, more...)
-			rest = nextRest
+			candidates, rest = a.probeFleetTiers(ctx, candidates, rest, pickReq, info.Repo)
 			continue
 		}
 		if pick.Action == pickRefuse {

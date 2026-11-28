@@ -606,7 +606,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "alpha", Remote: "r-alpha", Project: mode.Project, DashboardURL: "https://alpha.example.com", Priority: 10},
 			{Name: "beta", Remote: "r-beta", Project: mode.Project, DashboardURL: "https://beta.example.com", Priority: 0},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
 		if len(cands) != 2 || len(rest) != 0 || len(*probed) != 2 {
 			t.Fatalf("boxd-capable cands=%d rest=%d probed=%v, want both probed together", len(cands), len(rest), *probed)
 		}
@@ -626,7 +626,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "high", Remote: "r-high", Project: "work", Priority: 10},
 			{Name: "mid", Remote: "r-mid", Project: "work", Priority: 5},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
 		if !slices.Equal(*probed, []string{"r-high"}) {
 			t.Fatalf("probed = %v, want [r-high]", *probed)
 		}
@@ -647,7 +647,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "low", Remote: "r-low", Project: "work", Priority: -1},
 			{Name: "boxd", Remote: "r-boxd", Project: mode.Project, Priority: 0},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
 		if !slices.Equal(*probed, []string{"r-boxd"}) || len(cands) != 1 || len(rest) != 1 || rest[0].Name != "low" {
 			t.Fatalf("probed=%v cands=%+v rest=%+v, want [r-boxd] and rest=[low]", *probed, cands, rest)
 		}
@@ -670,7 +670,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "low", Remote: "r-low", Project: "work", Priority: -1},
 			{Name: "sunk", Remote: "r-sunk", Project: "work", Priority: -5},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
 		if !slices.Equal(*probed, []string{"r-boxd", "r-low"}) || len(rest) != 1 || rest[0].Name != "sunk" {
 			t.Fatalf("probed=%v rest=%+v, want [r-boxd r-low] and rest=[sunk]", *probed, rest)
 		}
@@ -692,7 +692,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "mid", Remote: "r-mid", Project: "work", Priority: 5},
 			{Name: "low", Remote: "r-low", Project: "work", Priority: 0},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{Queue: true}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{Queue: true}, "")
 		if !slices.Equal(*probed, []string{"r-high", "r-mid"}) {
 			t.Fatalf("probed = %v, want [r-high r-mid]", *probed)
 		}
@@ -713,7 +713,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "one", Remote: "r1", Project: mode.Project},
 			{Name: "two", Remote: "r2", Project: mode.Project},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
 		if len(cands) != 2 || len(rest) != 0 || len(*probed) != 2 {
 			t.Fatalf("equal priority cands=%d rest=%d probed=%v", len(cands), len(rest), *probed)
 		}
@@ -740,7 +740,7 @@ func TestProbeFleetTiers(t *testing.T) {
 			{Name: "two", Remote: "r2", Project: mode.Project, DashboardURL: "https://two.example.com", Priority: 15},
 			{Name: "three", Remote: "r3", Project: mode.Project, DashboardURL: "https://three.example.com", Priority: 15},
 		}
-		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		cands, rest := a.probeFleetTiers(context.Background(), nil, targets, pickRequest{}, "")
 		if len(rest) != 0 || cands[0].Priority != 0 || cands[1].Priority != 20 || cands[2].Priority != 15 {
 			t.Fatalf("cands=%+v rest=%+v, want priorities [0 20 15]", cands, rest)
 		}
