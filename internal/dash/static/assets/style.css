@@ -802,6 +802,10 @@ code {
 }
 .topbar h1 {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.875rem;
   font-weight: 500;
 }
@@ -844,6 +848,46 @@ code {
 .host-ico .icon {
   width: 1.25rem;
   height: 1.25rem;
+}
+.host-title {
+  flex: 1;
+  min-width: 0;
+}
+.host-name {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+/* A name of one long word (up to 40 characters) wraps rather than pushing the pencil off a phone. */
+.host-name h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.host-name .icon-btn {
+  opacity: 0.7;
+}
+.host-name .icon-btn:hover,
+.host-name .icon-btn:focus-visible {
+  opacity: 1;
+}
+.host-rename {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.host-rename .field {
+  flex: 1;
+  max-width: 22rem;
+}
+.host-rename .field input {
+  height: 2rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.host-rename-note {
+  margin-top: 0.375rem;
+  font-size: 0.8125rem;
 }
 a.machine-name {
   border-radius: var(--control-radius);

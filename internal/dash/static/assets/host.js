@@ -149,12 +149,85 @@ function limitRows(m) {
   ];
 }
 
+// Renaming (#291): the name is a label on the page, kept on the host so every device sees it.
+// While the field is open, a redraw moves the same input into the new page rather than making
+// another, so what is typed, the caret and the focus survive the stream's events.
+const MAX_NAME = 40; // dash.MaxMachineName
+let ed = null; // { id, saving, err }
+
+function startRename(m) {
+  ed = { id: m.id, saving: false, err: "" };
+  changed();
+  requestAnimationFrame(() => {
+    const input = document.querySelector(`[data-key="rename-${CSS.escape(m.id)}"]`);
+    input?.focus();
+    input?.select();
+  });
+}
+
+function stopRename() {
+  ed = null;
+  changed();
+  requestAnimationFrame(() => document.querySelector('[data-key="rename-open"]')?.focus());
+}
+
+// The form's submit is the one way in (Enter submits it). It reads the host as it is now: another
+// device may have renamed it while the field was open.
+async function saveRename(id, input) {
+  const m = S.machines.get(id);
+  if (!ed || ed.saving || !m) return;
+  const name = input.value.trim();
+  if (name === m.name) return stopRename();
+  ed.saving = true;
+  ed.err = "";
+  changed();
+  try {
+    S.machines.set(m.id, await post("/api/machine/name", { name }));
+    stopRename();
+  } catch (e) {
+    if (ed) {
+      ed.saving = false;
+      ed.err = e.message || "Couldn't rename the host.";
+    }
+    changed();
+    // The field was disabled while saving, which took the focus away; give it back.
+    requestAnimationFrame(() => input.focus());
+  }
+}
+
+function nameHead(m, el) {
+  if (ed?.id !== m.id) {
+    return h("div", { class: "host-name" }, h("h2", null, m.name), h("button", { class: "icon-btn", type: "button", title: "Rename", "aria-label": "Rename " + m.name, "data-key": "rename-open", onclick: () => startRename(m) }, icon("pencil")));
+  }
+  const key = "rename-" + m.id;
+  let input = el.querySelector(`[data-key="${CSS.escape(key)}"]`);
+  if (!input) {
+    input = h("input", { type: "text", value: m.name, maxlength: MAX_NAME, placeholder: "Name from the host's setup", "aria-label": "Host name", "data-key": key, spellcheck: "false", autocomplete: "off" });
+    input.addEventListener("keydown", (e) => e.key === "Escape" && stopRename());
+  }
+  input.disabled = ed.saving;
+  return h(
+    "div",
+    null,
+    h(
+      "form",
+      { class: "host-rename", onsubmit: (e) => (e.preventDefault(), saveRename(m.id, input)) },
+      h("label", { class: "field" }, input),
+      h("button", { class: "btn btn-sm btn-primary", type: "submit", disabled: ed.saving }, ed.saving ? "Saving…" : "Save"),
+      h("button", { class: "btn btn-sm btn-outline", type: "button", onclick: stopRename }, "Cancel"),
+    ),
+    h("p", { class: "host-rename-note" }, "Only a label on this page, the same on every device. Agents keep using the host's ID, " + m.id + ". Leave it empty for the name from the host's setup."),
+    ed.err ? h("p", { class: "row-error", role: "alert" }, ed.err) : null,
+  );
+}
+
 const host = {
   mount(el, id) {
     this.update(el, id);
   },
   leave() {
     if (!checking) checkErr = "";
+    ed = null;
   },
   update(el, id) {
     const m = S.machines.get(id);
@@ -170,7 +243,7 @@ const host = {
       h(
         "div",
         { class: "page" },
-        h("div", { class: "page-head host-head" }, h("span", { class: "host-ico" }, icon(kind.icon)), h("div", null, h("h2", null, m.name), h("p", null, kind.about + (m.reachable ? "" : " It isn't answering now.")))),
+        h("div", { class: "page-head host-head" }, h("span", { class: "host-ico" }, icon(kind.icon)), h("div", { class: "host-title" }, nameHead(m, el), ed?.id === m.id ? null : h("p", null, kind.about + (m.reachable ? "" : " It isn't answering now.")))),
         banners(m),
         section("Now", null, machineCard(m)),
         section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map(runningRow) : h("p", { class: "row-empty" }, "Nothing is running on " + m.name + "."))),
