@@ -81,7 +81,10 @@ type App struct {
 	HTTP func(*http.Request) (*http.Response, error)
 	// dashboardURL overrides the derived boxd address for a configured job host.
 	dashboardURL string
-	jobHostName  string // display name for a qualified job destination
+	// home is the App a host-scoped one (jobHostApp) came from: the default host's boxd, where
+	// cloud usage reports go. nil on the App itself.
+	home        *App
+	jobHostName string // display name for a qualified job destination
 	// boxdDisabled keeps a qualified lookup outside boxd's fixed project on Incus.
 	boxdDisabled bool
 	// Pushing a job's result to the agent's T3 thread (push.go). Push sends

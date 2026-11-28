@@ -25,6 +25,7 @@ func (a *App) probeFleetTiers(ctx context.Context, existing []fleetCandidate, ta
 	tiers := fleetPriorityTiers(targets)
 	for i, tier := range tiers {
 		cands = append(cands, a.probeFleetCandidates(ctx, tier, req, repoOrigin)...)
+		applyDashboardCloudPause(cands)
 		if pick := pickFleetHost(cands, req); pick.Action == pickStart {
 			var remHosts []fleetHost
 			for _, rem := range tiers[i+1:] {
@@ -36,6 +37,23 @@ func (a *App) probeFleetTiers(ctx context.Context, existing []fleetCandidate, ta
 		}
 	}
 	return cands, nil
+}
+
+// dashboardCloudPaused is why a cloud host is skipped while a boxd host's page has cloud
+// launches paused.
+const dashboardCloudPaused = "cloud paused from the dashboard"
+
+// applyDashboardCloudPause marks every cloud candidate unavailable when a probed boxd host reports
+// its page's cloud pause, which it read in the same /api/state as its queue.
+func applyDashboardCloudPause(cands []fleetCandidate) {
+	if !slices.ContainsFunc(cands, func(c fleetCandidate) bool { return c.CloudPaused }) {
+		return
+	}
+	for i := range cands {
+		if cands[i].Host.Kind != "" && cands[i].Error == "" {
+			cands[i].Unavailable = dashboardCloudPaused
+		}
+	}
 }
 
 func needsLowerTierProbe(pick fleetPick, cands []fleetCandidate, rest []fleetHost) bool {
@@ -137,7 +155,11 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 		if err != nil {
 			return fleetCandidate{Host: host, Priority: host.Priority, Error: err.Error()}
 		}
-		return c.probe(ctx)
+		cand, p := c.probeStatus(ctx)
+		if cand.Reachable && cand.Error == "" {
+			a.reportCloudUsage(ctx, host, p)
+		}
+		return cand
 	}
 	hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
 	defer cancel()
@@ -180,7 +202,8 @@ func (a *App) probeFleetCandidate(ctx context.Context, host fleetHost, req pickR
 
 	// Optional boxd probes (mode.Project "agents" only). A failure or timeout
 	// here leaves the already-verified Incus start capacity usable.
-	queued, queueCapable, hostPrio := hostApp.fleetBoxdState(hostCtx, host.DashboardURL)
+	queued, queueCapable, hostPrio, cloudPaused := hostApp.fleetBoxdState(hostCtx, host.DashboardURL)
+	c.CloudPaused = cloudPaused
 	if queueCapable {
 		c.BoxdAvailable = true
 		c.Queued = queued

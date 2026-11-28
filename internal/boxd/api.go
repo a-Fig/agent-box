@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/updates/check", control(http.HandlerFunc(s.checkUpdates)))
 	s.queueRoutes(mux)
 	s.controlRoutes(mux)
+	s.cloudRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, dash.CodeNotFound, "no such endpoint")
 	})

@@ -97,6 +97,7 @@ type fleetCandidate struct {
 	BoxdAvailable    bool     // positively established boxd queue capability on this host
 	Queued           *int     // optional boxd queue depth when BoxdAvailable is true; nil if depth unknown
 	Unavailable      string   // non-empty when a reachable host refuses new starts (e.g. cloud paused/budget/busy)
+	CloudPaused      bool     // a boxd host's page has cloud launches paused (applyDashboardCloudPause)
 
 	startRefusal *turnAwayInfo // pre-start refusal from a live attempt
 	queueError   string        // queue rejection after probing

@@ -57,6 +57,9 @@ func (a *App) jobHostApp(host fleetHost) *App {
 	scoped.Remote, scoped.Project, scoped.dashboardURL = host.Remote, host.Project, host.DashboardURL
 	scoped.jobHostName = host.Name
 	scoped.boxdDisabled = host.Kind != "" || host.Project != mode.Project
+	if scoped.home == nil {
+		scoped.home = a
+	}
 	return &scoped
 }
 

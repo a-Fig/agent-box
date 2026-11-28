@@ -109,6 +109,14 @@ func TestScenariosShowTheirCase(t *testing.T) {
 	if s := get("lost"); count(s.State.Jobs, dash.JobLost) == 0 {
 		t.Error("lost has no lost job")
 	}
+	if s := get("cloud"); len(s.State.Cloud) != 4 || s.State.Controller == nil || s.State.CloudPaused {
+		t.Errorf("cloud has %d cloud hosts and controller %v", len(s.State.Cloud), s.State.Controller)
+	}
+	for _, c := range get("cloud").State.Cloud {
+		if err := (dash.CloudUsageBody{Host: &c}).Validate(); err != nil {
+			t.Errorf("cloud host %s: %v", c.Name, err)
+		}
+	}
 	week := get("week")
 	days := map[string]bool{}
 	for _, j := range week.Jobs.Jobs {

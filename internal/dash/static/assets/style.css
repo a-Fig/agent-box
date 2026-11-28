@@ -520,6 +520,9 @@ code {
 .dot-mypc {
   background: var(--mode-mypc);
 }
+.dot-warn {
+  background: var(--warning);
+}
 .dot-off {
   border: 1.5px solid var(--dot-off);
   background: transparent;
@@ -1754,4 +1757,28 @@ a.hbar:hover .truncate {
 }
 .stat > * + * {
   border-top: 0;
+}
+
+/* A cloud host's page (cloud.js): its spend takes the width two meters would. */
+.cloud-meters {
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+}
+.meter-under {
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.cloud-pause {
+  margin-left: auto;
+}
+@media (max-width: 767px) {
+  .cloud-meters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cloud-spend {
+    grid-column: 1 / -1;
+  }
+  .cloud-pause {
+    margin-left: 0;
+  }
 }

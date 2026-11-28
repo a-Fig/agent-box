@@ -13,15 +13,19 @@ import { hint } from "./tip.js";
 import { section, empty, machineCard, banners, runningRow, boxRow, queued, queueSection } from "./views.js";
 import { row, group } from "./settings.js";
 import { drift, releaseStatus } from "./versions.js";
+import { cloudPage, cloudLeave } from "./cloud.js";
 
 export { host, hostKind, hostLink };
 
 const KINDS = {
   pc: { icon: "monitor", label: "PC", about: "A Windows PC that runs boxes in WSL." },
+  modal: { icon: "cloud", label: "Modal", about: "A Modal account that runs jobs in the cloud when the PCs have no room. Each job costs money, against a monthly cap." },
+  cloud: { icon: "cloud", label: "Cloud", about: "A cloud runner that takes jobs when the PCs have no room. Each job costs money, against a monthly cap." },
 };
 
+// A PC has no kind; a cloud host (dash.CloudHost) always has one.
 function hostKind(m) {
-  return KINDS[m.kind] || KINDS.pc;
+  return KINDS[m.kind] || (m.kind ? KINDS.cloud : KINDS.pc);
 }
 
 function hostLink(m) {
@@ -228,8 +232,10 @@ const host = {
   leave() {
     if (!checking) checkErr = "";
     ed = null;
+    cloudLeave();
   },
   update(el, id) {
+    if (id.startsWith("cloud/")) return cloudPage(el, id);
     const m = S.machines.get(id);
     if (!m) {
       el.replaceChildren(h("div", { class: "page" }, empty("offline", "No such host", "The fleet has no host called " + id + ". It may have been removed.", h("a", { class: "btn btn-sm btn-outline", href: "#overview" }, "Back to Overview"))));

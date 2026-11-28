@@ -341,7 +341,8 @@ JSON over HTTPS, on the same origin as the page.
 The page polls nothing. It opens one `GET /api/events` server-sent-events stream.
 - The first event is `state`, the full `/api/state`.
 - After that, each event carries one whole object, which replaces the old one: `machine`, `box`,
-  `job`, `box-gone`, `job-gone` and `updates`.
+  `job`, `box-gone`, `job-gone`, `updates` and `cloud` (`{cloud, cloudPaused, controller}`, all three
+  at once).
 - On reconnect the page starts over from `state`. There is no replay. If `/api/state` fails too, the
   page shows "PC unreachable" and tries again every 10s.
 - A running job's `job` events carry its `tail`, so Overview's log tails are live without a call.
@@ -352,7 +353,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 
 | Method and path | Returns or does |
 |---|---|
-| `GET /api/state` | `{machines, boxes, jobs, updates, now}`. `jobs` holds the running, paused and queued jobs plus the last 50 finished. `updates` is `{latest, checkedAt}`. Before the first successful check, `checkedAt` is omitted. An empty `latest` after a successful check means there is no stable release. |
+| `GET /api/state` | `{machines, boxes, jobs, updates, cloud, cloudPaused, controller, now}`, the three cloud fields left out while empty. `jobs` holds the running, paused and queued jobs plus the last 50 finished. `updates` is `{latest, checkedAt}`. Before the first successful check, `checkedAt` is omitted. An empty `latest` after a successful check means there is no stable release. |
 | `GET /api/events` | SSE, as above |
 | `GET /api/jobs?repo=&agent=&kind=&machine=&result=&box=&uid=&created=&q=&before=&limit=` | `{jobs, more, last}`: finished jobs from history, newest first. `repo` is the URL or its last element, `agent` the session, `box` with `machine`, `uid` and `created` (its `createdAt`) one box: its jobs as above, and `last`, the one of them that ended last (400 without all four), `q` a substring of the reason, the command or the branch (each field on its own), with both sides lower-cased by Go's `strings.ToLower` (Unicode's simple mapping, code point by code point; the page folds the same way), `limit` 1 to 200 (50). Jobs are ordered by `startedAt` and then key, newest first, and `before` is the last job's key: the page after it. Start times have one-second resolution, so a time alone would skip jobs that started together. `more` says there are more. |
 | `GET /api/jobs/{key}` | one `Job`, running or from history, for a job the page has let go |
@@ -364,6 +365,8 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
 | `POST /api/boxes/{name}/extend` | `{hours, createdAt}`, `hours` one of 1, 4 or 24, added to the later of now and `user.expires`, written to `user.expires` and `user.box.hold-until`. 200 with the `Box`. |
 | `POST /api/refusals` | from `box`, as above |
 | `POST /api/jobs/ended` | from `box`, as above: `{box, id, exit, endedAt, tail}`; 204, or 404 for a job not running |
+| `POST /api/cloud/usage` | from `box`, as a best effort (2s): `{host?, controller?}`, a cloud host's last probe (`CloudHost` without `reportedAt`/`reportedBy`, which boxd sets) or the controller's `{day, requests, limit}`. 204, or 400 past 32 hosts. Kept in memory only, so a restart of boxd forgets them until the next probe. |
+| `POST /api/cloud/pause` | `{paused}`. 200 with `{cloud, cloudPaused, controller}`. While `cloudPaused`, `box` reads it from the `/api/state` it already fetches when probing the fleet and starts no new cloud job ("cloud paused from the dashboard"); running jobs go on, and `box cloud stop` stops them. In memory too: a restart of boxd resumes. |
 | `POST /api/updates/check` | `{}`. Queries GitHub for the latest stable release (read-only, coalescing concurrent clicks), updates `State.updates`, broadcasts `updates` over SSE, and answers 200 with `{latest, checkedAt}` (or 502 `update-check` on lookup failure). |
 | `POST /api/queue/{job}/cancel` | `{}`, `job` being `<box>.<id>`. 204. 409 `not-running` unless the job is waiting. |
 | `POST /api/queue/{job}/front` | `{}`. 200 with the `Job` at place 1; the others' new places follow as `job` events. 409 `not-running` unless the job is waiting. |
@@ -396,6 +399,11 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   `startedAt` is `queuedAt`, `position` is its place from 1, and `why` is one of the refusal causes;
   every change to either comes as a `job` event. When it starts, `job-gone` takes its waiting key and
   the running job comes under its own key with the same box and ID.
+- **`CloudHost`:** `{name, kind, mode: function|sandbox, paused, running, maxConcurrent, budget:
+  {month, spentUSD, runningUSD, capUSD, creditUSD, warnAt} | null, reportedAt, reportedBy}`, a cloud
+  runner's probe as `box` reported it (`paused` is the runner's own, `box cloud pause`). Its page is
+  `#fleet/cloud/<name>`: spend (settled plus running) against the cap, amber from `warnAt`, red at
+  the cap, and the page's pause.
 
 ### The contract and the devserver
 
@@ -411,7 +419,9 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   - headless: nobody logged on, the headless enforcer holding Full, a mode request waiting for the
     tray;
   - a lost job;
-  - a week of history.
+  - a week of history;
+  - cloud: the PC in My PC and four Modal hosts, well under, past the warning, at the cap, and paused
+    on the runner, with the controller's requests.
 - **The devserver** is `internal/dash/devserver`, like Murmur's `internal/web/devserver`. It serves
   the page with a chosen fixture, replays SSE events on a timer, and fakes the controls. The page is
   built against it, so the page and `boxd` are built at the same time.

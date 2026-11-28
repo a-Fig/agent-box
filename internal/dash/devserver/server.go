@@ -101,6 +101,7 @@ func (s *server) snapshot() dash.State {
 	st.Machines = slices.Clone(st.Machines)
 	st.Boxes = slices.Clone(st.Boxes)
 	st.Jobs = slices.Clone(st.Jobs)
+	st.Cloud = slices.Clone(st.Cloud)
 	return st
 }
 
@@ -593,4 +594,57 @@ func (s *server) reallot() {
 		s.publish(dash.EventBox, b)
 	}
 	s.publish(dash.EventMachine, *m)
+}
+
+// cloudState is the scenario's cloud fields; s.mu is held.
+func (s *server) cloudState() dash.CloudState {
+	st := dash.CloudState{Cloud: slices.Clone(s.sc.State.Cloud), CloudPaused: s.sc.State.CloudPaused, Controller: s.sc.State.Controller}
+	if st.Cloud == nil {
+		st.Cloud = []dash.CloudHost{}
+	}
+	return st
+}
+
+// handleCloudUsage keeps a cloud report as boxd's POST /api/cloud/usage does.
+func (s *server) handleCloudUsage(r *http.Request, body []byte) (int, any, error) {
+	var b dash.CloudUsageBody
+	if err := decode(body, &b); err != nil {
+		return 0, nil, err
+	}
+	if err := b.Validate(); err != nil {
+		return 0, nil, fail(http.StatusBadRequest, dash.CodeBadRequest, "%s", err.Error())
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if h := b.Host; h != nil {
+		c := *h
+		c.ReportedAt, c.ReportedBy = s.now().UTC().Truncate(time.Second), "devserver"
+		i := slices.IndexFunc(s.sc.State.Cloud, func(x dash.CloudHost) bool { return x.Name == c.Name })
+		if i < 0 {
+			s.sc.State.Cloud = append(s.sc.State.Cloud, c)
+		} else {
+			s.sc.State.Cloud[i] = c
+		}
+	}
+	if b.Controller != nil {
+		u := *b.Controller
+		s.sc.State.Controller = &u
+	}
+	s.publish(dash.EventCloud, s.cloudState())
+	return http.StatusNoContent, nil, nil
+}
+
+// handleCloudPause sets the page's cloud pause, as boxd's POST /api/cloud/pause.
+func (s *server) handleCloudPause(r *http.Request, body []byte) (int, any, error) {
+	var b dash.CloudPauseBody
+	if err := decode(body, &b); err != nil {
+		return 0, nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sc.State.CloudPaused != b.Paused {
+		s.sc.State.CloudPaused = b.Paused
+		s.publish(dash.EventCloud, s.cloudState())
+	}
+	return http.StatusOK, s.cloudState(), nil
 }

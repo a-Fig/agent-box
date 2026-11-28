@@ -47,6 +47,7 @@ var scenarios = []struct {
 	{"headless", "Nobody is logged on to the PC: the headless enforcer holds Full, and a request for Shared from a phone waits for the tray.", buildHeadless},
 	{"lost", "boxd restarted and found a job's box gone: the job is lost.", buildLost},
 	{"week", "A week of history: jobs, box-hours, modes and refusals.", buildWeek},
+	{"cloud", "The PC in My PC, so runs spill over to three Modal hosts: one well under its cap, one past its warning, one at its cap, and one the runner itself has paused.", buildCloud},
 }
 
 // Names lists the scenarios.
@@ -155,6 +156,8 @@ type world struct {
 	logs     map[string]string
 	segments []dash.Segment
 	refusals []refusal
+	cloud    []dash.CloudHost
+	control  *dash.ControllerUsage
 	since    time.Time // how far back history goes
 }
 
@@ -522,7 +525,7 @@ func (w *world) finish(name, about string) Scenario {
 	return Scenario{
 		Name:  name,
 		About: about,
-		State: dash.State{Machines: []dash.Machine{*m}, Boxes: boxes, Jobs: state, Now: w.now},
+		State: dash.State{Machines: []dash.Machine{*m}, Boxes: boxes, Jobs: state, Cloud: w.cloud, Controller: w.control, Now: w.now},
 		Jobs:  dash.JobsPage{Jobs: done},
 		Day:   w.historyFor(dash.RangeDay, done),
 		Week:  w.historyFor(dash.RangeWeek, done),
@@ -807,6 +810,30 @@ func buildHeadless(w *world) {
 	w.history(w.now.Add(-24*time.Hour), 18)
 	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-9*time.Hour), dash.ModeShared)
 	w.segment(w.now.Add(-9*time.Hour), w.now, dash.ModeFull)
+}
+
+func buildCloud(w *world) {
+	w.machine.Mode = dash.ModeMyPC
+	lb := w.box("lantern", "medium", lantern, dash.BoxFrozen, false, 2*time.Hour, 23*time.Hour+10*time.Minute)
+	w.load(lb, 0.4, 0)
+	w.history(w.now.Add(-24*time.Hour), 20)
+	w.segment(w.now.Add(-24*time.Hour), w.now.Add(-2*time.Hour), dash.ModeShared)
+	w.segment(w.now.Add(-2*time.Hour), w.now, dash.ModeMyPC)
+	month := w.now.Format("2006-01")
+	host := func(name, mode string, running, max int, spent, live, cap, credit float64, paused bool, ago time.Duration) dash.CloudHost {
+		return dash.CloudHost{
+			Name: name, Kind: "modal", Mode: mode, Paused: paused, Running: running, MaxConcurrent: max,
+			Budget:     &dash.CloudBudget{Month: month, SpentUSD: spent, RunningUSD: live, CapUSD: cap, CreditUSD: credit, WarnAt: 0.75},
+			ReportedAt: w.now.Add(-ago), ReportedBy: "laptop",
+		}
+	}
+	w.cloud = []dash.CloudHost{
+		host("modal", "function", 1, 4, 3.12, 0.04, 25, 30, false, 40*time.Second),
+		host("modal-gpu", "sandbox", 2, 2, 19.4, 0.62, 25, 0, false, 3*time.Minute),
+		host("modal-spare", "function", 0, 4, 10, 0, 10, 0, false, 26*time.Minute),
+		host("modal-sandbox", "sandbox", 0, 2, 1.05, 0, 25, 30, true, 2*time.Hour),
+	}
+	w.control = &dash.ControllerUsage{Day: w.now.Format(time.DateOnly), Requests: 2412, Limit: 100000}
 }
 
 func buildLost(w *world) {

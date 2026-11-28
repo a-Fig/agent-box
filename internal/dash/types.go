@@ -348,7 +348,13 @@ type State struct {
 	// wins; nil when unset, meaning default 0).
 	Priority *int        `json:"priority,omitempty"`
 	Updates  *UpdateInfo `json:"updates,omitempty"`
-	Now      time.Time   `json:"now"`
+	// Cloud is the cloud hosts as box last reported them (POST /api/cloud/usage), by name;
+	// CloudPaused is the page's pause switch, and Controller the fleet controller's daily
+	// requests. All three live in boxd's memory only (cloud.go).
+	Cloud       []CloudHost      `json:"cloud,omitempty"`
+	CloudPaused bool             `json:"cloudPaused,omitempty"`
+	Controller  *ControllerUsage `json:"controller,omitempty"`
+	Now         time.Time        `json:"now"`
 }
 
 // FinishedInState is how many finished jobs State.Jobs keeps.
@@ -678,6 +684,7 @@ const (
 	EventJob     = "job"      // Job
 	EventBoxGone = "box-gone" // BoxGone
 	EventJobGone = "job-gone" // JobGone
+	EventCloud   = "cloud"    // CloudState
 )
 
 // BoxGone and JobGone name what went.

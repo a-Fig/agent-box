@@ -104,6 +104,8 @@ func (s *server) routes() http.Handler {
 	api("POST /api/refusals", s.control(s.handleRefusal))
 	api("POST /api/jobs/ended", s.control(s.handleJobEnded))
 	api("POST /api/updates/check", s.control(s.handleUpdatesCheck))
+	api("POST /api/cloud/usage", s.control(s.handleCloudUsage))
+	api("POST /api/cloud/pause", s.control(s.handleCloudPause))
 	api("POST /api/queue/{job}/cancel", s.control(s.handleQueueCancel))
 	api("POST /api/queue/{job}/front", s.control(s.handleQueueFront))
 	api("/api/", func(w http.ResponseWriter, r *http.Request) {

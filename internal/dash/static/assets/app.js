@@ -10,6 +10,7 @@ import { history } from "./history.js";
 import { settings, themeSwitch } from "./settings.js";
 import { drift } from "./versions.js";
 import { host, hostKind, hostLink } from "./host.js";
+import { cloudStatus, cloudLink, cloudLine } from "./cloud.js";
 import { syncTip, hint } from "./tip.js";
 
 const root = document.getElementById("root");
@@ -60,8 +61,8 @@ function sidebar(r) {
           h("li", null, h("a", { class: "menu-button", href: "#" + id, "data-key": "nav-" + id, "aria-current": r.name === id ? "page" : null, onclick: () => setDrawer(false) }, icon(v.icon), h("span", { class: "label" }, v.title), counts[id] ? h("span", { class: "menu-count" }, String(counts[id])) : null)),
         ),
       ),
-      S.machines.size ? h("p", { class: "group-label" }, "Fleet") : null,
-      S.machines.size ? h("ul", { class: "sidebar-menu" }, [...S.machines.values()].map((m) => h("li", null, fleetRow(m, r)))) : null,
+      S.machines.size || S.cloud.size ? h("p", { class: "group-label" }, "Fleet") : null,
+      S.machines.size || S.cloud.size ? h("ul", { class: "sidebar-menu" }, [...S.machines.values()].map((m) => h("li", null, fleetRow(m, r))), [...S.cloud.values()].map((c) => h("li", null, cloudRow(c, r)))) : null,
     ),
     foot(r),
   );
@@ -89,6 +90,18 @@ function fleetRow(m, r) {
     hint(hostKind(m).label + ": " + about, { class: "menu-button side-host", href: hostLink(m), "data-key": "host-" + m.id, "aria-current": r.name === "fleet" && r.key === m.id ? "page" : null, onclick: () => setDrawer(false) }, "inner"),
     icon(hostKind(m).icon),
     h("span", { class: "label side-host-text" }, h("span", { class: "side-host-name truncate" }, m.name), h("span", { class: "side-host-line" }, h("span", { class: "dot " + dot }), state)),
+  );
+}
+
+// A cloud host in the sidebar's Fleet (#280): the same row, with its spend for the line. Its key is
+// cloud/<name>, which no PC's ID can be.
+function cloudRow(c, r) {
+  const st = cloudStatus(c);
+  return h(
+    "a",
+    hint(hostKind(c).label + ": " + st.why, { class: "menu-button side-host", href: cloudLink(c), "data-key": "host-cloud-" + c.name, "aria-current": r.name === "fleet" && r.key === "cloud/" + c.name ? "page" : null, onclick: () => setDrawer(false) }, "inner"),
+    icon(hostKind(c).icon),
+    h("span", { class: "label side-host-text" }, h("span", { class: "side-host-name truncate" }, c.name), h("span", { class: "side-host-line truncate" }, h("span", { class: "dot " + st.dot }), cloudLine(c))),
   );
 }
 
@@ -215,7 +228,7 @@ function draw() {
   const r = route();
   // A host's page has its name as its heading (with the rename), so the top bar says where it is:
   // Fleet. Every other page's name is said once, in the top bar (#293).
-  const page = r.name === "fleet" ? { title: "Fleet", doc: S.machines.get(r.key)?.name || "Host", view: host } : r.key ? { title: "Job", view: jobDetail } : PAGES[r.name];
+  const page = r.name === "fleet" ? { title: "Fleet", doc: S.machines.get(r.key)?.name || (r.key.startsWith("cloud/") ? r.key.slice(6) : "Host"), view: host } : r.key ? { title: "Job", view: jobDetail } : PAGES[r.name];
   const v = page.view;
   if (!shell) {
     const content = h("main", { class: "content", id: "content", tabindex: "-1" });
