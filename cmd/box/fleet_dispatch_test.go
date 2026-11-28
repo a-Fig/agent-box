@@ -962,7 +962,7 @@ func TestFleetRunDistinguishesQueueStorageFailureFromInvalidRequest(t *testing.T
 }
 
 func TestFleetRunTieredFallbackOnTurnAway(t *testing.T) {
-	t.Run("turn-away from higher-priority tier probes and starts on lower tier", func(t *testing.T) {
+	t.Run("turn-away from higher-priority tier probes and starts on deferred lower tier", func(t *testing.T) {
 		high := &fakeFleetHost{
 			remote:       "r1",
 			project:      mode.Project,
@@ -971,24 +971,22 @@ func TestFleetRunTieredFallbackOnTurnAway(t *testing.T) {
 			refuseLaunch: memoryRefusal,
 		}
 		low := &fakeFleetHost{
-			remote:       "r2",
-			project:      mode.Project,
-			mode:         "full",
-			queueCapable: true,
-			execStdout:   "ran-on-low\n",
+			remote:     "r2",
+			project:    "work",
+			mode:       "full",
+			execStdout: "ran-on-low\n",
 		}
 		ff := newFakeFleet(t, high, low)
 		ff.dashHosts["https://high.example.com"] = high
-		ff.dashHosts["https://low.example.com"] = low
 		hosts := []fleetHost{
-			{Name: "low", Remote: "r2", Project: mode.Project, DashboardURL: "https://low.example.com", Priority: 0},
+			{Name: "low", Remote: "r2", Project: "work", Priority: -1},
 			{Name: "high", Remote: "r1", Project: mode.Project, DashboardURL: "https://high.example.com", Priority: 10},
 		}
 		a, out, repoDir := fleetDispatchTestApp(t, ff, hosts)
 
 		r, err := a.Run(context.Background(), RunOpts{
 			Dir: repoDir, Cmd: []string{"echo ok"}, New: true, Queue: true,
-			Reason: "Fall back to lower-priority tier after higher tier turns away.",
+			Reason: "Fall back to deferred lower-priority tier after higher tier turns away.",
 		})
 		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "low" {
 			t.Fatalf("tiered fallback = %+v, %v\n%s", r, err, out.String())
@@ -1007,18 +1005,16 @@ func TestFleetRunTieredFallbackOnTurnAway(t *testing.T) {
 			refuseLaunch: memoryRefusal,
 		}
 		low := &fakeFleetHost{
-			remote:       "r2",
-			project:      mode.Project,
-			mode:         "full",
-			keys:         map[string]string{"limits.instances": "1"},
-			insts:        []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}},
-			queueCapable: true,
+			remote:  "r2",
+			project: "work",
+			mode:    "full",
+			keys:    map[string]string{"limits.instances": "1"},
+			insts:   []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}},
 		}
 		ff := newFakeFleet(t, high, low)
 		ff.dashHosts["https://high.example.com"] = high
-		ff.dashHosts["https://low.example.com"] = low
 		hosts := []fleetHost{
-			{Name: "low", Remote: "r2", Project: mode.Project, DashboardURL: "https://low.example.com", Priority: 0},
+			{Name: "low", Remote: "r2", Project: "work", Priority: -1},
 			{Name: "high", Remote: "r1", Project: mode.Project, DashboardURL: "https://high.example.com", Priority: 10},
 		}
 		a, out, repoDir := fleetDispatchTestApp(t, ff, hosts)
@@ -1065,23 +1061,24 @@ func TestFleetRunBoxdAuthoritativePriority(t *testing.T) {
 		}
 	})
 
-	t.Run("boxd-reported priority overrides stale hosts.json hint once probed", func(t *testing.T) {
+	t.Run("boxd-reported priority overrides differing hosts.json hints across tiers", func(t *testing.T) {
 		alpha := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(0), execStdout: "alpha\n"}
 		beta := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(25), execStdout: "beta\n"}
 		ff := newFakeFleet(t, alpha, beta)
 		ff.dashHosts["https://alpha.example.com"] = alpha
 		ff.dashHosts["https://beta.example.com"] = beta
 
-		// Stale client config puts both in the same tier (hint 10), even though
-		// boxd reports 0 on alpha and 25 on beta.
+		// Even though alpha has a higher hosts.json hint (10) than beta (0), both
+		// boxd-capable hosts are probed in the initial tier and beta (boxd 25) wins.
 		hosts := []fleetHost{
 			{Name: "alpha", Remote: "r1", Project: mode.Project, DashboardURL: "https://alpha.example.com", Priority: 10},
-			{Name: "beta", Remote: "r2", Project: mode.Project, DashboardURL: "https://beta.example.com", Priority: 10},
+			{Name: "beta", Remote: "r2", Project: mode.Project, DashboardURL: "https://beta.example.com", Priority: 0},
 		}
 		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
-		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Verify boxd priority overrides stale hosts.json hint."})
-		if err != nil || r.Host != "beta" || len(alpha.startJobs) != 0 || len(beta.startJobs) != 1 {
-			t.Fatalf("override run = %+v, %v (alpha=%d beta=%d)\n%s", r, err, len(alpha.startJobs), len(beta.startJobs), out.String())
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Verify boxd priority overrides differing hosts.json hints."})
+		if err != nil || r.Host != "beta" || alpha.listCalls == 0 || beta.listCalls == 0 || len(alpha.startJobs) != 0 || len(beta.startJobs) != 1 {
+			t.Fatalf("override run = %+v, %v (alpha list=%d start=%d; beta list=%d start=%d)\n%s",
+				r, err, alpha.listCalls, len(alpha.startJobs), beta.listCalls, len(beta.startJobs), out.String())
 		}
 	})
 }
@@ -1090,13 +1087,10 @@ func TestFleetRunThreeTierProbeAndLaunchOrder(t *testing.T) {
 	recordingApp := func(t *testing.T, t1, t2, t3 *fakeFleetHost) (*App, *[]string, *[]string, *int, *bytes.Buffer, string) {
 		t.Helper()
 		ff := newFakeFleet(t, t1, t2, t3)
-		ff.dashHosts["https://t1.example.com"] = t1
-		ff.dashHosts["https://t2.example.com"] = t2
-		ff.dashHosts["https://t3.example.com"] = t3
 		hosts := []fleetHost{
-			{Name: "tier3", Remote: "r3", Project: mode.Project, DashboardURL: "https://t3.example.com", Priority: 0},
-			{Name: "tier1", Remote: "r1", Project: mode.Project, DashboardURL: "https://t1.example.com", Priority: 20},
-			{Name: "tier2", Remote: "r2", Project: mode.Project, DashboardURL: "https://t2.example.com", Priority: 10},
+			{Name: "tier3", Remote: "r3", Project: "work", Priority: 0},
+			{Name: "tier1", Remote: "r1", Project: "work", Priority: 20},
+			{Name: "tier2", Remote: "r2", Project: "work", Priority: 10},
 		}
 		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
 		var mu sync.Mutex
@@ -1133,12 +1127,12 @@ func TestFleetRunThreeTierProbeAndLaunchOrder(t *testing.T) {
 
 	t.Run("stops before tier 3 when tier 2 can start", func(t *testing.T) {
 		t1 := &fakeFleetHost{
-			remote: "r1", project: mode.Project, mode: "full", queueCapable: true,
+			remote: "r1", project: "work", mode: "full",
 			keys:  map[string]string{"limits.instances": "1"},
 			insts: []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}},
 		}
-		t2 := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, execStdout: "tier2-ok\n"}
-		t3 := &fakeFleetHost{remote: "r3", project: mode.Project, mode: "full", queueCapable: true, execStdout: "tier3-ok\n"}
+		t2 := &fakeFleetHost{remote: "r2", project: "work", mode: "full", execStdout: "tier2-ok\n"}
+		t3 := &fakeFleetHost{remote: "r3", project: "work", mode: "full", execStdout: "tier3-ok\n"}
 
 		a, probeOrder, launchOrder, _, out, dir := recordingApp(t, t1, t2, t3)
 		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Tier 2 start must not probe tier 3."})
@@ -1151,9 +1145,9 @@ func TestFleetRunThreeTierProbeAndLaunchOrder(t *testing.T) {
 	})
 
 	t.Run("probes and launches tier 3 only after tier 1 and tier 2 both turn away", func(t *testing.T) {
-		t1 := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, refuseLaunch: memoryRefusal}
-		t2 := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, refuseLaunch: memoryRefusal}
-		t3 := &fakeFleetHost{remote: "r3", project: mode.Project, mode: "full", queueCapable: true, execStdout: "tier3-ok\n"}
+		t1 := &fakeFleetHost{remote: "r1", project: "work", mode: "full", refuseLaunch: memoryRefusal}
+		t2 := &fakeFleetHost{remote: "r2", project: "work", mode: "full", refuseLaunch: memoryRefusal}
+		t3 := &fakeFleetHost{remote: "r3", project: "work", mode: "full", execStdout: "tier3-ok\n"}
 
 		a, probeOrder, launchOrder, t3AtT2, out, dir := recordingApp(t, t1, t2, t3)
 		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Queue: true, Reason: "Three-tier fallback after tier 1 and tier 2 turn away."})

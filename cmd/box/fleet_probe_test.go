@@ -588,16 +588,43 @@ func TestProbeFleetTiers(t *testing.T) {
 		return a, &probed
 	}
 
-	t.Run("stops after top tier when top tier can start", func(t *testing.T) {
+	t.Run("boxd-capable hosts are always probed together regardless of hosts.json hints", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-alpha": openKeys,
+			"r-beta":  openKeys,
+		}, nil)
+		a.HTTP = func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "alpha.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":0,"jobs":[]}`))}, nil
+			case "beta.example.com":
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"priority":25,"jobs":[]}`))}, nil
+			}
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		targets := []fleetHost{
+			{Name: "alpha", Remote: "r-alpha", Project: mode.Project, DashboardURL: "https://alpha.example.com", Priority: 10},
+			{Name: "beta", Remote: "r-beta", Project: mode.Project, DashboardURL: "https://beta.example.com", Priority: 0},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		if len(cands) != 2 || len(rest) != 0 || len(*probed) != 2 {
+			t.Fatalf("boxd-capable cands=%d rest=%d probed=%v, want both probed together", len(cands), len(rest), *probed)
+		}
+		if pick := pickFleetHost(cands, pickRequest{}); pick.Action != pickStart || pick.Host.Name != "beta" {
+			t.Fatalf("pick = %+v, want beta (boxd priority 25)", pick)
+		}
+	})
+
+	t.Run("stops after top non-boxd tier when top tier can start", func(t *testing.T) {
 		a, probed := newProbeApp(t, map[string]map[string]string{
 			"r-high": openKeys,
 			"r-mid":  openKeys,
 			"r-low":  openKeys,
 		}, nil)
 		targets := []fleetHost{
-			{Name: "low", Remote: "r-low", Project: mode.Project, Priority: 0},
-			{Name: "high", Remote: "r-high", Project: mode.Project, Priority: 10},
-			{Name: "mid", Remote: "r-mid", Project: mode.Project, Priority: 5},
+			{Name: "low", Remote: "r-low", Project: "work", Priority: 0},
+			{Name: "high", Remote: "r-high", Project: "work", Priority: 10},
+			{Name: "mid", Remote: "r-mid", Project: "work", Priority: 5},
 		}
 		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
 		if !slices.Equal(*probed, []string{"r-high"}) {
@@ -611,7 +638,22 @@ func TestProbeFleetTiers(t *testing.T) {
 		}
 	})
 
-	t.Run("probes lower tier when higher tier cannot start and stops at first startable tier", func(t *testing.T) {
+	t.Run("defers negative-priority non-boxd hosts below boxd tier", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-boxd": openKeys,
+			"r-low":  openKeys,
+		}, nil)
+		targets := []fleetHost{
+			{Name: "low", Remote: "r-low", Project: "work", Priority: -1},
+			{Name: "boxd", Remote: "r-boxd", Project: mode.Project, Priority: 0},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		if !slices.Equal(*probed, []string{"r-boxd"}) || len(cands) != 1 || len(rest) != 1 || rest[0].Name != "low" {
+			t.Fatalf("probed=%v cands=%+v rest=%+v, want [r-boxd] and rest=[low]", *probed, cands, rest)
+		}
+	})
+
+	t.Run("probes lower non-boxd tier when higher tier cannot start and stops at first startable tier", func(t *testing.T) {
 		a, probed := newProbeApp(t, map[string]map[string]string{
 			"r-high": fullKeys,
 			"r-mid":  openKeys,
@@ -620,9 +662,9 @@ func TestProbeFleetTiers(t *testing.T) {
 			"r-high": `[{"name":"busy","status":"Running","config":{"user.box.size":"medium"}}]`,
 		})
 		targets := []fleetHost{
-			{Name: "high", Remote: "r-high", Project: mode.Project, Priority: 10},
-			{Name: "mid", Remote: "r-mid", Project: mode.Project, Priority: 5},
-			{Name: "low", Remote: "r-low", Project: mode.Project, Priority: 0},
+			{Name: "high", Remote: "r-high", Project: "work", Priority: 10},
+			{Name: "mid", Remote: "r-mid", Project: "work", Priority: 5},
+			{Name: "low", Remote: "r-low", Project: "work", Priority: 0},
 		}
 		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{Queue: true}, "")
 		if !slices.Equal(*probed, []string{"r-high", "r-mid"}) {

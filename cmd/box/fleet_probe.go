@@ -11,9 +11,13 @@ import (
 	"github.com/a-Fig/agent-box/internal/mode"
 )
 
-// probeFleetTiers groups targets by Priority descending and probes each tier
-// concurrently, stopping right after the first tier where pickFleetHost returns
-// pickStart. Any unprobed lower-priority hosts are returned in rest.
+// probeFleetTiers probes hosts in tiers and stops right after the first tier
+// where pickFleetHost returns pickStart, returning unprobed hosts in rest.
+//
+// All boxd-capable hosts (Project == mode.Project) are always probed together in
+// the initial tier (alongside any non-boxd hosts with Priority >= 0) so a
+// client's hosts.json hint never hides a host-reported boxd priority. Only
+// non-boxd hosts are deferred into lower tiers ordered by Priority descending.
 func (a *App) probeFleetTiers(ctx context.Context, targets []fleetHost, req pickRequest, repoOrigin string) (cands []fleetCandidate, rest []fleetHost) {
 	tiers := fleetPriorityTiers(targets)
 	for i, tier := range tiers {
@@ -32,19 +36,45 @@ func fleetPriorityTiers(targets []fleetHost) [][]fleetHost {
 	if len(targets) == 0 {
 		return nil
 	}
-	ordered := slices.Clone(targets)
-	slices.SortStableFunc(ordered, func(a, b fleetHost) int {
-		return cmp.Compare(b.Priority, a.Priority)
-	})
-	var tiers [][]fleetHost
-	start := 0
-	for i := 1; i < len(ordered); i++ {
-		if ordered[i].Priority != ordered[start].Priority {
-			tiers = append(tiers, ordered[start:i])
-			start = i
+	hasBoxd := false
+	for _, host := range targets {
+		if host.Project == mode.Project {
+			hasBoxd = true
+			break
 		}
 	}
-	tiers = append(tiers, ordered[start:])
+
+	var tier0, deferred []fleetHost
+	if hasBoxd {
+		for _, host := range targets {
+			if host.Project == mode.Project || host.Priority >= 0 {
+				tier0 = append(tier0, host)
+			} else {
+				deferred = append(deferred, host)
+			}
+		}
+	} else {
+		deferred = targets
+	}
+
+	var tiers [][]fleetHost
+	if len(tier0) > 0 {
+		tiers = append(tiers, tier0)
+	}
+	if len(deferred) > 0 {
+		ordered := slices.Clone(deferred)
+		slices.SortStableFunc(ordered, func(a, b fleetHost) int {
+			return cmp.Compare(b.Priority, a.Priority)
+		})
+		start := 0
+		for i := 1; i < len(ordered); i++ {
+			if ordered[i].Priority != ordered[start].Priority {
+				tiers = append(tiers, ordered[start:i])
+				start = i
+			}
+		}
+		tiers = append(tiers, ordered[start:])
+	}
 	return tiers
 }
 
