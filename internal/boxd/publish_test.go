@@ -12,80 +12,23 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/controller"
 	"github.com/a-Fig/agent-box/internal/dash"
 )
 
-type fakePublishClock struct {
-	mu      sync.Mutex
-	now     time.Time
-	waiters []fakeWaiter
-	waiting chan time.Duration
+type handlerTransport struct {
+	h http.Handler
 }
 
-type fakeWaiter struct {
-	until time.Time
-	ch    chan time.Time
-}
-
-func newFakePublishClock(start time.Time) *fakePublishClock {
-	return &fakePublishClock{
-		now:     start,
-		waiting: make(chan time.Duration, 16),
-	}
-}
-
-func (c *fakePublishClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *fakePublishClock) After(d time.Duration) <-chan time.Time {
-	ch := make(chan time.Time, 1)
-	c.mu.Lock()
-	target := c.now.Add(d)
-	if !target.After(c.now) {
-		ch <- c.now
-		c.mu.Unlock()
-		return ch
-	}
-	c.waiters = append(c.waiters, fakeWaiter{until: target, ch: ch})
-	c.mu.Unlock()
-	select {
-	case c.waiting <- d:
-	default:
-	}
-	return ch
-}
-
-func (c *fakePublishClock) WaitForSleep(t *testing.T) time.Duration {
-	t.Helper()
-	select {
-	case d := <-c.waiting:
-		return d
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for publisher sleep")
-		return 0
-	}
-}
-
-func (c *fakePublishClock) Advance(d time.Duration) {
-	c.mu.Lock()
-	c.now = c.now.Add(d)
-	now := c.now
-	kept := c.waiters[:0]
-	for _, w := range c.waiters {
-		if !w.until.After(now) {
-			w.ch <- now
-		} else {
-			kept = append(kept, w)
-		}
-	}
-	c.waiters = kept
-	c.mu.Unlock()
+func (t handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	t.h.ServeHTTP(rec, r)
+	res := rec.Result()
+	res.Request = r
+	return res, nil
 }
 
 type recordedPush struct {
@@ -93,12 +36,12 @@ type recordedPush struct {
 }
 
 type recordingController struct {
-	mu     sync.Mutex
-	mem    controller.MemServer
-	fail   bool
-	pushes []recordedPush
-	pushed chan recordedPush
-	failed chan struct{}
+	mu       sync.Mutex
+	mem      controller.MemServer
+	fail     bool
+	pushes   []recordedPush
+	failures int
+	pushed   chan recordedPush
 }
 
 func newRecordingController(now func() time.Time) *recordingController {
@@ -109,7 +52,6 @@ func newRecordingController(now func() time.Time) *recordingController {
 			Now:         now,
 		},
 		pushed: make(chan recordedPush, 32),
-		failed: make(chan struct{}, 32),
 	}
 }
 
@@ -119,13 +61,12 @@ func (rc *recordingController) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	rc.mu.Unlock()
 
 	if fail && r.Method == http.MethodPut {
+		rc.mu.Lock()
+		rc.failures++
+		rc.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		io.WriteString(w, `{"error":"unavailable","message":"controller down"}`)
-		select {
-		case rc.failed <- struct{}{}:
-		default:
-		}
 		return
 	}
 
@@ -148,24 +89,18 @@ func (rc *recordingController) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	rc.mem.ServeHTTP(w, r)
 }
 
-func (rc *recordingController) waitPush(t *testing.T) recordedPush {
-	t.Helper()
-	select {
-	case p := <-rc.pushed:
-		return p
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for push")
-		return recordedPush{}
-	}
+func (rc *recordingController) snapshot() ([]recordedPush, int) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	out := make([]recordedPush, len(rc.pushes))
+	copy(out, rc.pushes)
+	return out, rc.failures
 }
 
-func (rc *recordingController) waitFail(t *testing.T) {
-	t.Helper()
-	select {
-	case <-rc.failed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for failed push")
-	}
+func (rc *recordingController) setFail(v bool) {
+	rc.mu.Lock()
+	rc.fail = v
+	rc.mu.Unlock()
 }
 
 func newPublishTestWatcher(t *testing.T, now func() time.Time) (*Watcher, *fakeIncus) {
@@ -245,175 +180,233 @@ func TestNewPublisherFromConfig(t *testing.T) {
 }
 
 func TestPublisherCoalescingHeartbeatAndShutdown(t *testing.T) {
-	clk := newFakePublishClock(time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC))
-	w, f := newPublishTestWatcher(t, clk.Now)
-	rc := newRecordingController(clk.Now)
-	srv := httptest.NewServer(rc)
-	defer srv.Close()
+	synctest.Test(t, func(t *testing.T) {
+		w, f := newPublishTestWatcher(t, time.Now)
+		rc := newRecordingController(time.Now)
+		pub := &Publisher{
+			Watcher: w,
+			Client: &controller.Client{
+				URL:   "https://ctrl.test",
+				Token: "host-secret",
+				HTTP:  &http.Client{Transport: handlerTransport{rc}},
+			},
+			HostID:   "pc",
+			HostName: "Gaming PC",
+		}
 
-	pub := &Publisher{
-		Watcher:  w,
-		Client:   &controller.Client{URL: srv.URL, Token: "host-secret"},
-		HostID:   "pc",
-		HostName: "Gaming PC",
-		Now:      clk.Now,
-		After:    clk.After,
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			pub.Run(ctx)
+			close(done)
+		}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		pub.Run(ctx)
-		close(done)
-	}()
+		// Initial push at t=0.
+		synctest.Wait()
+		pushes, _ := rc.snapshot()
+		if len(pushes) != 1 || pushes[0].req.Seq != 1 || pushes[0].req.ID != "pc" {
+			t.Fatalf("initial pushes = %+v", pushes)
+		}
 
-	// Initial push at t=0.
-	p1 := rc.waitPush(t)
-	if p1.req.Seq != 1 || p1.req.ID != "pc" {
-		t.Fatalf("initial push = %+v", p1.req)
-	}
-	if d := clk.WaitForSleep(t); d != 60*time.Second {
-		t.Fatalf("idle wait = %s, want 60s", d)
-	}
+		// Burst of changes within MinGap (15s) coalesces to one push at t=15s.
+		time.Sleep(2 * time.Second)
+		f.set(func() {
+			f.cfg["user.agent-box.mode"] = "full"
+			f.ins = []Instance{inst("b1", "Running", "small", time.Now())}
+		})
+		w.Poll(ctx)
+		synctest.Wait()
+		if pushes, _ = rc.snapshot(); len(pushes) != 1 {
+			t.Fatalf("pushed too early at +2s: %d", len(pushes))
+		}
 
-	// Burst of changes within MinGap (15s) coalesces to one push at t=15s.
-	clk.Advance(2 * time.Second)
-	f.set(func() {
-		f.cfg["user.agent-box.mode"] = "full"
-		f.ins = []Instance{inst("b1", "Running", "small", clk.Now())}
+		time.Sleep(3 * time.Second)
+		f.set(func() {
+			f.ins = append(f.ins, inst("b2", "Running", "medium", time.Now()))
+		})
+		w.Poll(ctx)
+		synctest.Wait()
+		if pushes, _ = rc.snapshot(); len(pushes) != 1 {
+			t.Fatalf("pushed too early at +5s: %d", len(pushes))
+		}
+
+		// Still only 1 push right before 15s has elapsed.
+		time.Sleep(9 * time.Second)
+		synctest.Wait()
+		if pushes, _ = rc.snapshot(); len(pushes) != 1 {
+			t.Fatalf("pushed too early at +14s: %d", len(pushes))
+		}
+
+		// At +15s, coalesced push seq=2 includes both boxes and updated mode.
+		time.Sleep(1 * time.Second)
+		synctest.Wait()
+		pushes, _ = rc.snapshot()
+		if len(pushes) != 2 {
+			t.Fatalf("pushes at +15s = %d, want 2", len(pushes))
+		}
+		p2 := pushes[1]
+		if p2.req.Seq != 2 || len(p2.req.State.Boxes) != 2 || p2.req.State.Machines[0].Mode != "full" {
+			t.Fatalf("coalesced push = seq:%d boxes:%d mode:%s", p2.req.Seq, len(p2.req.State.Boxes), p2.req.State.Machines[0].Mode)
+		}
+
+		// Quiet period -> no push before 60s, heartbeat fires at +60s.
+		time.Sleep(59 * time.Second)
+		synctest.Wait()
+		if pushes, _ = rc.snapshot(); len(pushes) != 2 {
+			t.Fatalf("heartbeat fired early at +59s: %d", len(pushes))
+		}
+		time.Sleep(1 * time.Second)
+		synctest.Wait()
+		pushes, _ = rc.snapshot()
+		if len(pushes) != 3 || pushes[2].req.Seq != 3 {
+			t.Fatalf("heartbeat pushes = %+v", pushes)
+		}
+
+		// Cancel context -> clean shutdown.
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("publisher did not stop on context cancel")
+		}
 	})
-	w.Poll(ctx)
-	if d := clk.WaitForSleep(t); d != 13*time.Second {
-		t.Fatalf("coalesce wait = %s, want 13s", d)
-	}
-
-	clk.Advance(3 * time.Second)
-	f.set(func() {
-		f.ins = append(f.ins, inst("b2", "Running", "medium", clk.Now()))
-	})
-	w.Poll(ctx)
-	if d := clk.WaitForSleep(t); d != 10*time.Second {
-		t.Fatalf("second coalesce wait = %s, want 10s", d)
-	}
-
-	// Still only 1 push before 15s has elapsed.
-	select {
-	case extra := <-rc.pushed:
-		t.Fatalf("unexpected push before MinGap: %+v", extra.req)
-	default:
-	}
-
-	// Advance remaining 10s -> coalesced push seq=2 includes both boxes.
-	clk.Advance(10 * time.Second)
-	p2 := rc.waitPush(t)
-	if p2.req.Seq != 2 || len(p2.req.State.Boxes) != 2 || p2.req.State.Machines[0].Mode != "full" {
-		t.Fatalf("coalesced push = seq:%d boxes:%d mode:%s", p2.req.Seq, len(p2.req.State.Boxes), p2.req.State.Machines[0].Mode)
-	}
-
-	// Quiet period -> heartbeat fires at +60s.
-	if d := clk.WaitForSleep(t); d != 60*time.Second {
-		t.Fatalf("heartbeat wait = %s, want 60s", d)
-	}
-	clk.Advance(60 * time.Second)
-	p3 := rc.waitPush(t)
-	if p3.req.Seq != 3 {
-		t.Fatalf("heartbeat seq = %d, want 3", p3.req.Seq)
-	}
-	clk.WaitForSleep(t)
-
-	// Cancel context -> clean shutdown.
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("publisher did not stop on context cancel")
-	}
 }
 
 func TestPublisherBackoffWithoutLogSpam(t *testing.T) {
-	clk := newFakePublishClock(time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC))
-	w, _ := newPublishTestWatcher(t, clk.Now)
-	rc := newRecordingController(clk.Now)
-	rc.fail = true
+	synctest.Test(t, func(t *testing.T) {
+		w, _ := newPublishTestWatcher(t, time.Now)
+		rc := newRecordingController(time.Now)
+		rc.setFail(true)
+
+		var logsMu sync.Mutex
+		var logs []string
+		pub := &Publisher{
+			Watcher: w,
+			Client: &controller.Client{
+				URL:   "https://ctrl.test",
+				Token: "host-secret",
+				HTTP:  &http.Client{Transport: handlerTransport{rc}},
+			},
+			HostID:   "pc",
+			HostName: "Gaming PC",
+			Logf: func(format string, args ...any) {
+				logsMu.Lock()
+				logs = append(logs, fmt.Sprintf(format, args...))
+				logsMu.Unlock()
+			},
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			pub.Run(ctx)
+			close(done)
+		}()
+
+		// Failure 1 -> 60s backoff, 1 log.
+		synctest.Wait()
+		if _, fails := rc.snapshot(); fails != 1 {
+			t.Fatalf("failures = %d, want 1", fails)
+		}
+
+		// No retry before 60s.
+		time.Sleep(59 * time.Second)
+		synctest.Wait()
+		if _, fails := rc.snapshot(); fails != 1 {
+			t.Fatalf("retried early at 59s: failures=%d", fails)
+		}
+
+		// Failure 2 at +60s -> 120s backoff, same error so no log spam.
+		time.Sleep(1 * time.Second)
+		synctest.Wait()
+		if _, fails := rc.snapshot(); fails != 2 {
+			t.Fatalf("failures = %d, want 2", fails)
+		}
+
+		// Failure 3 at +120s -> 240s backoff.
+		time.Sleep(120 * time.Second)
+		synctest.Wait()
+		if _, fails := rc.snapshot(); fails != 3 {
+			t.Fatalf("failures = %d, want 3", fails)
+		}
+
+		// Failure 4 at +240s -> capped at 300s (5m).
+		time.Sleep(240 * time.Second)
+		synctest.Wait()
+		if _, fails := rc.snapshot(); fails != 4 {
+			t.Fatalf("failures = %d, want 4", fails)
+		}
+
+		logsMu.Lock()
+		if len(logs) != 1 {
+			t.Fatalf("expected 1 failure log during identical outage, got %d: %v", len(logs), logs)
+		}
+		logsMu.Unlock()
+
+		// Still waiting at 299s.
+		time.Sleep(299 * time.Second)
+		synctest.Wait()
+		if _, fails := rc.snapshot(); fails != 4 {
+			t.Fatalf("retried before 300s cap: failures=%d", fails)
+		}
+
+		// Controller recovers -> next retry at +300s succeeds and logs recovery.
+		rc.setFail(false)
+		time.Sleep(1 * time.Second)
+		synctest.Wait()
+		pushes, _ := rc.snapshot()
+		if len(pushes) != 1 || pushes[0].req.Seq != 5 {
+			t.Fatalf("recovery pushes = %+v, want seq 5", pushes)
+		}
+
+		logsMu.Lock()
+		if len(logs) != 2 || !strings.Contains(logs[1], "recovered after 4 failure(s)") {
+			t.Fatalf("logs after recovery = %v", logs)
+		}
+		logsMu.Unlock()
+
+		cancel()
+		synctest.Wait()
+		<-done
+	})
+}
+
+func TestPublisherEndToEndHTTP(t *testing.T) {
+	w, _ := newPublishTestWatcher(t, time.Now)
+	rc := newRecordingController(time.Now)
 	srv := httptest.NewServer(rc)
 	defer srv.Close()
 
-	var logsMu sync.Mutex
-	var logs []string
 	pub := &Publisher{
 		Watcher:  w,
 		Client:   &controller.Client{URL: srv.URL, Token: "host-secret"},
 		HostID:   "pc",
 		HostName: "Gaming PC",
-		Now:      clk.Now,
-		After:    clk.After,
-		Logf: func(format string, args ...any) {
-			logsMu.Lock()
-			logs = append(logs, fmt.Sprintf(format, args...))
-			logsMu.Unlock()
-		},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		pub.Run(ctx)
 		close(done)
 	}()
 
-	// Failure 1 -> 60s backoff, 1 log.
-	rc.waitFail(t)
-	if d := clk.WaitForSleep(t); d != 60*time.Second {
-		t.Fatalf("backoff 1 = %s, want 60s", d)
+	select {
+	case p := <-rc.pushed:
+		if p.req.Seq != 1 || p.req.ID != "pc" {
+			t.Fatalf("unexpected push = %+v", p.req)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for HTTP push")
 	}
-
-	// Failure 2 -> 120s backoff, same error so no log spam.
-	clk.Advance(60 * time.Second)
-	rc.waitFail(t)
-	if d := clk.WaitForSleep(t); d != 120*time.Second {
-		t.Fatalf("backoff 2 = %s, want 120s", d)
-	}
-
-	// Failure 3 -> 240s backoff.
-	clk.Advance(120 * time.Second)
-	rc.waitFail(t)
-	if d := clk.WaitForSleep(t); d != 240*time.Second {
-		t.Fatalf("backoff 3 = %s, want 240s", d)
-	}
-
-	// Failure 4 -> capped at 300s (5m).
-	clk.Advance(240 * time.Second)
-	rc.waitFail(t)
-	if d := clk.WaitForSleep(t); d != 300*time.Second {
-		t.Fatalf("backoff 4 = %s, want 300s", d)
-	}
-
-	logsMu.Lock()
-	if len(logs) != 1 {
-		t.Fatalf("expected 1 failure log during identical outage, got %d: %v", len(logs), logs)
-	}
-	logsMu.Unlock()
-
-	// Controller recovers -> next retry succeeds and logs recovery.
-	rc.mu.Lock()
-	rc.fail = false
-	rc.mu.Unlock()
-	clk.Advance(300 * time.Second)
-	p := rc.waitPush(t)
-	if p.req.Seq != 5 {
-		t.Fatalf("recovery seq = %d, want 5", p.req.Seq)
-	}
-	clk.WaitForSleep(t)
-
-	logsMu.Lock()
-	if len(logs) != 2 || !strings.Contains(logs[1], "recovered after 4 failure(s)") {
-		t.Fatalf("logs after recovery = %v", logs)
-	}
-	logsMu.Unlock()
 
 	cancel()
-	<-done
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publisher did not stop on context cancel")
+	}
 }
 
 func TestPublisherTrimsAndEnforcesBodyCap(t *testing.T) {

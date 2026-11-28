@@ -26,7 +26,6 @@ type Publisher struct {
 	HostID      string
 	HostName    string
 	Now         func() time.Time
-	After       func(time.Duration) <-chan time.Time // optional; defaults to time.NewTimer
 	MinGap      time.Duration
 	Heartbeat   time.Duration
 	BaseBackoff time.Duration
@@ -131,6 +130,9 @@ func (p *Publisher) Run(ctx context.Context) {
 	var lastErr string
 
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		var closed bool
 		dirty, closed = drainWatcherEvents(ch, dirty)
 		if closed {
@@ -143,7 +145,8 @@ func (p *Publisher) Run(ctx context.Context) {
 		due := p.nextDue(dirty, lastAttempt, lastSuccess, backoffUntil)
 		if !now.Before(due) {
 			err := p.pushOnce(ctx, now)
-			lastAttempt = now
+			doneAt := p.now()
+			lastAttempt = doneAt
 			if err == nil {
 				if failures > 0 {
 					p.logf("boxd: controller push recovered after %d failure(s)", failures)
@@ -151,7 +154,7 @@ func (p *Publisher) Run(ctx context.Context) {
 				failures = 0
 				lastErr = ""
 				backoffUntil = time.Time{}
-				lastSuccess = now
+				lastSuccess = doneAt
 				dirty = false
 			} else {
 				if ctx.Err() != nil {
@@ -160,7 +163,7 @@ func (p *Publisher) Run(ctx context.Context) {
 				failures++
 				dirty = true
 				delay := backoffDelay(p.baseBackoff(), p.maxBackoff(), failures)
-				backoffUntil = now.Add(delay)
+				backoffUntil = doneAt.Add(delay)
 				msg := err.Error()
 				if failures == 1 || msg != lastErr {
 					p.logf("boxd: controller push failed (retry in %s): %v", delay, err)
@@ -170,32 +173,19 @@ func (p *Publisher) Run(ctx context.Context) {
 			continue
 		}
 
-		wait := due.Sub(now)
-		var timer *time.Timer
-		var timerCh <-chan time.Time
-		if p.After != nil {
-			timerCh = p.After(wait)
-		} else {
-			timer = time.NewTimer(wait)
-			timerCh = timer.C
-		}
-
+		timer := time.NewTimer(due.Sub(now))
 		select {
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
+			timer.Stop()
 			return
 		case _, ok := <-ch:
-			if timer != nil {
-				timer.Stop()
-			}
+			timer.Stop()
 			if !ok {
 				cancel()
 				_, ch, cancel = p.Watcher.Subscribe()
 			}
 			dirty = true
-		case <-timerCh:
+		case <-timer.C:
 		}
 	}
 }
