@@ -1,34 +1,16 @@
-// The builds boxd and the tray run, and what to say when they differ. The sidebar shows the short
-// line (versions); Settings shows each build and the whole note (drift).
+// What to say when the builds boxd and the tray run differ (drift), and how a build compares to the
+// latest stable release (releaseStatus). A host's page shows both; the sidebar's foot shows a
+// notice when either wants attention.
 
-import { h, dur, stamp, clock } from "./dom.js";
-import { trayAlive } from "./store.js";
-import { hint } from "./tip.js";
+import { dur, clock } from "./dom.js";
 
-export { versions, drift, releaseStatus };
+export { drift, releaseStatus };
 
 // The builds boxd and the tray run (dash.Version), and a note when they differ: twice on
 // 2026-11-25 the PC ran builds hours behind the repo and nothing showed it. Both follow stable
 // releases and check for one hourly (docs/releasing.md), so a release on one is on the other
 // within the hour, and the note warns only once that is well past.
 const BEHIND_WARN_MS = 2 * 3600e3; // the hourly check, with room for a slow download
-
-function versions(m, named) {
-  const b = m.boxd, t = m.tray;
-  if (!b && !t) return null;
-  const short = (v) => (v && v.commit ? v.commit.slice(0, 7) + (v.modified ? "+" : "") : "unknown");
-  const name = (v) => (v?.tag ? v.tag : short(v));
-  const about = (who, v) => who + ": " + (v && v.commit ? (v.tag ? v.tag + ", " : "") + v.commit.slice(0, 10) + (v.time ? ", committed " + stamp(v.time) : "") + (v.modified ? ", with uncommitted changes" : "") : "unknown");
-  const lines = ["The builds of boxd (the server behind this page) and of the tray, which applies the mode on the PC.", about("boxd", b), about("tray", t)];
-  const note = drift(b, t, trayAlive(m));
-  if (note) lines.push(note.why);
-  return h(
-    "div",
-    hint(lines.join("\n"), { class: "versions" }, "versions-" + m.name),
-    h("span", null, (named ? m.name + ": " : "") + "boxd " + name(b) + " · tray " + name(t)),
-    note ? h("span", { class: note.warn ? "versions-drift" : "versions-note" }, note.text) : null,
-  );
-}
 
 // What is true when boxd and the tray run different builds: which one updates to which release,
 // and when, or why neither will by itself. null when they are the same build. Which is behind is

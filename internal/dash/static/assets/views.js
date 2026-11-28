@@ -6,7 +6,7 @@ import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 import { hint, hideTip } from "./tip.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, MODE_HINTS, RESULT_HINTS };
+export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
 
 const MODES = [
   ["full", "Full"],
@@ -391,7 +391,9 @@ function enforcerName(m) {
   return m.enforcer === "headless" ? "headless enforcer" : "tray";
 }
 
-function machineCard(m) {
+// On Overview (linked) the name opens the host's page; the host's page has its name as its
+// heading, so its card leaves the name out.
+function machineCard(m, linked = false) {
   const now = clock.now();
   const alive = trayAlive(m);
   const headless = alive && m.enforcer === "headless";
@@ -434,7 +436,7 @@ function machineCard(m) {
     h(
       "div",
       { class: "row" },
-      h("div", { class: "machine-head" }, h("span", { class: "machine-name" }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name), state, enforcerBadge, switcher),
+      h("div", { class: "machine-head" }, linked && h("a", { class: "machine-name", href: "#fleet/" + encodeURIComponent(m.id), "data-key": "card-" + m.id }, h("span", { class: "dot " + (m.reachable ? "dot-on" : "dot-off") }), m.name, icon("chevron", "machine-chev")), state, enforcerBadge, switcher),
       note,
     ),
     h("div", { class: "row" }, h("div", { class: "meters" }, meter("CPUs", m.allocated.cpu, m.caps.cpu, n, "CPUs the boxes hold, each counted at its size's Full share, of the most all boxes together may have."), meter("Memory", m.allocated.memory, m.caps.memory, bytes, "Memory the boxes may use, by their sizes, of the most all boxes together may have. A new box starts only if its size fits."), meter("Boxes", m.allocated.instances, m.caps.instances, n, "Boxes that exist, of the most allowed at once."), meter("Disk", m.allocated.disk, m.caps.disk, bytes, "Disk the boxes and the image they start from use, of the most allowed for all of them."))),
@@ -701,7 +703,7 @@ const overview = {
         "div",
         { class: "page" },
         ms.flatMap(banners),
-        ms.length ? section(ms.length > 1 ? "Machines" : "Machine", null, ms.map(machineCard)) : null,
+        ms.length ? section("Fleet", ms.length > 1 ? plural(ms.length, "host") : null, ms.map((m) => machineCard(m, true))) : null,
         section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map(runningRow) : h("p", { class: "row-empty" }, "Nothing is running. Agents start jobs with box run; they show here as they start."))),
         q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes. One is made when an agent first runs something here."))),

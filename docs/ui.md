@@ -108,12 +108,25 @@ the jobs it ran before, each linked to its page (#184, 2026-11-25).
 **Jobs**: running and finished, filterable by repo, agent, kind, machine and result. Each shows its
 whole log while the box still exists, and the kept tail after.
 
-**Settings** (2026-11-26, #158, #250) holds the browser's theme and shows each host's boxd and tray
-builds, mode and enforcer, sizes, caps, expiry times and GPU availability. **Check for updates**
-compares the running builds with the latest stable release on GitHub. It downloads release
-metadata only. The latest release reads as unknown until the first check succeeds. Boxd keeps
-the last successful result in memory, so it starts fresh after a restart. `Machine.Config` carries
-the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
+**The sidebar** (#286, 2026-11-27) lists the pages used every day (Overview, Boxes, Jobs,
+History), then **Fleet**: each host as a link to its page, with a line of state (its mode, a
+pending request, headless, or nothing enforcing). Every host is a PC today; cloud hosts
+(Cloudflare Workers #277, Modal #278) will join the same list, and `hostKind` in `host.js` is the
+one place that knows the kinds. Its foot, as Murmur's, holds the connection and the Settings
+button, and a notice that opens a host's page when its builds have been out of step past the
+2-hour warning. A release that is only out gets no notice: both builds install it within the hour.
+
+**A host's page** (`#fleet/<id>`, #289) holds everything the page knows about one host: the mode
+switch, caps and room (the card Overview shows), its running jobs and boxes, its boxd and tray
+builds with **Check for updates**, the enforcer, box sizes, caps, expiry times and GPU
+availability. Check for updates compares the running builds with the latest stable release on
+GitHub. It downloads release metadata only. The latest release reads as unknown until the first
+check succeeds. Boxd keeps the last successful result in memory, so it starts fresh after a
+restart. `Machine.Config` carries the sizes, times and GPU flag (boxd needs `/dev/dxg` and a project that doesn't block GPU devices, as `box` does (`block`, or the key unset on a `restricted=true` project, where Incus defaults it to block); a cap set to 0 reads 0, an unset one "no limit"); a host with no tray or no GPU says so.
+`internal/dash/devserver/host.test.mjs` checks it in a browser against the devserver.
+
+**Settings** (2026-11-26, #158; trimmed by #290) holds only what can be changed here: the theme,
+saved in this browser.
 
 **History**: charts over a day or a week:
 - jobs per day by result;
@@ -364,7 +377,7 @@ The page polls nothing. It opens one `GET /api/events` server-sent-events stream
   `Version` is `{commit, time, modified, tag, since}`, the commit and release a binary was built
   from (`internal/version`). `boxd` is the serving boxd's; `tray` is `user.agent-box.tray-version`,
   which the active enforcer writes when it starts enforcing. `since` is when boxd first saw that build
-  run: its own start, or when the tray's key took its value. The sidebar's foot shows both, with a
+  run: its own start, or when the tray's key took its value. The host's page shows both, with a
   note when they differ: on 2026-11-25 the PC twice ran a boxd hours older than the repo, and nothing
   showed it. Both update hourly to the latest stable release, so the note says which one updates
   ("tray updates at its hourly check"), and it turns to a warning only when the two have differed

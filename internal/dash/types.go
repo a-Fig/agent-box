@@ -81,10 +81,10 @@ type Machine struct {
 	WSLMemory     int64        `json:"wslMemory"` // bytes the distro's VM holds now
 	Boxd          *Version     `json:"boxd"`      // the boxd serving this; null if its build has no commit
 	Tray          *Version     `json:"tray"`      // the enforcer's build, user.agent-box.tray-version; null: unknown
-	Config        Config       `json:"config"`    // how this host is set up, for the Settings page
+	Config        Config       `json:"config"`    // how this host is set up, for its host page
 }
 
-// Config is how a host is set up, read-only: what the Settings page shows of it. The sizes and
+// Config is how a host is set up, read-only: what its host page shows of it. The sizes and
 // durations are boxd's own constants, the caps are Machine.Caps. Nothing here is written from the
 // page: the tray owns the mode and its CPUs, the project holds the caps.
 type Config struct {
