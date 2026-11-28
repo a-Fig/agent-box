@@ -1038,7 +1038,8 @@ type JobResult struct {
 	// Digest leads a finished Go test or vitest run's result: the failed
 	// tests with file:line and first message, then the counts
 	// (internal/digest). "" for other runs.
-	Digest string `json:"digest,omitempty"`
+	Digest string     `json:"digest,omitempty"`
+	Cost   *cloudCost `json:"cost,omitempty"`
 
 	throwaway bool       // a queued job's box is a throwaway, kept after the job
 	fleetHost *fleetHost // exact fleet destination when dispatched via fleet routing
@@ -1581,7 +1582,7 @@ func (a *App) job(ctx context.Context, id jobID, wait time.Duration, source *das
 				fmt.Fprintf(a.Err, "box: can't read %s from its box (%s); this is the result recorded when it ended. If the box is gone, so are its full log and files.\n", job, firstLine(err.Error()))
 			}
 			fmt.Fprint(a.Out, end.Tail)
-			r.State, r.Code, r.Digest = stateDone, end.Code, end.Digest
+			r.State, r.Code, r.Digest, r.Cost = stateDone, end.Code, end.Digest, end.Cost
 			if r.Source == nil {
 				r.Source = end.Source
 			}

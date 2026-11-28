@@ -63,10 +63,10 @@ func integer(desc string) map[string]any {
 }
 
 var tools = []tool{
-	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length; box_run routes each run to the best host. The advice, available and repo box fields describe the default host.`, obj(map[string]any{
+	{"box_status", `Check room to offload work. With a host registry, report a fleet summary and each host's reachability, mode, room by size, GPU and queue length (or running count, monthly spend/cap and pause state for cloud hosts); box_run routes each run to the best host. The advice, available and repo box fields describe the default host.`, obj(map[string]any{
 		"dir": str("Absolute path of your git worktree, to report its box and running jobs. Optional."),
 	}), nil},
-	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. With a host registry, box_run picks the best host that can start now (or queues on the best one), names the host in the result, and returns a qualified job ID. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box (and host when routed) and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
+	{"box_run", "Sync a local git worktree (uncommitted and untracked files included, ignored files excluded) to a box and run a shell command there. With a host registry, box_run picks the best host that can start now (or queues on the best one), names the host in the result, and returns a qualified job ID. Cloud hosts stream logs, push results after 30 seconds, report a per-run cost line (and structuredContent.cost), and support box_pull only in sandbox mode. A run that ends within 30 seconds of the command starting returns its exit code and output tail. A longer one returns state running (exitCode null) with the job ID and push. push true: don't wait or poll; do other work or end your turn, and the result arrives as a turn starting \"box: job\": an exit 0 as the log's last 3 lines (a passing test run's counts first), a test failure as its failed tests and last 3 lines, any other failure as its last 10 lines; box_job gives the full result. push false (no T3 thread, or you passed push false, as a subagent should): call box_job with the job ID, which waits. If Incus returns EOF during the image lookup, box retries the launch once. With push, a run that can't start now (no room, GPU taken, My PC) is queued instead of refused: state queued, with its place in line and what it waits for; the code is snapshotted now, so keep editing, and the result is pushed when it has run. A result box_run or box_job returns starts with the job ID, box (and host when routed) and, once ended, the exit code; a go test or vitest run's digest follows (failed tests with file:line and first assertion, then counts; structuredContent's digest), then the output tail (structuredContent's tail). A one-string command runs in bash with pipefail, so 'go test ./... | tail' exits with go test's code; '| head' can exit 141, so pipe to tail. " + pausedHint, obj(map[string]any{
 		"dir":     str("Absolute path of the local git worktree."),
 		"command": str(`Shell command to run in the repo's root, like "go test ./...".`),
 		"reason":  str(`One or two sentences (10-300 characters) on why this run needs a box, like "Full go test -race suite for the scheduler change; it takes about 10 minutes on every core." The PC's owner sees it.`),
@@ -141,6 +141,14 @@ var jobOutput = obj(map[string]any{
 			"snapshotCommit": str("Full SHA of the bundled snapshot commit."),
 		},
 	},
+	"cost": obj(map[string]any{
+		"host":     str("Cloud host name."),
+		"kind":     str("Cloud backend kind."),
+		"usd":      map[string]any{"type": "number", "description": "Estimated cost of this run in USD."},
+		"monthUSD": map[string]any{"type": "number", "description": "Month-to-date spend on this cloud host in USD."},
+		"capUSD":   map[string]any{"type": "number", "description": "Monthly spend cap in USD, if set."},
+		"warnAt":   map[string]any{"type": "number", "description": "Warning threshold fraction of capUSD."},
+	}),
 	// Only for a log page (box_job with offset or limit).
 	"log":        str("This page of the log, as text."),
 	"offset":     map[string]any{"type": "integer"},
@@ -371,6 +379,9 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 	if r.Job != "" {
 		text += sourceLine(r.Source) + "\n"
 	}
+	if line := costLine(r.Cost); line != "" {
+		text += line + "\n"
+	}
 	text += log
 	if err != nil {
 		text += "\nerror: " + err.Error()
@@ -393,7 +404,8 @@ func jobResult(r JobResult, err error, log string, warnings []string) map[string
 		Error    string               `json:"error,omitempty"`
 		Capacity *capacityDetail      `json:"capacity,omitempty"`
 		Source   *dash.SourceRevision `json:"source"`
-	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity, r.Source}
+		Cost     *cloudCost           `json:"cost,omitempty"`
+	}{r.Job, r.Box, r.Host, r.State, &r.Code, r.Push, r.Position, r.Why, warnings, r.Digest, log, "", r.Capacity, r.Source, r.Cost}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -611,7 +623,7 @@ func callTool(ctx context.Context, base *App, params json.RawMessage, notify fun
 				if end != nil {
 					box := lookup.id.Box
 					a.warn("box: can't read the log from " + box + " (" + firstLine(err.Error()) + "); this is the tail recorded when the job ended")
-					return jobResult(JobResult{Job: lookup.id.ID, Box: box, Host: lookup.host, State: stateDone, Code: end.Code, Digest: end.Digest, Source: end.Source}, nil, end.Tail, warnings)
+					return jobResult(JobResult{Job: lookup.id.ID, Box: box, Host: lookup.host, State: stateDone, Code: end.Code, Digest: end.Digest, Source: end.Source, Cost: end.Cost}, nil, end.Tail, warnings)
 				}
 				return textResult(err.Error(), true)
 			}

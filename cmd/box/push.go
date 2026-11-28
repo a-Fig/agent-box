@@ -291,6 +291,7 @@ type jobEnd struct {
 	Source     *dash.SourceRevision `json:"source,omitempty"`
 	Host       string               `json:"host,omitempty"`
 	Locator    *jobLocator          `json:"hostLocator,omitempty"` // identifies the target for bare job IDs
+	Cost       *cloudCost           `json:"cost,omitempty"`
 }
 
 // Early provenance builds stored the locator in the host field.
@@ -514,15 +515,12 @@ func (a *App) startWatch(info jobMeta, job string, gpu, throwaway, queued bool) 
 }
 
 func (a *App) startWatchOnHost(info jobMeta, job string, host fleetHost, gpu, throwaway, queued bool) bool {
-	if host.Kind != "" {
-		return false
-	}
 	locator := locateJobHost(host)
 	return a.startWatchRecord(info, job, locator, gpu, throwaway, queued)
 }
 
 func (a *App) startWatchRecord(info jobMeta, job string, host *jobLocator, gpu, throwaway, queued bool) bool {
-	if !a.canPush() || (host != nil && host.Kind != "") {
+	if !a.canPush() {
 		return false
 	}
 	id, err := parseJobID(job)
@@ -838,7 +836,12 @@ func endedMessage(r jobRecord, e jobEnd) string {
 		head += " (" + why + ")" // which run this is, after compaction or among parallel runs
 	}
 	where := fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull, before this repo's next run.", r.Job)
-	if r.New {
+	if r.Host != nil && r.Host.Kind != "" {
+		where = fmt.Sprintf("Full result: box_job id %s.", r.Job)
+		if r.Host.Mode == cloudModeSandbox {
+			where = fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull while the sandbox is kept.", r.Job)
+		}
+	} else if r.New {
 		where = fmt.Sprintf("Full result: box_job id %s. Artifacts: box_pull; box and log kept up to %d minutes (a queued job or another launch that needs the room takes them sooner).", r.Job, int(endedKeep.Minutes()))
 	}
 	digest := strings.TrimRight(mask.Mask(e.Digest), "\n")
@@ -929,7 +932,11 @@ func endMessage(rec jobRecord, end jobEnd) string {
 	default:
 		msg = endedMessage(rec, end)
 	}
-	return msg + "\n" + sourceLine(end.Source)
+	msg += "\n" + sourceLine(end.Source)
+	if line := costLine(end.Cost); line != "" {
+		msg += "\n" + line
+	}
+	return msg
 }
 
 // send delivers a message, retrying a few times.
@@ -1037,7 +1044,11 @@ func (a *App) Watch(ctx context.Context, job string) error {
 			rec.Source = nil
 		}
 		var ended bool
-		end, ended = target.follow(ctx, rec, id)
+		if rec.Host != nil && rec.Host.Kind != "" {
+			end, ended = target.followCloud(ctx, rec, id)
+		} else {
+			end, ended = target.follow(ctx, rec, id)
+		}
 		if !ended {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -1048,12 +1059,126 @@ func (a *App) Watch(ctx context.Context, job string) error {
 			end.Source = rec.Source
 		}
 		end.Host = target.jobHostName
-		end.Locator = &jobLocator{Remote: target.Remote, Project: target.Project}
+		if rec.Host != nil && rec.Host.Kind != "" {
+			end.Locator = &jobLocator{
+				Name:     rec.Host.Name,
+				Kind:     rec.Host.Kind,
+				Endpoint: rec.Host.Endpoint,
+				Mode:     rec.Host.Mode,
+			}
+		} else {
+			end.Locator = &jobLocator{Remote: target.Remote, Project: target.Project}
+		}
 		if err := writeJSON(a.statePath(job, ".ended"), end); err != nil {
 			return fmt.Errorf("recording the end of %s: %w", job, err)
 		}
 	}
 	return a.deliver(ctx, rec, end)
+}
+
+func (a *App) followCloud(ctx context.Context, rec jobRecord, id jobID) (end jobEnd, ended bool) {
+	job := rec.Job
+	if saved, ok := a.readJobEnd(id, ".result", rec.Host != nil); ok && !saved.Lost && !saved.Dropped {
+		switch saved.Completion {
+		case completionExited:
+			return saved, true
+		case completionCancelled:
+			a.markNotified(job, "cancel")
+			return jobEnd{}, false
+		}
+	}
+	host, err := rec.watchHost(id)
+	if err != nil {
+		return jobEnd{}, false
+	}
+	ch, err := a.newCloudHost(host)
+	if err != nil {
+		return jobEnd{}, false
+	}
+	start := jobStart(id.Bare)
+	took := func(j cloudJob) int64 {
+		s := start
+		if j.StartedAt != nil && !j.StartedAt.IsZero() {
+			s = *j.StartedAt
+		}
+		e := a.Now()
+		if j.EndedAt != nil && !j.EndedAt.IsZero() {
+			e = *j.EndedAt
+		}
+		return max(int64(0), int64(e.Sub(s)/time.Second))
+	}
+	var lastTail string
+	backoff := 5 * time.Second
+	for ctx.Err() == nil {
+		startedCall := time.Now()
+		j, err := ch.job(ctx, id.Bare, cloudFollowWaitSec)
+		if ctx.Err() != nil {
+			return jobEnd{}, false
+		}
+		if err != nil {
+			if strings.HasPrefix(err.Error(), "no job ") {
+				return jobEnd{
+					Code:   exitPaused,
+					Lost:   true,
+					Took:   max(int64(0), int64(a.Now().Sub(start)/time.Second)),
+					Tail:   lastTail,
+					Source: rec.Source,
+				}, true
+			}
+			a.sleep(ctx, backoff)
+			backoff = min(backoff*2, 2*time.Minute)
+			continue
+		}
+		backoff = 5 * time.Second
+		if j.Tail != "" {
+			lastTail = j.Tail
+		}
+		switch j.State {
+		case "done", "cancelled":
+			if j.State == "cancelled" {
+				saved, _ := a.recordedEnd(job)
+				if saved.Completion == completionCancelled || a.exists(job, ".notified") {
+					a.markNotified(job, "cancel")
+					return jobEnd{}, false
+				}
+			}
+			code := 0
+			if j.Exit != nil {
+				code = *j.Exit
+			} else if j.State == "cancelled" {
+				code = exitDetached
+			}
+			tail := ch.readTail(ctx, id.Bare, j)
+			if tail == "" {
+				tail = lastTail
+			}
+			return jobEnd{
+				Code:       code,
+				Took:       took(j),
+				Tail:       tail,
+				Completion: completionExited,
+				Source:     rec.Source,
+				Cost:       ch.makeCost(j),
+			}, true
+		case "lost":
+			tail := ch.readTail(ctx, id.Bare, j)
+			if tail == "" {
+				tail = lastTail
+			}
+			return jobEnd{
+				Code:   exitPaused,
+				Lost:   true,
+				Took:   took(j),
+				Tail:   tail,
+				Source: rec.Source,
+				Cost:   ch.makeCost(j),
+			}, true
+		}
+		if time.Since(startedCall) < 50*time.Millisecond {
+			a.sleep(ctx, 50*time.Millisecond)
+		}
+	}
+	return jobEnd{}, false
 }
 
 // follow follows the job to its end. It retries transport errors, and says

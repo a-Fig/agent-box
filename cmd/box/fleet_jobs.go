@@ -31,12 +31,18 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 		err       error
 	}
 	defaultHost := fleetHost{Name: a.Remote, Remote: a.Remote, Project: a.Project}
-	defaultKey := [2]string{a.Remote, a.Project}
-	seen := make(map[[2]string]bool, len(hosts)+1)
+	defaultKey := "incus:" + a.Remote + "\x00" + a.Project
+	hostKey := func(h fleetHost) string {
+		if h.Kind != "" {
+			return "cloud:" + h.Kind + "\x00" + strings.TrimRight(h.Endpoint, "/")
+		}
+		return "incus:" + h.Remote + "\x00" + h.Project
+	}
+	seen := make(map[string]bool, len(hosts)+1)
 	lists := make([]listing, 0, len(hosts)+1)
 	for i, host := range append(hosts, defaultHost) {
-		key := [2]string{host.Remote, host.Project}
-		if box != "" && key != defaultKey {
+		key := hostKey(host)
+		if box != "" && (host.Kind != "" || key != defaultKey) {
 			continue
 		}
 		if !seen[key] {
@@ -59,7 +65,7 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 			if err == nil {
 				// A row should only advertise IDs that the reader can resolve.
 				resolved, resolveErr := resolveJobHost(tag, fleetHost{}, hosts)
-				host.DashboardURL, err = resolved.DashboardURL, resolveErr
+				host.DashboardURL, host.TokenFile, host.Mode, err = resolved.DashboardURL, resolved.TokenFile, resolved.Mode, resolveErr
 			}
 			if err != nil {
 				result.err = err
@@ -71,6 +77,15 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 		wg.Go(func() {
 			hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
 			defer cancel()
+			if host.Kind != "" {
+				ch, err := app.newCloudHost(host)
+				if err != nil {
+					result.err = err
+					return
+				}
+				result.jobs, result.err = ch.listJobs(hostCtx, 20)
+				return
+			}
 			result.jobs, result.err = app.Jobs(hostCtx, box)
 		})
 		if box == "" && !result.bare && !app.boxdDisabled {
@@ -91,6 +106,9 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 	for _, result := range lists {
 		host := result.host
 		label := fmt.Sprintf("%s (%s/%s)", host.Name, host.Remote, host.Project)
+		if host.Kind != "" {
+			label = fmt.Sprintf("%s (%s)", host.Name, host.Kind)
+		}
 		if result.err != nil {
 			failures = append(failures, fmt.Errorf("listing jobs on %s: %w", label, result.err))
 		}
@@ -110,7 +128,7 @@ func (a *App) listJobs(ctx context.Context, box string) ([]JobInfo, error) {
 					continue
 				}
 				// Keep legacy IDs only when there is no qualified record.
-				legacy := [2]string{host.Remote, host.Project} == defaultKey &&
+				legacy := host.Kind == "" && hostKey(host) == defaultKey &&
 					a.hasJobRecord(id.Bare) && !a.hasJobRecord(id.ID)
 				if !legacy {
 					job.Job = id.ID

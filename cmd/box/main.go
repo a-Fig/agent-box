@@ -33,6 +33,8 @@ const usage = `usage:
   box cancel <id>                           stop a running job, or take a queued one off the queue
   box pull <id|box> <remote-path> <local-dir>
                                             copy a file or directory from a box into local-dir
+  box cloud pause|resume|stop [--host name]
+                                            pause or resume a cloud runner, or pause and stop all jobs
   box new [name] [--ttl 2h] [--size S | --gpu] [--reason "why"]
                                             launch a box with a positive TTL
   box rm <name>                             delete a box
@@ -81,6 +83,8 @@ The dashboard is https://<host>/ of the remote; --url points them elsewhere.
 With hosts.json, box run picks a host, names it in the result, and returns a
 qualified job ID. If no host can start now, it looks for a queue.
 --host pins a host for debugging. --box uses the default host unless pinned.
+Cloud runs print a cost line and support box pull only in sandbox mode;
+box cloud pause|resume|stop controls a cloud runner immediately.
 Settings: BOX_REMOTE (pc), BOX_PROJECT (agents), BOX_IMAGE (agent-base).
 `
 
@@ -133,6 +137,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		c := r.Code
 		if r.Job != "" {
 			fmt.Fprintln(a.Err, "box:", sourceLine(r.Source))
+		}
+		if line := costLine(r.Cost); line != "" {
+			fmt.Fprintln(a.Err, "box:", line)
 		}
 		if r.Digest != "" {
 			fmt.Fprint(a.Err, "\n"+r.Digest)
@@ -252,6 +259,9 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 			if end != nil {
 				fmt.Fprintf(a.Err, "box: can't read the log (%s); this is the tail recorded when the job ended\n", firstLine(err.Error()))
 				fmt.Fprintln(a.Err, "box:", sourceLine(end.Source))
+				if line := costLine(end.Cost); line != "" {
+					fmt.Fprintln(a.Err, "box:", line)
+				}
 				io.WriteString(a.Out, end.Tail)
 				return 0
 			}
@@ -324,6 +334,8 @@ func run(ctx context.Context, a *App, args []string, stdin io.Reader) int {
 		}
 		fmt.Fprintln(a.Out, dest)
 		return 0
+	case "cloud":
+		return runCloud(ctx, a, fs, args[1:])
 	case "join":
 		leave := fs.Bool("leave", false, "unregister box and remove the skill")
 		if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
