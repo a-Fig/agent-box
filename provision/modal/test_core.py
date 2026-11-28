@@ -416,6 +416,70 @@ class ValidationAndLifecycleTest(unittest.TestCase):
             {"start_new_session": True},
         )
 
+    def test_restrict_jobs_mount_fails_closed(self) -> None:
+        # Non-root worker must fail closed.
+        with self.assertRaises(PermissionError):
+            core.restrict_jobs_mount("/jobs", euid=1000)
+
+        # chmod failure must propagate rather than silently succeeding.
+        def _boom_chmod(_p, _mode):
+            raise PermissionError("chmod denied")
+
+        with self.assertRaises(PermissionError):
+            core.restrict_jobs_mount("/jobs", euid=0, chmod_fn=_boom_chmod)
+
+        # Bad ownership or loose mode must fail closed.
+        fake_stat_bad = type("St", (), {"st_uid": 1000, "st_mode": 0o40700})()
+        with self.assertRaises(PermissionError):
+            core.restrict_jobs_mount(
+                "/jobs", euid=0, chmod_fn=lambda _p, _m: None, stat_fn=lambda _p: fake_stat_bad
+            )
+
+        fake_stat_ok = type("St", (), {"st_uid": 0, "st_mode": 0o40700})()
+        core.restrict_jobs_mount(
+            "/jobs", euid=0, chmod_fn=lambda _p, _m: None, stat_fn=lambda _p: fake_stat_ok
+        )
+
+    def test_upload_bundle_to_sandbox_drains_per_chunk_without_buffer_overflow(self) -> None:
+        class _BoundedStdin:
+            def __init__(self, cap: int) -> None:
+                self.cap = cap
+                self.pending = bytearray()
+                self.received = bytearray()
+                self.eof = False
+
+            def write(self, data: bytes) -> None:
+                self.pending.extend(data)
+                if len(self.pending) > self.cap:
+                    raise BufferError(f"stdin buffer exceeded {self.cap} bytes")
+
+            def drain(self) -> None:
+                self.received.extend(self.pending)
+                self.pending.clear()
+
+            def write_eof(self) -> None:
+                self.eof = True
+
+        class _FakeProc:
+            def __init__(self, cap: int) -> None:
+                self.stdin = _BoundedStdin(cap)
+
+            def wait(self) -> int:
+                return 0 if self.stdin.eof and not self.stdin.pending else 1
+
+        class _FakeSandbox:
+            def __init__(self, cap: int) -> None:
+                self.proc = _FakeProc(cap)
+
+            def exec(self, *args):
+                del args
+                return self.proc
+
+        payload = b"x" * (3 * 1024 * 1024)  # 3 MiB > 2 MiB Modal stdin buffer limit
+        sb = _FakeSandbox(cap=512 * 1024)
+        core.upload_bundle_to_sandbox(sb, payload)
+        self.assertEqual(bytes(sb.proc.stdin.received), payload)
+
     def test_cancellation_tombstone_overrides_racing_worker_write(self) -> None:
         now = datetime(2026, 11, 27, 16, 0, 0, tzinfo=timezone.utc)
         store = {
@@ -574,8 +638,13 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
     def test_actual_sandbox_tar_script_toctou_free(self) -> None:
         """Execute the actual SANDBOX_TAR_SCRIPT used by agent_box_runner against a real tree."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "work"
+            work_parent = Path(tmp) / "work"
+            work_parent.mkdir()
+            root = work_parent / "lantern"
             outside = Path(tmp) / "outside.txt"
+            outside_dir = Path(tmp) / "outside-dir"
+            outside_dir.mkdir()
+            (outside_dir / "secret.txt").write_text("secret", encoding="utf-8")
             root.mkdir()
             outside.write_text("secret", encoding="utf-8")
             (root / "nested").mkdir()
@@ -583,10 +652,11 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
             (root / "-rf").write_text("dash-file", encoding="utf-8")
             os.symlink(outside, root / "escape-link")
             os.symlink(outside, root / "nested" / "inner-escape")
+            os.mkfifo(root / "blocking-pipe")
 
             # Regular nested file succeeds.
             res = subprocess.run(
-                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "nested/out.txt"],
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(work_parent), "lantern", "nested/out.txt"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -598,7 +668,7 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
 
             # Leading-dash filename archives safely without flag injection.
             res_dash = subprocess.run(
-                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "-rf"],
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(work_parent), "lantern", "-rf"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -609,7 +679,7 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
 
             # Directory walk drops symlink children rather than following them.
             res_dir = subprocess.run(
-                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "nested"],
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(work_parent), "lantern", "nested"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -618,19 +688,32 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
             with tarfile.open(fileobj=io.BytesIO(base64.b64decode(res_dir.stdout)), mode="r:") as tf:
                 self.assertEqual(tf.getnames(), ["nested", "nested/out.txt"])
 
-            # Direct symlink or traversal exits with code 2 (400 invalid).
-            for bad_rel in ("escape-link", "nested/inner-escape", "../outside.txt"):
+            # Direct symlink, traversal, or named FIFO exits with code 2 immediately without blocking.
+            for bad_rel in ("escape-link", "nested/inner-escape", "../outside.txt", "blocking-pipe"):
                 res_bad = subprocess.run(
-                    [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), bad_rel],
+                    [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(work_parent), "lantern", bad_rel],
                     capture_output=True,
                     text=True,
+                    timeout=5,
                     check=False,
                 )
                 self.assertEqual(res_bad.returncode, 2, (bad_rel, res_bad.returncode, res_bad.stderr))
 
+            # Symlinked workspace root /work/<repo> must be rejected immediately with code 2.
+            os.symlink(outside_dir, work_parent / "evil-repo")
+            for rel_arg in (".", "secret.txt"):
+                res_root_sym = subprocess.run(
+                    [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(work_parent), "evil-repo", rel_arg],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                self.assertEqual(res_root_sym.returncode, 2, (rel_arg, res_root_sym.returncode, res_root_sym.stderr))
+
             # Missing file exits with code 3 (404 not_found).
             res_missing = subprocess.run(
-                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(root), "does-not-exist"],
+                [sys.executable, "-c", core.SANDBOX_TAR_SCRIPT, str(work_parent), "lantern", "does-not-exist"],
                 capture_output=True,
                 text=True,
                 check=False,

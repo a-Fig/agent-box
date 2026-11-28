@@ -168,18 +168,21 @@ def _prepare_command(cmd: list[str]) -> list[str]:
 
 
 def _mark_job_lost(job_id: str, message: str, *, log_file: Path | None = None) -> None:
-    """Persist `lost` status first so a Volume failure can never strand an active job."""
+    """Persist `lost` status first so a Volume read/write failure can never strand an active job."""
     if state_dict.get(core.cancelled_entry_key(job_id)):
         return
     key = core.job_entry_key(job_id)
     rec = state_dict.get(key)
     if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
         return
-    log_bytes, tail = (
-        _read_tail_and_size(log_file)
-        if log_file and log_file.exists()
-        else (rec.get("logBytes", 0), rec.get("tail", ""))
-    )
+    log_bytes = rec.get("logBytes", 0)
+    tail = rec.get("tail", "")
+    if log_file is not None:
+        try:
+            if log_file.exists():
+                log_bytes, tail = _read_tail_and_size(log_file)
+        except Exception as exc:
+            print(f"[box] warning: failed to read log in _mark_job_lost for {job_id}: {exc}", file=sys.stderr)
     core.transition_job(
         rec,
         "lost",
@@ -193,12 +196,8 @@ def _mark_job_lost(job_id: str, message: str, *, log_file: Path | None = None) -
 
 
 def _restrict_jobs_mount() -> None:
-    """Ensure /jobs is unreadable by the unprivileged `agent` user in Function containers."""
-    if os.geteuid() == 0 and os.path.isdir(JOBS_MOUNT):
-        try:
-            os.chmod(JOBS_MOUNT, 0o700)
-        except OSError:
-            pass
+    """Fail-closed enforcement that Function containers isolate /jobs from the `agent` user."""
+    core.restrict_jobs_mount(JOBS_MOUNT)
 
 
 def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
@@ -452,19 +451,8 @@ FUNCTION_BY_SIZE = {
 
 
 def _upload_bundle_to_sandbox(sb: Any, bundle_bytes: bytes) -> None:
-    """Stream bundle bytes into /tmp/repo.bundle inside the Sandbox via exec stdin (modal>=1.6)."""
-    proc = sb.exec("sh", "-c", "cat > /tmp/repo.bundle")
-    chunk_size = 65536
-    for idx in range(0, len(bundle_bytes), chunk_size):
-        proc.stdin.write(bundle_bytes[idx : idx + chunk_size])
-    proc.stdin.write_eof()
-    if hasattr(proc.stdin, "drain"):
-        res = proc.stdin.drain()
-        if inspect.isawaitable(res):
-            pass
-    rc = proc.wait()
-    if rc != 0:
-        raise RuntimeError(f"bundle upload into sandbox failed with exit code {rc}")
+    """Stream bundle bytes into /tmp/repo.bundle inside the Sandbox, draining each chunk."""
+    core.upload_bundle_to_sandbox(sb, bundle_bytes)
 
 
 def _drain_sandbox_log(sb: Any, remote_log: str, local_log: Path, offset: int) -> int:
@@ -555,6 +543,7 @@ def run_sandbox_job(job_id: str) -> None:
             cmd_str = f"env {env_prefix} {cmd_str}"
 
         inner = (
+            f"mkdir -p -m 0755 /work && "
             f"mkdir -p {shlex.quote(workdir)} && "
             f"git init -q {shlex.quote(workdir)} && "
             f"git -C {shlex.quote(workdir)} fetch -q /tmp/repo.bundle "
@@ -754,9 +743,8 @@ class ModalBackend:
         sb_id = state_dict.get(core.sandbox_entry_key(rec["id"])) or rec.get("sandboxId")
         if not sb_id:
             return 409, "gone", b""
-        workdir = f"/work/{rec['repo']}"
         sb = modal.Sandbox.from_id(sb_id)
-        proc = sb.exec("python3", "-c", core.SANDBOX_TAR_SCRIPT, workdir, rel)
+        proc = sb.exec("python3", "-c", core.SANDBOX_TAR_SCRIPT, "/work", rec["repo"], rel)
         encoded = "".join(c.decode("ascii") if isinstance(c, bytes) else c for c in proc.stdout)
         rc = proc.wait()
         if rc == 2:

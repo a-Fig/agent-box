@@ -177,26 +177,65 @@ def build_subprocess_kwargs(
     return kwargs
 
 
+def restrict_jobs_mount(
+    jobs_mount: str | os.PathLike[str],
+    *,
+    euid: int | None = None,
+    chmod_fn: Any = None,
+    stat_fn: Any = None,
+) -> None:
+    """Fail-closed enforcement that Function workers run as root with 0700 root-owned /jobs."""
+    uid = os.geteuid() if euid is None else euid
+    if uid != 0:
+        raise PermissionError(
+            f"Function worker must run as root (euid=0) to isolate {jobs_mount}; got euid={uid}"
+        )
+    mount_str = os.fspath(jobs_mount)
+    do_chmod = os.chmod if chmod_fn is None else chmod_fn
+    do_stat = os.stat if stat_fn is None else stat_fn
+    do_chmod(mount_str, 0o700)
+    st = do_stat(mount_str)
+    if st.st_uid != 0 or (st.st_mode & 0o077) != 0:
+        raise PermissionError(
+            f"{mount_str} must be owned by uid 0 with mode 0700 (got uid={st.st_uid}, mode={oct(st.st_mode & 0o777)})"
+        )
+
+
+def upload_bundle_to_sandbox(sb: Any, bundle_bytes: bytes, chunk_size: int = 262144) -> None:
+    """Stream bundle bytes into /tmp/repo.bundle inside a Sandbox, draining every chunk."""
+    proc = sb.exec("sh", "-c", "cat > /tmp/repo.bundle")
+    for idx in range(0, len(bundle_bytes), chunk_size):
+        proc.stdin.write(bundle_bytes[idx : idx + chunk_size])
+        if hasattr(proc.stdin, "drain"):
+            proc.stdin.drain()
+    proc.stdin.write_eof()
+    if hasattr(proc.stdin, "drain"):
+        proc.stdin.drain()
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"bundle upload into sandbox failed with exit code {rc}")
+
+
 # Executed via `python3 -c` inside a Sandbox (and directly in unit tests) for TOCTOU-free tar export.
-# Exit codes: 0=ok (base64 tar on stdout), 2=symlink escape / illegal path, 3=not found.
+# Args: <work_parent> <repo_name> <rel_path>
+# Exit codes: 0=ok (base64 tar on stdout), 2=symlink escape / FIFO / illegal path, 3=not found.
 SANDBOX_TAR_SCRIPT = (
     "import base64, errno, io, os, stat, sys, tarfile\n"
     "O_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)\n"
-    "O_DIRECTORY = getattr(os, 'O_DIRECTORY', 0)\n"
-    "def _open_rel(root_fd, parts):\n"
-    "    cur_fd = os.dup(root_fd)\n"
+    "O_NONBLOCK = getattr(os, 'O_NONBLOCK', 0)\n"
+    "def _open_rel(parent_fd, parts):\n"
+    "    cur_fd = os.dup(parent_fd)\n"
     "    try:\n"
     "        for i, part in enumerate(parts):\n"
     "            if part in ('', '.'):\n"
     "                continue\n"
-    "            if part == '..':\n"
+    "            if part == '..' or '/' in part:\n"
     "                raise PermissionError('traversal')\n"
-    "            flags = os.O_RDONLY | O_NOFOLLOW\n"
-    "            if i < len(parts) - 1:\n"
-    "                flags |= O_DIRECTORY\n"
-    "            nxt = os.open(part, flags, dir_fd=cur_fd)\n"
+    "            nxt = os.open(part, os.O_RDONLY | O_NOFOLLOW | O_NONBLOCK, dir_fd=cur_fd)\n"
     "            os.close(cur_fd)\n"
     "            cur_fd = nxt\n"
+    "            if i < len(parts) - 1 and not stat.S_ISDIR(os.fstat(cur_fd).st_mode):\n"
+    "                raise NotADirectoryError(part)\n"
     "        return cur_fd\n"
     "    except Exception:\n"
     "        os.close(cur_fd)\n"
@@ -213,7 +252,7 @@ SANDBOX_TAR_SCRIPT = (
     "            tf.addfile(ti)\n"
     "            for name in names:\n"
     "                try:\n"
-    "                    child_fd = os.open(name, os.O_RDONLY | O_NOFOLLOW, dir_fd=fd)\n"
+    "                    child_fd = os.open(name, os.O_RDONLY | O_NOFOLLOW | O_NONBLOCK, dir_fd=fd)\n"
     "                except OSError as exc:\n"
     "                    if exc.errno in (errno.ELOOP, errno.ENOENT):\n"
     "                        continue\n"
@@ -231,27 +270,37 @@ SANDBOX_TAR_SCRIPT = (
     "            tf.addfile(ti, fh)\n"
     "    else:\n"
     "        os.close(fd)\n"
+    "        raise PermissionError('non-regular file rejected')\n"
+    "work_parent, repo_name, rel = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+    "if not repo_name or repo_name in ('.', '..') or '/' in repo_name:\n"
+    "    sys.exit(2)\n"
     "try:\n"
-    "    root_fd = os.open(sys.argv[1], os.O_RDONLY | O_DIRECTORY)\n"
-    "except OSError:\n"
-    "    sys.exit(3)\n"
-    "rel = sys.argv[2]\n"
-    "parts = [] if rel == '.' else [p for p in rel.split('/') if p not in ('', '.')]\n"
+    "    parent_fd = os.open(work_parent, os.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)\n"
+    "    if not stat.S_ISDIR(os.fstat(parent_fd).st_mode):\n"
+    "        os.close(parent_fd)\n"
+    "        sys.exit(2)\n"
+    "except OSError as exc:\n"
+    "    sys.exit(2 if exc.errno == errno.ELOOP else 3)\n"
+    "rel_parts = [] if rel == '.' else [p for p in rel.split('/') if p not in ('', '.')]\n"
+    "parts = [repo_name] + rel_parts\n"
     "try:\n"
-    "    target_fd = _open_rel(root_fd, parts)\n"
+    "    target_fd = _open_rel(parent_fd, parts)\n"
     "except PermissionError:\n"
-    "    os.close(root_fd)\n"
+    "    os.close(parent_fd)\n"
     "    sys.exit(2)\n"
     "except OSError as exc:\n"
-    "    os.close(root_fd)\n"
+    "    os.close(parent_fd)\n"
     "    if exc.errno == errno.ELOOP:\n"
     "        sys.exit(2)\n"
     "    sys.exit(3)\n"
-    "os.close(root_fd)\n"
+    "os.close(parent_fd)\n"
     "buf = io.BytesIO()\n"
-    "arc = '.' if not parts else '/'.join(parts)\n"
-    "with tarfile.open(fileobj=buf, mode='w', dereference=False) as tf:\n"
-    "    _add_fd(tf, target_fd, arc)\n"
+    "arc = '.' if not rel_parts else '/'.join(rel_parts)\n"
+    "try:\n"
+    "    with tarfile.open(fileobj=buf, mode='w', dereference=False) as tf:\n"
+    "        _add_fd(tf, target_fd, arc)\n"
+    "except PermissionError:\n"
+    "    sys.exit(2)\n"
     "sys.stdout.write(base64.b64encode(buf.getvalue()).decode('ascii'))\n"
 )
 
