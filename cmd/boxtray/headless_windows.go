@@ -77,6 +77,7 @@ func runHeadless() {
 
 	inc := mode.CLI{Run: wslIncus}
 	hb := newHeartbeat(inc, mode.EnforcerHeadless, lg.Printf)
+	hb.usage = (&usageReader{}).read
 	cfg := loopCfg{
 		Manager: func() *mode.Manager {
 			hb.last = time.Time{} // say so at once after standing aside

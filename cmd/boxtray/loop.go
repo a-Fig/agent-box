@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/mode"
 	"github.com/a-Fig/agent-box/internal/version"
 )
@@ -138,6 +139,9 @@ type heartbeat struct {
 	build string // this binary's version, as JSON
 	every time.Duration
 	last  time.Time
+	// usage, if set, reads the whole machine's use, written with each beat (#294). A beat without
+	// it (nil) still counts: the use is for the page, the heartbeat for the mode.
+	usage func(context.Context) *dash.HostUsage
 	logf  func(format string, args ...any)
 }
 
@@ -169,4 +173,12 @@ func (h *heartbeat) beat(ctx context.Context, now time.Time) {
 		return
 	}
 	h.last = now
+	if h.usage != nil {
+		if u := h.usage(ctx); u != nil {
+			b, _ := json.Marshal(u)
+			if err := h.inc.SetProjectConfig(ctx, mode.ProjectHostUsageKey, string(b)); err != nil {
+				h.logf("host usage: %v", err)
+			}
+		}
+	}
 }

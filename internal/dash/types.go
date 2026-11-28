@@ -84,6 +84,28 @@ type Machine struct {
 	Boxd          *Version     `json:"boxd"`      // the boxd serving this; null if its build has no commit
 	Tray          *Version     `json:"tray"`      // the enforcer's build, user.agent-box.tray-version; null: unknown
 	Config        Config       `json:"config"`    // how this host is set up, for its host page
+	// Host is the whole machine as Windows sees it, which boxd can't from inside WSL: the active
+	// enforcer reports it with its heartbeat (#294). Null when it doesn't (a tray from before #294).
+	Host *HostUsage `json:"host"`
+}
+
+// HostUsage is the whole machine now: its logical CPUs and how busy they are (all of them, 0 to
+// 100), its physical memory and how much is in use, and its GPU when it has an NVIDIA one.
+type HostUsage struct {
+	At       time.Time `json:"at"`
+	CPUs     int       `json:"cpus"`
+	CPUPct   float64   `json:"cpuPct"`
+	MemTotal int64     `json:"memTotal"`
+	MemUsed  int64     `json:"memUsed"`
+	GPU      *GPUUsage `json:"gpu,omitempty"`
+}
+
+// GPUUsage is a GPU's memory and how busy it is (0 to 100), as nvidia-smi reports them.
+type GPUUsage struct {
+	Name     string  `json:"name"`
+	MemTotal int64   `json:"memTotal"`
+	MemUsed  int64   `json:"memUsed"`
+	Pct      float64 `json:"pct"`
 }
 
 // Config is how a host is set up, read-only: what its host page shows of it. The sizes and

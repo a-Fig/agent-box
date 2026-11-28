@@ -24,6 +24,10 @@ const ProjectModeKey = "user.agent-box.mode"
 // it is stale.
 const ProjectTraySeenKey = "user.agent-box.tray-seen"
 
+// ProjectHostUsageKey is the whole machine's use, dash.HostUsage as JSON, written by the active
+// enforcer with its heartbeat (#294): boxd runs inside WSL and can't see Windows.
+const ProjectHostUsageKey = "user.agent-box.host-usage"
+
 // ProjectEnforcerKey says which enforcer is active: EnforcerTray or EnforcerHeadless.
 const ProjectEnforcerKey = "user.agent-box.enforcer"
 

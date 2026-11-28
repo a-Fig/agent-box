@@ -13,6 +13,7 @@ import { hint } from "./tip.js";
 import { section, empty, machineCard, banners, runningRow, boxRow, queued, queueSection } from "./views.js";
 import { row, group } from "./settings.js";
 import { drift, releaseStatus } from "./versions.js";
+import { useSection } from "./use.js";
 
 export { host, hostKind, hostLink };
 
@@ -246,6 +247,7 @@ const host = {
         h("div", { class: "page-head host-head" }, h("span", { class: "host-ico" }, icon(kind.icon)), h("div", { class: "host-title" }, nameHead(m, el), ed?.id === m.id ? null : h("p", null, kind.about + (m.reachable ? "" : " It isn't answering now.")))),
         banners(m),
         section("Now", null, machineCard(m)),
+        m.host ? section("Whole machine", null, useSection(m)) : null,
         section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map((j) => runningRow(j)) : h("p", { class: "row-empty" }, "Nothing is running on " + m.name + "."))),
         q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes on " + m.name + "."))),

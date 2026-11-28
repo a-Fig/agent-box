@@ -155,6 +155,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hb := newHeartbeat(mgr.Incus, mode.EnforcerTray, lg.Printf)
+	hb.usage = (&usageReader{}).read
 	restarts := make(chan func() bool, 1)
 	up := autoUpdater(os.Args[1:], lg.Printf, func(start func() bool) {
 		finish := func() bool {

@@ -649,6 +649,12 @@ func (w *Watcher) applyMachine(now time.Time, ins []Instance, proj Project, boxe
 		t = t.UTC()
 		m.TrayLastSeen = &t
 	}
+	if v := cfg[mode.ProjectHostUsageKey]; v != "" {
+		var u dash.HostUsage
+		if json.Unmarshal([]byte(v), &u) == nil && u.MemTotal > 0 && u.CPUs > 0 {
+			m.Host = &u
+		}
+	}
 	// Which enforcer wrote the heartbeat. Values other than boxtray's are unknown.
 	switch e := cfg[mode.ProjectEnforcerKey]; e {
 	case dash.EnforcerTray, dash.EnforcerHeadless:
