@@ -11,9 +11,18 @@ import (
 	"os"
 	"strings"
 
+	"github.com/a-Fig/agent-box/internal/controller"
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/dash/static"
 )
+
+// ControllerConfig enables optional state publishing to a fleet controller
+// (docs/controller-protocol.md). Nil or empty URL disables publishing.
+type ControllerConfig struct {
+	URL       string `json:"url"`
+	TokenFile string `json:"token_file"`
+	ID        string `json:"id"`
+}
 
 // Config is /etc/agent-box/boxd.json, written by provision/setup-host.sh.
 type Config struct {
@@ -37,6 +46,8 @@ type Config struct {
 	// Priority is this host's scheduling priority reported in /api/state
 	// (higher wins; nil when unset, meaning default 0).
 	Priority *int `json:"priority,omitempty"`
+	// Controller optionally publishes trimmed host state to a fleet controller.
+	Controller *ControllerConfig `json:"controller,omitempty"`
 }
 
 // DefaultListen is the port docs/ui.md picked, so nothing else on the
@@ -67,6 +78,16 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if c.MachineName == "" {
 		c.MachineName = "PC"
+	}
+	if c.Controller != nil {
+		c.Controller.URL = strings.TrimSpace(c.Controller.URL)
+		c.Controller.TokenFile = strings.TrimSpace(c.Controller.TokenFile)
+		c.Controller.ID = strings.TrimSpace(c.Controller.ID)
+		if c.Controller.URL == "" && c.Controller.TokenFile == "" && c.Controller.ID == "" {
+			c.Controller = nil
+		} else if c.Controller.URL != "" && c.Controller.ID == "" {
+			c.Controller.ID = controller.SanitizeHostID(c.MachineID)
+		}
 	}
 	return c, nil
 }

@@ -77,6 +77,9 @@ func main() {
 		MachineID: cfg.MachineID, MachineName: cfg.MachineName, WSLMemory: wslMemory, HasGPU: hasGPU, Logf: log.Printf,
 	}
 	go w.Run(ctx, cfg.CoolIdleThrowaways, cfg.ReuseThrowaways)
+	if pub := boxd.NewPublisherFromConfig(cfg, w, log.Printf); pub != nil {
+		go pub.Run(ctx)
+	}
 
 	srv := &boxd.Server{
 		W:               w,

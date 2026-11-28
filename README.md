@@ -127,6 +127,26 @@ With a host registry, `box run` and `box_run` rank hosts by `priority` (higher w
 
 When capacity blocks a run, the CLI and MCP report the limiting resource and whether it queued or was refused. A suggested smaller size is an estimate for the selected host. A queued run keeps the requested size and GPU requirement.
 
+### Cloud overflow and fleet controller setup
+
+Two optional cloud pieces, each set up by one command that explains what stays free first;
+[docs/cloud.md](docs/cloud.md) has the costs, the budget guardrails and both walkthroughs.
+
+```sh
+box setup modal --token-in modal-token.txt   # Modal runner as overflow: $25/mo cap, priority -1
+box setup cloudflare                         # free Workers controller for offline host status
+```
+
+`--dry-run` prints every step and the exact `hosts.json` or `controller.json` change without
+running `modal` or `wrangler`. Secrets are read only from a file or stdin, never from flags.
+
+### Optional fleet controller (offline status fallback)
+
+To show last-known host state when a host is unreachable, configure an optional `controller-v1` server:
+
+- **Host (`boxd.json`):** add `"controller": {"url": "https://...", "token_file": "/etc/agent-box/controller-host.token", "id": "pc"}` (`id` defaults to `machineId` sanitized to `^[a-z0-9-]{1,40}$`; single-host setups without `hosts.json` should set `"id": "pc"` matching `BOX_REMOTE` so offline fallback matches by default). Missing or unreadable `token_file` disables publishing with a warning without blocking `boxd`.
+- **Client (`agent-box/controller.json`):** add `{"url": "https://...", "token_file": "/path/to/client.token"}` (`https://`, or loopback `http://` for tests). In `hosts.json`, set `"controller_id"` on a host if its controller ID differs from `"name"`. When all hosts are reachable, `box status` makes zero controller requests.
+
 ## Website previews
 
 Run the preview command from a trusted checkout of `main`, with `gh` and Wrangler signed in. Pass the PR number while staying on `main`. The command prints a public preview link and a link pinned to this deployment.

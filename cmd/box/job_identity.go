@@ -124,6 +124,9 @@ func resolveJobHost(hostTag string, defaultHost fleetHost, hosts []fleetHost) (f
 		if match.Priority != host.Priority {
 			return fleetHost{}, fmt.Errorf("conflicting priorities for job host %s (%d and %d)", targetDesc, match.Priority, host.Priority)
 		}
+		if match.ControllerID == "" {
+			match.ControllerID = host.ControllerID
+		}
 	}
 	if found {
 		return match, nil
