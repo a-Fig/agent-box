@@ -92,6 +92,60 @@ type cloudJobCost struct {
 	GPUSec float64 `json:"gpuSec"`
 }
 
+// cloudCost summarizes a cloud run's estimated spend and monthly budget.
+type cloudCost struct {
+	Host     string  `json:"host,omitempty"`
+	Kind     string  `json:"kind,omitempty"`
+	USD      float64 `json:"usd"`
+	MonthUSD float64 `json:"monthUSD"`
+	CapUSD   float64 `json:"capUSD,omitempty"`
+	WarnAt   float64 `json:"warnAt,omitempty"`
+}
+
+func costLine(c *cloudCost) string {
+	if c == nil {
+		return ""
+	}
+	host := c.Host
+	if host == "" {
+		host = c.Kind
+	}
+	if host == "" {
+		host = "cloud"
+	}
+	if c.CapUSD <= 0 {
+		if c.MonthUSD > 0 {
+			return fmt.Sprintf("%s · ~$%.2f · $%.2f this month", host, c.USD, c.MonthUSD)
+		}
+		return fmt.Sprintf("%s · ~$%.2f", host, c.USD)
+	}
+	if c.MonthUSD >= c.CapUSD {
+		return fmt.Sprintf("warning: %s · ~$%.2f · monthly cap reached ($%.2f of $%.2f)", host, c.USD, c.MonthUSD, c.CapUSD)
+	}
+	left := c.CapUSD - c.MonthUSD
+	if c.WarnAt > 0 && c.MonthUSD/c.CapUSD >= c.WarnAt {
+		return fmt.Sprintf("warning: %s · ~$%.2f · $%.2f of $%.2f cap left", host, c.USD, left, c.CapUSD)
+	}
+	return fmt.Sprintf("%s · ~$%.2f · $%.2f of $%.2f cap left", host, c.USD, left, c.CapUSD)
+}
+
+func (c *cloudHost) makeCost(j cloudJob) *cloudCost {
+	if j.Cost == nil {
+		return nil
+	}
+	cost := &cloudCost{
+		Host: c.host.Name,
+		Kind: c.host.Kind,
+		USD:  j.Cost.USD,
+	}
+	if j.Budget != nil {
+		cost.MonthUSD = j.Budget.SpentUSD
+		cost.CapUSD = j.Budget.CapUSD
+		cost.WarnAt = j.Budget.WarnAt
+	}
+	return cost
+}
+
 type cloudJob struct {
 	ID        string        `json:"id"`
 	State     string        `json:"state"`
@@ -255,6 +309,11 @@ func (c *cloudHost) errOut() io.Writer {
 }
 
 func (c *cloudHost) probe(ctx context.Context) fleetCandidate {
+	cand, _ := c.probeStatus(ctx)
+	return cand
+}
+
+func (c *cloudHost) probeStatus(ctx context.Context) (fleetCandidate, cloudProbeResponse) {
 	probeCtx, cancel := context.WithTimeout(ctx, cloudProbeTimeout)
 	defer cancel()
 
@@ -266,12 +325,12 @@ func (c *cloudHost) probe(ctx context.Context) fleetCandidate {
 	var p cloudProbeResponse
 	if err := c.doJSON(probeCtx, http.MethodGet, "/v1/probe", nil, &p); err != nil {
 		cand.Error = firstLine(err.Error())
-		return cand
+		return cand, cloudProbeResponse{}
 	}
 	if p.Protocol != 1 {
 		cand.Reachable = true
 		cand.Error = fmt.Sprintf("unsupported runner protocol %d", p.Protocol)
-		return cand
+		return cand, p
 	}
 
 	cand.Reachable = true
@@ -300,7 +359,7 @@ func (c *cloudHost) probe(ctx context.Context) fleetCandidate {
 	case p.Running >= p.MaxConcurrent:
 		cand.Unavailable = fmt.Sprintf("cloud busy (%d/%d running)", p.Running, p.MaxConcurrent)
 	}
-	return cand
+	return cand, p
 }
 
 func (c *cloudHost) start(ctx context.Context, o RunOpts, sz mode.Size, prepared *fleetRun) (JobResult, *turnAwayInfo, error) {
@@ -437,7 +496,8 @@ func (c *cloudHost) follow(ctx context.Context, pubID jobID, wait time.Duration,
 	}
 
 	var logOffset int64
-	out := c.out()
+	kept := &lineTail{}
+	out := io.MultiWriter(c.out(), kept)
 	drain := func(dctx context.Context) error {
 		for {
 			chunk, err := c.logChunk(dctx, pubID.Bare, logOffset, dash.MaxLogChunk)
@@ -510,7 +570,32 @@ func (c *cloudHost) follow(ctx context.Context, pubID jobID, wait time.Duration,
 			} else if j.State == "cancelled" {
 				code = exitDetached
 			}
-			r.State, r.Code = stateDone, code
+			r.State, r.Code, r.Cost = stateDone, code, c.makeCost(j)
+			if c.app != nil {
+				ended := c.app.Now()
+				if j.EndedAt != nil && !j.EndedAt.IsZero() {
+					ended = *j.EndedAt
+				}
+				start := jobStart(pubID.Bare)
+				if j.StartedAt != nil && !j.StartedAt.IsZero() {
+					start = *j.StartedAt
+				}
+				took := max(int64(0), int64(ended.Sub(start)/time.Second))
+				completion := completionExited
+				if j.State == "cancelled" && c.app.exists(pubID.ID, ".notified") {
+					completion = completionCancelled
+				}
+				c.app.recordEnd(pubID.ID, jobEnd{
+					Host:       c.host.Name,
+					Code:       code,
+					Took:       took,
+					Tail:       keepTail(kept.lastLines(1 << 20)),
+					Completion: completion,
+					Source:     source,
+					Cost:       r.Cost,
+					Locator:    &jobLocator{Name: c.host.Name, Kind: c.host.Kind, Endpoint: c.host.Endpoint, Mode: c.host.Mode},
+				})
+			}
 			return r, nil
 		case "lost":
 			if j.LogBytes > logOffset {
@@ -520,6 +605,7 @@ func (c *cloudHost) follow(ctx context.Context, pubID jobID, wait time.Duration,
 			} else if logOffset == 0 && j.Tail != "" {
 				_, _ = io.WriteString(out, j.Tail)
 			}
+			r.Cost = c.makeCost(j)
 			r.State, r.Code = statePaused, exitPaused
 			return r, fmt.Errorf("lost job %s (reattach with: box job %s)", pubID.ID, pubID.ID)
 		}
@@ -655,6 +741,72 @@ func mapCloudJobState(state string) string {
 	default:
 		return state
 	}
+}
+
+func (c *cloudHost) readTail(ctx context.Context, bareID string, j cloudJob) string {
+	if j.LogBytes > 0 {
+		var dctx context.Context
+		var cancel context.CancelFunc
+		if c.app != nil {
+			dctx, cancel = c.app.probeCtx(ctx)
+		} else {
+			dctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
+		}
+		defer cancel()
+		offset := max(int64(0), j.LogBytes-keptTail)
+		tail := &lineTail{}
+		var wrote bool
+		for {
+			chunk, err := c.logChunk(dctx, bareID, offset, dash.MaxLogChunk)
+			if err != nil {
+				break
+			}
+			raw, err := decodeLogChunkData(chunk)
+			if err != nil {
+				break
+			}
+			if len(raw) > 0 {
+				_, _ = tail.Write(raw)
+				wrote = true
+			}
+			if chunk.Offset > offset {
+				offset = chunk.Offset
+			} else {
+				offset += int64(len(raw))
+			}
+			if chunk.EOF || len(raw) == 0 {
+				break
+			}
+		}
+		if wrote {
+			return keepTail(tail.lastLines(1 << 20))
+		}
+	}
+	return keepTail(j.Tail)
+}
+
+func (c *cloudHost) listJobs(ctx context.Context, limit int) ([]JobInfo, error) {
+	raw, err := c.list(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	jobs := make([]JobInfo, 0, len(raw))
+	for _, j := range raw {
+		started := jobStart(j.ID)
+		if j.StartedAt != nil && !j.StartedAt.IsZero() {
+			started = j.StartedAt.UTC()
+		}
+		box, _, _ := strings.Cut(j.ID, ".")
+		jobs = append(jobs, JobInfo{
+			Job:      j.ID,
+			Box:      box,
+			State:    mapCloudJobState(j.State),
+			Code:     j.Exit,
+			Started:  started,
+			LogBytes: j.LogBytes,
+		})
+	}
+	return jobs, nil
 }
 
 func (c *cloudHost) list(ctx context.Context, limit int) ([]cloudJob, error) {

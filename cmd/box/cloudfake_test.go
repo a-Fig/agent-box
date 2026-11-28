@@ -1167,53 +1167,135 @@ func TestCloudCancelAndPull(t *testing.T) {
 	}
 }
 
-func TestCloudMCPBoxRunLongJobSetsPushFalse(t *testing.T) {
+func TestCloudMCPBoxRunLongJobSpawnsWatcherAndDeliversCostNotice(t *testing.T) {
 	srv := newFakeRunnerV1(t)
-	srv.jobDelay = 150 * time.Millisecond
+	srv.jobDelay = 120 * time.Millisecond
 	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
 	hosts := []fleetHost{
 		{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1},
 	}
 	a, _, _, dir := cloudDispatchTestApp(t, newFakeFleet(t), hosts, srv.doHTTP)
-	a.Thread = "t3-thread-1"
-	a.Push = &fakePusher{}
-	var spawned int
-	a.Spawn = func(string, string) error {
-		spawned++
+	pusher := &fakePusher{}
+	a.Getenv = func(k string) string {
+		if k == "T3CODE_THREAD_ID" {
+			return "t3-thread-1"
+		}
+		return ""
+	}
+	a.Push = pusher
+	var spawned []string
+	a.Spawn = func(_, job string) error {
+		spawned = append(spawned, job)
 		return nil
 	}
 	a.InlineWait = 25 * time.Millisecond
 
-	params, err := json.Marshal(map[string]any{
-		"name": "box_run",
-		"arguments": map[string]any{
+	callRun := func(pushArg *bool) (map[string]any, map[string]any) {
+		args := map[string]any{
 			"dir":     dir,
 			"command": "go test ./...",
-			"reason":  "Verify long cloud MCP run reports push false without spawning watcher.",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+			"reason":  "Verify long cloud MCP run watcher and push delivery.",
+		}
+		if pushArg != nil {
+			args["push"] = *pushArg
+		}
+		params, err := json.Marshal(map[string]any{
+			"name":      "box_run",
+			"arguments": args,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := callTool(context.Background(), a, params, nil)
+		rawSC, err := json.Marshal(res["structuredContent"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sc map[string]any
+		if err := json.Unmarshal(rawSC, &sc); err != nil {
+			t.Fatal(err)
+		}
+		return res, sc
 	}
-	res := callTool(context.Background(), a, params, nil)
-	rawSC, err := json.Marshal(res["structuredContent"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sc map[string]any
-	if err := json.Unmarshal(rawSC, &sc); err != nil {
-		t.Fatal(err)
-	}
-	if res["isError"] != false || sc["state"] != stateRunning || sc["push"] != false || sc["exitCode"] != nil || spawned != 0 {
-		t.Fatalf("box_run >InlineWait = %+v, spawned=%d", res, spawned)
+
+	// Default push=true spawns watcher and returns running with push:true.
+	res, sc := callRun(nil)
+	if res["isError"] != false || sc["state"] != stateRunning || sc["push"] != true || sc["exitCode"] != nil {
+		t.Fatalf("box_run >InlineWait = %+v", res)
 	}
 	jobID, _ := sc["job"].(string)
-	if jobID == "" {
-		t.Fatalf("missing job id in %+v", res)
+	if !slices.Equal(spawned, []string{jobID}) {
+		t.Fatalf("spawned = %v, want [%s]", spawned, jobID)
 	}
-	jobRes, jobData := lookupTool(t, a, jobID, false)
-	if jobRes["isError"] != false || jobData["state"] != stateDone || jobData["exitCode"] != 0.0 {
+
+	// Run Watch to completion; verify .ended has cloud Locator + Cost and notice includes cost line.
+	if err := a.Watch(context.Background(), jobID); err != nil {
+		t.Fatalf("Watch(%s) = %v", jobID, err)
+	}
+	if pusher.count() != 1 {
+		t.Fatalf("pusher sent %d messages, want 1", pusher.count())
+	}
+	notice := pusher.sent[0].msg
+	wantCost := "cloud · ~$0.01 · $21.88 of $25.00 cap left"
+	if !strings.Contains(notice, "box: job "+jobID+" on cloud ended, exit 0") ||
+		!strings.Contains(notice, wantCost) ||
+		!strings.Contains(notice, "source ") ||
+		strings.Contains(notice, "box_pull") {
+		t.Fatalf("completion notice = %q", notice)
+	}
+	id, err := parseJobID(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, ok := a.readJobEnd(id, ".ended", true)
+	if !ok || end.Locator == nil || end.Locator.Kind != "modal" || end.Locator.Endpoint != srv.endpoint() || end.Cost == nil || end.Cost.Host != "cloud" {
+		t.Fatalf("saved .ended = %+v, ok=%v", end, ok)
+	}
+
+	// safetyNet and Hook handle cloud .ended notices seamlessly and validate cloud Locator.
+	if err := os.Remove(a.statePath(jobID, ".notified")); err != nil {
+		t.Fatal(err)
+	}
+	if net := a.safetyNet(""); !strings.Contains(net, jobID+" exit 0") {
+		t.Fatalf("safetyNet = %q, want %s exit 0", net, jobID)
+	}
+	var hookOut bytes.Buffer
+	a.Hook(strings.NewReader(`{"session_id":"s1"}`), &hookOut)
+	if !strings.Contains(hookOut.String(), wantCost) || !a.exists(jobID, ".notified") {
+		t.Fatalf("Hook output = %q, notified=%v", hookOut.String(), a.exists(jobID, ".notified"))
+	}
+
+	// Mismatched endpoint in Locator is rejected by readJobEnd / safetyNet / Hook.
+	if err := os.Remove(a.statePath(jobID, ".notified")); err != nil {
+		t.Fatal(err)
+	}
+	badEnd := end
+	badEnd.Locator = &jobLocator{Kind: "modal", Endpoint: "https://other.example.com"}
+	if err := writeJSON(a.statePath(jobID, ".ended"), badEnd); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.readJobEnd(id, ".ended", true); ok {
+		t.Fatal("readJobEnd accepted mismatched cloud Locator endpoint")
+	}
+
+	// Explicit push=false still avoids spawning watcher and box_job returns cost.
+	// Mark job 1 delivered so the safety net leaves it alone, and give job 2
+	// its own ID (the fake runner returns an existing job for a reused ID).
+	a.markNotified(jobID, "test")
+	a.Rand = func() string { return "c3d4" }
+	spawned = nil
+	falseVal := false
+	res, sc = callRun(&falseVal)
+	if res["isError"] != false || sc["state"] != stateRunning || sc["push"] != false || sc["exitCode"] != nil || len(spawned) != 0 {
+		t.Fatalf("box_run push=false = %+v, spawned=%v", res, spawned)
+	}
+	jobID2, _ := sc["job"].(string)
+	jobRes, jobData := lookupTool(t, a, jobID2, false)
+	if jobRes["isError"] != false || jobData["state"] != stateDone || jobData["exitCode"] != 0.0 || jobData["cost"] == nil {
 		t.Fatalf("box_job follow-up = %+v", jobRes)
+	}
+	if text := jobRes["content"].([]map[string]any)[0]["text"].(string); !strings.Contains(text, wantCost) {
+		t.Fatalf("box_job text missing cost line:\n%s", text)
 	}
 }
 
@@ -1243,4 +1325,413 @@ func TestCloudStartContextCancelledMidUploadPreservesJobID(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || away != nil || r.Job != wantID {
 		t.Fatalf("start on ctx cancel = r:%+v away:%v err:%v (want Job=%s)", r, away, err, wantID)
 	}
+}
+
+func TestCloudCostLineAndStructuredCost(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cost *cloudCost
+		want string
+	}{
+		{
+			name: "nil",
+			cost: nil,
+			want: "",
+		},
+		{
+			name: "normal",
+			cost: &cloudCost{Host: "cloud", Kind: "modal", USD: 0.012, MonthUSD: 3.12, CapUSD: 25, WarnAt: 0.75},
+			want: "cloud · ~$0.01 · $21.88 of $25.00 cap left",
+		},
+		{
+			name: "warning at warnAt",
+			cost: &cloudCost{Host: "cloud", Kind: "modal", USD: 0.012, MonthUSD: 20.50, CapUSD: 25, WarnAt: 0.75},
+			want: "warning: cloud · ~$0.01 · $4.50 of $25.00 cap left",
+		},
+		{
+			name: "cap reached",
+			cost: &cloudCost{Host: "cloud", Kind: "modal", USD: 0.012, MonthUSD: 25.00, CapUSD: 25, WarnAt: 0.75},
+			want: "warning: cloud · ~$0.01 · monthly cap reached ($25.00 of $25.00)",
+		},
+		{
+			name: "uncapped",
+			cost: &cloudCost{Host: "cloud", Kind: "modal", USD: 0.012, MonthUSD: 3.12},
+			want: "cloud · ~$0.01 · $3.12 this month",
+		},
+	} {
+		if got := costLine(tc.cost); got != tc.want {
+			t.Errorf("%s: costLine = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	// Verify sandbox notice text includes sandbox box_pull guidance + cost line.
+	rec := jobRecord{Job: "h1~j", Host: &jobLocator{Name: "cloud", Kind: "modal", Mode: "sandbox"}}
+	end := jobEnd{Code: 0, Cost: &cloudCost{Host: "cloud", Kind: "modal", USD: 0.012, MonthUSD: 3.12, CapUSD: 25, WarnAt: 0.75}}
+	if msg := endMessage(rec, end); !strings.Contains(msg, "box_pull while the sandbox is kept") || !strings.Contains(msg, "cloud · ~$0.01 · $21.88 of $25.00 cap left") {
+		t.Fatalf("sandbox endMessage = %q", msg)
+	}
+
+	// Verify Incus MCP box_run omits structured cost while cloud MCP box_run includes it,
+	// and CLI box run prints the cost line.
+	srv := newFakeRunnerV1(t)
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+	pc := &fakeFleetHost{remote: "pc", project: mode.Project, mode: "full", queueCapable: true, execStdout: "pc-ok\n"}
+	ff := newFakeFleet(t, pc)
+	ff.dashHosts["https://pc.example.com"] = pc
+	httpRouter := func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.String(), srv.endpoint()) {
+			return srv.doHTTP(req)
+		}
+		return ff.httpDo(req)
+	}
+
+	// Incus run: no cost in structuredContent.
+	a, _, _, dir := cloudDispatchTestApp(t, ff, []fleetHost{
+		{Name: "pc", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"},
+	}, httpRouter)
+	params, _ := json.Marshal(map[string]any{"name": "box_run", "arguments": map[string]any{"dir": dir, "command": "true", "reason": "Verify Incus omits cost."}})
+	res := callTool(context.Background(), a, params, nil)
+	rawSC, _ := json.Marshal(res["structuredContent"])
+	if strings.Contains(string(rawSC), `"cost"`) {
+		t.Fatalf("Incus structuredContent unexpectedly included cost: %s", rawSC)
+	}
+
+	// Cloud run via MCP and CLI: includes cost line and structuredContent.cost.
+	a, out, errOut, dir := cloudDispatchTestApp(t, ff, []fleetHost{
+		{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1},
+	}, httpRouter)
+	params, _ = json.Marshal(map[string]any{"name": "box_run", "arguments": map[string]any{"dir": dir, "command": "true", "reason": "Verify cloud includes cost."}})
+	res = callTool(context.Background(), a, params, nil)
+	rawSC, _ = json.Marshal(res["structuredContent"])
+	if !strings.Contains(string(rawSC), `"monthUSD":3.12`) {
+		t.Fatalf("cloud structuredContent missing cost: %s", rawSC)
+	}
+	if text := res["content"].([]map[string]any)[0]["text"].(string); !strings.Contains(text, "cloud · ~$0.01 · $21.88 of $25.00 cap left") {
+		t.Fatalf("cloud MCP text missing cost line:\n%s", text)
+	}
+	out.Reset()
+	errOut.Reset()
+	wd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if c := run(context.Background(), a, []string{"run", "--reason", "Verify CLI prints cloud cost line.", "--", "true"}, nil); c != 0 {
+		t.Fatalf("CLI box run exited %d: %s", c, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "box: cloud · ~$0.01 · $21.88 of $25.00 cap left") {
+		t.Fatalf("CLI stderr missing cost line:\n%s", errOut.String())
+	}
+}
+
+func TestCloudFleetJobsListingAndFollowUp(t *testing.T) {
+	srv := newFakeRunnerV1(t)
+	srv.mode = "sandbox"
+	tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+	pcJobID := "lantern.20261127-140000-0001"
+
+	cloudHostCfg := fleetHost{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "sandbox", Priority: -1}
+	pcHostCfg := fleetHost{Name: "pc", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"}
+
+	// Seed a running and a done cloud job directly on fakeRunnerV1.
+	tRun := time.Date(2026, 11, 27, 15, 10, 0, 0, time.UTC)
+	tDone := time.Date(2026, 11, 27, 15, 4, 5, 0, time.UTC)
+	zero := 0
+	cloudRunID := "lantern.20261127-151000-c3d4"
+	cloudDoneID := "lantern.20261127-150405-a1b2"
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	artifact := []byte("cov-ok\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "cov.txt", Typeflag: tar.TypeReg, Size: int64(len(artifact)), Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(artifact); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	srv.jobs[cloudRunID] = &fakeCloudJob{job: cloudJob{ID: cloudRunID, State: "running", StartedAt: &tRun, LogBytes: 120}}
+	srv.jobs[cloudDoneID] = &fakeCloudJob{
+		log:     []byte("done-log\n"),
+		fileTar: tarBuf.Bytes(),
+		job:     cloudJob{ID: cloudDoneID, State: "done", Exit: &zero, StartedAt: &tDone, LogBytes: 9, Cost: &cloudJobCost{USD: 0.012}, Budget: &srv.budget},
+	}
+	srv.jobOrder = []string{cloudRunID, cloudDoneID}
+	srv.mu.Unlock()
+
+	ff := newFakeFleet(t)
+	a, out, errOut, _ := cloudDispatchTestApp(t, ff, []fleetHost{pcHostCfg, cloudHostCfg}, func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.String(), srv.endpoint()) {
+			return srv.doHTTP(req)
+		}
+		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("offline"))}, nil
+	})
+	a.R = lookupRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+		if len(cmd.Args) >= 3 && cmd.Args[2] == "list" {
+			return Result{Stdout: `[{"name":"lantern","status":"Running"}]`}, nil
+		}
+		if len(cmd.Args) >= 3 && cmd.Args[2] == "exec" {
+			return Result{Stdout: pcJobID + " done 0 12\n"}, nil
+		}
+		return Result{}, fmt.Errorf("unexpected Incus args %q", cmd.Args)
+	})
+
+	if c := run(context.Background(), a, []string{"jobs"}, nil); c != 0 {
+		t.Fatalf("box jobs exited %d: %s", c, errOut.String())
+	}
+	wantCloudRunQ := requireQualifiedJobID(t, cloudHostCfg, cloudRunID).ID
+	wantCloudDoneQ := requireQualifiedJobID(t, cloudHostCfg, cloudDoneID).ID
+	wantPCQ := requireQualifiedJobID(t, pcHostCfg, pcJobID).ID
+	cli := out.String()
+	for _, want := range []string{"HOST", "cloud", "pc", wantCloudRunQ, wantCloudDoneQ, wantPCQ} {
+		if !strings.Contains(cli, want) {
+			t.Fatalf("box jobs output missing %q:\n%s", want, cli)
+		}
+	}
+
+	// MCP box_job without id returns cloud + PC jobs with qualified IDs.
+	res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_job"}`), nil)
+	text := res["content"].([]map[string]any)[0]["text"].(string)
+	if res["isError"] != false || !strings.Contains(text, wantCloudRunQ+" on cloud running") || !strings.Contains(text, wantCloudDoneQ+" on cloud done (exit 0)") {
+		t.Fatalf("MCP box_job list = %s", text)
+	}
+
+	// Follow-up box_job, Pull, and CancelAny work directly with the qualified cloud IDs.
+	doneRes, doneData := lookupTool(t, a, wantCloudDoneQ, false)
+	if doneRes["isError"] != false || doneData["state"] != stateDone || doneData["exitCode"] != 0.0 {
+		t.Fatalf("follow-up box_job(%s) = %+v", wantCloudDoneQ, doneRes)
+	}
+	dest, err := a.Pull(context.Background(), wantCloudDoneQ, "cov.txt", t.TempDir())
+	if err != nil {
+		t.Fatalf("Pull(%s) = %v", wantCloudDoneQ, err)
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != "cov-ok\n" {
+		t.Fatalf("pulled file = %q, %v", got, err)
+	}
+	_, cancelled, code, err := a.CancelAny(context.Background(), wantCloudRunQ)
+	if err != nil || !cancelled || code != 137 {
+		t.Fatalf("CancelAny(%s) = cancelled:%v code:%d err:%v", wantCloudRunQ, cancelled, code, err)
+	}
+
+	// --box skips cloud hosts and queries the default host only.
+	out.Reset()
+	if c := run(context.Background(), a, []string{"jobs", "--box", "lantern"}, nil); c != 0 {
+		t.Fatalf("box jobs --box exited %d: %s", c, errOut.String())
+	}
+	if strings.Contains(out.String(), wantCloudDoneQ) || !strings.Contains(out.String(), pcJobID) {
+		t.Fatalf("box jobs --box output = %q", out.String())
+	}
+}
+
+func TestCloudStatusLinesAndWriteFleet(t *testing.T) {
+	t.Run("writeFleet formats all cloud states and priority rules", func(t *testing.T) {
+		var out strings.Builder
+		writeFleet(&out, []fleetHostStatus{
+			{
+				Name: "pc", Remote: "pc", Project: "agents", Priority: 0,
+				Reachable: true, Available: true, Mode: "full", Room: "2 medium", GPU: "free",
+			},
+			{
+				Name: "cloud-ok", Kind: "modal", CloudMode: "function", Priority: -1,
+				Reachable: true, Available: true, Running: 1, MaxConcurrent: 4,
+				Budget: &cloudBudget{SpentUSD: 3.12, CapUSD: 25, WarnAt: 0.75},
+			},
+			{
+				Name: "cloud-warn", Kind: "modal", CloudMode: "sandbox", Priority: -1,
+				Reachable: true, Available: true, Running: 2, MaxConcurrent: 4,
+				Budget: &cloudBudget{SpentUSD: 20.50, CapUSD: 25, WarnAt: 0.75},
+			},
+			{
+				Name: "cloud-paused", Kind: "modal", CloudMode: "function", Priority: -1,
+				Reachable: true, Available: false, Running: 0, MaxConcurrent: 4, Paused: true,
+				Budget: &cloudBudget{SpentUSD: 3.12, CapUSD: 25, WarnAt: 0.75},
+			},
+			{
+				Name: "cloud-capped", Kind: "modal", CloudMode: "function", Priority: -1,
+				Reachable: true, Available: false, Running: 0, MaxConcurrent: 4,
+				Budget: &cloudBudget{SpentUSD: 25.00, CapUSD: 25, WarnAt: 0.75},
+			},
+			{
+				Name: "cloud-down", Kind: "modal", CloudMode: "function", Priority: -2,
+				Reachable: false, Error: "dial tcp: connection refused",
+			},
+		})
+		want := "hosts: 3 available, 5 of 6 reachable\n" +
+			"  pc (pc/agents): priority 0, full, room 2 medium, GPU free, queue unknown\n" +
+			"  cloud-ok (modal, function): priority -1, 1/4 running · $3.12 of $25.00 this month\n" +
+			"  cloud-warn (modal, sandbox): priority -1, 2/4 running · $20.50 of $25.00 this month · warning\n" +
+			"  cloud-paused (modal, function): priority -1, 0/4 running · $3.12 of $25.00 this month · paused\n" +
+			"  cloud-capped (modal, function): priority -1, 0/4 running · $25.00 of $25.00 this month · cap reached\n" +
+			"  cloud-down (modal, function): priority -2, unavailable (dial tcp: connection refused)\n"
+		if out.String() != want {
+			t.Fatalf("writeFleet:\n%s\nwant:\n%s", out.String(), want)
+		}
+
+		// Priority omitted when all hosts have priority 0.
+		out.Reset()
+		writeFleet(&out, []fleetHostStatus{
+			{
+				Name: "cloud", Kind: "modal", CloudMode: "function", Priority: 0,
+				Reachable: true, Available: true, Running: 1, MaxConcurrent: 4,
+				Budget: &cloudBudget{SpentUSD: 3.12, CapUSD: 25, WarnAt: 0.75},
+			},
+		})
+		wantZero := "hosts: 1 available, 1 of 1 reachable\n" +
+			"  cloud (modal, function): 1/4 running · $3.12 of $25.00 this month\n"
+		if out.String() != wantZero {
+			t.Fatalf("writeFleet zero priority:\n%s\nwant:\n%s", out.String(), wantZero)
+		}
+	})
+
+	t.Run("box hosts, box status, and MCP box_status probe live cloud host", func(t *testing.T) {
+		srv := newFakeRunnerV1(t)
+		srv.mu.Lock()
+		srv.jobs["lantern.20261127-150000-0001"] = &fakeCloudJob{job: cloudJob{ID: "lantern.20261127-150000-0001", State: "running"}}
+		srv.mu.Unlock()
+		tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+		pc := &fakeFleetHost{remote: "pc", project: mode.Project, mode: "full", queueCapable: true}
+		ff := newFakeFleet(t, pc)
+		ff.dashHosts["https://pc.example.com"] = pc
+		hosts := []fleetHost{
+			{Name: "pc", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com"},
+			{Name: "overflow", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1},
+		}
+		a, out, _, _ := cloudDispatchTestApp(t, ff, hosts, func(req *http.Request) (*http.Response, error) {
+			if strings.HasPrefix(req.URL.String(), srv.endpoint()) {
+				return srv.doHTTP(req)
+			}
+			return ff.httpDo(req)
+		})
+
+		if c := run(context.Background(), a, []string{"hosts"}, nil); c != 0 {
+			t.Fatalf("box hosts exited %d", c)
+		}
+		wantCloud := "  overflow (modal, function): priority -1, 1/4 running · $3.12 of $25.00 this month"
+		if !strings.Contains(out.String(), wantCloud) {
+			t.Fatalf("box hosts = %q, want %q", out.String(), wantCloud)
+		}
+
+		out.Reset()
+		if c := run(context.Background(), a, []string{"status"}, nil); c != 0 {
+			t.Fatalf("box status exited %d", c)
+		}
+		if !strings.Contains(out.String(), wantCloud) {
+			t.Fatalf("box status = %q, want %q", out.String(), wantCloud)
+		}
+
+		res := callTool(context.Background(), a, json.RawMessage(`{"name":"box_status","arguments":{}}`), nil)
+		text := res["content"].([]map[string]any)[0]["text"].(string)
+		if res["isError"] != false || !strings.Contains(text, wantCloud) {
+			t.Fatalf("MCP box_status = %s", text)
+		}
+	})
+}
+
+func TestCloudPauseResumeStopCLI(t *testing.T) {
+	t.Run("pause, resume, and stop (pause before stop) on single cloud host", func(t *testing.T) {
+		srv := newFakeRunnerV1(t)
+		srv.mu.Lock()
+		srv.jobs["repo.20261127-120000-0001"] = &fakeCloudJob{job: cloudJob{ID: "repo.20261127-120000-0001", State: "running"}}
+		srv.jobs["repo.20261127-120000-0002"] = &fakeCloudJob{job: cloudJob{ID: "repo.20261127-120000-0002", State: "queued"}}
+		srv.mu.Unlock()
+		tok := srv.writeTokenFile(t, t.TempDir(), "modal.json")
+		hosts := []fleetHost{
+			{Name: "pc", Remote: "pc", Project: mode.Project},
+			{Name: "cloud", Kind: "modal", Endpoint: srv.endpoint(), TokenFile: tok, Mode: "function", Priority: -1},
+		}
+		var order []string
+		a, out, errOut, _ := cloudDispatchTestApp(t, newFakeFleet(t), hosts, func(req *http.Request) (*http.Response, error) {
+			order = append(order, req.Method+" "+req.URL.Path)
+			return srv.doHTTP(req)
+		})
+
+		if c := run(context.Background(), a, []string{"cloud", "pause"}, nil); c != 0 || strings.TrimSpace(out.String()) != "paused cloud" {
+			t.Fatalf("pause = code:%d out:%q err:%q", c, out.String(), errOut.String())
+		}
+		srv.mu.Lock()
+		pausedAfterPause := srv.paused
+		srv.mu.Unlock()
+		if !pausedAfterPause {
+			t.Fatal("fake runner was not paused")
+		}
+
+		out.Reset()
+		if c := run(context.Background(), a, []string{"cloud", "resume"}, nil); c != 0 || strings.TrimSpace(out.String()) != "resumed cloud" {
+			t.Fatalf("resume = code:%d out:%q err:%q", c, out.String(), errOut.String())
+		}
+		srv.mu.Lock()
+		pausedAfterResume := srv.paused
+		srv.mu.Unlock()
+		if pausedAfterResume {
+			t.Fatal("fake runner stayed paused after resume")
+		}
+
+		order = nil
+		out.Reset()
+		if c := run(context.Background(), a, []string{"cloud", "stop"}, nil); c != 0 || strings.TrimSpace(out.String()) != "paused cloud and stopped 2 jobs" {
+			t.Fatalf("stop = code:%d out:%q err:%q", c, out.String(), errOut.String())
+		}
+		if !slices.Equal(order, []string{"POST /v1/pause", "POST /v1/stop"}) {
+			t.Fatalf("stop call order = %v, want [POST /v1/pause POST /v1/stop]", order)
+		}
+		srv.mu.Lock()
+		pausedAfterStop := srv.paused
+		runningAfterStop := srv.runningCountLocked()
+		srv.mu.Unlock()
+		if !pausedAfterStop || runningAfterStop != 0 {
+			t.Fatalf("after stop: paused=%v running=%d, want true, 0", pausedAfterStop, runningAfterStop)
+		}
+	})
+
+	t.Run("host selection errors and --host flag", func(t *testing.T) {
+		// 0 cloud hosts.
+		a, out, errOut, _ := cloudDispatchTestApp(t, newFakeFleet(t), []fleetHost{{Name: "pc", Remote: "pc", Project: mode.Project}}, nil)
+		if c := run(context.Background(), a, []string{"cloud", "pause"}, nil); c != 1 || !strings.Contains(errOut.String(), "no cloud host configured") {
+			t.Fatalf("0 cloud hosts = code:%d err:%q", c, errOut.String())
+		}
+
+		// >1 cloud hosts requires --host.
+		s1 := newFakeRunnerV1(t)
+		s2 := newFakeRunnerV1(t)
+		tmp := t.TempDir()
+		hosts := []fleetHost{
+			{Name: "pc", Remote: "pc", Project: mode.Project},
+			{Name: "cloud-a", Kind: "modal", Endpoint: s1.endpoint(), TokenFile: s1.writeTokenFile(t, tmp, "a.json"), Mode: "function", Priority: -1},
+			{Name: "cloud-b", Kind: "modal", Endpoint: s2.endpoint(), TokenFile: s2.writeTokenFile(t, tmp, "b.json"), Mode: "function", Priority: -2},
+		}
+		a, out, errOut, _ = cloudDispatchTestApp(t, newFakeFleet(t), hosts, func(req *http.Request) (*http.Response, error) {
+			if strings.HasPrefix(req.URL.String(), s1.endpoint()) {
+				return s1.doHTTP(req)
+			}
+			return s2.doHTTP(req)
+		})
+		if c := run(context.Background(), a, []string{"cloud", "pause"}, nil); c != 1 || !strings.Contains(errOut.String(), "multiple cloud hosts configured") {
+			t.Fatalf("multi cloud without --host = code:%d err:%q", c, errOut.String())
+		}
+		errOut.Reset()
+		if c := run(context.Background(), a, []string{"cloud", "pause", "--host", "pc"}, nil); c != 1 || !strings.Contains(errOut.String(), "not a cloud host") {
+			t.Fatalf("non-cloud --host = code:%d err:%q", c, errOut.String())
+		}
+		errOut.Reset()
+		if c := run(context.Background(), a, []string{"cloud", "pause", "--host", "cloud-b"}, nil); c != 0 || strings.TrimSpace(out.String()) != "paused cloud-b" {
+			t.Fatalf("--host cloud-b = code:%d out:%q err:%q", c, out.String(), errOut.String())
+		}
+		s1.mu.Lock()
+		p1 := s1.paused
+		s1.mu.Unlock()
+		s2.mu.Lock()
+		p2 := s2.paused
+		s2.mu.Unlock()
+		if p1 || !p2 {
+			t.Fatalf("paused = s1:%v s2:%v, want false, true", p1, p2)
+		}
+	})
+
+	t.Run("usage text lists box cloud", func(t *testing.T) {
+		if !strings.Contains(usageText(), "box cloud") {
+			t.Fatal("usageText() missing box cloud")
+		}
+	})
 }

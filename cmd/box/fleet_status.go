@@ -16,18 +16,24 @@ import (
 const fleetProbeTimeout = 5 * time.Second
 
 type fleetHostStatus struct {
-	Name      string     `json:"name"`
-	Remote    string     `json:"remote"`
-	Project   string     `json:"project"`
-	Priority  int        `json:"priority,omitempty"`
-	Reachable bool       `json:"reachable"`
-	Available bool       `json:"available"`
-	Error     string     `json:"error,omitempty"`
-	Mode      string     `json:"mode"`
-	Room      string     `json:"room"`
-	Sizes     []SizeRoom `json:"sizes"`
-	GPU       string     `json:"gpu"`
-	Queued    *int       `json:"queued,omitempty"`
+	Name          string       `json:"name"`
+	Remote        string       `json:"remote,omitempty"`
+	Project       string       `json:"project,omitempty"`
+	Kind          string       `json:"kind,omitempty"`
+	CloudMode     string       `json:"cloudMode,omitempty"`
+	Priority      int          `json:"priority,omitempty"`
+	Reachable     bool         `json:"reachable"`
+	Available     bool         `json:"available"`
+	Error         string       `json:"error,omitempty"`
+	Mode          string       `json:"mode"`
+	Room          string       `json:"room"`
+	Sizes         []SizeRoom   `json:"sizes"`
+	GPU           string       `json:"gpu"`
+	Queued        *int         `json:"queued,omitempty"`
+	Running       int          `json:"running,omitempty"`
+	MaxConcurrent int          `json:"maxConcurrent,omitempty"`
+	Paused        bool         `json:"paused,omitempty"`
+	Budget        *cloudBudget `json:"budget,omitempty"`
 }
 
 // fleetStatus reports fleet capacity while retaining the default host's
@@ -43,7 +49,7 @@ func (a *App) fleetStatus(ctx context.Context, dir string, listOnly bool) (Statu
 	visible := max(len(hosts), 1)
 	selected := -1
 	for i, host := range hosts {
-		if host.Remote == a.Remote && host.Project == a.Project {
+		if host.Kind == "" && host.Remote == a.Remote && host.Project == a.Project {
 			selected = i
 			break
 		}
@@ -65,6 +71,13 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 			hostCtx, cancel := context.WithTimeout(ctx, fleetProbeTimeout)
 			defer cancel()
 			app := *a
+			if host.Kind != "" {
+				if i >= visible {
+					return
+				}
+				rows[i] = app.probeCloudStatus(hostCtx, host)
+				return
+			}
 			app.Remote, app.Project = host.Remote, host.Project
 			app.Warn = func(string) {}
 			repoDir := ""
@@ -107,6 +120,46 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 	}
 	current.Hosts = rows
 	return current
+}
+
+func (a *App) probeCloudStatus(ctx context.Context, host fleetHost) fleetHostStatus {
+	row := fleetHostStatus{
+		Name:      host.Name,
+		Kind:      host.Kind,
+		CloudMode: host.Mode,
+		Priority:  host.Priority,
+		GPU:       gpuNone,
+	}
+	if row.CloudMode == "" {
+		row.CloudMode = cloudModeFunction
+	}
+	ch, err := a.newCloudHost(host)
+	if err != nil {
+		row.Error = firstLine(err.Error())
+		return row
+	}
+	cand, p := ch.probeStatus(ctx)
+	row.Reachable = cand.Reachable
+	row.Error = cand.Error
+	row.Mode = cand.Mode
+	row.Sizes = cand.Sizes
+	if cand.HasGPU {
+		if cand.Unavailable != "" {
+			row.GPU = "unavailable: " + cand.Unavailable
+		} else {
+			row.GPU = "free"
+		}
+	}
+	if !cand.Reachable || cand.Error != "" {
+		return row
+	}
+	row.Available = cand.Unavailable == ""
+	row.Running = p.Running
+	row.MaxConcurrent = p.MaxConcurrent
+	row.Paused = p.Paused
+	row.Budget = p.Budget
+	row.Room = fmt.Sprintf("%d/%d running", p.Running, p.MaxConcurrent)
+	return row
 }
 
 type fleetBoxdSnapshot struct {
@@ -160,11 +213,42 @@ func writeFleet(w io.Writer, hosts []fleetHostStatus) {
 	}
 	fmt.Fprintf(w, "hosts: %d available, %d of %d reachable\n", ready, reachable, len(hosts))
 	for _, host := range hosts {
-		fmt.Fprintf(w, "  %s (%s/%s)", host.Name, host.Remote, host.Project)
 		prio := ""
 		if showPriority {
 			prio = fmt.Sprintf("priority %d, ", host.Priority)
 		}
+		if host.Kind != "" {
+			cloudMode := host.CloudMode
+			if cloudMode == "" {
+				cloudMode = cloudModeFunction
+			}
+			fmt.Fprintf(w, "  %s (%s, %s)", host.Name, host.Kind, cloudMode)
+			if !host.Reachable || host.Error != "" {
+				fmt.Fprintf(w, ": %sunavailable (%s)\n", prio, host.Error)
+				continue
+			}
+			parts := []string{fmt.Sprintf("%d/%d running", host.Running, host.MaxConcurrent)}
+			if b := host.Budget; b != nil {
+				if b.CapUSD > 0 {
+					parts = append(parts, fmt.Sprintf("$%.2f of $%.2f this month", b.SpentUSD, b.CapUSD))
+				} else {
+					parts = append(parts, fmt.Sprintf("$%.2f this month", b.SpentUSD))
+				}
+			}
+			if host.Paused {
+				parts = append(parts, "paused")
+			}
+			if b := host.Budget; b != nil && b.CapUSD > 0 {
+				if b.SpentUSD+b.RunningUSD >= b.CapUSD {
+					parts = append(parts, "cap reached")
+				} else if b.WarnAt > 0 && b.SpentUSD/b.CapUSD >= b.WarnAt {
+					parts = append(parts, "warning")
+				}
+			}
+			fmt.Fprintf(w, ": %s%s\n", prio, strings.Join(parts, " · "))
+			continue
+		}
+		fmt.Fprintf(w, "  %s (%s/%s)", host.Name, host.Remote, host.Project)
 		if !host.Reachable {
 			fmt.Fprintf(w, ": %sunavailable (%s)\n", prio, host.Error)
 			continue
