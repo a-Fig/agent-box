@@ -1120,6 +1120,33 @@ func TestFleetRunBoxdAuthoritativePriority(t *testing.T) {
 				r, err, workHigher.listCalls, len(workHigher.startJobs), len(boxdLow.startJobs), out.String())
 		}
 	})
+
+	t.Run("turn-away fallback stops before lower deferred tier when existing -10 boxd candidate beats -20 tier", func(t *testing.T) {
+		boxdTop := &fakeFleetHost{remote: "r1", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(10), refuseLaunch: memoryRefusal}
+		boxdLow := &fakeFleetHost{remote: "r2", project: mode.Project, mode: "full", queueCapable: true, priority: intPtr(-10), execStdout: "boxd-low\n"}
+		workMid := &fakeFleetHost{
+			remote: "r3", project: "work", mode: "full",
+			keys:  map[string]string{"limits.instances": "1"},
+			insts: []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}},
+		}
+		workSunk := &fakeFleetHost{remote: "r4", project: "work", mode: "full", execStdout: "work-sunk\n"}
+		ff := newFakeFleet(t, boxdTop, boxdLow, workMid, workSunk)
+		ff.dashHosts["https://top.example.com"] = boxdTop
+		ff.dashHosts["https://low.example.com"] = boxdLow
+
+		hosts := []fleetHost{
+			{Name: "boxd-top", Remote: "r1", Project: mode.Project, DashboardURL: "https://top.example.com"},
+			{Name: "boxd-low", Remote: "r2", Project: mode.Project, DashboardURL: "https://low.example.com"},
+			{Name: "work-mid", Remote: "r3", Project: "work", Priority: -1},
+			{Name: "work-sunk", Remote: "r4", Project: "work", Priority: -20},
+		}
+		a, out, dir := fleetDispatchTestApp(t, ff, hosts)
+		r, err := a.Run(context.Background(), RunOpts{Dir: dir, Cmd: []string{"echo ok"}, New: true, Reason: "Full -1 tier must fall back to existing -10 boxd host without probing -20 tier."})
+		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "boxd-low" || workMid.listCalls == 0 || workSunk.listCalls != 0 || len(boxdLow.startJobs) != 1 {
+			t.Fatalf("fallback preserving existing -10 = %+v, %v (mid list=%d sunk list=%d low start=%d)\n%s",
+				r, err, workMid.listCalls, workSunk.listCalls, len(boxdLow.startJobs), out.String())
+		}
+	})
 }
 
 func TestFleetRunThreeTierProbeAndLaunchOrder(t *testing.T) {
