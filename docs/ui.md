@@ -116,9 +116,9 @@ one place that knows the kinds. Its foot, as Murmur's, holds the connection and 
 button, and a notice that opens a host's page when its builds have been out of step past the
 2-hour warning. A release that is only out gets no notice: both builds install it within the hour.
 
-**A host's page** (`#fleet/<id>`, #289) holds everything the page knows about one host: its name, which the pencil beside it changes (#291), the mode
-switch, caps and room (the card Overview shows), its running jobs and boxes, its boxd and tray
-builds with **Check for updates**, the enforcer, box sizes, caps, expiry times and GPU
+**A host's page** (`#fleet/<id>`, #289) holds everything the page knows about one host: its
+name, which the pencil beside it changes (#291), the mode switch, caps and room (the card
+Overview shows), its running jobs, queue and boxes, its boxd and tray builds with **Check for updates**, the enforcer, box sizes, caps, expiry times and GPU
 availability. Check for updates compares the running builds with the latest stable release on
 GitHub. It downloads release metadata only. The latest release reads as unknown until the first
 check succeeds. Boxd keeps the last successful result in memory, so it starts fresh after a
@@ -145,7 +145,7 @@ The same set everywhere, since everywhere is the same page.
 | Control | What `boxd` does |
 |---|---|
 | Mode: Full / Shared / My PC | writes `user.agent-box.mode-request` as `{mode, at, by}` (by = the device) on the project. See the mode handshake below. |
-| Rename a host | writes `user.agent-box.name` on the project, or unsets it for an empty name, which goes back to `machineName` in `boxd.json` (#291). At most 40 characters on one line. Only a label: agents and `box` address the host by its ID |
+| Rename a host | writes `user.agent-box.name` on the project, or unsets it for an empty name, which goes back to `machineName` in `boxd.json` (#291). At most 40 characters on one line, with no format characters such as bidi overrides. Only a label: agents and `box` address the host by its ID |
 | Cancel a job | what `box cancel` does, except that it doesn't leave the `.cancelled` mark that keeps the agent's watcher quiet, and it adds "box: cancelled from the dashboard by <device>" to the log, so the agent hears that the job ended and why |
 | Delete a box | `incus delete --force`. The page confirms only when a job on that box is starting, running or paused, or ended within the last 2 minutes (#247); otherwise the first click deletes. boxd rechecks on an unconfirmed request and refuses with the warning when work appeared after the page's last update |
 | Extend a box | adds 1h, 4h or 24h to `user.expires` and holds the box until then (`user.box.hold-until`): a job's end or a launch short of room won't take that time (#198) |

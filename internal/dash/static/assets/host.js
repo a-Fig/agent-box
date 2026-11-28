@@ -171,8 +171,11 @@ function stopRename() {
   requestAnimationFrame(() => document.querySelector('[data-key="rename-open"]')?.focus());
 }
 
-async function saveRename(m, input) {
-  if (ed?.saving) return;
+// The form's submit is the one way in (Enter submits it). It reads the host as it is now: another
+// device may have renamed it while the field was open.
+async function saveRename(id, input) {
+  const m = S.machines.get(id);
+  if (!ed || ed.saving || !m) return;
   const name = input.value.trim();
   if (name === m.name) return stopRename();
   ed.saving = true;
@@ -187,6 +190,8 @@ async function saveRename(m, input) {
       ed.err = e.message || "Couldn't rename the host.";
     }
     changed();
+    // The field was disabled while saving, which took the focus away; give it back.
+    requestAnimationFrame(() => input.focus());
   }
 }
 
@@ -198,10 +203,7 @@ function nameHead(m, el) {
   let input = el.querySelector(`[data-key="${CSS.escape(key)}"]`);
   if (!input) {
     input = h("input", { type: "text", value: m.name, maxlength: MAX_NAME, placeholder: "Name from the host's setup", "aria-label": "Host name", "data-key": key, spellcheck: "false", autocomplete: "off" });
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") saveRename(m, input);
-      if (e.key === "Escape") stopRename();
-    });
+    input.addEventListener("keydown", (e) => e.key === "Escape" && stopRename());
   }
   input.disabled = ed.saving;
   return h(
@@ -209,7 +211,7 @@ function nameHead(m, el) {
     null,
     h(
       "form",
-      { class: "host-rename", onsubmit: (e) => (e.preventDefault(), saveRename(m, input)) },
+      { class: "host-rename", onsubmit: (e) => (e.preventDefault(), saveRename(m.id, input)) },
       h("label", { class: "field" }, input),
       h("button", { class: "btn btn-sm btn-primary", type: "submit", disabled: ed.saving }, ed.saving ? "Saving…" : "Save"),
       h("button", { class: "btn btn-sm btn-outline", type: "button", onclick: stopRename }, "Cancel"),

@@ -802,6 +802,10 @@ code {
 }
 .topbar h1 {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.875rem;
   font-weight: 500;
 }
@@ -853,6 +857,11 @@ code {
   display: flex;
   align-items: center;
   gap: 0.375rem;
+}
+/* A name of one long word (up to 40 characters) wraps rather than pushing the pencil off a phone. */
+.host-name h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .host-name .icon-btn {
   opacity: 0.7;

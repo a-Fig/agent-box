@@ -378,6 +378,9 @@ func TestRenameMachine(t *testing.T) {
 	if code, b := r.post("/api/machine/name", `{"name":"two\nlines"}`); code != 400 {
 		t.Fatalf("control character: %d %s", code, b)
 	}
+	if code, b := r.post("/api/machine/name", `{"name":"‮evil"}`); code != 400 {
+		t.Fatalf("bidi override: %d %s", code, b)
+	}
 	code, b := r.post("/api/machine/name", `{"name":"  Tower  "}`)
 	var m dash.Machine
 	json.Unmarshal(b, &m)
@@ -400,6 +403,11 @@ func TestRenameMachine(t *testing.T) {
 	}
 	if last := r.f.cli[len(r.f.cli)-1]; last != "project unset agents user.agent-box.name" {
 		t.Fatalf("clear ran %s", last)
+	}
+	r.f.set(func() { delete(r.f.cfg, ProjectNameKey) })
+	r.poll()
+	if got := r.w.State().Machines[0].Name; got != r.w.MachineName {
+		t.Fatalf("polled name after clearing %q", got)
 	}
 	var acts []string
 	for _, rec := range readEvents(t, r.dir+"/history") {

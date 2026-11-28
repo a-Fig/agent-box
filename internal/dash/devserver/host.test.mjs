@@ -193,5 +193,27 @@ test("a host is renamed from its page, and an empty name goes back to the host's
 
   await page.getByRole("button", { name: "Rename " + m.name }).click();
   await field.press("Escape");
-  assert.equal(await field.count(), 0);
+  await field.waitFor({ state: "detached" });
+});
+
+test("Enter saves once, against the name as it is now, and a failed save keeps the field", async (t) => {
+  const { page, state } = await hostPage(t);
+  const m = state.machines[0];
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  let posts = 0;
+  await page.route("**/api/machine/name", (route) => {
+    posts++;
+    route.fulfill({ status: 502, json: { error: "Incus didn't answer", code: "incus" } });
+  });
+  await page.getByRole("button", { name: "Rename " + m.name }).click();
+  const field = page.getByRole("textbox", { name: "Host name" });
+  // Another device renames the host while the field is open; typing the old name back is a change.
+  await event(page, "machine", { ...m, name: "Elsewhere" });
+  await field.fill(m.name);
+  await field.press("Enter");
+  await page.getByRole("alert").filter({ hasText: "Incus didn't answer" }).waitFor();
+  assert.equal(posts, 1);
+  assert.deepEqual(errors, []);
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Host name");
 });

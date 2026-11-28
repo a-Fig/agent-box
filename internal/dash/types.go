@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Modes a machine can be in, as the tray writes user.agent-box.mode.
@@ -518,6 +520,15 @@ type NameBody struct {
 
 // MaxMachineName is the most characters a host's name may have.
 const MaxMachineName = 40
+
+// ValidMachineName says whether a trimmed name may be a host's: at most MaxMachineName characters,
+// with no control characters (one line) and no format characters, such as a bidi override that
+// would turn the text around it backwards wherever the name is shown.
+func ValidMachineName(name string) bool {
+	return utf8.RuneCountInString(name) <= MaxMachineName && !strings.ContainsFunc(name, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	})
+}
 
 // BoxBody names which box a control is for: the box of the path's name made at CreatedAt.
 // Names are reused, so a page that saw an older box of the name must not act on a newer one;

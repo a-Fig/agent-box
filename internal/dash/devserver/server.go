@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
@@ -365,7 +364,7 @@ func (s *server) handleName(r *http.Request, body []byte) (int, any, error) {
 		return 0, nil, err
 	}
 	name := strings.TrimSpace(b.Name)
-	if utf8.RuneCountInString(name) > dash.MaxMachineName || strings.ContainsFunc(name, unicode.IsControl) {
+	if !dash.ValidMachineName(name) {
 		return 0, nil, fail(http.StatusBadRequest, dash.CodeBadRequest, "a name is at most %d characters, on one line", dash.MaxMachineName)
 	}
 	s.mu.Lock()

@@ -13,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/a-Fig/agent-box/internal/dash"
 	"github.com/a-Fig/agent-box/internal/jobrun"
@@ -201,7 +199,7 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(b.Name)
-	if utf8.RuneCountInString(name) > dash.MaxMachineName || strings.ContainsFunc(name, unicode.IsControl) {
+	if !dash.ValidMachineName(name) {
 		writeError(w, http.StatusBadRequest, dash.CodeBadRequest, fmt.Sprintf("a name is at most %d characters, on one line", dash.MaxMachineName))
 		return
 	}
