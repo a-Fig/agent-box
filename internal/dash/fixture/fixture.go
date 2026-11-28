@@ -487,6 +487,9 @@ func (w *world) finish(name, about string) Scenario {
 		// Windows counts the WSL VM in its own use: the owner's apps take 11GiB beside it.
 		h := *m.Host
 		h.MemUsed = m.WSLMemory + 11<<30
+		if m.TrayLastSeen != nil {
+			h.At = *m.TrayLastSeen // the enforcer reads it with its heartbeat
+		}
 		m.Host = &h
 	}
 

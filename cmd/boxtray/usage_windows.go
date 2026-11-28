@@ -6,7 +6,6 @@ import (
 	"context"
 	"os/exec"
 	"runtime"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -32,10 +31,12 @@ type memoryStatusEx struct {
 }
 
 // usageReader reads the machine's use. CPU use is over the time since the last read, the
-// heartbeat's 30s; the first read samples half a second.
+// heartbeat's 30s. A first read, or one long after the last (an enforcer that stood aside, or the
+// distro down), samples half a second instead, so it says what is busy now. Only the enforcer's
+// loop calls it.
 type usageReader struct {
-	mu   sync.Mutex
-	last *cpuTimes
+	last   *cpuTimes
+	lastAt time.Time
 }
 
 func (r *usageReader) read(ctx context.Context) *dash.HostUsage {
@@ -48,20 +49,20 @@ func (r *usageReader) read(ctx context.Context) *dash.HostUsage {
 	if !ok {
 		return nil
 	}
-	r.mu.Lock()
 	prev := r.last
-	if prev == nil {
-		r.mu.Unlock()
-		time.Sleep(500 * time.Millisecond)
+	if prev == nil || time.Since(r.lastAt) > 2*heartbeatEvery {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(500 * time.Millisecond):
+		}
 		p := now
 		prev = &p
 		if now, ok = systemTimes(); !ok {
 			return nil
 		}
-		r.mu.Lock()
 	}
-	r.last = &now
-	r.mu.Unlock()
+	r.last, r.lastAt = &now, time.Now()
 	return &dash.HostUsage{
 		At:       time.Now().UTC().Truncate(time.Second),
 		CPUs:     runtime.NumCPU(),
