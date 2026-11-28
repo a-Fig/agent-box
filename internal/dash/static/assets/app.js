@@ -24,9 +24,10 @@ const VIEWS = {
 // Reached from the sidebar's foot (#287) and from a host in Fleet (#288), not from the nav list.
 const PAGES = { ...VIEWS, settings: { title: "Settings", view: settings } };
 
-// Routes: #overview, #boxes, #jobs, #jobs/<key>, #history, #settings, #fleet/<host id>.
+// Routes: #overview, #boxes, #jobs, #jobs?<filters> (read once by Jobs), #jobs/<key>, #history,
+// #settings, #fleet/<host id>.
 function route() {
-  const [name, ...rest] = location.hash.slice(1).split("/");
+  const [name, ...rest] = location.hash.slice(1).split("?")[0].split("/");
   // A hand-typed hash can hold a bad escape, which decodeURIComponent throws on: it opens Overview.
   const key = () => {
     try {

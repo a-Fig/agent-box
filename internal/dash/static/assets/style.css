@@ -221,8 +221,8 @@
 
 
 /* Chart colors: the dataviz reference palette's categorical slots (validated: adjacent CVD
- * Delta E >= 8.4), dark steps for Dark and Dim, light steps for Light. Results use the status
- * colors, so they never share a hue with a series. */
+ * Delta E >= 8.4), dark steps for Dark and Dim, light steps for Light. Results and modes use the
+ * status colors (below), so the series beside them on a page keep to hues of their own. */
 :root {
   --s1: #3987e5;
   --s2: #d95926;
@@ -516,6 +516,9 @@ code {
 }
 .dot-shared {
   background: var(--mode-shared);
+}
+.dot-mypc {
+  background: var(--mode-mypc);
 }
 .dot-off {
   border: 1.5px solid var(--dot-off);

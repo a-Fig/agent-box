@@ -6,7 +6,7 @@ import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 import { hint, hideTip } from "./tip.js";
 
-export { overview, boxes, jobs, openJobs, modeBadge, modeDot, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
+export { overview, boxes, jobs, jobsHref, modeDot, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
 
 const MODES = [
   ["full", "Full"],
@@ -869,6 +869,7 @@ function options(label, key, values) {
 
 const jobs = {
   mount(el) {
+    filtersFromHash();
     let t = 0;
     const search = h("input", { type: "search", placeholder: "Search reasons, commands, branches", "aria-label": "Search jobs", value: F.q });
     search.addEventListener("input", () => {
@@ -924,13 +925,21 @@ function modeBadge(mode) {
   return mode === "full" ? "badge-full" : mode === "shared" ? "badge-shared" : "";
 }
 function modeDot(mode) {
-  return mode === "full" ? "dot-full" : mode === "shared" ? "dot-shared" : "dot-off";
+  return mode === "full" ? "dot-full" : mode === "shared" ? "dot-shared" : "dot-mypc";
 }
 
-// Sets Jobs' filters to f and leaves the rest clear, for a link that opens Jobs on what it names
-// (History's bars). The link's own href, #jobs, then mounts the page with them.
-function openJobs(f) {
-  for (const k of Object.keys(F)) F[k] = f[k] || "";
+// A link to Jobs filtered to f (History's bars): #jobs?kind=go-test. The filters ride in the link,
+// so a new tab or a copied link opens them too; Jobs reads them once and drops them from the
+// address, as its own selects aren't kept there.
+function jobsHref(f) {
+  return "#jobs?" + new URLSearchParams(f);
+}
+function filtersFromHash() {
+  const q = location.hash.split("?")[1];
+  if (q == null) return;
+  const p = new URLSearchParams(q);
+  for (const k of Object.keys(F)) F[k] = p.get(k) || "";
+  history.replaceState(null, "", location.pathname + location.search + "#jobs");
 }
 
 function clearFilters() {
