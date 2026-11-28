@@ -69,7 +69,7 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 		Repo:         rp.Name,
 		Queue:        o.Queue,
 	}
-	candidates := a.probeFleetCandidates(ctx, targets, pickReq, info.Repo)
+	candidates, rest := a.probeFleetTiers(ctx, targets, pickReq, info.Repo)
 
 	prepared := fleetRun{repo: rp, info: info}
 	defer func() {
@@ -84,6 +84,12 @@ func (a *App) runFleet(ctx context.Context, o RunOpts, sz mode.Size, targets []f
 	var lastLimits []string
 	for {
 		pick := pickFleetHost(candidates, pickReq)
+		if pick.Action != pickStart && len(rest) > 0 && ctx.Err() == nil {
+			more, nextRest := a.probeFleetTiers(ctx, rest, pickReq, info.Repo)
+			candidates = append(candidates, more...)
+			rest = nextRest
+			continue
+		}
 		if pick.Action == pickRefuse {
 			if pick.Invalid {
 				return JobResult{Code: 2}, fmt.Errorf("%s", pick.Reason)

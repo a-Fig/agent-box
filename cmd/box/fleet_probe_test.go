@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -545,4 +546,108 @@ func TestProbeFleetCandidatePooledThrowawayRequiresIdleAndPoolEnabled(t *testing
 			}
 		})
 	}
+}
+
+func TestProbeFleetTiers(t *testing.T) {
+	openKeys := map[string]string{mode.ProjectModeKey: "full", "limits.instances": "4", gpuKey: "block"}
+	fullKeys := map[string]string{mode.ProjectModeKey: "full", "limits.instances": "1", gpuKey: "block"}
+
+	newProbeApp := func(t *testing.T, hostKeys map[string]map[string]string, insts map[string]string) (*App, *[]string) {
+		t.Helper()
+		var mu sync.Mutex
+		var probed []string
+		recorded := map[string]bool{}
+		a := newApp()
+		a.Now = func() time.Time { return time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC) }
+		a.R = fleetTestRunner(func(_ context.Context, cmd Cmd) (Result, error) {
+			if len(cmd.Args) >= 4 && cmd.Args[2] == "list" {
+				remote, _, _ := strings.Cut(cmd.Args[3], ":")
+				mu.Lock()
+				if !recorded[remote] {
+					recorded[remote] = true
+					probed = append(probed, remote)
+				}
+				mu.Unlock()
+				out, ok := insts[remote]
+				if !ok {
+					out = "[]"
+				}
+				return Result{Stdout: out}, nil
+			}
+			if len(cmd.Args) >= 5 && cmd.Args[2] == "project" {
+				remote, _, _ := strings.Cut(cmd.Args[4], ":")
+				if res, ok := respondHealthyProject(cmd, hostKeys[remote], "{}"); ok {
+					return res, nil
+				}
+			}
+			return Result{Code: 1}, nil
+		})
+		a.HTTP = func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"queue":true,"jobs":[]}`))}, nil
+		}
+		return a, &probed
+	}
+
+	t.Run("stops after top tier when top tier can start", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-high": openKeys,
+			"r-mid":  openKeys,
+			"r-low":  openKeys,
+		}, nil)
+		targets := []fleetHost{
+			{Name: "low", Remote: "r-low", Project: mode.Project, Priority: 0},
+			{Name: "high", Remote: "r-high", Project: mode.Project, Priority: 10},
+			{Name: "mid", Remote: "r-mid", Project: mode.Project, Priority: 5},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		if !slices.Equal(*probed, []string{"r-high"}) {
+			t.Fatalf("probed = %v, want [r-high]", *probed)
+		}
+		if len(cands) != 1 || cands[0].Host.Name != "high" {
+			t.Fatalf("cands = %+v, want [high]", cands)
+		}
+		if len(rest) != 2 || rest[0].Name != "mid" || rest[1].Name != "low" {
+			t.Fatalf("rest = %+v, want [mid, low]", rest)
+		}
+	})
+
+	t.Run("probes lower tier when higher tier cannot start and stops at first startable tier", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r-high": fullKeys,
+			"r-mid":  openKeys,
+			"r-low":  openKeys,
+		}, map[string]string{
+			"r-high": `[{"name":"busy","status":"Running","config":{"user.box.size":"medium"}}]`,
+		})
+		targets := []fleetHost{
+			{Name: "high", Remote: "r-high", Project: mode.Project, Priority: 10},
+			{Name: "mid", Remote: "r-mid", Project: mode.Project, Priority: 5},
+			{Name: "low", Remote: "r-low", Project: mode.Project, Priority: 0},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{Queue: true}, "")
+		if !slices.Equal(*probed, []string{"r-high", "r-mid"}) {
+			t.Fatalf("probed = %v, want [r-high r-mid]", *probed)
+		}
+		if len(cands) != 2 || len(rest) != 1 || rest[0].Name != "low" {
+			t.Fatalf("cands=%d rest=%+v, want 2 cands and [low]", len(cands), rest)
+		}
+		if pick := pickFleetHost(cands, pickRequest{Queue: true}); pick.Action != pickStart || pick.Host.Name != "mid" {
+			t.Fatalf("pick = %+v, want start on mid", pick)
+		}
+	})
+
+	t.Run("equal priority hosts probe in one tier with empty rest", func(t *testing.T) {
+		a, probed := newProbeApp(t, map[string]map[string]string{
+			"r1": openKeys,
+			"r2": openKeys,
+		}, nil)
+		targets := []fleetHost{
+			{Name: "one", Remote: "r1", Project: mode.Project},
+			{Name: "two", Remote: "r2", Project: mode.Project},
+		}
+		cands, rest := a.probeFleetTiers(context.Background(), targets, pickRequest{}, "")
+		if len(cands) != 2 || len(rest) != 0 || len(*probed) != 2 {
+			t.Fatalf("equal priority cands=%d rest=%d probed=%v", len(cands), len(rest), *probed)
+		}
+	})
 }

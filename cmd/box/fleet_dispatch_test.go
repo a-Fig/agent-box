@@ -959,3 +959,78 @@ func TestFleetRunDistinguishesQueueStorageFailureFromInvalidRequest(t *testing.T
 		t.Fatalf("invalid request = %+v, %v; second queue requests=%d", r, err, len(second.enqueued))
 	}
 }
+
+func TestFleetRunTieredFallbackOnTurnAway(t *testing.T) {
+	t.Run("turn-away from higher-priority tier probes and starts on lower tier", func(t *testing.T) {
+		high := &fakeFleetHost{
+			remote:       "r1",
+			project:      mode.Project,
+			mode:         "full",
+			queueCapable: true,
+			refuseLaunch: memoryRefusal,
+		}
+		low := &fakeFleetHost{
+			remote:       "r2",
+			project:      mode.Project,
+			mode:         "full",
+			queueCapable: true,
+			execStdout:   "ran-on-low\n",
+		}
+		ff := newFakeFleet(t, high, low)
+		ff.dashHosts["https://high.example.com"] = high
+		ff.dashHosts["https://low.example.com"] = low
+		hosts := []fleetHost{
+			{Name: "low", Remote: "r2", Project: mode.Project, DashboardURL: "https://low.example.com", Priority: 0},
+			{Name: "high", Remote: "r1", Project: mode.Project, DashboardURL: "https://high.example.com", Priority: 10},
+		}
+		a, out, repoDir := fleetDispatchTestApp(t, ff, hosts)
+
+		r, err := a.Run(context.Background(), RunOpts{
+			Dir: repoDir, Cmd: []string{"echo ok"}, New: true, Queue: true,
+			Reason: "Fall back to lower-priority tier after higher tier turns away.",
+		})
+		if err != nil || r.State != stateDone || r.Code != 0 || r.Host != "low" {
+			t.Fatalf("tiered fallback = %+v, %v\n%s", r, err, out.String())
+		}
+		if high.listCalls == 0 || low.listCalls == 0 {
+			t.Fatalf("expected both tiers probed after turn-away, got high=%d low=%d", high.listCalls, low.listCalls)
+		}
+	})
+
+	t.Run("turn-away from higher tier probes lower tier then queues on higher tier if lower is also full", func(t *testing.T) {
+		high := &fakeFleetHost{
+			remote:       "r1",
+			project:      mode.Project,
+			mode:         "full",
+			queueCapable: true,
+			refuseLaunch: memoryRefusal,
+		}
+		low := &fakeFleetHost{
+			remote:       "r2",
+			project:      mode.Project,
+			mode:         "full",
+			keys:         map[string]string{"limits.instances": "1"},
+			insts:        []instance{{Name: "busy", Status: "Running", Config: map[string]string{mode.SizeKey: "medium"}}},
+			queueCapable: true,
+		}
+		ff := newFakeFleet(t, high, low)
+		ff.dashHosts["https://high.example.com"] = high
+		ff.dashHosts["https://low.example.com"] = low
+		hosts := []fleetHost{
+			{Name: "low", Remote: "r2", Project: mode.Project, DashboardURL: "https://low.example.com", Priority: 0},
+			{Name: "high", Remote: "r1", Project: mode.Project, DashboardURL: "https://high.example.com", Priority: 10},
+		}
+		a, out, repoDir := fleetDispatchTestApp(t, ff, hosts)
+
+		r, err := a.Run(context.Background(), RunOpts{
+			Dir: repoDir, Cmd: []string{"echo queued"}, New: true, Queue: true,
+			Reason: "Queue on higher-priority tier when lower tier is also full.",
+		})
+		if err != nil || r.State != stateQueued || r.Host != "high" || len(high.enqueued) != 1 || len(low.enqueued) != 0 {
+			t.Fatalf("tiered queue fallback = %+v, %v (high=%d low=%d)\n%s", r, err, len(high.enqueued), len(low.enqueued), out.String())
+		}
+		if low.listCalls == 0 {
+			t.Fatalf("expected lower tier to be probed before queueing on higher tier")
+		}
+	})
+}

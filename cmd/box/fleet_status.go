@@ -19,6 +19,7 @@ type fleetHostStatus struct {
 	Name      string     `json:"name"`
 	Remote    string     `json:"remote"`
 	Project   string     `json:"project"`
+	Priority  int        `json:"priority,omitempty"`
 	Reachable bool       `json:"reachable"`
 	Available bool       `json:"available"`
 	Error     string     `json:"error,omitempty"`
@@ -86,7 +87,7 @@ func (a *App) probeFleet(ctx context.Context, dir string, hosts []fleetHost, sel
 				return
 			}
 			row := fleetHostStatus{
-				Name: host.Name, Remote: host.Remote, Project: host.Project,
+				Name: host.Name, Remote: host.Remote, Project: host.Project, Priority: host.Priority,
 				Reachable: s.Reachable, Available: s.Available, Error: s.Error,
 				Mode: s.Mode, Room: s.Room, Sizes: s.Sizes, GPU: s.GPU,
 			}
@@ -145,7 +146,7 @@ func (a *App) fleetQueueLength(ctx context.Context, dashboardURL string) *int {
 }
 
 func writeFleet(w io.Writer, hosts []fleetHostStatus) {
-	ready, reachable := 0, 0
+	ready, reachable, showPriority := 0, 0, false
 	for _, host := range hosts {
 		if host.Available {
 			ready++
@@ -153,12 +154,19 @@ func writeFleet(w io.Writer, hosts []fleetHostStatus) {
 		if host.Reachable {
 			reachable++
 		}
+		if host.Priority != 0 {
+			showPriority = true
+		}
 	}
 	fmt.Fprintf(w, "hosts: %d available, %d of %d reachable\n", ready, reachable, len(hosts))
 	for _, host := range hosts {
 		fmt.Fprintf(w, "  %s (%s/%s)", host.Name, host.Remote, host.Project)
+		prio := ""
+		if showPriority {
+			prio = fmt.Sprintf("priority %d, ", host.Priority)
+		}
 		if !host.Reachable {
-			fmt.Fprintf(w, ": unavailable (%s)\n", host.Error)
+			fmt.Fprintf(w, ": %sunavailable (%s)\n", prio, host.Error)
 			continue
 		}
 		mode, queue := host.Mode, "unknown"
@@ -166,12 +174,12 @@ func writeFleet(w io.Writer, hosts []fleetHostStatus) {
 			mode = "unknown"
 		}
 		if host.Error != "" {
-			fmt.Fprintf(w, ": %s, capacity unknown (%s)\n", mode, host.Error)
+			fmt.Fprintf(w, ": %s%s, capacity unknown (%s)\n", prio, mode, host.Error)
 			continue
 		}
 		if host.Queued != nil {
 			queue = fmt.Sprint(*host.Queued)
 		}
-		fmt.Fprintf(w, ": %s, room %s, GPU %s, queue %s\n", mode, host.Room, host.GPU, queue)
+		fmt.Fprintf(w, ": %s%s, room %s, GPU %s, queue %s\n", prio, mode, host.Room, host.GPU, queue)
 	}
 }

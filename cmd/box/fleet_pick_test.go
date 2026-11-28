@@ -162,6 +162,37 @@ func TestResolveFleetTargetsBypassAndPinning(t *testing.T) {
 			t.Fatalf("pinned unambiguous = %v, %v, %v", targets, bypass, err)
 		}
 	})
+
+	t.Run("priority propagates through target resolution and conflicts reject", func(t *testing.T) {
+		withPrio := []fleetHost{
+			{Name: "primary", Remote: "pc", Project: mode.Project, Priority: 10},
+			{Name: "primary-dash", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com", Priority: 10},
+			{Name: "spare", Remote: "spare", Project: mode.Project, Priority: -1},
+		}
+		targets, bypass, err := resolveFleetTargets(def, withPrio, "", "")
+		want := []fleetHost{
+			{Name: "primary", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com", Priority: 10},
+			{Name: "spare", Remote: "spare", Project: mode.Project, Priority: -1},
+		}
+		if err != nil || bypass || !slices.Equal(targets, want) {
+			t.Fatalf("unpinned priority = %v, %v, %v; want %v", targets, bypass, err, want)
+		}
+		targets, bypass, err = resolveFleetTargets(def, withPrio, "primary-dash", "")
+		if err != nil || bypass || !slices.Equal(targets, []fleetHost{{Name: "primary-dash", Remote: "pc", Project: mode.Project, DashboardURL: "https://pc.example.com", Priority: 10}}) {
+			t.Fatalf("pinned alias priority = %v, %v, %v", targets, bypass, err)
+		}
+
+		conflictingPrio := []fleetHost{
+			{Name: "a", Remote: "pc", Project: mode.Project, Priority: 10},
+			{Name: "b", Remote: "pc", Project: mode.Project, Priority: 5},
+		}
+		if _, _, err := resolveFleetTargets(def, conflictingPrio, "", ""); err == nil || !strings.Contains(err.Error(), "conflicting priorities") {
+			t.Fatalf("unpinned conflicting priority = %v, want conflicting priorities", err)
+		}
+		if _, _, err := resolveFleetTargets(def, conflictingPrio, "a", ""); err == nil || !strings.Contains(err.Error(), "conflicting priorities") {
+			t.Fatalf("pinned conflicting priority = %v, want conflicting priorities", err)
+		}
+	})
 }
 
 func TestPickFleetHostStartEligibility(t *testing.T) {
@@ -652,6 +683,75 @@ func TestPickFleetHostResolvedSingleAndExplicitBoxGuard(t *testing.T) {
 		pick := pickFleetHost(nil, pickRequest{})
 		if pick.Action != pickRefuse || !strings.Contains(pick.Reason, "no configured hosts") {
 			t.Fatalf("empty pick = %+v", pick)
+		}
+	})
+}
+
+func TestPickFleetHostPriority(t *testing.T) {
+	t.Run("higher priority beats warm repo affinity and idle preference", func(t *testing.T) {
+		lowWarm := readyHost("low-warm", "r1", mode.Project)
+		lowWarm.Host.Priority = 0
+		lowWarm.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
+
+		highBusy := readyHost("high-busy", "r2", mode.Project)
+		highBusy.Host.Priority = 10
+		highBusy.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running", Running: []JobInfo{{Job: "repo.1"}}}
+
+		pick := pickFleetHost([]fleetCandidate{lowWarm, highBusy}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "high-busy" {
+			t.Fatalf("pick = %+v, want start on high-busy", pick)
+		}
+	})
+
+	t.Run("equal priority preserves warm affinity and config order", func(t *testing.T) {
+		coldFirst := readyHost("cold-first", "r1", mode.Project)
+		coldFirst.Host.Priority = 5
+		warmSecond := readyHost("warm-second", "r2", mode.Project)
+		warmSecond.Host.Priority = 5
+		warmSecond.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
+
+		pick := pickFleetHost([]fleetCandidate{coldFirst, warmSecond}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "warm-second" {
+			t.Fatalf("equal priority warm pick = %+v, want warm-second", pick)
+		}
+
+		coldSecond := readyHost("cold-second", "r3", mode.Project)
+		coldSecond.Host.Priority = 5
+		pick = pickFleetHost([]fleetCandidate{coldFirst, coldSecond}, pickRequest{Repo: "repo"})
+		if pick.Action != pickStart || pick.Host.Name != "cold-first" {
+			t.Fatalf("equal priority tie pick = %+v, want cold-first", pick)
+		}
+	})
+
+	t.Run("queue prefers higher priority over shorter queue or active mode", func(t *testing.T) {
+		lowShort := readyHost("low-short", "r1", mode.Project)
+		lowShort.Host.Priority = 0
+		lowShort.Sizes = testCPUSizes(0, 0, 0)
+		lowShort.Queued = intPtr(0)
+
+		highLongMyPC := readyHost("high-long-mypc", "r2", mode.Project)
+		highLongMyPC.Host.Priority = 10
+		highLongMyPC.Mode = string(mode.MyPC)
+		highLongMyPC.Queued = intPtr(5)
+
+		pick := pickFleetHost([]fleetCandidate{lowShort, highLongMyPC}, pickRequest{Queue: true})
+		if pick.Action != pickQueue || pick.Host.Name != "high-long-mypc" {
+			t.Fatalf("queue priority pick = %+v, want high-long-mypc", pick)
+		}
+	})
+
+	t.Run("starting on lower-priority host beats queueing on higher-priority host", func(t *testing.T) {
+		highFull := readyHost("high-full", "r1", mode.Project)
+		highFull.Host.Priority = 10
+		highFull.Sizes = testCPUSizes(0, 0, 0)
+		highFull.RepoBox = &RepoBox{Name: "repo", Size: "medium", Status: "Running"}
+
+		lowOpen := readyHost("low-open", "r2", mode.Project)
+		lowOpen.Host.Priority = 0
+
+		pick := pickFleetHost([]fleetCandidate{highFull, lowOpen}, pickRequest{Repo: "repo", New: true, Queue: true})
+		if pick.Action != pickStart || pick.Host.Name != "low-open" {
+			t.Fatalf("overflow pick = %+v, want start on low-open", pick)
 		}
 	})
 }

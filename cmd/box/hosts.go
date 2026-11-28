@@ -14,6 +14,7 @@ type fleetHost struct {
 	Remote       string `json:"remote"`
 	Project      string `json:"project"`
 	DashboardURL string `json:"dashboard_url"`
+	Priority     int    `json:"priority,omitempty"`
 }
 
 // configuredHosts reads agent-box/hosts.json in the user's config directory.
@@ -40,6 +41,7 @@ func (a *App) configuredHosts() ([]fleetHost, error) {
 	}
 
 	names := make(map[string]bool, len(config.Hosts))
+	priorities := make(map[[2]string]int, len(config.Hosts))
 	for i := range config.Hosts {
 		host := &config.Hosts[i]
 		host.Name = strings.TrimSpace(host.Name)
@@ -57,6 +59,11 @@ func (a *App) configuredHosts() ([]fleetHost, error) {
 		if host.DashboardURL != "" && !validDashboardURL(host.DashboardURL) {
 			return nil, fmt.Errorf("%s: host %d dashboard_url must be an absolute HTTP(S) URL without credentials, query, or fragment", path, i+1)
 		}
+		key := [2]string{host.Remote, host.Project}
+		if prev, ok := priorities[key]; ok && prev != host.Priority {
+			return nil, fmt.Errorf("%s: conflicting priorities for %s/%s (%d and %d)", path, host.Remote, host.Project, prev, host.Priority)
+		}
+		priorities[key] = host.Priority
 	}
 	return config.Hosts, nil
 }

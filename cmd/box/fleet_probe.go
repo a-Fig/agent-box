@@ -1,13 +1,52 @@
 package main
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/a-Fig/agent-box/internal/jobrun"
 	"github.com/a-Fig/agent-box/internal/mode"
 )
+
+// probeFleetTiers groups targets by Priority descending and probes each tier
+// concurrently, stopping right after the first tier where pickFleetHost returns
+// pickStart. Any unprobed lower-priority hosts are returned in rest.
+func (a *App) probeFleetTiers(ctx context.Context, targets []fleetHost, req pickRequest, repoOrigin string) (cands []fleetCandidate, rest []fleetHost) {
+	tiers := fleetPriorityTiers(targets)
+	for i, tier := range tiers {
+		cands = append(cands, a.probeFleetCandidates(ctx, tier, req, repoOrigin)...)
+		if pickFleetHost(cands, req).Action == pickStart {
+			for _, rem := range tiers[i+1:] {
+				rest = append(rest, rem...)
+			}
+			return cands, rest
+		}
+	}
+	return cands, nil
+}
+
+func fleetPriorityTiers(targets []fleetHost) [][]fleetHost {
+	if len(targets) == 0 {
+		return nil
+	}
+	ordered := slices.Clone(targets)
+	slices.SortStableFunc(ordered, func(a, b fleetHost) int {
+		return cmp.Compare(b.Priority, a.Priority)
+	})
+	var tiers [][]fleetHost
+	start := 0
+	for i := 1; i < len(ordered); i++ {
+		if ordered[i].Priority != ordered[start].Priority {
+			tiers = append(tiers, ordered[start:i])
+			start = i
+		}
+	}
+	tiers = append(tiers, ordered[start:])
+	return tiers
+}
 
 // probeFleetCandidates inspects each resolved target host concurrently within
 // fleetProbeTimeout (5s) and returns typed fleetCandidate facts in targets order.

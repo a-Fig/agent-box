@@ -43,12 +43,25 @@ func TestConfiguredHostsFile(t *testing.T) {
 		{
 			name: "multiple hosts in file order",
 			data: `{"hosts":[
-				{"name":"primary","remote":"pc","project":"primary-project","dashboard_url":"https://example.com:8443/dashboard"},
-				{"name":"backup","remote":"spare"}
+				{"name":"primary","remote":"pc","project":"primary-project","dashboard_url":"https://example.com:8443/dashboard","priority":10},
+				{"name":"backup","remote":"spare"},
+				{"name":"archive","remote":"cold","priority":-5}
 			]}`,
 			want: []fleetHost{
-				{Name: "primary", Remote: "pc", Project: "primary-project", DashboardURL: "https://example.com:8443/dashboard"},
-				{Name: "backup", Remote: "spare", Project: "existing-project"},
+				{Name: "primary", Remote: "pc", Project: "primary-project", DashboardURL: "https://example.com:8443/dashboard", Priority: 10},
+				{Name: "backup", Remote: "spare", Project: "existing-project", Priority: 0},
+				{Name: "archive", Remote: "cold", Project: "existing-project", Priority: -5},
+			},
+		},
+		{
+			name: "compatible aliases with matching priority",
+			data: `{"hosts":[
+				{"name":"primary","remote":"pc","priority":5},
+				{"name":"primary-dash","remote":"pc","dashboard_url":"https://example.com","priority":5}
+			]}`,
+			want: []fleetHost{
+				{Name: "primary", Remote: "pc", Project: "existing-project", Priority: 5},
+				{Name: "primary-dash", Remote: "pc", Project: "existing-project", DashboardURL: "https://example.com", Priority: 5},
 			},
 		},
 		{name: "empty host list", data: `{"hosts":[]}`},
@@ -56,6 +69,8 @@ func TestConfiguredHostsFile(t *testing.T) {
 		{name: "missing name", data: `{"hosts":[{"name":" ","remote":"pc"}]}`, wantErr: "host 1 requires a name and remote"},
 		{name: "missing remote", data: `{"hosts":[{"name":"primary","remote":" "}]}`, wantErr: "host 1 requires a name and remote"},
 		{name: "duplicate name", data: `{"hosts":[{"name":"primary","remote":"pc"},{"name":"primary","remote":"spare"}]}`, wantErr: `duplicate host name "primary"`},
+		{name: "conflicting priorities on aliases", data: `{"hosts":[{"name":"a","remote":"pc","priority":10},{"name":"b","remote":"pc","priority":5}]}`, wantErr: "conflicting priorities for pc/existing-project"},
+		{name: "conflicting explicit and default priority on aliases", data: `{"hosts":[{"name":"a","remote":"pc","priority":10},{"name":"b","remote":"pc"}]}`, wantErr: "conflicting priorities for pc/existing-project"},
 		{name: "relative dashboard URL", data: `{"hosts":[{"name":"primary","remote":"pc","dashboard_url":"/dash"}]}`, wantErr: "host 1 dashboard_url"},
 		{name: "dashboard URL scheme", data: `{"hosts":[{"name":"primary","remote":"pc","dashboard_url":"ftp://example.com"}]}`, wantErr: "host 1 dashboard_url"},
 		{name: "dashboard URL missing hostname", data: `{"hosts":[{"name":"primary","remote":"pc","dashboard_url":"https://:8443"}]}`, wantErr: "host 1 dashboard_url"},
