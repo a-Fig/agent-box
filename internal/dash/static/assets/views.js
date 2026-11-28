@@ -6,7 +6,7 @@ import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 import { hint, hideTip } from "./tip.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
+export { overview, boxes, jobs, openJobs, modeBadge, modeDot, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
 
 const MODES = [
   ["full", "Full"],
@@ -407,7 +407,7 @@ function machineCard(m, linked = false) {
       return control("mode-" + m.id + "-" + id, hint(tip, { "aria-pressed": !req && m.mode === id ? "true" : "false", class: pending ? "pending" : null, disabled: busy.has("mode-" + m.id), onclick: () => setMode(m, id) }), label, pending ? h("span", { class: "muted" }, "· pending") : null);
     }),
   );
-  const state = h("span", { class: "badge " + (m.mode === "mypc" ? "" : "badge-on") }, modeLabel(m.mode));
+  const state = h("span", { class: "badge " + modeBadge(m.mode) }, modeLabel(m.mode));
   const enforcerBadge = headless ? h("span", hint("Nobody is logged on to the PC, so the headless enforcer, a background task, applies the mode. The tray takes over at logon.", { class: "badge badge-outline" }, true), "headless") : null;
   let note = null;
   if (req) {
@@ -918,6 +918,20 @@ const jobs = {
     this.listEl.replaceChildren(...kids);
   },
 };
+
+// A mode's badge and dot: its own color, the same on every page (#292).
+function modeBadge(mode) {
+  return mode === "full" ? "badge-full" : mode === "shared" ? "badge-shared" : "";
+}
+function modeDot(mode) {
+  return mode === "full" ? "dot-full" : mode === "shared" ? "dot-shared" : "dot-off";
+}
+
+// Sets Jobs' filters to f and leaves the rest clear, for a link that opens Jobs on what it names
+// (History's bars). The link's own href, #jobs, then mounts the page with them.
+function openJobs(f) {
+  for (const k of Object.keys(F)) F[k] = f[k] || "";
+}
 
 function clearFilters() {
   for (const k of Object.keys(F)) F[k] = "";

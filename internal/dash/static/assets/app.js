@@ -5,7 +5,7 @@
 
 import { h, icon, tickTimes } from "./dom.js";
 import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./store.js";
-import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog, MODE_HINTS } from "./views.js";
+import { overview, boxes, jobs, jobDetail, modeLabel, modeDot, checkDialog, MODE_HINTS } from "./views.js";
 import { history } from "./history.js";
 import { settings, themeSwitch } from "./settings.js";
 import { drift } from "./versions.js";
@@ -74,7 +74,7 @@ function fleetRow(m, r) {
   const state = !m.reachable ? "Not answering" : !alive ? "Nothing enforcing" : modeLabel(m.mode) + (req ? " → " + modeLabel(req.mode) : "") + (m.enforcer === "headless" ? " · headless" : "");
   // The same dots as Overview's card: hollow when the host doesn't answer, red when it answers but
   // nothing applies its mode.
-  const dot = !m.reachable ? "dot-off" : !alive ? "dot-bad" : m.mode === "mypc" ? "dot-off" : "dot-on";
+  const dot = !m.reachable ? "dot-off" : !alive ? "dot-bad" : modeDot(m.mode);
   // The hint says what the line says.
   const about = !m.reachable
     ? "The host isn't answering: it may be asleep or off."

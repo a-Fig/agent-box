@@ -245,6 +245,13 @@
   --s8: #e34948;
   --grid: rgb(0 0 0 / 7%);
 }
+/* A mode wears one color on every page (#292): Full green, Shared blue, My PC grey. They follow
+ * the theme through the status colors they name. */
+:root {
+  --mode-full: var(--success);
+  --mode-shared: var(--info);
+  --mode-mypc: var(--muted-foreground);
+}
 
 /* Base. */
 *,
@@ -464,6 +471,14 @@ code {
   background: color-mix(in oklab, var(--success) 16%, transparent);
   color: var(--success-foreground);
 }
+.badge-full {
+  background: color-mix(in oklab, var(--mode-full) 16%, transparent);
+  color: var(--success-foreground);
+}
+.badge-shared {
+  background: color-mix(in oklab, var(--mode-shared) 16%, transparent);
+  color: var(--info-foreground);
+}
 .badge-warn {
   background: color-mix(in oklab, var(--warning) 16%, transparent);
   color: var(--warning-foreground);
@@ -495,6 +510,12 @@ code {
 }
 .dot-bad {
   background: var(--destructive);
+}
+.dot-full {
+  background: var(--mode-full);
+}
+.dot-shared {
+  background: var(--mode-shared);
 }
 .dot-off {
   border: 1.5px solid var(--dot-off);
@@ -1410,6 +1431,15 @@ a.machine-name:hover {
 .chart .mark:focus-visible {
   stroke: var(--foreground);
   stroke-width: 2;
+}
+a.hbar {
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+a.hbar:hover .truncate {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .hbar:focus-visible {
   outline-offset: 2px;

@@ -6,7 +6,7 @@
 
 import { h, s, icon, dur, bytes, stamp, clock } from "./dom.js";
 import { api, changed } from "./store.js";
-import { empty, section, modeLabel, MODE_HINTS, RESULT_HINTS } from "./views.js";
+import { empty, section, modeLabel, openJobs, MODE_HINTS, RESULT_HINTS } from "./views.js";
 import { rove, hint } from "./tip.js";
 
 export { history };
@@ -17,7 +17,7 @@ const RESULT_COLORS = { pass: "var(--success)", fail: "var(--destructive)", canc
 const SIZES = ["small", "medium", "large", "gpu"];
 const KINDS = ["go-test", "go-build", "js-test", "py-test", "gradle", "build", "gpu", "other"];
 const slot = (i) => "var(--s" + (i < 0 ? 8 : (i % 8) + 1) + ")"; // -1, a kind the table lacks, is drawn as other
-const MODE_COLORS = { full: "var(--s1)", shared: "var(--s3)", mypc: "var(--muted-foreground)" };
+const MODE_COLORS = { full: "var(--mode-full)", shared: "var(--mode-shared)", mypc: "var(--mode-mypc)" }; // as on every page
 const WHY = { mypc: "My PC", full: "caps full", "gpu-busy": "GPU busy" };
 
 async function load(range, force) {
@@ -194,8 +194,9 @@ function timeline(d, range) {
   return rove(s("svg", { viewBox: `0 0 ${W} 120`, role: "group", "aria-label": "Mode timeline, refused runs and queued runs" }, kids));
 }
 
-// Totals as horizontal bars, biggest first, labelled with their value.
-function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "") {
+// Totals as horizontal bars, biggest first, labelled with their value. With filter, each bar
+// with a name is a link to Jobs filtered to it: filter(k) gives Jobs' filters.
+function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "", filter = null) {
   entries = entries.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return h("p", { class: "row-empty" }, "Nothing in this range.");
   const max = entries[0][1];
@@ -205,7 +206,9 @@ function hbars(entries, color, fmt = String, limit = 6, emptyLabel = "") {
       { class: "hbars" },
       entries.slice(0, limit).map(([k, v], i) => {
         const name = k || emptyLabel || "(none)";
-        return h("div", tip(name + ": " + fmt(v), { class: "hbar", role: "img" }), h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
+        const link = filter && k;
+        const props = link ? { class: "hbar", href: "#jobs", onclick: () => openJobs(filter(k)) } : { class: "hbar", role: "img" };
+        return h(link ? "a" : "div", tip(name + ": " + fmt(v) + (link ? "\nOpen these jobs" : ""), props), h("span", { class: "truncate" }, name), h("div", { class: "bar" }, h("i", { "data-w": (v / max) * 100, "data-bg": color(k, i) })), h("span", { class: "val" }, fmt(v)));
       }),
     ),
   );
@@ -315,10 +318,10 @@ const history = {
         chart("Jobs by result", "Jobs started in " + per + ".", [sized(wide, () => columns(B, range, (b) => b.jobs.byResult, ["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k])), legend(["pass", "fail", "cancelled", "lost"], (k) => RESULT_COLORS[k], undefined, (k) => RESULT_HINTS[k])], true),
         chart("Box-hours by size", "How long boxes existed.", [sized(half, () => columns(B, range, (b) => b.boxHours.bySize, SIZES, (k) => slot(SIZES.indexOf(k)), (v) => String(Math.round(v * 10) / 10))), legend(sizesSeen.length ? sizesSeen : SIZES, (k) => slot(SIZES.indexOf(k)), undefined, (k) => SIZE_HINTS[k])]),
         chart("Memory in use", "Mean of the minute samples; the cap is " + bytes(Math.max(...B.map((b) => b.memCap))) + ".", sized(half, () => memory(B, range))),
-        chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), (k) => slot(KINDS.indexOf(k)))),
-        chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)")),
-        chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s1)", String, 6, "(no repo)")),
-        chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s3)", String, 6, "unknown agent")),
+        chart("What agents use boxes for", "Jobs by kind.", hbars(Object.entries(totals(B, (b) => b.jobs.byKind)), () => "var(--s1)", String, 6, "", (k) => ({ kind: k }))),
+        chart("Median run time", "Per repo, finished jobs.", hbars(medians, () => "var(--s7)", dur, 6, "(no repo)", (k) => ({ repo: k }))),
+        chart("Busiest repos", "Jobs started.", hbars(Object.entries(totals(B, (b) => b.jobs.byRepo)), () => "var(--s1)", String, 6, "(no repo)", (k) => ({ repo: k }))),
+        chart("Busiest agents", "Jobs started, by session.", hbars(Object.entries(totals(B, (b) => b.jobs.byAgent)), () => "var(--s1)", String, 6, "unknown agent", (k) => ({ agent: k }))),
       ),
       h("p", { class: "muted", "data-now": clock.now() }, H.loading[range] ? "Refreshing…" : (range === "day" ? "Each bar is an hour. " : "Each bar is a day, midnight to midnight UTC. ") + (H.at[range] ? "Loaded " + new Date(H.at[range]).toLocaleTimeString() + "." : "")),
     ];
