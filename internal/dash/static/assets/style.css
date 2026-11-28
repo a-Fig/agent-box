@@ -718,6 +718,8 @@ code {
 }
 .side-host-line {
   display: flex;
+  min-width: 0;
+  white-space: nowrap;
   align-items: center;
   gap: 0.375rem;
   font-size: 0.75rem;
@@ -763,6 +765,15 @@ code {
   background: color-mix(in oklab, var(--warning) 12%, transparent);
   color: var(--warning-foreground);
   font-weight: 500;
+}
+.side-notice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.side-notice-host {
+  font-weight: 400;
+  opacity: 0.85;
 }
 .side-notice:hover {
   background: color-mix(in oklab, var(--warning) 18%, transparent);
@@ -1351,7 +1362,6 @@ a.machine-name:hover {
 }
 .badge.hint,
 .conn.hint,
-.side-host.hint,
 .queue-pos.hint {
   text-decoration: none;
 }

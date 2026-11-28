@@ -8,7 +8,7 @@ import { S, start, retryNow, setChanged, trayAlive, jobsOf, RETRY_MS } from "./s
 import { overview, boxes, jobs, jobDetail, modeLabel, checkDialog, MODE_HINTS } from "./views.js";
 import { history } from "./history.js";
 import { settings, themeSwitch } from "./settings.js";
-import { drift, releaseStatus } from "./versions.js";
+import { drift } from "./versions.js";
 import { host, hostKind, hostLink } from "./host.js";
 import { syncTip, hint } from "./tip.js";
 
@@ -27,8 +27,15 @@ const PAGES = { ...VIEWS, settings: { title: "Settings", view: settings } };
 // Routes: #overview, #boxes, #jobs, #jobs/<key>, #history, #settings, #fleet/<host id>.
 function route() {
   const [name, ...rest] = location.hash.slice(1).split("/");
-  if (name === "jobs" && rest.length) return { name: "jobs", key: decodeURIComponent(rest.join("/")) };
-  if (name === "fleet" && rest.length) return { name: "fleet", key: decodeURIComponent(rest.join("/")) };
+  // A hand-typed hash can hold a bad escape, which decodeURIComponent throws on: it opens Overview.
+  const key = () => {
+    try {
+      return decodeURIComponent(rest.join("/"));
+    } catch {
+      return null;
+    }
+  };
+  if ((name === "jobs" || name === "fleet") && rest.length && key() != null) return { name, key: key() };
   return { name: PAGES[name] ? name : "overview" };
 }
 
@@ -63,25 +70,36 @@ function sidebar(r) {
 // its page. A row says what kind of host it is, so cloud hosts can sit beside the PCs later.
 function fleetRow(m, r) {
   const alive = trayAlive(m);
-  const state = !m.reachable ? "Not answering" : !alive ? "Nothing enforcing" : modeLabel(m.mode) + (m.modeRequested ? " → " + modeLabel(m.modeRequested.mode) : "") + (m.enforcer === "headless" ? " · headless" : "");
-  const dot = !m.reachable || !alive ? "dot-bad" : m.mode === "mypc" ? "dot-off" : "dot-on";
+  const req = m.modeRequested;
+  const state = !m.reachable ? "Not answering" : !alive ? "Nothing enforcing" : modeLabel(m.mode) + (req ? " → " + modeLabel(req.mode) : "") + (m.enforcer === "headless" ? " · headless" : "");
+  // The same dots as Overview's card: hollow when the host doesn't answer, red when it answers but
+  // nothing applies its mode.
+  const dot = !m.reachable ? "dot-off" : !alive ? "dot-bad" : m.mode === "mypc" ? "dot-off" : "dot-on";
+  // The hint says what the line says.
+  const about = !m.reachable
+    ? "The host isn't answering: it may be asleep or off."
+    : !alive
+      ? "Nothing applies the mode on this host, so mode changes wait."
+      : req
+        ? "Switching to " + modeLabel(req.mode) + ", asked from " + req.by + "."
+        : (MODE_HINTS[m.mode] || "") + (m.enforcer === "headless" ? " Nobody is logged on, so the headless enforcer applies it." : "");
   return h(
     "a",
-    hint(hostKind(m).label + " · " + (MODE_HINTS[m.mode] || ""), { class: "menu-button side-host", href: hostLink(m), "data-key": "host-" + m.id, "aria-current": r.name === "fleet" && r.key === m.id ? "page" : null, onclick: () => setDrawer(false) }, "inner"),
+    hint(hostKind(m).label + ": " + about, { class: "menu-button side-host", href: hostLink(m), "data-key": "host-" + m.id, "aria-current": r.name === "fleet" && r.key === m.id ? "page" : null, onclick: () => setDrawer(false) }, "inner"),
     icon(hostKind(m).icon),
     h("span", { class: "label side-host-text" }, h("span", { class: "side-host-name truncate" }, m.name), h("span", { class: "side-host-line" }, h("span", { class: "dot " + dot }), state)),
   );
 }
 
-// The sidebar's foot, as Murmur's (#287): a notice when a host's builds want attention, then the
-// connection and the Settings button. The builds themselves are on each host's page.
+// The sidebar's foot, as Murmur's (#287): a notice when a host's builds have been out of step past
+// the time both update by themselves (drift's warning), then the connection and the Settings
+// button. A release that is merely out isn't a notice: both install it within the hour. The builds
+// themselves are on each host's page.
 function foot(r) {
   const notes = [...S.machines.values()]
     .map((m) => {
       const d = drift(m.boxd, m.tray, trayAlive(m));
-      const behind = [m.boxd, m.tray].some((v) => releaseStatus(v, S.updates)?.label === "update available");
-      const text = d?.warn ? d.text : behind ? "Update available" : null;
-      return text && h("a", { class: "side-notice", href: hostLink(m), "data-key": "notice-" + m.id, onclick: () => setDrawer(false) }, icon("alert"), h("span", { class: "truncate" }, (S.machines.size > 1 ? m.name + ": " : "") + text));
+      return d?.warn && h("a", hint(d.why, { class: "side-notice", href: hostLink(m), "data-key": "notice-" + m.id, onclick: () => setDrawer(false) }, "inner"), icon("alert"), h("span", { class: "side-notice-text" }, h("span", null, "Builds out of step"), S.machines.size > 1 ? h("span", { class: "side-notice-host truncate" }, m.name) : null));
     })
     .filter(Boolean);
   const live = S.conn === "live";

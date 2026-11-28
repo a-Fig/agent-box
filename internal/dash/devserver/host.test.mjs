@@ -146,3 +146,20 @@ test("a host in the sidebar's Fleet opens its page", async (t) => {
   await page.getByRole("heading", { name: m.name, exact: true, level: 2 }).waitFor();
   assert.equal(await page.locator('.side-host[aria-current="page"]').count(), 1);
 });
+
+test("the foot's notice opens the host only once its builds are out of step past the hourly updates", async (t) => {
+  const long = new Date(Date.now() - 3 * 3600e3).toISOString();
+  const { page, state } = await hostPage(t, (state) => {
+    state.updates = { latest: "v0.3.2", checkedAt: tick + "Z" };
+  });
+  const notice = page.locator(".sidebar-foot .side-notice");
+  // A release that is out, and builds 20 minutes apart: both update within the hour, so no notice.
+  assert.equal(await notice.count(), 0);
+  state.machines[0].boxd.since = long;
+  state.machines[0].tray.since = long;
+  await event(page, "machine", state.machines[0]);
+  await notice.waitFor();
+  await page.goto(fixture + "/#settings");
+  await notice.click();
+  await page.getByRole("heading", { name: "Builds", exact: true }).waitFor();
+});

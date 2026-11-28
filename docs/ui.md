@@ -113,8 +113,8 @@ History), then **Fleet**: each host as a link to its page, with a line of state 
 pending request, headless, or nothing enforcing). Every host is a PC today; cloud hosts
 (Cloudflare Workers #277, Modal #278) will join the same list, and `hostKind` in `host.js` is the
 one place that knows the kinds. Its foot, as Murmur's, holds the connection and the Settings
-button, and a notice that opens a host's page when its builds are out of step past the 2-hour
-warning or an update is out.
+button, and a notice that opens a host's page when its builds have been out of step past the
+2-hour warning. A release that is only out gets no notice: both builds install it within the hour.
 
 **A host's page** (`#fleet/<id>`, #289) holds everything the page knows about one host: the mode
 switch, caps and room (the card Overview shows), its running jobs and boxes, its boxd and tray

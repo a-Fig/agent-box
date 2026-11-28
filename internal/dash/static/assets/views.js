@@ -6,7 +6,7 @@ import { h, icon, clock, dur, bytes, pct, shortRepo, plural, stamp, hhmm, timeEl
 import { S, api, post, changed, toast, jobsOf, boxOf, trayAlive } from "./store.js";
 import { hint, hideTip } from "./tip.js";
 
-export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, MODE_HINTS, RESULT_HINTS };
+export { overview, boxes, jobs, jobDetail, confirmDialog, checkDialog, empty, section, modeLabel, jobBox, fold, machineCard, banners, runningRow, boxRow, queued, queueSection, MODE_HINTS, RESULT_HINTS };
 
 const MODES = [
   ["full", "Full"],

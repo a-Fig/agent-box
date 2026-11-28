@@ -10,7 +10,7 @@
 import { h, icon, bytes, dur, plural, timeEl } from "./dom.js";
 import { S, post, applyUpdates, trayAlive, changed, jobsOf } from "./store.js";
 import { hint } from "./tip.js";
-import { section, empty, machineCard, banners, runningRow, boxRow } from "./views.js";
+import { section, empty, machineCard, banners, runningRow, boxRow, queued, queueSection } from "./views.js";
 import { row, group } from "./settings.js";
 import { drift, releaseStatus } from "./versions.js";
 
@@ -121,10 +121,7 @@ const gpuWhy = (why) =>
   })[why] || "no device";
 
 function setupRows(m) {
-  const c = m.caps || {};
   const k = m.config || {};
-  // An unset cap doesn't limit; one set to 0 does, so it reads 0.
-  const cap = (key, fmt = String) => value(k.capped?.[key] ? fmt(c[key]) : "no limit");
   const rows = [];
   for (const s of k.sizes || []) {
     if (s.gpu && !k.gpu) continue;
@@ -139,6 +136,7 @@ function setupRows(m) {
 function limitRows(m) {
   const c = m.caps || {};
   const k = m.config || {};
+  // An unset cap doesn't limit; one set to 0 does, so it reads 0.
   const cap = (key, fmt = String) => value(k.capped?.[key] ? fmt(c[key]) : "no limit");
   return [
     row("Boxes", "Most boxes that may exist at once; a run that needs one more waits in the queue.", cap("instances")),
@@ -166,6 +164,7 @@ const host = {
     }
     const kind = hostKind(m);
     const running = jobsOf((j) => j.machine === m.id && (j.state === "running" || j.state === "paused"));
+    const q = queued().filter((j) => j.machine === m.id);
     const bx = [...S.boxes.values()].filter((b) => b.machine === m.id).sort((a, b) => a.name.localeCompare(b.name));
     el.replaceChildren(
       h(
@@ -175,6 +174,7 @@ const host = {
         banners(m),
         section("Now", null, machineCard(m)),
         section("Running jobs", running.length ? String(running.length) : null, h("div", { class: "group" }, running.length ? running.map(runningRow) : h("p", { class: "row-empty" }, "Nothing is running on " + m.name + "."))),
+        q.length ? queueSection(q) : null,
         section("Boxes", bx.length ? plural(bx.length, "box", "boxes") : null, h("div", { class: "group" }, bx.length ? bx.map((b) => boxRow(b, false)) : h("p", { class: "row-empty" }, "No boxes on " + m.name + "."))),
         section("Builds", null, group(buildRows(m).filter(Boolean))),
         section("Box sizes", null, group(setupRows(m))),
