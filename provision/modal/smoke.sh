@@ -14,12 +14,13 @@ set -eu
 
 BASE_URL=${RUNNER_URL%/}
 TMP_DIR=$(mktemp -d)
-ORIG_CFG=""
+ORIG_CAP=""
+RESTORE_CAP=0
 cleanup() {
-  if [ -n "$ORIG_CFG" ]; then
+  if [ "$RESTORE_CAP" -eq 1 ] && [ -n "$ORIG_CAP" ]; then
     curl -fsS -X PUT "$BASE_URL/v1/config" \
       -H "Modal-Key: $MODAL_KEY" -H "Modal-Secret: $MODAL_SECRET" \
-      -H "Content-Type: application/json" -d "$ORIG_CFG" >/dev/null 2>&1 || true
+      -H "Content-Type: application/json" -d "$ORIG_CAP" >/dev/null 2>&1 || true
   fi
   rm -rf "$TMP_DIR"
 }
@@ -29,16 +30,10 @@ echo "1. Probing $BASE_URL/v1/probe ..."
 PROBE=$(curl -fsS "$BASE_URL/v1/probe" \
   -H "Modal-Key: $MODAL_KEY" -H "Modal-Secret: $MODAL_SECRET")
 printf '%s\n' "$PROBE"
-ORIG_CFG=$(printf '%s' "$PROBE" | python3 -c '
+ORIG_CAP=$(printf '%s' "$PROBE" | python3 -c '
 import json, sys
 p = json.load(sys.stdin)
-print(json.dumps({
-    "capUSD": p["budget"]["capUSD"],
-    "maxConcurrent": p["maxConcurrent"],
-    "maxTimeoutSec": p["maxTimeoutSec"],
-    "keepSec": 0,
-    "mode": "function",
-}))
+print(json.dumps({"capUSD": p["budget"]["capUSD"]}))
 ')
 
 # Build a minimal valid git bundle containing one commit at refs/agent-box/<ref>.
@@ -125,6 +120,7 @@ assert d.get("cancelled") is True and d.get("exit") == 137, d
 '
 
 echo "5. Testing monthly budget cap refusal (402 budget) ..."
+RESTORE_CAP=1
 curl -fsS -X PUT "$BASE_URL/v1/config" \
   -H "Modal-Key: $MODAL_KEY" -H "Modal-Secret: $MODAL_SECRET" \
   -H "Content-Type: application/json" -d '{"capUSD": 0}' >/dev/null

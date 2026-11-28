@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 from datetime import datetime, timedelta, timezone
+import io
 import json
 import os
 from pathlib import Path
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -25,11 +28,95 @@ def _load_fixture(name: str) -> dict:
     return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
-class StdlibOnlyTest(unittest.TestCase):
+class StdlibAndStaticSafetyTest(unittest.TestCase):
     def test_no_modal_import_in_core_or_rates(self) -> None:
         self.assertNotIn("modal", sys.modules)
         self.assertEqual(rates.RATES_UPDATED, "2026-11-27")
         self.assertEqual(rates.SANDBOX_CPU_MEM_MULTIPLIER, 3.0)
+
+    def test_runner_has_no_postponed_annotations_local_import_hazard(self) -> None:
+        """Prevent P0 FastAPI startup bug: future annotations + function-local FastAPI imports."""
+        src = (MODAL_DIR / "agent_box_runner.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        has_future_annotations = any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "__future__"
+            and any(alias.name == "annotations" for alias in node.names)
+            for node in tree.body
+        )
+        self.assertFalse(
+            has_future_annotations,
+            "agent_box_runner.py must not enable `from __future__ import annotations` "
+            "because FastAPI resolves stringified route annotations in module globals.",
+        )
+
+        # Also verify app_factory exists and route handler annotations are resolvable.
+        fn_map = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+        self.assertIn("app_factory", fn_map)
+        app_fn = fn_map["app_factory"]
+        route_handlers = [
+            n
+            for n in app_fn.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.decorator_list
+        ]
+        self.assertGreaterEqual(len(route_handlers), 10)
+
+        # Ensure sandbox creation never mounts the shared writable /jobs volume.
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "create"
+            ):
+                src_seg = ast.get_source_segment(src, node) or ""
+                if "Sandbox.create" in src_seg:
+                    self.assertNotIn("volumes", src_seg)
+
+    def test_app_factory_with_stubbed_modal_when_fastapi_available(self) -> None:
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            self.skipTest("fastapi not installed in stdlib-only environment")
+
+        import types
+
+        fake_modal = types.ModuleType("modal")
+
+        class _Dummy:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __getattr__(self, _name):
+                return lambda *a, **kw: self
+
+        class _App(_Dummy):
+            def function(self, *args, **kwargs):
+                return lambda fn: fn
+
+        fake_modal.App = _App
+        fake_modal.Volume = type("Volume", (), {"from_name": staticmethod(lambda *a, **kw: _Dummy())})
+        fake_modal.Dict = type("Dict", (), {"from_name": staticmethod(lambda *a, **kw: _Dummy())})
+        fake_modal.Image = type("Image", (), {"debian_slim": staticmethod(lambda *a, **kw: _Dummy())})
+        fake_modal.Retries = _Dummy
+        fake_modal.asgi_app = lambda *a, **kw: (lambda fn: fn)
+
+        prev = sys.modules.get("modal")
+        sys.modules["modal"] = fake_modal
+        try:
+            import importlib
+
+            runner = importlib.import_module("agent_box_runner")
+            api = runner.app_factory(backend=object())
+            paths = {r.path for r in api.routes}
+            self.assertIn("/v1/probe", paths)
+            self.assertIn("/v1/jobs", paths)
+            self.assertIn("/v1/jobs/{job_id}/file", paths)
+        finally:
+            if prev is None:
+                sys.modules.pop("modal", None)
+            else:
+                sys.modules["modal"] = prev
+            sys.modules.pop("agent_box_runner", None)
 
 
 class GoldenFixturesTest(unittest.TestCase):
@@ -216,6 +303,32 @@ class SizingAndCostTest(unittest.TestCase):
             self.assertEqual(fn["gpuSec"], 60.0)
             self.assertEqual(sb["gpuSec"], 60.0)
 
+    def test_volume_monthly_cost_ledger_and_kept_sandbox_spend(self) -> None:
+        now = datetime(2026, 11, 27, 16, 10, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            costs_dir = Path(tmp) / "_costs"
+            core.write_cost_record(costs_dir, "2026-11", "a.20261127-150000-0001", 1.25, settled_at="2026-11-27T15:05:00Z")
+            core.write_cost_record(costs_dir, "2026-11", "b.20261127-151000-0002", 0.50)
+            # Even if Dict lost all cost:* keys after 7 idle days, Volume ledger recovers them.
+            store = {
+                "config": dict(core.DEFAULT_CONFIG),
+                "job:sb.20261127-160000-0003": {
+                    "id": "sb.20261127-160000-0003",
+                    "state": "done",
+                    "mode": "sandbox",
+                    "size": "medium",
+                    "startedAt": "2026-11-27T16:00:00Z",
+                    "endedAt": "2026-11-27T16:01:00Z",
+                    "keepUntil": "2026-11-27T16:15:00Z",
+                },
+            }
+            snap = core.snapshot_dict_state(store, costs_root=costs_dir, now=now)
+            budget = core.compute_budget(snap, now=now)
+            self.assertEqual(budget["spentUSD"], 1.75)
+            # Kept sandbox has been alive 600s since startedAt and isn't settled yet, so runningUSD reflects it.
+            expected_kept = core.estimate_job_cost("medium", 600.0, mode="sandbox")["usd"]
+            self.assertEqual(budget["runningUSD"], expected_kept)
+
 
 class ValidationAndLifecycleTest(unittest.TestCase):
     def _spec(self, **overrides) -> dict:
@@ -231,17 +344,32 @@ class ValidationAndLifecycleTest(unittest.TestCase):
         self.assertFalse(core.valid_job_id("lantern.20261127-150405-xyz"))
         self.assertFalse(core.valid_job_id("h1-pc~lantern.20261127-150405-a1b2"))
 
-    def test_validate_spec_bounds_and_overrides(self) -> None:
-        ok, status, err, _, norm = core.validate_spec(self._spec(timeoutSec=0), core.DEFAULT_CONFIG)
+    def test_validate_spec_bounds_overrides_and_sandbox_24h_cap(self) -> None:
+        ok, _, _, _, norm = core.validate_spec(self._spec(timeoutSec=0), core.DEFAULT_CONFIG)
         self.assertTrue(ok)
         self.assertEqual(norm["timeoutSec"], 3600)
         self.assertEqual(norm["mode"], "function")
 
-        ok, status, err, _, norm = core.validate_spec(self._spec(mode="sandbox"), core.DEFAULT_CONFIG)
+        ok, _, _, _, norm = core.validate_spec(self._spec(mode="sandbox"), core.DEFAULT_CONFIG)
         self.assertTrue(ok)
         self.assertEqual(norm["mode"], "sandbox")
 
+        # Function GPU normalizes gpuType to deployed worker GPU type.
+        ok, _, _, _, norm = core.validate_spec(
+            self._spec(size="gpu", gpuType="H100"),
+            core.DEFAULT_CONFIG,
+            deployed_gpu_type="T4",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(norm["gpuType"], "T4")
+
         ok, status, err, _, _ = core.validate_spec(self._spec(timeoutSec=3601), core.DEFAULT_CONFIG)
+        self.assertFalse(ok)
+        self.assertEqual((status, err), (400, "timeout_cap"))
+
+        # Modal 24h (86400s) sandbox lifetime ceiling: timeoutSec + keepSec > 86400 must fail.
+        sb_cfg = {**core.DEFAULT_CONFIG, "maxTimeoutSec": 86400, "keepSec": 900, "mode": "sandbox"}
+        ok, status, err, _, _ = core.validate_spec(self._spec(timeoutSec=86000, mode="sandbox"), sb_cfg)
         self.assertFalse(ok)
         self.assertEqual((status, err), (400, "timeout_cap"))
 
@@ -259,6 +387,22 @@ class ValidationAndLifecycleTest(unittest.TestCase):
             ok, status, err, _, _ = core.validate_spec(bad, core.DEFAULT_CONFIG)
             self.assertFalse(ok)
             self.assertEqual((status, err), (400, "invalid"))
+
+    def test_clean_env_strips_modal_credentials(self) -> None:
+        host_env = {
+            "PATH": "/usr/local/bin:/usr/bin",
+            "HOME": "/root",
+            "LANG": "C.UTF-8",
+            "MODAL_TOKEN_ID": "ak-secret",
+            "MODAL_TOKEN_SECRET": "as-secret",
+            "MODAL_IDENTITY_TOKEN": "oidc-jwt",
+            "AWS_SECRET_ACCESS_KEY": "nope",
+        }
+        cleaned = core.build_clean_env(host_env, {"CGO_ENABLED": "1"})
+        self.assertEqual(cleaned["PATH"], "/usr/local/bin:/usr/bin")
+        self.assertEqual(cleaned["CGO_ENABLED"], "1")
+        for secret_key in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "MODAL_IDENTITY_TOKEN", "AWS_SECRET_ACCESS_KEY"):
+            self.assertNotIn(secret_key, cleaned)
 
     def test_admission_includes_running_job_accrued_spend(self) -> None:
         now = datetime(2026, 11, 27, 16, 0, 0, tzinfo=timezone.utc)
@@ -278,20 +422,20 @@ class ValidationAndLifecycleTest(unittest.TestCase):
                 }
             },
         }
-        # Running T4 job for 1000s accrues > $0.22, pushing spent+running past $1.00.
         ok, status, code, _ = core.check_admission(state, self._spec(), now)
         self.assertFalse(ok)
         self.assertEqual((status, code), (402, "budget"))
 
-    def test_idempotent_duplicate_submit(self) -> None:
+    def test_idempotent_duplicate_submit_survives_config_changes(self) -> None:
         store: dict = {}
-        spec = self._spec()
+        spec = self._spec(timeoutSec=900)
         t0 = datetime(2026, 11, 27, 15, 0, 0, tzinfo=timezone.utc)
         status1, body1 = core.submit_job(store, spec, now=t0)
         self.assertEqual(status1, 201)
         self.assertEqual(body1, {"id": spec["id"], "state": "queued"})
 
-        # Even if paused later, resubmitting the same job id returns 200 with existing record.
+        # Lower maxTimeoutSec below 900 and pause the runner: duplicate id must still return 200.
+        store["config"] = {**core.DEFAULT_CONFIG, "maxTimeoutSec": 60}
         store["paused"] = True
         status2, body2 = core.submit_job(store, spec, now=t0 + timedelta(seconds=5))
         self.assertEqual(status2, 200)
@@ -333,6 +477,14 @@ class ValidationAndLifecycleTest(unittest.TestCase):
 
 
 class LogChunkAndPathSanitizationTest(unittest.TestCase):
+    def test_parse_int_query(self) -> None:
+        self.assertEqual(core.parse_int_query(None, "limit", 20, min_value=1, max_value=200), 20)
+        self.assertEqual(core.parse_int_query("500", "limit", 20, min_value=1, max_value=200), 200)
+        self.assertEqual(core.parse_int_query("0", "offset", 0, min_value=0), 0)
+        for bad in ("abc", "1.5", "-1"):
+            with self.assertRaises(ValueError):
+                core.parse_int_query(bad, "offset", 0, min_value=0)
+
     def test_log_chunk_paging_and_invalid_utf8(self) -> None:
         raw = b"a\xffb\xe2\x82\xac"
         c1 = core.build_log_chunk(raw, offset=0, limit=3, stopped=True)
@@ -349,9 +501,11 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
         self.assertNotIn("dataBase64", c2)
         self.assertTrue(c2["eof"])
 
-    def test_sanitize_rel_path_blocks_traversal_and_symlinks(self) -> None:
+    def test_sanitize_rel_path_and_safe_tar_blocks_traversal_symlinks_and_handles_dashes(self) -> None:
         self.assertEqual(core.sanitize_rel_path("./out/report.xml"), "out/report.xml")
         self.assertEqual(core.sanitize_rel_path("."), ".")
+        self.assertEqual(core.sanitize_rel_path("-rf"), "-rf")
+        self.assertEqual(core.sanitize_rel_path("--checkpoint=1"), "--checkpoint=1")
 
         for bad in ("", "/etc/passwd", "../secret", "a/../../b", "C:\\x", "a\\b", "a\x00b"):
             with self.assertRaises(ValueError):
@@ -362,9 +516,14 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
             outside = Path(tmp) / "outside.txt"
             root.mkdir()
             outside.write_text("secret", encoding="utf-8")
-            inside = root / "ok.txt"
-            inside.write_text("ok", encoding="utf-8")
-            self.assertEqual(core.sanitize_rel_path("ok.txt", root=root), "ok.txt")
+            (root / "-rf").write_text("dash", encoding="utf-8")
+            (root / "--checkpoint=1").write_text("ckpt", encoding="utf-8")
+
+            # Leading-dash filenames archive safely without flag injection.
+            for dash_name in ("-rf", "--checkpoint=1"):
+                tar_bytes = core.create_safe_tar_bytes(root, dash_name)
+                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as tf:
+                    self.assertEqual(tf.getnames(), [dash_name])
 
             link = root / "escape"
             try:
@@ -373,10 +532,12 @@ class LogChunkAndPathSanitizationTest(unittest.TestCase):
                 return
             with self.assertRaises(ValueError):
                 core.sanitize_rel_path("escape", root=root)
+            with self.assertRaises(ValueError):
+                core.create_safe_tar_bytes(root, "escape")
 
 
 class ConfigUpdateTest(unittest.TestCase):
-    def test_config_validation(self) -> None:
+    def test_config_validation_and_sandbox_24h_cap(self) -> None:
         ok, _, _, _, merged = core.validate_config_update(
             core.DEFAULT_CONFIG,
             {"capUSD": 50, "keepSec": 300, "mode": "sandbox"},
@@ -385,6 +546,13 @@ class ConfigUpdateTest(unittest.TestCase):
         self.assertEqual(merged["capUSD"], 50.0)
         self.assertEqual(merged["keepSec"], 300)
         self.assertEqual(merged["mode"], "sandbox")
+
+        ok, status, code, _, _ = core.validate_config_update(
+            core.DEFAULT_CONFIG,
+            {"maxTimeoutSec": 86400, "keepSec": 900, "mode": "sandbox"},
+        )
+        self.assertFalse(ok)
+        self.assertEqual((status, code), (400, "timeout_cap"))
 
         for bad in (
             "not-a-dict",

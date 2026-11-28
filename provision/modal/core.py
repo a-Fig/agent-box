@@ -9,10 +9,13 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import io
+import json
 import math
 import os
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import tarfile
 from typing import Any, Mapping, MutableMapping
 
 from rates import (
@@ -29,11 +32,28 @@ MAX_LOG_CHUNK = 65536  # dash.MaxLogChunk (64 KiB)
 MAX_POLL_WAIT_SEC = 25
 DEFAULT_LIST_LIMIT = 20
 MAX_LIST_LIMIT = 200
+MAX_SANDBOX_LIFETIME_SEC = 86400  # Modal Sandbox hard 24h timeout ceiling
 
 MODES = ("function", "sandbox")
 ACTIVE_STATES = frozenset({"queued", "running"})
 TERMINAL_STATES = frozenset({"done", "cancelled", "lost"})
 ALL_STATES = ACTIVE_STATES | TERMINAL_STATES
+
+# Allowlisted host env vars passed into untrusted job subprocesses; never pass MODAL_* tokens.
+SAFE_ENV_KEYS = (
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "USER",
+    "SHELL",
+    "GOPATH",
+    "GOCACHE",
+    "GOMODCACHE",
+    "UV_CACHE_DIR",
+)
 
 # Exact regexes matching cmd/box/box.go (validBox, validJob) and internal/dash/types.go.
 VALID_BOX_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
@@ -129,6 +149,16 @@ def job_entry_key(job_id: str) -> str:
     return f"job:{job_id}"
 
 
+def call_entry_key(job_id: str) -> str:
+    """Return the Dict key storing a job's Modal FunctionCall ID."""
+    return f"call:{job_id}"
+
+
+def sandbox_entry_key(job_id: str) -> str:
+    """Return the Dict key storing a job's Modal Sandbox ID."""
+    return f"sandbox:{job_id}"
+
+
 def error_envelope(code: str, message: str) -> dict[str, str]:
     """Build a uniform runner-v1 error response payload."""
     return {"error": code, "message": message}
@@ -155,6 +185,43 @@ def _is_int(value: Any) -> bool:
 
 def _is_finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def parse_int_query(
+    raw: str | None,
+    name: str,
+    default: int,
+    *,
+    min_value: int = 0,
+    max_value: int | None = None,
+) -> int:
+    """Parse an integer query parameter or raise ValueError for 400 invalid responses."""
+    if raw is None or raw == "":
+        return default
+    try:
+        val = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if val < min_value:
+        raise ValueError(f"{name} must be >= {min_value}.")
+    if max_value is not None:
+        return min(val, max_value)
+    return val
+
+
+def build_clean_env(
+    base_env: Mapping[str, str],
+    user_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a subprocess env from allowlisted base vars plus user spec.env.
+
+    Prevents leaking Modal runtime tokens (MODAL_*) or host credentials to job commands.
+    """
+    clean = {k: str(base_env[k]) for k in SAFE_ENV_KEYS if k in base_env}
+    if user_env:
+        for k, v in user_env.items():
+            clean[str(k)] = str(v)
+    return clean
 
 
 def normalize_config(raw: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -199,12 +266,24 @@ def validate_config_update(
                 return False, 400, "invalid", "maxConcurrent must be an integer between 1 and 100.", None
             merged[key] = val
         elif key == "maxTimeoutSec":
-            if not _is_int(val) or val < 1 or val > 86400:
-                return False, 400, "invalid", "maxTimeoutSec must be an integer between 1 and 86400.", None
+            if not _is_int(val) or val < 1 or val > MAX_SANDBOX_LIFETIME_SEC:
+                return (
+                    False,
+                    400,
+                    "invalid",
+                    f"maxTimeoutSec must be an integer between 1 and {MAX_SANDBOX_LIFETIME_SEC}.",
+                    None,
+                )
             merged[key] = val
         elif key == "keepSec":
-            if not _is_int(val) or val < 0 or val > 86400:
-                return False, 400, "invalid", "keepSec must be an integer between 0 and 86400.", None
+            if not _is_int(val) or val < 0 or val > MAX_SANDBOX_LIFETIME_SEC:
+                return (
+                    False,
+                    400,
+                    "invalid",
+                    f"keepSec must be an integer between 0 and {MAX_SANDBOX_LIFETIME_SEC}.",
+                    None,
+                )
             merged[key] = val
         elif key == "mode":
             if val not in MODES:
@@ -220,6 +299,16 @@ def validate_config_update(
                     None,
                 )
             merged[key] = val
+
+    if merged["mode"] == "sandbox" and int(merged["maxTimeoutSec"]) + int(merged["keepSec"]) > MAX_SANDBOX_LIFETIME_SEC:
+        return (
+            False,
+            400,
+            "timeout_cap",
+            f"Sandbox maxTimeoutSec ({merged['maxTimeoutSec']}) + keepSec ({merged['keepSec']}) "
+            f"exceeds Modal's {MAX_SANDBOX_LIFETIME_SEC}s limit.",
+            None,
+        )
 
     return True, 200, "", "", merged
 
@@ -242,7 +331,10 @@ def _valid_source_revision(source: Any) -> bool:
 
 
 def validate_spec(
-    spec: Any, config: Mapping[str, Any] | None = None
+    spec: Any,
+    config: Mapping[str, Any] | None = None,
+    *,
+    deployed_gpu_type: str | None = None,
 ) -> tuple[bool, int, str, str, dict[str, Any] | None]:
     """Validate a runner-v1 job spec and return normalized fields.
 
@@ -323,6 +415,17 @@ def validate_spec(
     elif mode not in MODES:
         return False, 400, "invalid", "mode must be 'function' or 'sandbox'.", None
 
+    keep_sec = int(cfg.get("keepSec", 0))
+    if mode == "sandbox" and timeout_sec + keep_sec > MAX_SANDBOX_LIFETIME_SEC:
+        return (
+            False,
+            400,
+            "timeout_cap",
+            f"Sandbox timeoutSec ({timeout_sec}) + keepSec ({keep_sec}) exceeds Modal's "
+            f"{MAX_SANDBOX_LIFETIME_SEC}s sandbox limit.",
+            None,
+        )
+
     gpu_type = spec.get("gpuType")
     if gpu_type is None:
         gpu_type = cfg.get("gpuType", DEFAULT_GPU_TYPE)
@@ -334,6 +437,8 @@ def validate_spec(
             f"Unsupported gpuType {gpu_type!r}; expected one of {', '.join(GPU_RATES_USD_PER_SEC)}.",
             None,
         )
+    if mode == "function" and size == "gpu" and deployed_gpu_type:
+        gpu_type = deployed_gpu_type
 
     normalized: dict[str, Any] = {
         "id": job_id,
@@ -392,6 +497,46 @@ def estimate_job_cost(
     }
 
 
+def write_cost_record(
+    costs_root: str | os.PathLike[str],
+    month: str,
+    job_id: str,
+    usd: float,
+    *,
+    settled_at: str | None = None,
+) -> Path:
+    """Atomically persist one job's monthly spend record under `<costs_root>/<month>/<job_id>.json`."""
+    month_dir = Path(costs_root) / month
+    month_dir.mkdir(parents=True, exist_ok=True)
+    target = month_dir / f"{job_id}.json"
+    tmp = month_dir / f".{job_id}.tmp.{os.getpid()}"
+    payload = {"jobId": job_id, "month": month, "usd": round(float(usd), 6)}
+    if settled_at:
+        payload["settledAt"] = settled_at
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, target)
+    return target
+
+
+def read_monthly_costs(costs_root: str | os.PathLike[str], month: str) -> dict[str, float]:
+    """Read all persisted monthly cost records for `month` keyed by `cost:{month}:{job_id}`."""
+    month_dir = Path(costs_root) / month
+    if not month_dir.is_dir():
+        return {}
+    out: dict[str, float] = {}
+    for entry in month_dir.iterdir():
+        if entry.name.startswith(".") or entry.suffix != ".json":
+            continue
+        try:
+            data = json.loads(entry.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, Mapping) and _is_finite_number(data.get("usd")):
+            job_id = str(data.get("jobId") or entry.stem)
+            out[cost_entry_key(month, job_id)] = float(data["usd"])
+    return out
+
+
 def _running_elapsed_sec(job: Mapping[str, Any], now: datetime) -> float:
     started = parse_rfc3339(job.get("startedAt"))
     if started is None:
@@ -399,17 +544,24 @@ def _running_elapsed_sec(job: Mapping[str, Any], now: datetime) -> float:
     return max(0.0, (utc_now(now) - started).total_seconds())
 
 
+def _is_kept_sandbox(job: Mapping[str, Any], now: datetime) -> bool:
+    if job.get("mode") != "sandbox" or job.get("state") != "done":
+        return False
+    keep_until = parse_rfc3339(job.get("keepUntil"))
+    return keep_until is not None and utc_now(now) <= keep_until
+
+
 def compute_budget(state: Mapping[str, Any], now: datetime | None = None) -> dict[str, Any]:
-    """Compute the monthly budget snapshot from state (settled costs + active running spend)."""
+    """Compute the monthly budget snapshot from state (settled costs + active/kept spend)."""
     ts = utc_now(now)
     cfg = normalize_config(state.get("config"))
     month = month_key(ts)
+    costs = state.get("costs") or {}
+    prefix = f"cost:{month}:"
 
     if "spentUSD" in state and state["spentUSD"] is not None:
         spent_usd = float(state["spentUSD"])
     else:
-        costs = state.get("costs") or {}
-        prefix = f"cost:{month}:"
         spent_usd = sum(
             float(v)
             for k, v in costs.items()
@@ -423,7 +575,10 @@ def compute_budget(state: Mapping[str, Any], now: datetime | None = None) -> dic
         job_iter = jobs.values() if isinstance(jobs, Mapping) else jobs
         running_usd = 0.0
         for job in job_iter:
-            if job.get("state") == "running":
+            job_id = job.get("id", "")
+            if cost_entry_key(month, job_id) in costs:
+                continue
+            if job.get("state") == "running" or _is_kept_sandbox(job, ts):
                 est = estimate_job_cost(
                     job.get("size", "medium"),
                     _running_elapsed_sec(job, ts),
@@ -519,7 +674,7 @@ def build_job_response(
     size = job.get("size", "medium")
     gpu_type = job.get("gpuType", cfg.get("gpuType", DEFAULT_GPU_TYPE))
 
-    if job.get("state") == "running":
+    if job.get("state") == "running" or _is_kept_sandbox(job, ts):
         cost = estimate_job_cost(size, _running_elapsed_sec(job, ts), mode, gpu_type)
     elif job.get("cost") is not None:
         cost = dict(job["cost"])
@@ -610,11 +765,39 @@ def sanitize_rel_path(rel_path: Any, root: str | os.PathLike[str] | None = None)
 
     if root is not None:
         root_real = os.path.realpath(os.fspath(root))
-        target_real = os.path.realpath(os.path.join(root_real, *clean_parts))
+        raw_target = root_real if not clean_parts else os.path.join(root_real, *clean_parts)
+        target_real = os.path.realpath(raw_target)
         if target_real != root_real and not target_real.startswith(root_real + os.sep):
             raise ValueError("path escapes workspace via symlink")
 
     return normalized
+
+
+def create_safe_tar_bytes(root: str | os.PathLike[str], rel_path: str) -> bytes:
+    """Atomically validate `rel_path` under `root` and build a tar archive without flag injection."""
+    norm = sanitize_rel_path(rel_path, root=root)
+    root_real = os.path.realpath(os.fspath(root))
+    raw_target = root_real if norm == "." else os.path.join(root_real, *norm.split("/"))
+    if not os.path.lexists(raw_target):
+        raise FileNotFoundError(norm)
+    target_real = os.path.realpath(raw_target)
+    if target_real != root_real and not target_real.startswith(root_real + os.sep):
+        raise ValueError("path escapes workspace via symlink")
+    if not os.path.exists(target_real):
+        raise FileNotFoundError(norm)
+
+    def _filter(ti: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        if ti.issym():
+            parent = os.path.dirname(os.path.join(root_real, ti.name))
+            link_dest = os.path.realpath(os.path.join(parent, ti.linkname))
+            if link_dest != root_real and not link_dest.startswith(root_real + os.sep):
+                return None
+        return ti
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", dereference=False) as tf:
+        tf.add(target_real, arcname=norm, recursive=True, filter=_filter)
+    return buf.getvalue()
 
 
 def new_job_record(spec: Mapping[str, Any], now: datetime | None = None) -> dict[str, Any]:
@@ -641,9 +824,9 @@ def new_job_record(spec: Mapping[str, Any], now: datetime | None = None) -> dict
         "logBytes": 0,
         "tail": "",
         "cost": {"usd": 0.0, "cpuSec": 0.0, "gpuSec": 0},
-        "callId": None,
         "sandboxId": None,
         "keepUntil": None,
+        "errorMessage": None,
     }
 
 
@@ -657,6 +840,7 @@ def transition_job(
     log_bytes: int | None = None,
     tail: str | None = None,
     keep_sec: int = 0,
+    error_message: str | None = None,
 ) -> MutableMapping[str, Any]:
     """Transition a job record along valid runner-v1 state edges."""
     if new_state not in ALL_STATES:
@@ -701,12 +885,19 @@ def transition_job(
         job["logBytes"] = int(log_bytes)
     if tail is not None:
         job["tail"] = tail
+    if error_message is not None:
+        job["errorMessage"] = error_message
     job["state"] = new_state
     return job
 
 
-def snapshot_dict_state(store: Mapping[str, Any]) -> dict[str, Any]:
-    """Build a read-only state snapshot from the backing Dict keyspace."""
+def snapshot_dict_state(
+    store: Mapping[str, Any],
+    *,
+    costs_root: str | os.PathLike[str] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a read-only state snapshot from the backing Dict and optional Volume cost ledger."""
     jobs: dict[str, dict[str, Any]] = {}
     costs: dict[str, float] = {}
     for k, v in store.items():
@@ -715,6 +906,10 @@ def snapshot_dict_state(store: Mapping[str, Any]) -> dict[str, Any]:
                 jobs[k[4:]] = dict(v)
             elif k.startswith("cost:") and _is_finite_number(v):
                 costs[k] = float(v)
+    if costs_root is not None:
+        month = month_key(now)
+        for k, v in read_monthly_costs(costs_root, month).items():
+            costs[k] = max(v, costs.get(k, 0.0))
     return {
         "config": normalize_config(store.get("config")),
         "paused": bool(store.get("paused", False)),
@@ -723,27 +918,47 @@ def snapshot_dict_state(store: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def find_existing_job(store: Mapping[str, Any], spec: Any) -> Mapping[str, Any] | None:
+    """Look up an existing job by valid spec.id before config-dependent validation."""
+    if not isinstance(spec, Mapping):
+        return None
+    job_id = spec.get("id")
+    if not valid_job_id(job_id):
+        return None
+    existing = store.get(job_entry_key(job_id))
+    return existing if isinstance(existing, Mapping) else None
+
+
 def submit_job(
     store: MutableMapping[str, Any],
     spec: Any,
     now: datetime | None = None,
+    *,
+    costs_root: str | os.PathLike[str] | None = None,
+    deployed_gpu_type: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Validate, deduplicate, and admit a POST /v1/jobs submission against `store`."""
+    """Validate, deduplicate, and admit a POST /v1/jobs submission against `store`.
+
+    Checks idempotency by `spec.id` before config-dependent validation so retries after a
+    config change (such as lowering maxTimeoutSec) still return 200 with the existing job.
+    """
     ts = utc_now(now)
-    state = snapshot_dict_state(store)
-    ok, status, err_code, msg, norm = validate_spec(spec, state["config"])
+    state = snapshot_dict_state(store, costs_root=costs_root, now=ts)
+
+    existing = find_existing_job(store, spec)
+    if existing is not None:
+        return 200, build_job_response(existing, state, ts)
+
+    ok, status, err_code, msg, norm = validate_spec(
+        spec, state["config"], deployed_gpu_type=deployed_gpu_type
+    )
     if not ok or norm is None:
         return status, error_envelope(err_code, msg)
-
-    job_id = norm["id"]
-    existing = store.get(job_entry_key(job_id))
-    if isinstance(existing, Mapping):
-        return 200, build_job_response(existing, state, ts)
 
     ok, status, err_code, msg = check_admission(state, norm, ts)
     if not ok:
         return status, error_envelope(err_code, msg)
 
     rec = new_job_record(norm, ts)
-    store[job_entry_key(job_id)] = rec
-    return 201, {"id": job_id, "state": "queued"}
+    store[job_entry_key(norm["id"])] = rec
+    return 201, {"id": norm["id"], "state": "queued"}

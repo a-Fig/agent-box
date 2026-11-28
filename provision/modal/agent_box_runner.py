@@ -3,22 +3,24 @@
 Exposes the HTTP+JSON endpoints defined in docs/runner-protocol.md via a
 Modal ASGI web endpoint (`requires_proxy_auth=True`) backed by:
   - 1x Modal Functions per size (`small`, `medium`, `large`, `gpu`) with preemption retries
-  - 3x Modal Sandboxes (opt-in `mode: "sandbox"`) with post-job `keepSec` file retention
-  - `modal.Volume("agent-box-jobs")` for git bundles and streaming job logs
-  - `modal.Dict("agent-box-state")` for jobs, config, pause flag, and per-job monthly costs
+  - 3x Modal Sandboxes (opt-in `mode: "sandbox"`, isolated without `/jobs` volume mount)
+  - `modal.Volume("agent-box-jobs")` for git bundles, streaming job logs, and monthly cost ledgers
+  - `modal.Dict("agent-box-state")` for live job metadata, config, and pause flag
 """
 
-from __future__ import annotations
-
 import asyncio
+import base64
+import inspect
 import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any
 
@@ -36,17 +38,47 @@ APP_NAME = "agent-box-runner"
 JOBS_VOLUME_NAME = "agent-box-jobs"
 STATE_DICT_NAME = "agent-box-state"
 JOBS_MOUNT = "/jobs"
+COSTS_DIR = f"{JOBS_MOUNT}/_costs"
 COMMIT_INTERVAL_SEC = 5.0
 MAX_FUNCTION_TIMEOUT_SEC = 86400
 
 # Toolchain versions mirror go.mod and provision/agent-base.yaml (built by provision/setup-host.sh).
 GO_VERSION = "1.27.4"  # matches go.mod
 NODE_MAJOR = "22"  # matches .github/workflows/test.yml and agent-base Node LTS
-GPU_TYPE = os.environ.get("AGENT_BOX_GPU_TYPE", rates.DEFAULT_GPU_TYPE)
+DEPLOYED_GPU_TYPE = os.environ.get("AGENT_BOX_GPU_TYPE", rates.DEFAULT_GPU_TYPE)
+if DEPLOYED_GPU_TYPE not in rates.GPU_RATES_USD_PER_SEC:
+    raise ValueError(f"Unsupported AGENT_BOX_GPU_TYPE {DEPLOYED_GPU_TYPE!r}")
 
 app = modal.App(APP_NAME)
 jobs_volume = modal.Volume.from_name(JOBS_VOLUME_NAME, create_if_missing=True)
 state_dict = modal.Dict.from_name(STATE_DICT_NAME, create_if_missing=True)
+_ADMISSION_LOCK = asyncio.Lock()
+
+# Atomic single-process Python script run inside a Sandbox for /v1/jobs/{id}/file?path=rel.
+_SANDBOX_TAR_SCRIPT = (
+    "import base64, io, os, sys, tarfile\n"
+    "root = os.path.realpath(sys.argv[1])\n"
+    "rel = sys.argv[2]\n"
+    "raw_target = root if rel == '.' else os.path.join(root, *rel.split('/'))\n"
+    "if not os.path.lexists(raw_target):\n"
+    "    sys.exit(3)\n"
+    "target = os.path.realpath(raw_target)\n"
+    "if target != root and not target.startswith(root + os.sep):\n"
+    "    sys.exit(2)\n"
+    "if not os.path.exists(target):\n"
+    "    sys.exit(3)\n"
+    "def _filter(ti):\n"
+    "    if ti.issym():\n"
+    "        parent = os.path.dirname(os.path.join(root, ti.name))\n"
+    "        dest = os.path.realpath(os.path.join(parent, ti.linkname))\n"
+    "        if dest != root and not dest.startswith(root + os.sep):\n"
+    "            return None\n"
+    "    return ti\n"
+    "buf = io.BytesIO()\n"
+    "with tarfile.open(fileobj=buf, mode='w', dereference=False) as tf:\n"
+    "    tf.add(target, arcname=rel, recursive=True, filter=_filter)\n"
+    "sys.stdout.write(base64.b64encode(buf.getvalue()).decode('ascii'))\n"
+)
 
 base_image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -104,9 +136,19 @@ def _read_tail_and_size(log_file: Path) -> tuple[int, str]:
 
 
 def _record_monthly_cost(job_id: str, job: dict[str, Any]) -> None:
+    """Persist settled job spend to both the durable Volume ledger and Dict cache."""
     cost_usd = float((job.get("cost") or {}).get("usd", 0.0))
     ts = core.parse_rfc3339(job.get("endedAt")) or core.utc_now()
-    state_dict[core.cost_entry_key(core.month_key(ts), job_id)] = cost_usd
+    month = core.month_key(ts)
+    core.write_cost_record(
+        COSTS_DIR,
+        month,
+        job_id,
+        cost_usd,
+        settled_at=core.format_rfc3339(ts),
+    )
+    jobs_volume.commit()
+    state_dict[core.cost_entry_key(month, job_id)] = cost_usd
 
 
 def _is_cancelled(job_id: str) -> bool:
@@ -120,49 +162,68 @@ def _prepare_command(cmd: list[str]) -> list[str]:
     return list(cmd)
 
 
+def _mark_job_lost(job_id: str, message: str, *, log_file: Path | None = None) -> None:
+    """Ensure a failed spawn or unexpected worker crash never leaves a job active."""
+    key = core.job_entry_key(job_id)
+    rec = state_dict.get(key)
+    if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
+        return
+    log_bytes, tail = _read_tail_and_size(log_file) if log_file else (rec.get("logBytes", 0), rec.get("tail", ""))
+    core.transition_job(
+        rec,
+        "lost",
+        now=core.utc_now(),
+        log_bytes=log_bytes,
+        tail=tail,
+        error_message=message,
+    )
+    _record_monthly_cost(job_id, rec)
+    state_dict[key] = rec
+
+
 def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
-    """Unpack the job's git bundle into a fresh temp worktree and stream output to job.log."""
+    """Copy bundle to an isolated temp dir, unpack, and stream output to job.log."""
     log_file = _log_path(job_id)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    bundle = _bundle_path(job_id)
+    volume_bundle = _bundle_path(job_id)
 
     with tempfile.TemporaryDirectory(prefix="agent-box-") as tmpdir:
-        workdir = Path(tmpdir) / rec["repo"]
+        tmp_path = Path(tmpdir)
+        isolated_bundle = tmp_path / "repo.bundle"
+        shutil.copyfile(volume_bundle, isolated_bundle)
+
+        workdir = tmp_path / "work" / rec["repo"]
         workdir.mkdir(parents=True, exist_ok=True)
+        clean_env = core.build_clean_env(os.environ, rec.get("env"))
 
         unpack_script = (
             f"git init -q {shlex.quote(str(workdir))} && "
-            f"git -C {shlex.quote(str(workdir))} fetch -q {shlex.quote(str(bundle))} "
+            f"git -C {shlex.quote(str(workdir))} fetch -q {shlex.quote(str(isolated_bundle))} "
             f"{shlex.quote('refs/agent-box/' + rec['ref'])} && "
             f"git -C {shlex.quote(str(workdir))} checkout -q -f FETCH_HEAD"
         )
         unpack = subprocess.run(
             ["bash", "-lc", unpack_script],
+            env=clean_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
+        isolated_bundle.unlink(missing_ok=True)
         if unpack.returncode != 0:
             with log_file.open("ab") as fh:
                 fh.write(f"[box] failed to unpack bundle: {unpack.stdout}\n".encode("utf-8", errors="replace"))
             jobs_volume.commit()
             return unpack.returncode or 1
 
-        env = os.environ.copy()
-        for k, v in (rec.get("env") or {}).items():
-            env[str(k)] = str(v)
-
         proc = subprocess.Popen(
             _prepare_command(rec["cmd"]),
             cwd=str(workdir),
-            env=env,
+            env=clean_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-
-        # Drain stdout in a background thread so timeout/cancel checks run on a 1s/5s cadence.
-        import threading
 
         def _drain() -> None:
             assert proc.stdout is not None
@@ -223,42 +284,62 @@ def _execute_in_workspace(job_id: str, rec: dict[str, Any]) -> int:
 
 
 def _run_function_job(job_id: str) -> None:
-    jobs_volume.reload()
-    key = core.job_entry_key(job_id)
-    rec = state_dict.get(key)
-    if not isinstance(rec, dict) or rec.get("state") == "cancelled":
-        return
-
     log_file = _log_path(job_id)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    completed = False
+    try:
+        jobs_volume.reload()
+        key = core.job_entry_key(job_id)
+        rec = state_dict.get(key)
+        if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
+            completed = True
+            return
 
-    if rec.get("state") == "running":
-        attempt = int(rec.get("attempt", 1)) + 1
-        rec["attempt"] = attempt
+        if rec.get("size") == "gpu":
+            rec["gpuType"] = DEPLOYED_GPU_TYPE
+
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        if rec.get("state") == "running":
+            attempt = int(rec.get("attempt", 1)) + 1
+            rec["attempt"] = attempt
+            with log_file.open("ab") as fh:
+                fh.write(f"[box] restarted after preemption (attempt {attempt})\n".encode("utf-8"))
+            jobs_volume.commit()
+        else:
+            core.transition_job(rec, "running", now=core.utc_now(), attempt=1)
+        state_dict[key] = rec
+
+        exit_code = _execute_in_workspace(job_id, rec)
+        log_bytes, tail = _read_tail_and_size(log_file)
+
+        latest = state_dict.get(key)
+        if not isinstance(latest, dict) or latest.get("state") in core.TERMINAL_STATES:
+            completed = True
+            return
+        if latest.get("size") == "gpu":
+            latest["gpuType"] = DEPLOYED_GPU_TYPE
+
+        final_state = "cancelled" if exit_code == 137 and _is_cancelled(job_id) else "done"
+        core.transition_job(
+            latest,
+            final_state,
+            now=core.utc_now(),
+            exit_code=exit_code,
+            log_bytes=log_bytes,
+            tail=tail,
+        )
+        _record_monthly_cost(job_id, latest)
+        state_dict[key] = latest
+        completed = True
+    except Exception as exc:
         with log_file.open("ab") as fh:
-            fh.write(f"[box] restarted after preemption (attempt {attempt})\n".encode("utf-8"))
+            fh.write(f"\n[box] worker error: {exc}\n".encode("utf-8", errors="replace"))
         jobs_volume.commit()
-    else:
-        core.transition_job(rec, "running", now=core.utc_now(), attempt=1)
-    state_dict[key] = rec
-
-    exit_code = _execute_in_workspace(job_id, rec)
-    log_bytes, tail = _read_tail_and_size(log_file)
-
-    latest = state_dict.get(key)
-    if not isinstance(latest, dict) or latest.get("state") == "cancelled":
-        return
-    final_state = "cancelled" if exit_code == 137 and _is_cancelled(job_id) else "done"
-    core.transition_job(
-        latest,
-        final_state,
-        now=core.utc_now(),
-        exit_code=exit_code,
-        log_bytes=log_bytes,
-        tail=tail,
-    )
-    _record_monthly_cost(job_id, latest)
-    state_dict[key] = latest
+        _mark_job_lost(job_id, str(exc), log_file=log_file)
+        completed = True
+        raise
+    finally:
+        if not completed:
+            _mark_job_lost(job_id, "worker exited unexpectedly", log_file=log_file)
 
 
 @app.function(
@@ -301,7 +382,7 @@ def run_large(job_id: str) -> None:
     image=base_image,
     cpu=core.SIZES["gpu"].cpu_cores,
     memory=core.SIZES["gpu"].memory_mib,
-    gpu=GPU_TYPE,
+    gpu=DEPLOYED_GPU_TYPE,
     timeout=MAX_FUNCTION_TIMEOUT_SEC,
     volumes={JOBS_MOUNT: jobs_volume},
     retries=modal.Retries(max_retries=2),
@@ -318,6 +399,24 @@ FUNCTION_BY_SIZE = {
 }
 
 
+def _drain_sandbox_log(sb: Any, remote_log: str, local_log: Path, offset: int) -> int:
+    """Read newly appended raw bytes from the sandbox's binary log file into local_log."""
+    try:
+        with sb.open(remote_log, "rb") as rf:
+            rf.seek(offset)
+            chunk = rf.read()
+    except Exception:
+        return offset
+    if not chunk:
+        return offset
+    data = chunk.encode("utf-8", errors="replace") if isinstance(chunk, str) else bytes(chunk)
+    if data:
+        with local_log.open("ab") as lf:
+            lf.write(data)
+        return offset + len(data)
+    return offset
+
+
 @app.function(
     image=base_image,
     cpu=0.25,
@@ -327,132 +426,187 @@ FUNCTION_BY_SIZE = {
     retries=0,
 )
 def run_sandbox_job(job_id: str) -> None:
-    """Supervise a non-preemptible 3x Modal Sandbox and retain it for `keepSec`."""
-    jobs_volume.reload()
-    key = core.job_entry_key(job_id)
-    rec = state_dict.get(key)
-    if not isinstance(rec, dict) or rec.get("state") == "cancelled":
-        return
-
-    cfg = core.normalize_config(state_dict.get("config"))
-    keep_sec = int(cfg.get("keepSec", 0))
-    timeout_sec = int(rec.get("timeoutSec", 3600))
-    size_spec = core.SIZES[rec["size"]]
-    gpu_arg = rec.get("gpuType", GPU_TYPE) if size_spec.gpu else None
-
-    sb_kwargs: dict[str, Any] = {
-        "image": base_image,
-        "cpu": size_spec.cpu_cores,
-        "memory": size_spec.memory_mib,
-        "timeout": timeout_sec + keep_sec + 60,
-        "volumes": {JOBS_MOUNT: jobs_volume},
-        "app": app,
-    }
-    if gpu_arg:
-        sb_kwargs["gpu"] = gpu_arg
-
-    sb = modal.Sandbox.create("sleep", str(timeout_sec + keep_sec + 60), **sb_kwargs)
-    rec["sandboxId"] = sb.object_id
-    core.transition_job(rec, "running", now=core.utc_now(), attempt=1)
-    state_dict[key] = rec
-
+    """Supervise an isolated 3x Modal Sandbox (no /jobs mount) and retain for `keepSec`."""
     log_file = _log_path(job_id)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    workdir = f"/work/{rec['repo']}"
-    bundle = str(_bundle_path(job_id))
-    cmd_args = _prepare_command(rec["cmd"])
-    env_prefix = " ".join(f"{shlex.quote(k)}={shlex.quote(str(v))}" for k, v in (rec.get("env") or {}).items())
-    cmd_str = " ".join(shlex.quote(arg) for arg in cmd_args)
-    if env_prefix:
-        cmd_str = f"env {env_prefix} {cmd_str}"
+    key = core.job_entry_key(job_id)
+    sb = None
+    completed = False
 
-    inner = (
-        f"mkdir -p {shlex.quote(workdir)} && "
-        f"git init -q {shlex.quote(workdir)} && "
-        f"git -C {shlex.quote(workdir)} fetch -q {shlex.quote(bundle)} "
-        f"{shlex.quote('refs/agent-box/' + rec['ref'])} && "
-        f"git -C {shlex.quote(workdir)} checkout -q -f FETCH_HEAD && "
-        f"cd {shlex.quote(workdir)} && exec {cmd_str} 2>&1"
-    )
-
-    exit_code = 0
-    timed_out = False
-    cancelled = False
     try:
+        jobs_volume.reload()
+        rec = state_dict.get(key)
+        if not isinstance(rec, dict) or rec.get("state") in core.TERMINAL_STATES:
+            completed = True
+            return
+
+        cfg = core.normalize_config(state_dict.get("config"))
+        keep_sec = int(cfg.get("keepSec", 0))
+        timeout_sec = int(rec.get("timeoutSec", 3600))
+        total_timeout = min(core.MAX_SANDBOX_LIFETIME_SEC, timeout_sec + keep_sec)
+        size_spec = core.SIZES[rec["size"]]
+        gpu_arg = rec.get("gpuType", DEPLOYED_GPU_TYPE) if size_spec.gpu else None
+
+        sb_kwargs: dict[str, Any] = {
+            "image": base_image,
+            "cpu": size_spec.cpu_cores,
+            "memory": size_spec.memory_mib,
+            "timeout": total_timeout,
+            "app": app,
+        }
+        if gpu_arg:
+            sb_kwargs["gpu"] = gpu_arg
+
+        # Never mount /jobs inside the Sandbox so untrusted code cannot access other jobs or _costs.
+        sb = modal.Sandbox.create("sleep", str(total_timeout), **sb_kwargs)
+        state_dict[core.sandbox_entry_key(job_id)] = sb.object_id
+        rec["sandboxId"] = sb.object_id
+        core.transition_job(rec, "running", now=core.utc_now(), attempt=1)
+        state_dict[key] = rec
+
+        bundle_bytes = _bundle_path(job_id).read_bytes()
+        with sb.open("/tmp/repo.bundle", "wb") as bf:
+            bf.write(bundle_bytes)
+
+        workdir = f"/work/{rec['repo']}"
+        remote_log = "/tmp/agent-box-job.log"
+        cmd_args = _prepare_command(rec["cmd"])
+        env_prefix = " ".join(
+            f"{shlex.quote(k)}={shlex.quote(str(v))}" for k, v in (rec.get("env") or {}).items()
+        )
+        cmd_str = " ".join(shlex.quote(arg) for arg in cmd_args)
+        if env_prefix:
+            cmd_str = f"env {env_prefix} {cmd_str}"
+
+        inner = (
+            f"mkdir -p {shlex.quote(workdir)} && "
+            f"git init -q {shlex.quote(workdir)} && "
+            f"git -C {shlex.quote(workdir)} fetch -q /tmp/repo.bundle "
+            f"{shlex.quote('refs/agent-box/' + rec['ref'])} && "
+            f"git -C {shlex.quote(workdir)} checkout -q -f FETCH_HEAD && "
+            f"rm -f /tmp/repo.bundle && "
+            f": > {remote_log} && "
+            f"cd {shlex.quote(workdir)} && ( {cmd_str} ) >{remote_log} 2>&1"
+        )
+
         proc = sb.exec("bash", "-lc", inner, timeout=timeout_sec)
+        remote_offset = 0
         last_commit = time.monotonic()
-        with log_file.open("ab") as fh:
-            for chunk in proc.stdout:
-                data = chunk.encode("utf-8", errors="replace") if isinstance(chunk, str) else chunk
-                fh.write(data)
-                fh.flush()
-                if _is_cancelled(job_id):
-                    cancelled = True
-                    break
-                if time.monotonic() - last_commit >= COMMIT_INTERVAL_SEC:
-                    jobs_volume.commit()
-                    log_bytes, tail = _read_tail_and_size(log_file)
-                    cur = state_dict.get(key)
-                    if isinstance(cur, dict) and cur.get("state") == "running":
-                        cur["logBytes"] = log_bytes
-                        cur["tail"] = tail
-                        state_dict[key] = cur
-                    last_commit = time.monotonic()
+        start_mono = last_commit
+        timed_out = False
+        cancelled = False
+
+        while proc.poll() is None:
+            now_mono = time.monotonic()
+            if now_mono - start_mono >= timeout_sec:
+                timed_out = True
+                break
+            if _is_cancelled(job_id):
+                cancelled = True
+                break
+            remote_offset = _drain_sandbox_log(sb, remote_log, log_file, remote_offset)
+            if now_mono - last_commit >= COMMIT_INTERVAL_SEC:
+                jobs_volume.commit()
+                log_bytes, tail = _read_tail_and_size(log_file)
+                cur = state_dict.get(key)
+                if isinstance(cur, dict) and cur.get("state") == "running":
+                    cur["logBytes"] = log_bytes
+                    cur["tail"] = tail
+                    state_dict[key] = cur
+                last_commit = now_mono
+            time.sleep(1.0)
 
         if cancelled:
             sb.terminate()
             exit_code = 137
-        else:
-            exit_code = int(proc.wait())
-    except Exception as exc:  # Modal TimeoutError or Sandbox failure
-        if "timeout" in type(exc).__name__.lower():
-            timed_out = True
+        elif timed_out:
             exit_code = 124
+            remote_offset = _drain_sandbox_log(sb, remote_log, log_file, remote_offset)
             with log_file.open("ab") as fh:
                 fh.write(f"\n[box] timed out after {timeout_sec}s\n".encode("utf-8"))
         else:
-            exit_code = 1
-            with log_file.open("ab") as fh:
-                fh.write(f"\n[box] sandbox error: {exc}\n".encode("utf-8"))
-    finally:
+            exit_code = int(proc.wait())
+            remote_offset = _drain_sandbox_log(sb, remote_log, log_file, remote_offset)
         jobs_volume.commit()
 
-    log_bytes, tail = _read_tail_and_size(log_file)
-    latest = state_dict.get(key)
-    if isinstance(latest, dict) and latest.get("state") not in core.TERMINAL_STATES:
-        final_state = "cancelled" if cancelled else "done"
-        core.transition_job(
-            latest,
-            final_state,
-            now=core.utc_now(),
-            exit_code=exit_code,
-            log_bytes=log_bytes,
-            tail=tail,
-            keep_sec=0 if (cancelled or timed_out) else keep_sec,
-        )
-        _record_monthly_cost(job_id, latest)
-        state_dict[key] = latest
+        log_bytes, tail = _read_tail_and_size(log_file)
+        latest = state_dict.get(key)
+        if isinstance(latest, dict) and latest.get("state") not in core.TERMINAL_STATES:
+            final_state = "cancelled" if cancelled else "done"
+            effective_keep = 0 if (cancelled or timed_out) else keep_sec
+            core.transition_job(
+                latest,
+                final_state,
+                now=core.utc_now(),
+                exit_code=exit_code,
+                log_bytes=log_bytes,
+                tail=tail,
+                keep_sec=effective_keep,
+            )
+            if effective_keep == 0:
+                _record_monthly_cost(job_id, latest)
+            state_dict[key] = latest
 
-    if keep_sec > 0 and not cancelled and not timed_out:
-        deadline = time.monotonic() + keep_sec
-        while time.monotonic() < deadline:
-            if _is_cancelled(job_id):
-                break
-            time.sleep(min(5.0, max(0.5, deadline - time.monotonic())))
-    try:
-        sb.terminate()
-    except Exception:
-        pass
+        # Hold the sandbox for keepSec, then settle total sandbox lifetime cost before terminating.
+        cost_settled = effective_keep == 0 or cancelled or timed_out
+        if keep_sec > 0 and not cancelled and not timed_out:
+            try:
+                deadline = time.monotonic() + keep_sec
+                while time.monotonic() < deadline:
+                    if _is_cancelled(job_id):
+                        break
+                    time.sleep(min(5.0, max(0.5, deadline - time.monotonic())))
+            finally:
+                settled_at = core.utc_now()
+                latest = state_dict.get(key)
+                if isinstance(latest, dict):
+                    started = core.parse_rfc3339(latest.get("startedAt"))
+                    total_dur = max(0.0, (settled_at - started).total_seconds()) if started else 0.0
+                    latest["cost"] = core.estimate_job_cost(
+                        latest.get("size", "medium"),
+                        total_dur,
+                        "sandbox",
+                        latest.get("gpuType", DEPLOYED_GPU_TYPE),
+                    )
+                    latest["keepUntil"] = core.format_rfc3339(settled_at)
+                    state_dict[key] = latest
+                    month = core.month_key(settled_at)
+                    core.write_cost_record(
+                        COSTS_DIR,
+                        month,
+                        job_id,
+                        float(latest["cost"]["usd"]),
+                        settled_at=core.format_rfc3339(settled_at),
+                    )
+                    jobs_volume.commit()
+                    state_dict[core.cost_entry_key(month, job_id)] = float(latest["cost"]["usd"])
+                cost_settled = True
+        completed = True
+    except Exception as exc:
+        with log_file.open("ab") as fh:
+            fh.write(f"\n[box] sandbox error: {exc}\n".encode("utf-8", errors="replace"))
+        jobs_volume.commit()
+        _mark_job_lost(job_id, str(exc), log_file=log_file)
+        completed = True
+        raise
+    finally:
+        if sb is not None:
+            try:
+                sb.terminate()
+            except Exception:
+                pass
+        if not completed:
+            _mark_job_lost(job_id, "sandbox supervisor exited unexpectedly", log_file=log_file)
 
 
-def _cancel_backing_execution(rec: dict[str, Any]) -> None:
-    sb_id = rec.get("sandboxId")
+def _cancel_backing_execution(job_id: str, rec: dict[str, Any]) -> None:
+    sb_id = state_dict.get(core.sandbox_entry_key(job_id)) or rec.get("sandboxId")
     if sb_id:
         try:
             modal.Sandbox.from_id(sb_id).terminate()
         except Exception:
             pass
-    call_id = rec.get("callId")
+    call_id = state_dict.get(core.call_entry_key(job_id))
     if call_id:
         try:
             modal.FunctionCall.from_id(call_id).cancel()
@@ -460,26 +614,98 @@ def _cancel_backing_execution(rec: dict[str, Any]) -> None:
             pass
 
 
-@app.function(
-    image=base_image,
-    cpu=0.5,
-    memory=512,
-    min_containers=0,
-    volumes={JOBS_MOUNT: jobs_volume},
-)
-@modal.asgi_app(requires_proxy_auth=True)
-def web_app():
-    from fastapi import FastAPI, HTTPException, Query, Request
+class ModalBackend:
+    """Modal-backed storage and job execution adapter for app_factory."""
+
+    def load_state(self) -> dict[str, Any]:
+        jobs_volume.reload()
+        return core.snapshot_dict_state(state_dict, costs_root=COSTS_DIR)
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        rec = state_dict.get(core.job_entry_key(job_id))
+        return rec if isinstance(rec, dict) else None
+
+    def save_job(self, job_id: str, rec: dict[str, Any]) -> None:
+        state_dict[core.job_entry_key(job_id)] = rec
+
+    def set_paused(self, paused: bool) -> None:
+        state_dict["paused"] = paused
+
+    def get_config(self) -> dict[str, Any]:
+        return core.normalize_config(state_dict.get("config"))
+
+    def set_config(self, cfg: dict[str, Any]) -> None:
+        state_dict["config"] = cfg
+
+    def write_bundle_and_spawn(self, norm: dict[str, Any], bundle_bytes: bytes) -> None:
+        job_id = norm["id"]
+        bundle_file = _bundle_path(job_id)
+        bundle_file.parent.mkdir(parents=True, exist_ok=True)
+        bundle_file.write_bytes(bundle_bytes)
+        jobs_volume.commit()
+
+        rec = core.new_job_record(norm)
+        state_dict[core.job_entry_key(job_id)] = rec
+        try:
+            if norm["mode"] == "sandbox":
+                call = run_sandbox_job.spawn(job_id)
+            else:
+                call = FUNCTION_BY_SIZE[norm["size"]].spawn(job_id)
+            state_dict[core.call_entry_key(job_id)] = call.object_id
+        except Exception as exc:
+            _mark_job_lost(job_id, f"spawn failed: {exc}")
+            raise
+
+    def read_log(self, job_id: str) -> bytes:
+        jobs_volume.reload()
+        log_file = _log_path(job_id)
+        return log_file.read_bytes() if log_file.exists() else b""
+
+    def cancel_job(self, job_id: str, rec: dict[str, Any]) -> None:
+        core.transition_job(rec, "cancelled", now=core.utc_now(), exit_code=137)
+        _record_monthly_cost(job_id, rec)
+        state_dict[core.job_entry_key(job_id)] = rec
+        _cancel_backing_execution(job_id, rec)
+
+    def pull_sandbox_tar(self, rec: dict[str, Any], rel: str) -> tuple[int, str, bytes]:
+        sb_id = state_dict.get(core.sandbox_entry_key(rec["id"])) or rec.get("sandboxId")
+        if not sb_id:
+            return 409, "gone", b""
+        workdir = f"/work/{rec['repo']}"
+        sb = modal.Sandbox.from_id(sb_id)
+        proc = sb.exec("python3", "-c", _SANDBOX_TAR_SCRIPT, workdir, rel)
+        encoded = "".join(c.decode("ascii") if isinstance(c, bytes) else c for c in proc.stdout)
+        rc = proc.wait()
+        if rc == 2:
+            return 400, "invalid", b""
+        if rc == 3:
+            return 404, "not_found", b""
+        if rc != 0:
+            return 409, "gone", b""
+        return 200, "", base64.b64decode(encoded)
+
+
+def app_factory(backend: Any = None, admission_lock: asyncio.Lock | None = None):
+    """Build the runner-v1 FastAPI ASGI application cleanly without forward-ref annotation pitfalls."""
+    from fastapi import FastAPI, Request
+    from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, Response
 
+    svc = backend if backend is not None else ModalBackend()
+    lock = admission_lock if admission_lock is not None else _ADMISSION_LOCK
     api = FastAPI(title="agent-box-runner", version="1")
 
     def _err(status: int, code: str, message: str) -> JSONResponse:
         return JSONResponse(status_code=status, content=core.error_envelope(code, message))
 
+    @api.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        del request
+        return _err(400, "invalid", f"Invalid request: {exc.errors()[0].get('msg', 'malformed parameters')}")
+
     @api.get("/v1/probe")
     async def probe() -> JSONResponse:
-        state = core.snapshot_dict_state(state_dict)
+        state = svc.load_state()
         return JSONResponse(status_code=200, content=core.build_probe_response(state))
 
     @api.post("/v1/jobs")
@@ -507,43 +733,45 @@ def web_app():
         if not bundle_bytes:
             return _err(400, "invalid", "Part 'bundle' must not be empty.")
 
-        state = core.snapshot_dict_state(state_dict)
-        ok, status, err_code, msg, norm = core.validate_spec(spec_obj, state["config"])
-        if not ok or norm is None:
-            return _err(status, err_code, msg)
+        async with lock:
+            state = svc.load_state()
+            existing = core.find_existing_job(
+                {core.job_entry_key(k): v for k, v in state["jobs"].items()}, spec_obj
+            )
+            if existing is not None:
+                return JSONResponse(status_code=200, content=core.build_job_response(dict(existing), state))
 
-        job_id = norm["id"]
-        existing = state_dict.get(core.job_entry_key(job_id))
-        if isinstance(existing, dict):
-            return JSONResponse(status_code=200, content=core.build_job_response(existing, state))
+            ok, status, err_code, msg, norm = core.validate_spec(
+                spec_obj, state["config"], deployed_gpu_type=DEPLOYED_GPU_TYPE
+            )
+            if not ok or norm is None:
+                return _err(status, err_code, msg)
 
-        ok, status, err_code, msg = core.check_admission(state, norm)
-        if not ok:
-            return _err(status, err_code, msg)
+            ok, status, err_code, msg = core.check_admission(state, norm)
+            if not ok:
+                return _err(status, err_code, msg)
 
-        bundle_file = _bundle_path(job_id)
-        bundle_file.parent.mkdir(parents=True, exist_ok=True)
-        bundle_file.write_bytes(bundle_bytes)
-        jobs_volume.commit()
+            try:
+                svc.write_bundle_and_spawn(norm, bundle_bytes)
+            except Exception as exc:
+                return _err(500, "spawn_failed", f"Failed to schedule job: {exc}")
 
-        rec = core.new_job_record(norm)
-        state_dict[core.job_entry_key(job_id)] = rec
-
-        if norm["mode"] == "sandbox":
-            call = run_sandbox_job.spawn(job_id)
-        else:
-            call = FUNCTION_BY_SIZE[norm["size"]].spawn(job_id)
-        rec["callId"] = call.object_id
-        state_dict[core.job_entry_key(job_id)] = rec
-
-        return JSONResponse(status_code=201, content={"id": job_id, "state": "queued"})
+        return JSONResponse(status_code=201, content={"id": norm["id"], "state": "queued"})
 
     @api.get("/v1/jobs")
-    async def list_jobs(limit: int = Query(default=core.DEFAULT_LIST_LIMIT)) -> JSONResponse:
-        if limit < 1:
-            return _err(400, "invalid", "limit must be a positive integer.")
-        clamped = min(limit, core.MAX_LIST_LIMIT)
-        state = core.snapshot_dict_state(state_dict)
+    async def list_jobs(request: Request) -> JSONResponse:
+        try:
+            clamped = core.parse_int_query(
+                request.query_params.get("limit"),
+                "limit",
+                core.DEFAULT_LIST_LIMIT,
+                min_value=1,
+                max_value=core.MAX_LIST_LIMIT,
+            )
+        except ValueError as exc:
+            return _err(400, "invalid", str(exc))
+
+        state = svc.load_state()
         now = core.utc_now()
         ordered = sorted(
             state["jobs"].values(),
@@ -556,46 +784,57 @@ def web_app():
         )
 
     @api.get("/v1/jobs/{job_id}")
-    async def get_job(job_id: str, wait: int = Query(default=0)) -> JSONResponse:
-        if wait < 0:
-            return _err(400, "invalid", "wait must be a non-negative integer.")
-        key = core.job_entry_key(job_id)
-        rec = state_dict.get(key)
-        if not isinstance(rec, dict):
+    async def get_job(request: Request, job_id: str) -> JSONResponse:
+        try:
+            wait_sec = core.parse_int_query(
+                request.query_params.get("wait"),
+                "wait",
+                0,
+                min_value=0,
+                max_value=core.MAX_POLL_WAIT_SEC,
+            )
+        except ValueError as exc:
+            return _err(400, "invalid", str(exc))
+
+        rec = svc.get_job(job_id)
+        if rec is None:
             return _err(404, "not_found", f"Unknown job {job_id!r}.")
 
         initial_state = rec.get("state")
-        wait_sec = min(wait, core.MAX_POLL_WAIT_SEC)
         if wait_sec > 0 and initial_state in core.ACTIVE_STATES:
             deadline = time.monotonic() + wait_sec
             while time.monotonic() < deadline:
                 await asyncio.sleep(0.5)
-                latest = state_dict.get(key)
-                if not isinstance(latest, dict):
+                latest = svc.get_job(job_id)
+                if latest is None:
                     break
                 rec = latest
                 cur_state = rec.get("state")
                 if cur_state in core.TERMINAL_STATES or cur_state != initial_state:
                     break
 
-        state = core.snapshot_dict_state(state_dict)
+        state = svc.load_state()
         return JSONResponse(status_code=200, content=core.build_job_response(rec, state))
 
     @api.get("/v1/jobs/{job_id}/log")
-    async def get_job_log(
-        job_id: str,
-        offset: int = Query(default=0),
-        limit: int = Query(default=core.MAX_LOG_CHUNK),
-    ) -> JSONResponse:
-        if offset < 0 or limit < 1:
-            return _err(400, "invalid", "offset must be >= 0 and limit must be >= 1.")
-        rec = state_dict.get(core.job_entry_key(job_id))
-        if not isinstance(rec, dict):
+    async def get_job_log(request: Request, job_id: str) -> JSONResponse:
+        try:
+            offset = core.parse_int_query(request.query_params.get("offset"), "offset", 0, min_value=0)
+            limit = core.parse_int_query(
+                request.query_params.get("limit"),
+                "limit",
+                core.MAX_LOG_CHUNK,
+                min_value=1,
+                max_value=core.MAX_LOG_CHUNK,
+            )
+        except ValueError as exc:
+            return _err(400, "invalid", str(exc))
+
+        rec = svc.get_job(job_id)
+        if rec is None:
             return _err(404, "not_found", f"Unknown job {job_id!r}.")
 
-        jobs_volume.reload()
-        log_file = _log_path(job_id)
-        data = log_file.read_bytes() if log_file.exists() else b""
+        data = svc.read_log(job_id)
         chunk = core.build_log_chunk(
             data,
             offset=offset,
@@ -607,16 +846,12 @@ def web_app():
 
     @api.post("/v1/jobs/{job_id}/cancel")
     async def cancel_job(job_id: str) -> JSONResponse:
-        key = core.job_entry_key(job_id)
-        rec = state_dict.get(key)
-        if not isinstance(rec, dict):
+        rec = svc.get_job(job_id)
+        if rec is None:
             return _err(404, "not_found", f"Unknown job {job_id!r}.")
 
         if rec.get("state") in core.ACTIVE_STATES:
-            core.transition_job(rec, "cancelled", now=core.utc_now(), exit_code=137)
-            _record_monthly_cost(job_id, rec)
-            state_dict[key] = rec
-            _cancel_backing_execution(rec)
+            svc.cancel_job(job_id, rec)
             return JSONResponse(status_code=200, content={"cancelled": True, "exit": 137})
 
         return JSONResponse(
@@ -625,66 +860,35 @@ def web_app():
         )
 
     @api.get("/v1/jobs/{job_id}/file")
-    async def pull_file(job_id: str, path: str = Query(default="")) -> Response:
-        rec = state_dict.get(core.job_entry_key(job_id))
-        if not isinstance(rec, dict):
+    async def pull_file(request: Request, job_id: str) -> Response:
+        rec = svc.get_job(job_id)
+        if rec is None:
             return _err(404, "not_found", f"Unknown job {job_id!r}.")
 
         try:
-            rel = core.sanitize_rel_path(path)
+            rel = core.sanitize_rel_path(request.query_params.get("path", ""))
         except ValueError as exc:
             return _err(400, "invalid", str(exc))
 
-        if rec.get("mode") != "sandbox":
+        if rec.get("mode") != "sandbox" or rec.get("state") != "done":
             return _err(409, "gone", "Sandbox is no longer kept; files are unavailable.")
 
         keep_until = core.parse_rfc3339(rec.get("keepUntil"))
-        if rec.get("state") in core.TERMINAL_STATES and (
-            keep_until is None or core.utc_now() > keep_until
-        ):
+        if keep_until is None or core.utc_now() > keep_until:
             return _err(409, "gone", "Sandbox is no longer kept; files are unavailable.")
 
-        sb_id = rec.get("sandboxId")
-        if not sb_id:
-            return _err(409, "gone", "Sandbox is no longer kept; files are unavailable.")
-
-        workdir = f"/work/{rec['repo']}"
         try:
-            sb = modal.Sandbox.from_id(sb_id)
-            check_py = (
-                "import os, sys; "
-                "root = os.path.realpath(sys.argv[1]); "
-                "target = os.path.realpath(os.path.join(root, sys.argv[2])); "
-                "sys.exit(0 if (target == root or target.startswith(root + os.sep)) and os.path.exists(target) else "
-                "(3 if not os.path.exists(target) else 2))"
-            )
-            chk = sb.exec("python3", "-c", check_py, workdir, rel)
-            rc = chk.wait()
-            if rc == 2:
-                return _err(400, "invalid", "path escapes workspace via symlink")
-            if rc == 3:
-                return _err(404, "not_found", f"Path {rel!r} not found in sandbox.")
-            if rc != 0:
-                return _err(409, "gone", "Sandbox is no longer kept; files are unavailable.")
-
-            import base64
-
-            tar_proc = sb.exec(
-                "bash",
-                "-lc",
-                f"tar -cf - -C {shlex.quote(workdir)} {shlex.quote(rel)} | base64 -w0",
-            )
-            encoded = "".join(
-                c.decode("ascii") if isinstance(c, bytes) else c for c in tar_proc.stdout
-            )
-            if tar_proc.wait() != 0:
-                return _err(404, "not_found", f"Could not archive {rel!r} from sandbox.")
-            tar_bytes = base64.b64decode(encoded)
-            return Response(content=tar_bytes, status_code=200, media_type="application/x-tar")
-        except HTTPException:
-            raise
+            status, err_code, tar_bytes = svc.pull_sandbox_tar(rec, rel)
         except Exception:
             return _err(409, "gone", "Sandbox is no longer kept; files are unavailable.")
+
+        if status == 400:
+            return _err(400, err_code, "path escapes workspace via symlink")
+        if status == 404:
+            return _err(404, err_code, f"Path {rel!r} not found in sandbox.")
+        if status != 200:
+            return _err(409, "gone", "Sandbox is no longer kept; files are unavailable.")
+        return Response(content=tar_bytes, status_code=200, media_type="application/x-tar")
 
     @api.post("/v1/pause")
     async def set_pause(request: Request) -> JSONResponse:
@@ -694,20 +898,16 @@ def web_app():
             return _err(400, "invalid", "Request body must be JSON.")
         if not isinstance(body, dict) or not isinstance(body.get("paused"), bool):
             return _err(400, "invalid", "Request must include boolean 'paused'.")
-        state_dict["paused"] = body["paused"]
+        svc.set_paused(body["paused"])
         return JSONResponse(status_code=200, content={"paused": body["paused"]})
 
     @api.post("/v1/stop")
     async def emergency_stop() -> JSONResponse:
-        state = core.snapshot_dict_state(state_dict)
-        now = core.utc_now()
+        state = svc.load_state()
         stopped = 0
         for job_id, rec in state["jobs"].items():
             if rec.get("state") in core.ACTIVE_STATES:
-                core.transition_job(rec, "cancelled", now=now, exit_code=137)
-                _record_monthly_cost(job_id, rec)
-                state_dict[core.job_entry_key(job_id)] = rec
-                _cancel_backing_execution(rec)
+                svc.cancel_job(job_id, rec)
                 stopped += 1
         return JSONResponse(status_code=200, content={"stopped": stopped})
 
@@ -717,11 +917,25 @@ def web_app():
             body = await request.json()
         except Exception:
             return _err(400, "invalid", "Request body must be JSON.")
-        current = core.normalize_config(state_dict.get("config"))
+        current = svc.get_config()
         ok, status, err_code, msg, merged = core.validate_config_update(current, body)
         if not ok or merged is None:
             return _err(status, err_code, msg)
-        state_dict["config"] = merged
+        svc.set_config(merged)
         return JSONResponse(status_code=200, content=core.public_config(merged))
 
     return api
+
+
+# Single-container web endpoint serializes admission checks alongside _ADMISSION_LOCK.
+@app.function(
+    image=base_image,
+    cpu=0.5,
+    memory=512,
+    min_containers=0,
+    max_containers=1,
+    volumes={JOBS_MOUNT: jobs_volume},
+)
+@modal.asgi_app(requires_proxy_auth=True)
+def web_app():
+    return app_factory()
