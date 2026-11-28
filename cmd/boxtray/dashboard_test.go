@@ -30,7 +30,6 @@ func TestParseServeStatus(t *testing.T) {
 	}{
 		{"boxd's handler", `{"TCP":{"443":{"HTTPS":true}},"Web":{"agent-box.example.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7766"}}}}}`, "https://agent-box.example.ts.net/"},
 		{"boxd's among others", `{"Web":{"a.example.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:9000"}}},"b.example.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7766/"}}}}}`, "https://b.example.ts.net/"},
-		{"no boxd: first on 443", `{"Web":{"z.example.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:1"}}},"y.example.ts.net:443":{"Handlers":{"/":{"Text":"hi"}}}}}`, "https://y.example.ts.net/"},
 	}
 	for _, c := range cases {
 		got, err := parseServeStatus([]byte(c.in))
@@ -38,7 +37,8 @@ func TestParseServeStatus(t *testing.T) {
 			t.Errorf("%s: got %q, %v; want %q", c.name, got, err, c.want)
 		}
 	}
-	for _, bad := range []string{``, `not json`, `{}`, `{"Web":{"a.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7766"}}}}}`} {
+	for _, bad := range []string{``, `not json`, `{}`, `{"Web":{"a.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7766"}}}}}`,
+		`{"Web":{"z.example.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:1"}}},"y.example.ts.net:443":{"Handlers":{"/":{"Text":"hi"}}}}}`} {
 		if got, err := parseServeStatus([]byte(bad)); err == nil {
 			t.Errorf("%q: got %q", bad, got)
 		}
@@ -176,5 +176,45 @@ func TestParseDashboardArgs(t *testing.T) {
 		if _, ok, err := parseDashboardArgs(bad); !ok || err == nil {
 			t.Errorf("%q: ok %v err %v", bad, ok, err)
 		}
+	}
+}
+
+func TestDashResolverLeavesWSLAlone(t *testing.T) {
+	ctx := context.Background()
+	ts := &fakeTailscale{serve: `{"Web":{"serve.example:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7766"}}}}}`}
+	up, busy := true, true
+	d := &dashResolver{
+		explicit: func() string { return "" },
+		up:       func(context.Context) bool { return up },
+		busy:     func() bool { return busy },
+		run:      ts.run,
+	}
+	// Release memory in progress: neither a click nor a warm-up may run wsl.exe -d agents.
+	if _, err := d.resolve(ctx); err == nil {
+		t.Error("resolve while releasing, with nothing cached: want an error")
+	}
+	if _, err := d.refresh(ctx); err == nil {
+		t.Error("refresh (warm) while releasing: want an error")
+	}
+	busy, up = false, false
+	if _, err := d.refresh(ctx); err == nil {
+		t.Error("refresh (warm) while WSL is down: want an error")
+	}
+	if ts.calls != 0 {
+		t.Fatalf("ran %d commands in a distro that is down or being stopped", ts.calls)
+	}
+
+	// A release that starts between the two lookups stops the second.
+	up = true
+	ts.serve = `{}`
+	d.run = func(ctx context.Context, args ...string) ([]byte, error) {
+		busy = true
+		return ts.run(ctx, args...)
+	}
+	if _, err := d.refresh(ctx); err == nil {
+		t.Error("want an error")
+	}
+	if ts.calls != 1 {
+		t.Errorf("ran %d commands, want 1", ts.calls)
 	}
 }

@@ -39,7 +39,7 @@ func checkDashURL(s string) (string, error) {
 const boxdPort = "7766"
 
 // parseServeStatus finds the dashboard in `tailscale serve status --json`: the name whose 443
-// handler proxies to boxd, or else the first name served on 443.
+// handler proxies to boxd. Another site served on 443 isn't taken for it.
 func parseServeStatus(b []byte) (string, error) {
 	var st struct {
 		Web map[string]struct {
@@ -56,7 +56,6 @@ func parseServeStatus(b []byte) (string, error) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys) // a map's order would make "the first" differ from run to run
-	first := ""
 	for _, k := range keys {
 		host, ok := strings.CutSuffix(k, ":443")
 		if !ok || host == "" {
@@ -67,14 +66,8 @@ func parseServeStatus(b []byte) (string, error) {
 				return checkDashURL("https://" + host + "/")
 			}
 		}
-		if first == "" {
-			first = host
-		}
 	}
-	if first == "" {
-		return "", errors.New("tailscale serve status: nothing served on 443")
-	}
-	return checkDashURL("https://" + first + "/")
+	return "", errors.New("tailscale serve status: nothing on 443 proxies to boxd")
 }
 
 // parseTailscaleStatus is the distro's own MagicDNS name in `tailscale status --json`, which is
@@ -101,6 +94,7 @@ func parseTailscaleStatus(b []byte) (string, error) {
 type dashResolver struct {
 	explicit func() string                                             // boxtray.json's dashboard_url
 	up       func(context.Context) bool                                // the distro runs; a lookup would otherwise start it
+	busy     func() bool                                               // Release memory is stopping the distro; nil is never
 	run      func(ctx context.Context, args ...string) ([]byte, error) // a command as root in the distro
 
 	mu     sync.Mutex
@@ -117,23 +111,30 @@ func (d *dashResolver) resolve(ctx context.Context) (string, error) {
 		}
 		return u, nil
 	}
-	var lookErr error
-	if d.up(ctx) {
-		u, err := d.refresh(ctx)
-		if err == nil {
-			return u, nil
-		}
-		lookErr = err
-	} else {
-		lookErr = errors.New("WSL isn't running")
+	u, lookErr := d.refresh(ctx)
+	if lookErr == nil {
+		return u, nil
 	}
 	d.mu.Lock()
-	u := d.cached
+	u = d.cached
 	d.mu.Unlock()
 	if u != "" {
 		return u, nil
 	}
 	return "", fmt.Errorf("no dashboard address (%v); boxtray.json's dashboard_url sets one", lookErr)
+}
+
+// errDown is a lookup not made: wsl.exe -d agents would start the distro, which is down or being
+// stopped by Release memory.
+var errDown = errors.New("WSL isn't running")
+
+// canRun says whether a command may run in the distro now. Asked before each one, so a Release
+// memory that starts between them stops the lookup.
+func (d *dashResolver) canRun(ctx context.Context) bool {
+	if d.busy != nil && d.busy() {
+		return false
+	}
+	return d.up(ctx)
 }
 
 // refresh looks the address up and keeps it.
@@ -150,6 +151,9 @@ func (d *dashResolver) refresh(ctx context.Context) (string, error) {
 
 // lookup asks Tailscale in the distro: the serve config first, the node's own name second.
 func (d *dashResolver) lookup(ctx context.Context) (string, error) {
+	if !d.canRun(ctx) {
+		return "", errDown
+	}
 	out, err := d.run(ctx, "tailscale", "serve", "status", "--json")
 	if err == nil {
 		u, perr := parseServeStatus(out)
@@ -157,6 +161,9 @@ func (d *dashResolver) lookup(ctx context.Context) (string, error) {
 			return u, nil
 		}
 		err = perr
+	}
+	if !d.canRun(ctx) {
+		return "", errDown
 	}
 	out, err2 := d.run(ctx, "tailscale", "status", "--json")
 	if err2 != nil {

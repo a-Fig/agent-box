@@ -124,6 +124,7 @@ func main() {
 	dash := &dashOpener{res: &dashResolver{
 		explicit: func() string { return loadDashboardURL(cfg) },
 		up:       sensors.HostUp,
+		busy:     mgr.Releasing,
 		run:      wslRoot,
 	}}
 	var releases sync.WaitGroup // Release memory runs in flight
